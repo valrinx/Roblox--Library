@@ -1,5 +1,5 @@
 -- ============================================================
---   MODULE: Bee Garden  v0.4 (Dex-aware runtime scan)
+--   MODULE: Bee Garden  v0.5 (Dex-aware runtime scan)
 -- ============================================================
 
 return function(Window, scriptInfo)
@@ -74,15 +74,35 @@ return function(Window, scriptInfo)
         if not prompt or not prompt:IsA("ProximityPrompt") then
             return false
         end
+        local holdTime = math.max(tonumber(prompt.HoldDuration) or 0, 0.1) + 0.08
+
+        -- Method 1: executor helper with hold args
         local ok = pcall(function()
-            -- Some executors support extra args for hold prompts.
-            fireproximityprompt(prompt, 1, true)
+            fireproximityprompt(prompt, holdTime, true)
         end)
-        if ok then
-            return true
-        end
+        if ok then return true end
+
+        -- Method 2: basic helper
         ok = pcall(function()
             fireproximityprompt(prompt)
+        end)
+        if ok then return true end
+
+        -- Method 3: native hold begin/end
+        ok = pcall(function()
+            prompt:InputHoldBegin()
+            task.wait(holdTime)
+            prompt:InputHoldEnd()
+        end)
+        if ok then return true end
+
+        -- Method 4: temporary zero-hold fallback
+        ok = pcall(function()
+            local old = prompt.HoldDuration
+            prompt.HoldDuration = 0
+            fireproximityprompt(prompt)
+            task.wait(0.05)
+            prompt.HoldDuration = old
         end)
         return ok
     end
@@ -291,7 +311,7 @@ return function(Window, scriptInfo)
             #teleportOptions,
             myPlotRoot and myPlotRoot.Name or "not found",
             scriptInfo.name or "Bee Garden",
-            scriptInfo.version or "v0.4"
+            scriptInfo.version or "v0.5"
         )
         infoLabel:Set(msg)
 
@@ -345,6 +365,7 @@ return function(Window, scriptInfo)
                 task.spawn(function()
                     while autoHatchEnabled do
                         local count = 0
+                        local readySeen = 0
                         local plot = getMyScriptablePlot()
                         local source = (plot and plot:FindFirstChild("Eggs")) or world
                         for _, obj in ipairs(source:GetDescendants()) do
@@ -353,6 +374,7 @@ return function(Window, scriptInfo)
                             end
                             if obj:IsA("ProximityPrompt") then
                                 if isMyEggPrompt(obj) then
+                                    readySeen += 1
                                     local part = getPartFromInstance(obj)
                                     if part then
                                         teleportToPart(part)
@@ -364,7 +386,7 @@ return function(Window, scriptInfo)
                                 end
                             end
                         end
-                        statusLabel:Set("Status: Auto Hatch ON (" .. tostring(count) .. " triggers)")
+                        statusLabel:Set("Status: Auto Hatch ON (ready: " .. tostring(readySeen) .. " | triggered: " .. tostring(count) .. ")")
                         task.wait(0.5)
                     end
                     statusLabel:Set("Status: Auto Hatch OFF")
