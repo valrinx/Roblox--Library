@@ -25,7 +25,7 @@ local SCRIPTS = {
         description = "Auto Roll | Auto Buy | Auto Sell | Anti AFK",
         gameId    = 0,
         version   = "v0.4",
-        moduleUrl = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/My%20knife%20farm",
+        moduleUrl = "https://raw.githubusercontent.com/YOUR_USER/YOUR_REPO/main/modules/MyKnifeFarm.lua",
     },
     --[[
     {
@@ -97,7 +97,7 @@ for _, scriptInfo in ipairs(SCRIPTS) do
             local ok, result = pcall(function()
                 -- Lazy load: ดึง module เฉพาะเกมที่ต้องการ
                 local moduleFunc = loadstring(game:HttpGet(scriptInfo.moduleUrl))()
-                moduleFunc(Window, scriptInfo)
+                moduleFunc(Window, scriptInfo, Rayfield)
             end)
             if not ok then
                 warn("[RAVEN HUB] Failed to load module for: " .. scriptInfo.name .. "\n" .. tostring(result))
