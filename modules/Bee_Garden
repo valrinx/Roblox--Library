@@ -1,0 +1,195 @@
+-- ============================================================
+--   MODULE: Bee Garden  v0.1
+-- ============================================================
+
+return function(Window, scriptInfo)
+    local Players = game:GetService("Players")
+
+    local player = Players.LocalPlayer
+    local character = player.Character or player.CharacterAdded:Wait()
+    local rootPart = character:WaitForChild("HumanoidRootPart")
+
+    local function refreshCharacter()
+        character = player.Character or player.CharacterAdded:Wait()
+        rootPart = character:WaitForChild("HumanoidRootPart")
+    end
+
+    player.CharacterAdded:Connect(function()
+        task.wait(0.2)
+        refreshCharacter()
+    end)
+
+    local MainTab = Window:CreateTab("Bee Garden", 4483362458)
+    local statusLabel = MainTab:CreateLabel("Status: Ready")
+    local infoLabel = MainTab:CreateLabel("Scanning map...")
+
+    local world = workspace
+    local points = {
+        Workspace = world,
+        Terrain = world:FindFirstChild("Terrain"),
+        Effects = world:FindFirstChild("Effects"),
+        Events = world:FindFirstChild("Events"),
+        FollowerBees = world:FindFirstChild("FollowerBees"),
+        Placables = world:FindFirstChild("Placables"),
+        LuckyBlockCommon = world:FindFirstChild("LuckyBlockCommon"),
+        LuckyBlockRare = world:FindFirstChild("LuckyBlockRare"),
+        LuckyBlockEpic = world:FindFirstChild("LuckyBlockEpic"),
+        Avriflench = world:FindFirstChild("Avriflench"),
+        Oat_zxc = world:FindFirstChild("Oat_zxc"),
+        PexKoTX = world:FindFirstChild("PexKoTX"),
+        jeikoplayz = world:FindFirstChild("jeikoplayz"),
+    }
+
+    for i = 1, 6 do
+        points["PlotModel" .. i] = world:FindFirstChild("PlotModel" .. i)
+    end
+
+    local teleportOptions = {}
+    for name, obj in pairs(points) do
+        if obj then
+            table.insert(teleportOptions, name)
+        end
+    end
+    table.sort(teleportOptions)
+
+    infoLabel:Set(string.format(
+        "Detected: %d teleport points | Module: %s %s",
+        #teleportOptions,
+        scriptInfo.name or "Bee Garden",
+        scriptInfo.version or ""
+    ))
+
+    MainTab:CreateDropdown({
+        Name = "Teleport To",
+        Options = teleportOptions,
+        CurrentValue = teleportOptions[1],
+        MultipleOptions = false,
+        Callback = function(option)
+            local selected = type(option) == "table" and option[1] or option
+            local target = selected and points[selected]
+            if not target then
+                statusLabel:Set("Status: Teleport target not found")
+                return
+            end
+
+            if not rootPart or not rootPart.Parent then
+                refreshCharacter()
+            end
+
+            local cf
+            if target:IsA("BasePart") then
+                cf = target.CFrame * CFrame.new(0, 4, 0)
+            elseif target:IsA("Model") then
+                cf = target:GetPivot() * CFrame.new(0, 4, 0)
+            elseif target == world then
+                cf = CFrame.new(0, 25, 0)
+            end
+
+            if cf then
+                rootPart.CFrame = cf
+                statusLabel:Set("Status: Teleported to " .. selected)
+            else
+                statusLabel:Set("Status: Target has no valid position")
+            end
+        end,
+    })
+
+    local autoLuckyEnabled = false
+    local autoPromptEnabled = false
+
+    local function collectLuckyBlocks()
+        local folders = {"LuckyBlockCommon", "LuckyBlockRare", "LuckyBlockEpic"}
+        local touched = 0
+
+        for _, folderName in ipairs(folders) do
+            local folder = world:FindFirstChild(folderName)
+            if folder then
+                for _, obj in ipairs(folder:GetDescendants()) do
+                    if not autoLuckyEnabled then
+                        return touched
+                    end
+
+                    if obj:IsA("ProximityPrompt") then
+                        pcall(function()
+                            rootPart.CFrame = obj.Parent.CFrame * CFrame.new(0, 3, 0)
+                            fireproximityprompt(obj)
+                            touched += 1
+                        end)
+                        task.wait(0.08)
+                    elseif obj:IsA("ClickDetector") then
+                        pcall(function()
+                            rootPart.CFrame = obj.Parent.CFrame * CFrame.new(0, 3, 0)
+                            fireclickdetector(obj)
+                            touched += 1
+                        end)
+                        task.wait(0.08)
+                    end
+                end
+            end
+        end
+
+        return touched
+    end
+
+    MainTab:CreateToggle({
+        Name = "Auto Lucky Blocks",
+        CurrentValue = false,
+        Flag = "beeAutoLucky",
+        Callback = function(value)
+            autoLuckyEnabled = value
+            if value then
+                statusLabel:Set("Status: Auto Lucky ON")
+                task.spawn(function()
+                    while autoLuckyEnabled do
+                        if not rootPart or not rootPart.Parent then
+                            refreshCharacter()
+                        end
+                        local total = collectLuckyBlocks()
+                        statusLabel:Set("Status: Auto Lucky running (" .. total .. " interactions)")
+                        task.wait(1.2)
+                    end
+                    statusLabel:Set("Status: Auto Lucky OFF")
+                end)
+            end
+        end,
+    })
+
+    MainTab:CreateToggle({
+        Name = "Auto Nearby Prompts",
+        CurrentValue = false,
+        Flag = "beeAutoPrompt",
+        Callback = function(value)
+            autoPromptEnabled = value
+            if value then
+                statusLabel:Set("Status: Auto Prompt ON")
+                task.spawn(function()
+                    while autoPromptEnabled do
+                        if not rootPart or not rootPart.Parent then
+                            refreshCharacter()
+                        end
+
+                        for _, obj in ipairs(world:GetDescendants()) do
+                            if not autoPromptEnabled then
+                                break
+                            end
+
+                            if obj:IsA("ProximityPrompt") and obj.Enabled then
+                                local parentPart = obj.Parent
+                                if parentPart and parentPart:IsA("BasePart") then
+                                    local dist = (rootPart.Position - parentPart.Position).Magnitude
+                                    if dist <= 16 then
+                                        pcall(function()
+                                            fireproximityprompt(obj)
+                                        end)
+                                    end
+                                end
+                            end
+                        end
+                        task.wait(0.35)
+                    end
+                    statusLabel:Set("Status: Auto Prompt OFF")
+                end)
+            end
+        end,
+    })
+end
