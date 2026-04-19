@@ -1,7 +1,5 @@
 -- ============================================================
---   MODULE: My Knife Farm
---   รับ Window และ scriptInfo จาก Hub หลัก
---   return function(Window, scriptInfo) ... end
+--   MODULE: My Knife Farm  v0.4
 -- ============================================================
 
 return function(Window, scriptInfo)
@@ -13,6 +11,10 @@ return function(Window, scriptInfo)
     local character = player.Character or player.CharacterAdded:Wait()
     local rootPart  = character:WaitForChild("HumanoidRootPart")
 
+    -- รอให้ map โหลดก่อน
+    local Plots = workspace:WaitForChild("Plots", 30)
+    assert(Plots, "Plots ไม่โหลดใน 30 วิ")
+
     -- ── Plot Detection ──────────────────────────────────────
 
     local myPlot = nil
@@ -22,7 +24,7 @@ return function(Window, scriptInfo)
         local myCleanName        = clean(player.Name)
         local myCleanDisplayName = clean(player.DisplayName)
         for i = 1, 8 do
-            local plotFolder = workspace.Plots:FindFirstChild("Plot_" .. i)
+            local plotFolder = Plots:FindFirstChild("Plot_" .. i)
             if plotFolder then
                 local nameplate = plotFolder:FindFirstChild("Plot_Models")
                     and plotFolder.Plot_Models:FindFirstChild("BaseModel")
@@ -41,21 +43,29 @@ return function(Window, scriptInfo)
 
     assignMyPlot()
     if not myPlot then
-        myPlot = workspace.Plots.Plot_1
+        myPlot = Plots.Plot_1
         warn("Plot detection failed. Using Plot_1 as fallback.")
     end
 
     -- ── References ──────────────────────────────────────────
 
-    local baseModel        = myPlot.Plot_Models.BaseModel
-    local conveyor         = baseModel.PackConveyor
-    local spawnClick       = baseModel.ButtonModel.PacketClick.ClickDetector
-    local BuyCaseRemote    = RepStorage:WaitForChild("Events"):WaitForChild("Game"):WaitForChild("CaseTriggered")
-    local SellAllRemote    = RepStorage:WaitForChild("Events"):WaitForChild("Game"):WaitForChild("SellAll")
-    local pickupCFrame     = baseModel.BoxStand.CFrame * CFrame.new(0, 3, 0)
-    local sellCFrame       = baseModel.SellButton.SellP.CFrame * CFrame.new(0, 10, 0)
-    local marketSellCFrame = workspace.InteractableParts.SellPart.CFrame * CFrame.new(0, 5, 0)
-    local boxPrompt        = baseModel.BoxStand.ProximityPrompt
+    local baseModel  = myPlot:WaitForChild("Plot_Models"):WaitForChild("BaseModel")
+    local conveyor   = baseModel:WaitForChild("PackConveyor")
+    local spawnClick = baseModel:WaitForChild("ButtonModel"):WaitForChild("PacketClick"):WaitForChild("ClickDetector")
+    local boxStand   = baseModel:WaitForChild("BoxStand")
+    local boxPrompt  = boxStand:WaitForChild("ProximityPrompt")
+    local sellButton = baseModel:WaitForChild("SellButton"):WaitForChild("SellP")
+
+    local BuyCaseRemote = RepStorage:WaitForChild("Events"):WaitForChild("Game"):WaitForChild("CaseTriggered")
+    local SellAllRemote = RepStorage:WaitForChild("Events"):WaitForChild("Game"):WaitForChild("SellAll")
+
+    local pickupCFrame     = boxStand.CFrame * CFrame.new(0, 3, 0)
+    local sellCFrame       = sellButton.CFrame * CFrame.new(0, 10, 0)
+
+    -- SellPart อาจโหลดช้า รอด้วย WaitForChild
+    local InteractableParts = workspace:WaitForChild("InteractableParts", 30)
+    local SellPart = InteractableParts and InteractableParts:WaitForChild("SellPart", 30)
+    local marketSellCFrame = SellPart and (SellPart.CFrame * CFrame.new(0, 5, 0))
 
     -- ── State ────────────────────────────────────────────────
 
@@ -88,9 +98,8 @@ return function(Window, scriptInfo)
     local MainTab     = Window:CreateTab("Main", 4483362458)
     local StatusLabel = MainTab:CreateLabel("Status: Idle")
 
-    -- Conveyor watcher
     task.spawn(function()
-        conveyor.SpawnedCase.ChildAdded:Connect(function(child)
+        conveyor:WaitForChild("SpawnedCase").ChildAdded:Connect(function(child)
             if not autoRollEnabled then return end
             task.spawn(function()
                 task.wait(0.01)
@@ -113,7 +122,6 @@ return function(Window, scriptInfo)
                                 StatusLabel:Set("Last Bought: " .. curM .. " " .. curR)
                             else
                                 autoRollEnabled = false
-                                -- toggle UI จะ sync เองเมื่อ callback ถูกเรียกครั้งถัดไป
                                 StatusLabel:Set("Found: " .. curM .. " " .. curR .. " — Auto Roll stopped")
                             end
                         end
@@ -170,7 +178,7 @@ return function(Window, scriptInfo)
     --   SETTINGS TAB
     -- ============================================================
 
-    local SettingsTab    = Window:CreateTab("Settings", 4483362458)
+    local SettingsTab     = Window:CreateTab("Settings", 4483362458)
     local SellTimerLabel  = SettingsTab:CreateLabel("Next Sell In: --:--")
     local SellStatusLabel = SettingsTab:CreateLabel("Sell Status: --")
 
@@ -188,7 +196,7 @@ return function(Window, scriptInfo)
                         task.wait(0.3)
                         local pickupTimeout = 0
                         while autoSellEnabled and not character:FindFirstChild("OpenBox") and pickupTimeout < 50 do
-                            if boxPrompt then fireproximityprompt(boxPrompt) end
+                            fireproximityprompt(boxPrompt)
                             task.wait(0.1)
                             pickupTimeout += 1
                         end
@@ -256,6 +264,10 @@ return function(Window, scriptInfo)
             if Value then
                 task.spawn(function()
                     while autoSellAllEnabled do
+                        if not marketSellCFrame then
+                            SellAllStatusLabel:Set("SellPart ไม่เจอใน workspace")
+                            break
+                        end
                         local returnPos = rootPart.CFrame
                         rootPart.CFrame = marketSellCFrame
                         task.wait(0.5)
@@ -289,4 +301,4 @@ return function(Window, scriptInfo)
         end,
     })
 
-end -- end of module function
+end
