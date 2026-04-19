@@ -1,5 +1,5 @@
 -- ============================================================
---   MY SCRIPT HUB  |  Version 2.0
+--   RAVEN HUB  |  Version 2.0
 --   To add a new game: add entry in SCRIPTS table,
 --   then add its logic inside loadScriptLogic().
 -- ============================================================
@@ -51,12 +51,12 @@ end)
 -- ============================================================
 
 local Window = Rayfield:CreateWindow({
-    Name            = "My Script Hub",
-    LoadingTitle    = "My Script Hub  |  v2.0",
+    Name            = "RAVEN HUB",
+    LoadingTitle    = "RAVEN HUB  |  v2.0",
     LoadingSubtitle = "by valrinx",
     ConfigurationSaving = {
         Enabled    = true,
-        FolderName = "MyScriptHub",
+        FolderName = "RAVENHUB",
         FileName   = "HubConfig",
     },
 })
@@ -67,7 +67,7 @@ local Window = Rayfield:CreateWindow({
 
 local HomeTab = Window:CreateTab("Home", 4483362458)
 
-HomeTab:CreateLabel("Welcome to My Script Hub")
+HomeTab:CreateLabel("Welcome to RAVEN HUB")
 HomeTab:CreateLabel("PlaceId: " .. tostring(game.PlaceId))
 
 local scriptNames = {}
