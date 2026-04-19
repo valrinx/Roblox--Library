@@ -1,5 +1,5 @@
 -- ============================================================
---   MODULE: Bee Garden  v0.3 (Dex-aware runtime scan)
+--   MODULE: Bee Garden  v0.4 (Dex-aware runtime scan)
 -- ============================================================
 
 return function(Window, scriptInfo)
@@ -75,6 +75,13 @@ return function(Window, scriptInfo)
             return false
         end
         local ok = pcall(function()
+            -- Some executors support extra args for hold prompts.
+            fireproximityprompt(prompt, 1, true)
+        end)
+        if ok then
+            return true
+        end
+        ok = pcall(function()
             fireproximityprompt(prompt)
         end)
         return ok
@@ -155,6 +162,33 @@ return function(Window, scriptInfo)
             end
         end
         return nil
+    end
+
+    local function isMyEggPrompt(prompt)
+        if not prompt or not prompt:IsA("ProximityPrompt") or not prompt.Enabled then
+            return false
+        end
+
+        local promptType = string.lower(tostring(prompt:GetAttribute("PromptType") or ""))
+        local plotOwner = cleanText(prompt:GetAttribute("PlotOwner"))
+        local action = string.lower(prompt.ActionText or "")
+        local objectName = string.lower(prompt.ObjectText or "")
+        local promptName = string.lower(prompt.Name or "")
+
+        -- Ignore timer/skip prompt while waiting; user confirmed this is not hatch-ready.
+        if promptName == "prompt2" and promptType ~= "egg_ready" then
+            return false
+        end
+
+        if plotOwner ~= "" and plotOwner ~= cleanText(player.Name) then
+            return false
+        end
+
+        if promptType == "egg_ready" or promptType == "egg_hatching" then
+            return true
+        end
+
+        return hasAny(action .. " " .. objectName .. " " .. promptName, {"hatch", "egg"})
     end
 
     local function detectMyPlot()
@@ -257,7 +291,7 @@ return function(Window, scriptInfo)
             #teleportOptions,
             myPlotRoot and myPlotRoot.Name or "not found",
             scriptInfo.name or "Bee Garden",
-            scriptInfo.version or "v0.3"
+            scriptInfo.version or "v0.4"
         )
         infoLabel:Set(msg)
 
@@ -318,17 +352,14 @@ return function(Window, scriptInfo)
                                 break
                             end
                             if obj:IsA("ProximityPrompt") then
-                                local action = string.lower(obj.ActionText or "")
-                                local object = string.lower(obj.ObjectText or "")
-                                local full = action .. " " .. object .. " " .. string.lower(obj.Name)
-                                if string.find(full, "hatch", 1, true) or string.find(full, "egg", 1, true) then
+                                if isMyEggPrompt(obj) then
                                     local part = getPartFromInstance(obj)
                                     if part then
                                         teleportToPart(part)
                                         if triggerPrompt(obj) then
                                             count += 1
                                         end
-                                        task.wait(0.12)
+                                        task.wait(0.2)
                                     end
                                 end
                             end
