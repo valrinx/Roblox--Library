@@ -27,7 +27,7 @@ local SCRIPTS = {
         name        = "Bee Garden",
         description = "Teleport | Auto Lucky | Auto Prompt",
         gameId      = 81535567274521,
-        version     = "v0.1",
+        version     = "v0.2",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/Bee_Garden",
     },
     --[[
