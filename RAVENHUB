@@ -23,6 +23,13 @@ local SCRIPTS = {
         version     = "v0.4",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/My_knife_farm",
     },
+    {
+        name        = "Bee Garden",
+        description = "Teleport | Auto Lucky | Auto Prompt",
+        gameId      = 81535567274521,
+        version     = "v0.1",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/Bee_Garden",
+    },
     --[[
     {
         name      = "Another Game",
