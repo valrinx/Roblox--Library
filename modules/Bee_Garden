@@ -1,5 +1,5 @@
 -- ============================================================
---   MODULE: Bee Garden  v0.5 (Dex-aware runtime scan)
+--   MODULE: Bee Garden  v0.6 (Dex-aware runtime scan)
 -- ============================================================
 
 return function(Window, scriptInfo)
@@ -184,6 +184,33 @@ return function(Window, scriptInfo)
         return nil
     end
 
+    local function isOwnedByMe(ownerValue)
+        local owner = cleanText(ownerValue)
+        if owner == "" then
+            return true
+        end
+
+        if owner == cleanText(player.Name) or owner == cleanText(player.DisplayName) then
+            return true
+        end
+
+        local plot = getMyScriptablePlot()
+        if plot then
+            if owner == cleanText(plot.Name) then
+                return true
+            end
+            local pot = plot:FindFirstChild("HoneyPot")
+            if pot then
+                local potOwner = cleanText(pot:GetAttribute("OwnerName"))
+                if potOwner ~= "" and owner == potOwner then
+                    return true
+                end
+            end
+        end
+
+        return false
+    end
+
     local function isMyEggPrompt(prompt)
         if not prompt or not prompt:IsA("ProximityPrompt") or not prompt.Enabled then
             return false
@@ -200,12 +227,23 @@ return function(Window, scriptInfo)
             return false
         end
 
-        if plotOwner ~= "" and plotOwner ~= cleanText(player.Name) then
+        if promptType == "egg_ready" or promptType == "egg_hatching" then
+            if plotOwner == "" or isOwnedByMe(plotOwner) then
+                return true
+            end
+            -- Owner string can differ between servers; allow nearby ready prompt fallback.
+            local part = getPartFromInstance(prompt)
+            if part and rootPart and rootPart.Parent then
+                local dist = (rootPart.Position - part.Position).Magnitude
+                if dist <= 60 then
+                    return true
+                end
+            end
             return false
         end
 
-        if promptType == "egg_ready" or promptType == "egg_hatching" then
-            return true
+        if plotOwner ~= "" and not isOwnedByMe(plotOwner) then
+            return false
         end
 
         return hasAny(action .. " " .. objectName .. " " .. promptName, {"hatch", "egg"})
@@ -311,7 +349,7 @@ return function(Window, scriptInfo)
             #teleportOptions,
             myPlotRoot and myPlotRoot.Name or "not found",
             scriptInfo.name or "Bee Garden",
-            scriptInfo.version or "v0.5"
+            scriptInfo.version or "v0.6"
         )
         infoLabel:Set(msg)
 
