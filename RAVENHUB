@@ -1,8 +1,6 @@
 -- ============================================================
 --   RAVEN HUB  |  Version 2.0
 --   Lazy Load + Module pattern
---   To add a new game: add entry in SCRIPTS, upload its module,
---   then set moduleUrl to the raw URL of that module file.
 -- ============================================================
 
 local Rayfield    = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
@@ -13,44 +11,21 @@ local player    = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local camera    = game.Workspace.CurrentCamera
 
--- ============================================================
---   SCRIPT REGISTRY
---   gameId = 0  means works in any game.
---   moduleUrl = raw URL to the module script for this game.
--- ============================================================
-
 local SCRIPTS = {
     {
-        name      = "My Knife Farm",
+        name        = "My Knife Farm",
         description = "Auto Roll | Auto Buy | Auto Sell | Anti AFK",
-        gameId    = 0,
-        version   = "v0.4",
-        moduleUrl = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/My_knife_farm",
+        gameId      = 0,
+        version     = "v0.4",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/My_knife_farm",
     },
-    --[[
-    {
-        name      = "Another Game",
-        description = "Auto Farm | Auto Quest",
-        gameId    = 123456789,
-        version   = "v1.0",
-        moduleUrl = "https://raw.githubusercontent.com/YOUR_USER/YOUR_REPO/main/modules/AnotherGame.lua",
-    },
-    ]]
 }
-
--- ============================================================
---   ANTI AFK  (global)
--- ============================================================
 
 player.Idled:Connect(function()
     VirtualUser:Button2Down(Vector2.zero, camera.CFrame)
     task.wait(1)
     VirtualUser:Button2Up(Vector2.zero, camera.CFrame)
 end)
-
--- ============================================================
---   WINDOW
--- ============================================================
 
 local Window = Rayfield:CreateWindow({
     Name            = "RAVEN HUB",
@@ -63,12 +38,7 @@ local Window = Rayfield:CreateWindow({
     },
 })
 
--- ============================================================
---   HOME TAB
--- ============================================================
-
 local HomeTab = Window:CreateTab("Home", 4483362458)
-
 HomeTab:CreateLabel("Welcome to RAVEN HUB")
 HomeTab:CreateLabel("PlaceId: " .. tostring(game.PlaceId))
 
@@ -85,30 +55,44 @@ HomeTab:CreateDropdown({
     Callback        = function() end,
 })
 
--- ============================================================
---   LAZY LOAD  –  โหลด module เฉพาะเกมที่ตรงกัน
--- ============================================================
-
 local currentPlaceId = game.PlaceId
+
+-- decode %XX ใน URL เผื่อ executor ไม่ decode ให้อัตโนมัติ
+local function decodeUrl(url)
+    return (url:gsub("%%(%x%x)", function(hex)
+        return string.char(tonumber(hex, 16))
+    end))
+end
 
 for _, scriptInfo in ipairs(SCRIPTS) do
     if scriptInfo.gameId == 0 or scriptInfo.gameId == currentPlaceId then
         task.spawn(function()
             local ok, result = pcall(function()
-                -- Lazy load: ดึง module เฉพาะเกมที่ต้องการ
-                local moduleFunc = loadstring(game:HttpGet(scriptInfo.moduleUrl))()
+                local url = decodeUrl(scriptInfo.moduleUrl)
+
+                -- ขั้น 1: ดึงโค้ด
+                local raw = game:HttpGet(url)
+                assert(type(raw) == "string" and #raw > 10,
+                    "HttpGet ได้ผลว่างหรือ nil — เช็ค URL: " .. url)
+
+                -- ขั้น 2: compile
+                local fn, compileErr = loadstring(raw)
+                assert(fn, "loadstring error: " .. tostring(compileErr))
+
+                -- ขั้น 3: รัน → ได้ module function
+                local moduleFunc = fn()
+                assert(type(moduleFunc) == "function",
+                    "module ต้อง return function แต่ได้: " .. type(moduleFunc))
+
+                -- ขั้น 4: เรียก module
                 moduleFunc(Window, scriptInfo)
             end)
             if not ok then
-                warn("[RAVEN HUB] Failed to load module for: " .. scriptInfo.name .. "\n" .. tostring(result))
+                warn("[RAVEN HUB] Failed to load '" .. scriptInfo.name .. "': " .. tostring(result))
             end
         end)
     end
 end
-
--- ============================================================
---   HUB SETTINGS  (always last tab)
--- ============================================================
 
 local HubSettingsTab = Window:CreateTab("Hub Settings", 4483362458)
 
