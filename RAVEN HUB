@@ -25,7 +25,7 @@ local SCRIPTS = {
         description = "Auto Roll | Auto Buy | Auto Sell | Anti AFK",
         gameId    = 0,
         version   = "v0.4",
-        moduleUrl = "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/My_knife_farm.lua",
+        moduleUrl = "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/My_knife_farm",
     },
     --[[
     {
