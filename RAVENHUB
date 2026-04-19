@@ -11,6 +11,10 @@ local player    = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local camera    = game.Workspace.CurrentCamera
 
+-- ============================================================
+--   SCRIPT REGISTRY
+-- ============================================================
+
 local SCRIPTS = {
     {
         name        = "My Knife Farm",
@@ -19,13 +23,30 @@ local SCRIPTS = {
         version     = "v0.4",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/My_knife_farm",
     },
+    --[[
+    {
+        name      = "Another Game",
+        description = "Auto Farm | Auto Quest",
+        gameId    = 123456789,
+        version   = "v1.0",
+        moduleUrl = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/AnotherGame",
+    },
+    ]]
 }
+
+-- ============================================================
+--   ANTI AFK
+-- ============================================================
 
 player.Idled:Connect(function()
     VirtualUser:Button2Down(Vector2.zero, camera.CFrame)
     task.wait(1)
     VirtualUser:Button2Up(Vector2.zero, camera.CFrame)
 end)
+
+-- ============================================================
+--   WINDOW
+-- ============================================================
 
 local Window = Rayfield:CreateWindow({
     Name            = "RAVEN HUB",
@@ -37,6 +58,10 @@ local Window = Rayfield:CreateWindow({
         FileName   = "HubConfig",
     },
 })
+
+-- ============================================================
+--   HOME TAB
+-- ============================================================
 
 local HomeTab = Window:CreateTab("Home", 4483362458)
 HomeTab:CreateLabel("Welcome to RAVEN HUB")
@@ -55,36 +80,27 @@ HomeTab:CreateDropdown({
     Callback        = function() end,
 })
 
-local currentPlaceId = game.PlaceId
+-- ============================================================
+--   LAZY LOAD
+-- ============================================================
 
--- decode %XX ใน URL เผื่อ executor ไม่ decode ให้อัตโนมัติ
-local function decodeUrl(url)
-    return (url:gsub("%%(%x%x)", function(hex)
-        return string.char(tonumber(hex, 16))
-    end))
-end
+local currentPlaceId = game.PlaceId
 
 for _, scriptInfo in ipairs(SCRIPTS) do
     if scriptInfo.gameId == 0 or scriptInfo.gameId == currentPlaceId then
         task.spawn(function()
             local ok, result = pcall(function()
-                local url = decodeUrl(scriptInfo.moduleUrl)
-
-                -- ขั้น 1: ดึงโค้ด
-                local raw = game:HttpGet(url)
+                local raw = game:HttpGet(scriptInfo.moduleUrl)
                 assert(type(raw) == "string" and #raw > 10,
-                    "HttpGet ได้ผลว่างหรือ nil — เช็ค URL: " .. url)
+                    "HttpGet empty — URL: " .. scriptInfo.moduleUrl)
 
-                -- ขั้น 2: compile
                 local fn, compileErr = loadstring(raw)
                 assert(fn, "loadstring error: " .. tostring(compileErr))
 
-                -- ขั้น 3: รัน → ได้ module function
                 local moduleFunc = fn()
                 assert(type(moduleFunc) == "function",
-                    "module ต้อง return function แต่ได้: " .. type(moduleFunc))
+                    "module must return function, got: " .. type(moduleFunc))
 
-                -- ขั้น 4: เรียก module
                 moduleFunc(Window, scriptInfo)
             end)
             if not ok then
@@ -93,6 +109,10 @@ for _, scriptInfo in ipairs(SCRIPTS) do
         end)
     end
 end
+
+-- ============================================================
+--   HUB SETTINGS
+-- ============================================================
 
 local HubSettingsTab = Window:CreateTab("Hub Settings", 4483362458)
 
