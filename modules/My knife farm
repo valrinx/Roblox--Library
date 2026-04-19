@@ -1,10 +1,10 @@
 -- ============================================================
 --   MODULE: My Knife Farm
---   รับ Window และ scriptInfo จาก Hub หลัก
---   return function(Window, scriptInfo) ... end
+--   รับ Window, scriptInfo และ Rayfield จาก Hub หลัก
+--   return function(Window, scriptInfo, Rayfield) ... end
 -- ============================================================
 
-return function(Window, scriptInfo)
+return function(Window, scriptInfo, Rayfield)
 
     local Players    = game:GetService("Players")
     local RepStorage = game:GetService("ReplicatedStorage")
