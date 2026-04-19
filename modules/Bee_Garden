@@ -1,5 +1,5 @@
 -- ============================================================
---   MODULE: Bee Garden  v0.1
+--   MODULE: Bee Garden  v0.2 (Dex-aware runtime scan)
 -- ============================================================
 
 return function(Window, scriptInfo)
@@ -8,6 +8,7 @@ return function(Window, scriptInfo)
     local player = Players.LocalPlayer
     local character = player.Character or player.CharacterAdded:Wait()
     local rootPart = character:WaitForChild("HumanoidRootPart")
+    local world = workspace
 
     local function refreshCharacter()
         character = player.Character or player.CharacterAdded:Wait()
@@ -19,175 +20,378 @@ return function(Window, scriptInfo)
         refreshCharacter()
     end)
 
+    local function cleanText(value)
+        return tostring(value or ""):gsub("%W", ""):lower()
+    end
+
+    local function hasAny(text, keywords)
+        local lowered = string.lower(tostring(text or ""))
+        for _, k in ipairs(keywords) do
+            if string.find(lowered, k, 1, true) then
+                return true
+            end
+        end
+        return false
+    end
+
+    local function getPartFromInstance(inst)
+        if not inst then
+            return nil
+        end
+        if inst:IsA("BasePart") then
+            return inst
+        end
+        if inst:IsA("Attachment") and inst.Parent and inst.Parent:IsA("BasePart") then
+            return inst.Parent
+        end
+        if inst:IsA("Model") then
+            if inst.PrimaryPart then
+                return inst.PrimaryPart
+            end
+            local anyPart = inst:FindFirstChildWhichIsA("BasePart", true)
+            if anyPart then
+                return anyPart
+            end
+        end
+        if inst.Parent then
+            return getPartFromInstance(inst.Parent)
+        end
+        return nil
+    end
+
+    local function teleportToPart(part)
+        if not part then
+            return false
+        end
+        if not rootPart or not rootPart.Parent then
+            refreshCharacter()
+        end
+        rootPart.CFrame = part.CFrame * CFrame.new(0, 3.5, 0)
+        return true
+    end
+
+    local function triggerPrompt(prompt)
+        if not prompt or not prompt:IsA("ProximityPrompt") then
+            return false
+        end
+        local ok = pcall(function()
+            fireproximityprompt(prompt)
+        end)
+        return ok
+    end
+
+    local function triggerClick(click)
+        if not click or not click:IsA("ClickDetector") then
+            return false
+        end
+        local ok = pcall(function()
+            fireclickdetector(click)
+        end)
+        return ok
+    end
+
+    local function touchPart(part)
+        if not part or not part:IsA("BasePart") then
+            return false
+        end
+        local ok = pcall(function()
+            firetouchinterest(rootPart, part, 0)
+            task.wait(0.03)
+            firetouchinterest(rootPart, part, 1)
+        end)
+        return ok
+    end
+
     local MainTab = Window:CreateTab("Bee Garden", 4483362458)
     local statusLabel = MainTab:CreateLabel("Status: Ready")
-    local infoLabel = MainTab:CreateLabel("Scanning map...")
+    local infoLabel = MainTab:CreateLabel("Dex Scan: pending")
 
-    local world = workspace
-    local points = {
-        Workspace = world,
-        Terrain = world:FindFirstChild("Terrain"),
-        Effects = world:FindFirstChild("Effects"),
-        Events = world:FindFirstChild("Events"),
-        FollowerBees = world:FindFirstChild("FollowerBees"),
-        Placables = world:FindFirstChild("Placables"),
-        LuckyBlockCommon = world:FindFirstChild("LuckyBlockCommon"),
-        LuckyBlockRare = world:FindFirstChild("LuckyBlockRare"),
-        LuckyBlockEpic = world:FindFirstChild("LuckyBlockEpic"),
-        Avriflench = world:FindFirstChild("Avriflench"),
-        Oat_zxc = world:FindFirstChild("Oat_zxc"),
-        PexKoTX = world:FindFirstChild("PexKoTX"),
-        jeikoplayz = world:FindFirstChild("jeikoplayz"),
-    }
+    local myPlotRoot = nil
+    local teleportPoints = {}
+    local teleportOptions = {}
+    local teleportDropdown
 
-    for i = 1, 6 do
-        points["PlotModel" .. i] = world:FindFirstChild("PlotModel" .. i)
+    local autoHatchEnabled = false
+    local autoFarmPlotEnabled = false
+    local autoCollectEnabled = false
+
+    local function detectMyPlot()
+        local myName = cleanText(player.Name)
+        local myDisplay = cleanText(player.DisplayName)
+        local best
+
+        for _, obj in ipairs(world:GetChildren()) do
+            local objClean = cleanText(obj.Name)
+            if objClean == myName or objClean == myDisplay then
+                best = obj
+                break
+            end
+        end
+
+        if best then
+            return best
+        end
+
+        for _, obj in ipairs(world:GetDescendants()) do
+            if obj:IsA("TextLabel") then
+                local txt = cleanText(obj.Text)
+                if txt ~= "" and (string.find(txt, myName, 1, true) or string.find(txt, myDisplay, 1, true)) then
+                    local parentModel = obj:FindFirstAncestorOfClass("Model")
+                    local parentFolder = obj:FindFirstAncestorOfClass("Folder")
+                    if parentModel then
+                        return parentModel
+                    elseif parentFolder then
+                        return parentFolder
+                    end
+                end
+            end
+        end
+        return nil
     end
 
-    local teleportOptions = {}
-    for name, obj in pairs(points) do
-        if obj then
+    local function refreshTeleportPoints()
+        teleportPoints = {}
+        teleportOptions = {}
+
+        local seedNames = {
+            "Workspace",
+            "Terrain",
+            "Effects",
+            "Events",
+            "FollowerBees",
+            "Placables",
+            "LuckyBlockCommon",
+            "LuckyBlockRare",
+            "LuckyBlockEpic",
+            "Model",
+        }
+        for _, n in ipairs(seedNames) do
+            local obj = (n == "Workspace") and world or world:FindFirstChild(n)
+            if obj then
+                teleportPoints[n] = obj
+            end
+        end
+
+        for _, obj in ipairs(world:GetChildren()) do
+            if obj:IsA("Model") or obj:IsA("Folder") then
+                if hasAny(obj.Name, {"plot", "lucky", "bee", "event"}) then
+                    teleportPoints[obj.Name] = obj
+                end
+            end
+        end
+
+        myPlotRoot = detectMyPlot()
+        if myPlotRoot then
+            teleportPoints["MyPlot"] = myPlotRoot
+        end
+
+        for i = 1, 8 do
+            local p = world:FindFirstChild("PlotModel" .. i)
+            if p then
+                teleportPoints[p.Name] = p
+            end
+        end
+
+        for name, _ in pairs(teleportPoints) do
             table.insert(teleportOptions, name)
         end
+        table.sort(teleportOptions)
+
+        local msg = string.format(
+            "Dex Scan: %d points | MyPlot: %s | %s %s",
+            #teleportOptions,
+            myPlotRoot and myPlotRoot.Name or "not found",
+            scriptInfo.name or "Bee Garden",
+            scriptInfo.version or "v0.2"
+        )
+        infoLabel:Set(msg)
+
+        if teleportDropdown then
+            pcall(function()
+                teleportDropdown:Refresh(teleportOptions, true)
+            end)
+        end
     end
-    table.sort(teleportOptions)
 
-    infoLabel:Set(string.format(
-        "Detected: %d teleport points | Module: %s %s",
-        #teleportOptions,
-        scriptInfo.name or "Bee Garden",
-        scriptInfo.version or ""
-    ))
+    refreshTeleportPoints()
 
-    MainTab:CreateDropdown({
+    MainTab:CreateButton({
+        Name = "Refresh Teleport Points (Runtime)",
+        Callback = function()
+            refreshTeleportPoints()
+            statusLabel:Set("Status: Teleport points refreshed")
+        end,
+    })
+
+    teleportDropdown = MainTab:CreateDropdown({
         Name = "Teleport To",
         Options = teleportOptions,
         CurrentValue = teleportOptions[1],
         MultipleOptions = false,
         Callback = function(option)
             local selected = type(option) == "table" and option[1] or option
-            local target = selected and points[selected]
-            if not target then
-                statusLabel:Set("Status: Teleport target not found")
+            local target = selected and teleportPoints[selected]
+            local targetPart = getPartFromInstance(target)
+            if target == world then
+                rootPart.CFrame = CFrame.new(0, 25, 0)
+                statusLabel:Set("Status: Teleported to Workspace center")
                 return
             end
-
-            if not rootPart or not rootPart.Parent then
-                refreshCharacter()
-            end
-
-            local cf
-            if target:IsA("BasePart") then
-                cf = target.CFrame * CFrame.new(0, 4, 0)
-            elseif target:IsA("Model") then
-                cf = target:GetPivot() * CFrame.new(0, 4, 0)
-            elseif target == world then
-                cf = CFrame.new(0, 25, 0)
-            end
-
-            if cf then
-                rootPart.CFrame = cf
-                statusLabel:Set("Status: Teleported to " .. selected)
+            if targetPart and teleportToPart(targetPart) then
+                statusLabel:Set("Status: Teleported to " .. tostring(selected))
             else
-                statusLabel:Set("Status: Target has no valid position")
+                statusLabel:Set("Status: Teleport failed (target not ready)")
             end
         end,
     })
 
-    local autoLuckyEnabled = false
-    local autoPromptEnabled = false
-
-    local function collectLuckyBlocks()
-        local folders = {"LuckyBlockCommon", "LuckyBlockRare", "LuckyBlockEpic"}
-        local touched = 0
-
-        for _, folderName in ipairs(folders) do
-            local folder = world:FindFirstChild(folderName)
-            if folder then
-                for _, obj in ipairs(folder:GetDescendants()) do
-                    if not autoLuckyEnabled then
-                        return touched
-                    end
-
-                    if obj:IsA("ProximityPrompt") then
-                        pcall(function()
-                            rootPart.CFrame = obj.Parent.CFrame * CFrame.new(0, 3, 0)
-                            fireproximityprompt(obj)
-                            touched += 1
-                        end)
-                        task.wait(0.08)
-                    elseif obj:IsA("ClickDetector") then
-                        pcall(function()
-                            rootPart.CFrame = obj.Parent.CFrame * CFrame.new(0, 3, 0)
-                            fireclickdetector(obj)
-                            touched += 1
-                        end)
-                        task.wait(0.08)
-                    end
-                end
-            end
-        end
-
-        return touched
-    end
-
     MainTab:CreateToggle({
-        Name = "Auto Lucky Blocks",
+        Name = "Auto Hatch When Ready",
         CurrentValue = false,
-        Flag = "beeAutoLucky",
+        Flag = "beeAutoHatch",
         Callback = function(value)
-            autoLuckyEnabled = value
+            autoHatchEnabled = value
             if value then
-                statusLabel:Set("Status: Auto Lucky ON")
+                statusLabel:Set("Status: Auto Hatch ON")
                 task.spawn(function()
-                    while autoLuckyEnabled do
-                        if not rootPart or not rootPart.Parent then
-                            refreshCharacter()
+                    while autoHatchEnabled do
+                        local count = 0
+                        for _, obj in ipairs(world:GetDescendants()) do
+                            if not autoHatchEnabled then
+                                break
+                            end
+                            if obj:IsA("ProximityPrompt") then
+                                local action = string.lower(obj.ActionText or "")
+                                local object = string.lower(obj.ObjectText or "")
+                                local full = action .. " " .. object .. " " .. string.lower(obj.Name)
+                                if string.find(full, "hatch", 1, true) or string.find(full, "egg", 1, true) then
+                                    local part = getPartFromInstance(obj)
+                                    if part then
+                                        teleportToPart(part)
+                                        if triggerPrompt(obj) then
+                                            count += 1
+                                        end
+                                        task.wait(0.12)
+                                    end
+                                end
+                            end
                         end
-                        local total = collectLuckyBlocks()
-                        statusLabel:Set("Status: Auto Lucky running (" .. total .. " interactions)")
-                        task.wait(1.2)
+                        statusLabel:Set("Status: Auto Hatch ON (" .. tostring(count) .. " triggers)")
+                        task.wait(0.5)
                     end
-                    statusLabel:Set("Status: Auto Lucky OFF")
+                    statusLabel:Set("Status: Auto Hatch OFF")
                 end)
             end
         end,
     })
 
     MainTab:CreateToggle({
-        Name = "Auto Nearby Prompts",
+        Name = "Auto Farm My Plot",
         CurrentValue = false,
-        Flag = "beeAutoPrompt",
+        Flag = "beeAutoFarmMyPlot",
         Callback = function(value)
-            autoPromptEnabled = value
+            autoFarmPlotEnabled = value
             if value then
-                statusLabel:Set("Status: Auto Prompt ON")
+                statusLabel:Set("Status: Auto Farm Plot ON")
                 task.spawn(function()
-                    while autoPromptEnabled do
-                        if not rootPart or not rootPart.Parent then
-                            refreshCharacter()
+                    while autoFarmPlotEnabled do
+                        if not myPlotRoot or not myPlotRoot.Parent then
+                            myPlotRoot = detectMyPlot()
                         end
-
-                        for _, obj in ipairs(world:GetDescendants()) do
-                            if not autoPromptEnabled then
-                                break
-                            end
-
-                            if obj:IsA("ProximityPrompt") and obj.Enabled then
-                                local parentPart = obj.Parent
-                                if parentPart and parentPart:IsA("BasePart") then
-                                    local dist = (rootPart.Position - parentPart.Position).Magnitude
-                                    if dist <= 16 then
-                                        pcall(function()
-                                            fireproximityprompt(obj)
-                                        end)
+                        if not myPlotRoot then
+                            statusLabel:Set("Status: MyPlot not found, waiting...")
+                            task.wait(1)
+                        else
+                            local interactions = 0
+                            for _, obj in ipairs(myPlotRoot:GetDescendants()) do
+                                if not autoFarmPlotEnabled then
+                                    break
+                                end
+                                if obj:IsA("ProximityPrompt") and obj.Enabled then
+                                    local part = getPartFromInstance(obj)
+                                    if part then
+                                        teleportToPart(part)
+                                        if triggerPrompt(obj) then
+                                            interactions += 1
+                                        end
+                                        task.wait(0.08)
+                                    end
+                                elseif obj:IsA("ClickDetector") then
+                                    local part = getPartFromInstance(obj)
+                                    if part then
+                                        teleportToPart(part)
+                                        if triggerClick(obj) then
+                                            interactions += 1
+                                        end
+                                        task.wait(0.08)
                                     end
                                 end
                             end
+                            statusLabel:Set("Status: Plot farm interactions: " .. tostring(interactions))
+                            task.wait(0.45)
                         end
-                        task.wait(0.35)
                     end
-                    statusLabel:Set("Status: Auto Prompt OFF")
+                    statusLabel:Set("Status: Auto Farm Plot OFF")
+                end)
+            end
+        end,
+    })
+
+    MainTab:CreateToggle({
+        Name = "Auto Collect Bees/Coins",
+        CurrentValue = false,
+        Flag = "beeAutoCollect",
+        Callback = function(value)
+            autoCollectEnabled = value
+            if value then
+                statusLabel:Set("Status: Auto Collect ON")
+                task.spawn(function()
+                    local keys = {"bee", "coin", "honey", "token", "collect", "reward"}
+                    while autoCollectEnabled do
+                        local collected = 0
+                        for _, obj in ipairs(world:GetDescendants()) do
+                            if not autoCollectEnabled then
+                                break
+                            end
+
+                            local name = string.lower(obj.Name)
+                            if obj:IsA("ProximityPrompt") and obj.Enabled then
+                                local text = name .. " " .. string.lower(obj.ActionText or "") .. " " .. string.lower(obj.ObjectText or "")
+                                if hasAny(text, keys) then
+                                    local part = getPartFromInstance(obj)
+                                    if part then
+                                        teleportToPart(part)
+                                        if triggerPrompt(obj) then
+                                            collected += 1
+                                        end
+                                        task.wait(0.06)
+                                    end
+                                end
+                            elseif obj:IsA("ClickDetector") then
+                                if hasAny(name, keys) then
+                                    local part = getPartFromInstance(obj)
+                                    if part then
+                                        teleportToPart(part)
+                                        if triggerClick(obj) then
+                                            collected += 1
+                                        end
+                                        task.wait(0.06)
+                                    end
+                                end
+                            elseif obj:IsA("BasePart") then
+                                if hasAny(name, keys) then
+                                    teleportToPart(obj)
+                                    if touchPart(obj) then
+                                        collected += 1
+                                    end
+                                    task.wait(0.03)
+                                end
+                            end
+                        end
+                        statusLabel:Set("Status: Auto Collect ON (" .. tostring(collected) .. " hits)")
+                        task.wait(0.45)
+                    end
+                    statusLabel:Set("Status: Auto Collect OFF")
                 end)
             end
         end,
