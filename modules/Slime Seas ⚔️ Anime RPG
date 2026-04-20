@@ -1,0 +1,297 @@
+-- ============================================================
+--   MODULE: Slime Seas ⚔️ Anime RPG
+--   Features: Auto Farm Aura + Infinite Stamina
+-- ============================================================
+
+return function(Window, scriptInfo)
+    local Players = game:GetService("Players")
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+    local RunService = game:GetService("RunService")
+
+    local player = Players.LocalPlayer
+
+    local AUTO_FARM_INTERVAL = 0.12
+    local AURA_INTERVAL = 0.12
+    local STAMINA_INTERVAL = 0.08
+
+    local autoFarmEnabled = false
+    local auraEnabled = false
+    local infiniteStaminaEnabled = false
+    local keepDistance = 8
+    local auraRange = 22
+
+    local character, humanoid, rootPart
+    local auraRemote
+    local statusLabel
+    local targetLabel
+
+    local function refreshCharacter()
+        character = player.Character or player.CharacterAdded:Wait()
+        humanoid = character:WaitForChild("Humanoid")
+        rootPart = character:WaitForChild("HumanoidRootPart")
+    end
+    refreshCharacter()
+
+    player.CharacterAdded:Connect(function()
+        task.wait(0.2)
+        refreshCharacter()
+    end)
+
+    local function isAlive(model)
+        if not model then return false end
+        local hum = model:FindFirstChildOfClass("Humanoid")
+        local hrp = model:FindFirstChild("HumanoidRootPart")
+        return hum and hum.Health > 0 and hrp
+    end
+
+    local function isMonsterModel(model)
+        if not model or model == character then return false end
+        local hum = model:FindFirstChildOfClass("Humanoid")
+        if not hum or hum.Health <= 0 then return false end
+        if Players:GetPlayerFromCharacter(model) then return false end
+
+        local lowName = string.lower(model.Name)
+        local looksLikeMob = lowName:find("mob") or lowName:find("enemy") or lowName:find("monster") or lowName:find("slime") or lowName:find("npc")
+        local hasEnemyTag = model:FindFirstChild("Enemy") or model:FindFirstChild("Monster") or model:FindFirstChild("Mob")
+        return looksLikeMob or hasEnemyTag ~= nil
+    end
+
+    local function getMonstersInRange(maxDistance)
+        if not rootPart then return {} end
+        local result = {}
+
+        for _, inst in ipairs(workspace:GetDescendants()) do
+            if inst:IsA("Model") and isMonsterModel(inst) then
+                local hrp = inst:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    local dist = (hrp.Position - rootPart.Position).Magnitude
+                    if dist <= maxDistance then
+                        table.insert(result, inst)
+                    end
+                end
+            end
+        end
+
+        table.sort(result, function(a, b)
+            local aRoot = a:FindFirstChild("HumanoidRootPart")
+            local bRoot = b:FindFirstChild("HumanoidRootPart")
+            if not aRoot or not bRoot then return false end
+            return (aRoot.Position - rootPart.Position).Magnitude < (bRoot.Position - rootPart.Position).Magnitude
+        end)
+
+        return result
+    end
+
+    local function getClosestMonster(maxDistance)
+        local mobs = getMonstersInRange(maxDistance)
+        return mobs[1]
+    end
+
+    local function resolveAuraRemote()
+        if auraRemote and auraRemote.Parent then return auraRemote end
+
+        local nameHints = {
+            "attack", "damage", "hit", "combat", "swing", "slash", "skill", "aura"
+        }
+
+        for _, inst in ipairs(ReplicatedStorage:GetDescendants()) do
+            if inst:IsA("RemoteEvent") or inst:IsA("RemoteFunction") then
+                local lowName = string.lower(inst.Name)
+                for _, key in ipairs(nameHints) do
+                    if lowName:find(key) then
+                        auraRemote = inst
+                        return auraRemote
+                    end
+                end
+            end
+        end
+
+        return nil
+    end
+
+    local function fireAuraToTarget(target)
+        if not target then return false end
+        local remote = resolveAuraRemote()
+        if not remote then return false end
+
+        local ok
+        if remote:IsA("RemoteEvent") then
+            ok = pcall(function()
+                remote:FireServer(target)
+                remote:FireServer(target, true)
+                remote:FireServer(target:FindFirstChildOfClass("Humanoid"))
+            end)
+        else
+            ok = pcall(function()
+                remote:InvokeServer(target)
+                remote:InvokeServer(target:FindFirstChildOfClass("Humanoid"))
+            end)
+        end
+
+        return ok
+    end
+
+    local function tpAbove(model)
+        if not rootPart or not isAlive(model) then return end
+        local targetRoot = model:FindFirstChild("HumanoidRootPart")
+        if not targetRoot then return end
+
+        local desired = targetRoot.CFrame * CFrame.new(0, keepDistance, 0)
+        rootPart.CFrame = desired
+    end
+
+    local function forceStamina(container)
+        for _, inst in ipairs(container:GetDescendants()) do
+            local lowName = string.lower(inst.Name)
+            if lowName:find("stamina") or lowName:find("energy") or lowName:find("sprint") then
+                if inst:IsA("NumberValue") or inst:IsA("IntValue") then
+                    local maxName = inst.Name .. "Max"
+                    local maxObj = container:FindFirstChild(maxName, true)
+                    if maxObj and (maxObj:IsA("NumberValue") or maxObj:IsA("IntValue")) then
+                        inst.Value = maxObj.Value
+                    else
+                        inst.Value = math.max(inst.Value, 99999)
+                    end
+                elseif inst:IsA("Attribute") then
+                    -- no-op (Attributes are set via SetAttribute on parent)
+                end
+            end
+        end
+
+        local attrTargets = {character, player}
+        for _, obj in ipairs(attrTargets) do
+            if obj then
+                for _, name in ipairs({"Stamina", "Energy", "Sprint"}) do
+                    local cur = obj:GetAttribute(name)
+                    local max = obj:GetAttribute(name .. "Max")
+                    if typeof(cur) == "number" then
+                        obj:SetAttribute(name, typeof(max) == "number" and max or math.max(cur, 99999))
+                    end
+                end
+            end
+        end
+    end
+
+    -- ============================================================
+    --   AUTO FARM TAB
+    -- ============================================================
+    local MainTab = Window:CreateTab("Auto Farm", 4483362458)
+    statusLabel = MainTab:CreateLabel("Status: Idle")
+    targetLabel = MainTab:CreateLabel("Target: None")
+
+    MainTab:CreateSlider({
+        Name = "TP Height (Above Mob)",
+        Range = {5, 20},
+        Increment = 1,
+        Suffix = " studs",
+        CurrentValue = keepDistance,
+        Flag = "slimeTpHeight",
+        Callback = function(value)
+            keepDistance = value
+        end,
+    })
+
+    MainTab:CreateSlider({
+        Name = "Aura Range",
+        Range = {8, 40},
+        Increment = 1,
+        Suffix = " studs",
+        CurrentValue = auraRange,
+        Flag = "slimeAuraRange",
+        Callback = function(value)
+            auraRange = value
+        end,
+    })
+
+    MainTab:CreateToggle({
+        Name = "Auto TP Above Mob",
+        CurrentValue = false,
+        Flag = "slimeAutoTp",
+        Callback = function(value)
+            autoFarmEnabled = value
+            if value then
+                statusLabel:Set("Status: Auto TP running")
+                task.spawn(function()
+                    while autoFarmEnabled do
+                        if character and humanoid and humanoid.Health > 0 and rootPart then
+                            local target = getClosestMonster(350)
+                            if target and isAlive(target) then
+                                targetLabel:Set("Target: " .. target.Name)
+                                tpAbove(target)
+                            else
+                                targetLabel:Set("Target: None")
+                            end
+                        end
+                        task.wait(AUTO_FARM_INTERVAL)
+                    end
+                    statusLabel:Set("Status: Idle")
+                    targetLabel:Set("Target: None")
+                end)
+            end
+        end,
+    })
+
+    MainTab:CreateToggle({
+        Name = "Aura Damage",
+        CurrentValue = false,
+        Flag = "slimeAura",
+        Callback = function(value)
+            auraEnabled = value
+            if value then
+                statusLabel:Set("Status: Aura running")
+                task.spawn(function()
+                    while auraEnabled do
+                        if character and humanoid and humanoid.Health > 0 and rootPart then
+                            local targets = getMonstersInRange(auraRange)
+                            if #targets > 0 then
+                                for _, mob in ipairs(targets) do
+                                    fireAuraToTarget(mob)
+                                end
+                                targetLabel:Set("Target: " .. tostring(#targets) .. " mobs")
+                            else
+                                targetLabel:Set("Target: None in range")
+                            end
+                        end
+                        task.wait(AURA_INTERVAL)
+                    end
+                    statusLabel:Set("Status: Idle")
+                end)
+            end
+        end,
+    })
+
+    -- ============================================================
+    --   PLAYER TAB
+    -- ============================================================
+    local PlayerTab = Window:CreateTab("Player", 4483362458)
+    local staminaLabel = PlayerTab:CreateLabel("Stamina: Normal")
+
+    PlayerTab:CreateToggle({
+        Name = "Infinite Stamina",
+        CurrentValue = false,
+        Flag = "slimeInfStamina",
+        Callback = function(value)
+            infiniteStaminaEnabled = value
+            staminaLabel:Set(value and "Stamina: Infinite (ON)" or "Stamina: Normal")
+
+            if value then
+                task.spawn(function()
+                    while infiniteStaminaEnabled do
+                        if character then
+                            forceStamina(character)
+                        end
+                        forceStamina(player)
+                        task.wait(STAMINA_INTERVAL)
+                    end
+                end)
+            end
+        end,
+    })
+
+    -- ลดโอกาสร่วง/ตก ถ้าเกมมีการปรับ Physics ระหว่างฟาร์ม
+    RunService.Heartbeat:Connect(function()
+        if autoFarmEnabled and character and rootPart and humanoid and humanoid.Health > 0 then
+            rootPart.AssemblyLinearVelocity = Vector3.zero
+        end
+    end)
+end
