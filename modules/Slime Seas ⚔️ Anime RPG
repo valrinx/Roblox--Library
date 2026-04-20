@@ -15,6 +15,8 @@ return function(Window, scriptInfo)
     local tweenTime = 0.1
     local selectedEffect = "GreatswordSlash1"
     local comboStep = 0
+    local auraInterval = 0.035
+    local auraBurstHits = 5
     local selectedEnemies = {}
     local auraRemote
     local combatRemotes = {}
@@ -273,6 +275,12 @@ return function(Window, scriptInfo)
             target:GetAttribute("CharacterId"),
             target.Name,
         }
+        local skillTargets = {
+            target,
+            enemyHum,
+            enemyRoot,
+            target.Parent,
+        }
 
         local function invokeAndTrack(remote, args)
             if not (remote and remote:IsA("RemoteFunction")) then return false end
@@ -294,9 +302,14 @@ return function(Window, scriptInfo)
         for _, t in ipairs(possibleTargets) do
             if t ~= nil then
                 invokeAndTrack(combatRemotes.weaponDamage, { t })
-                invokeAndTrack(combatRemotes.skillDamage, { t })
                 invokeAndTrack(combatRemotes.weaponDamage, { t, enemyRoot.Position })
-                invokeAndTrack(combatRemotes.skillDamage, { t, enemyRoot.Position })
+            end
+        end
+
+        -- SkillDamage ต้องการ Instance (ไม่ใช่ Vector3)
+        for _, t in ipairs(skillTargets) do
+            if typeof(t) == "Instance" then
+                invokeAndTrack(combatRemotes.skillDamage, { t })
             end
         end
 
@@ -396,6 +409,24 @@ return function(Window, scriptInfo)
         Callback = function(v) tweenTime = v end,
     })
 
+    FarmTab:CreateSlider({
+        Name = "Aura Interval",
+        Range = {0.02, 0.12},
+        Increment = 0.005,
+        CurrentValue = auraInterval,
+        Flag = "slimeAuraInterval",
+        Callback = function(v) auraInterval = v end,
+    })
+
+    FarmTab:CreateSlider({
+        Name = "Aura Burst Hits",
+        Range = {1, 8},
+        Increment = 1,
+        CurrentValue = auraBurstHits,
+        Flag = "slimeAuraBurstHits",
+        Callback = function(v) auraBurstHits = v end,
+    })
+
     FarmTab:CreateDropdown({
         Name = "Attack Effect",
         Options = {
@@ -455,13 +486,17 @@ return function(Window, scriptInfo)
                         local targets = getTargets(attackRange)
                         if #targets > 0 then
                             targetLabel:Set("Target: " .. tostring(#targets) .. " mobs")
-                            for _, mob in ipairs(targets) do
-                                strike(mob)
+                            local maxTargets = math.min(#targets, 3)
+                            for i = 1, auraBurstHits do
+                                local mob = targets[((i - 1) % maxTargets) + 1]
+                                if mob then
+                                    strike(mob)
+                                end
                             end
                         else
                             targetLabel:Set("Target: None in range")
                         end
-                        task.wait(0.12)
+                        task.wait(auraInterval)
                     end
                     statusLabel:Set("Status: Idle")
                 end)
