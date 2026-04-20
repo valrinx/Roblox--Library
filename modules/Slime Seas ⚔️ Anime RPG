@@ -25,7 +25,11 @@ return function(Window, scriptInfo)
     local enemyDropdown
     local activeTween
     local debugLabel
+    local errorLabel
     local lastDebug = "Debug: idle"
+    local lastError = "Last Error: none"
+    local currentTarget
+    local targetSwitchDistance = 60
 
     local function refreshCharacter()
         character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
@@ -219,6 +223,28 @@ return function(Window, scriptInfo)
         end
     end
 
+    local function holdAbove(target)
+        local hrp = target and target:FindFirstChild("HumanoidRootPart")
+        if rootPart and hrp then
+            rootPart.CFrame = hrp.CFrame * CFrame.new(0, tpHeight, 0)
+        end
+    end
+
+    local function getFocusTarget(maxDist)
+        if currentTarget and mobAlive(currentTarget) then
+            local hrp = currentTarget:FindFirstChild("HumanoidRootPart")
+            if hrp and rootPart then
+                local d = (hrp.Position - rootPart.Position).Magnitude
+                if d <= (maxDist + targetSwitchDistance) then
+                    return currentTarget, false
+                end
+            end
+        end
+
+        currentTarget = getTargets(maxDist)[1]
+        return currentTarget, true
+    end
+
     local function strike(target)
         if not target then return end
         equipAnyTool()
@@ -267,21 +293,6 @@ return function(Window, scriptInfo)
             end
         end
 
-        local possibleTargets = {
-            target,
-            enemyHum,
-            enemyRoot,
-            target.Parent,
-            target:GetAttribute("CharacterId"),
-            target.Name,
-        }
-        local skillTargets = {
-            target,
-            enemyHum,
-            enemyRoot,
-            target.Parent,
-        }
-
         local function invokeAndTrack(remote, args)
             if not (remote and remote:IsA("RemoteFunction")) then return false end
             local ok, res = pcall(function()
@@ -291,7 +302,12 @@ return function(Window, scriptInfo)
                 invoked = true
                 lastDebug = "Debug: OK " .. remote.Name .. " -> " .. tostring(res)
             else
-                lastDebug = "Debug: ERR " .. remote.Name .. " -> " .. tostring(res)
+                local msg = tostring(res)
+                lastDebug = "Debug: ERR " .. remote.Name
+                lastError = "Last Error: " .. remote.Name .. " -> " .. msg
+                if errorLabel then
+                    errorLabel:Set(lastError)
+                end
             end
             if debugLabel then
                 debugLabel:Set(lastDebug)
@@ -299,19 +315,10 @@ return function(Window, scriptInfo)
             return ok
         end
 
-        for _, t in ipairs(possibleTargets) do
-            if t ~= nil then
-                invokeAndTrack(combatRemotes.weaponDamage, { t })
-                invokeAndTrack(combatRemotes.weaponDamage, { t, enemyRoot.Position })
-            end
-        end
-
-        -- SkillDamage ต้องการ Instance (ไม่ใช่ Vector3)
-        for _, t in ipairs(skillTargets) do
-            if typeof(t) == "Instance" then
-                invokeAndTrack(combatRemotes.skillDamage, { t })
-            end
-        end
+        -- ลด payload ที่ไม่จำเป็น เพื่อให้ตีถี่และเสถียรกว่า
+        invokeAndTrack(combatRemotes.weaponDamage, { target })
+        invokeAndTrack(combatRemotes.weaponDamage, { target })
+        invokeAndTrack(combatRemotes.skillDamage, { enemyHum })
 
         if not invoked then
             local remote = auraRemote or resolveRemote()
@@ -350,6 +357,7 @@ return function(Window, scriptInfo)
     local statusLabel = FarmTab:CreateLabel("Status: Idle")
     local targetLabel = FarmTab:CreateLabel("Target: None")
     debugLabel = FarmTab:CreateLabel(lastDebug)
+    errorLabel = FarmTab:CreateLabel(lastError)
 
     enemyDropdown = FarmTab:CreateDropdown({
         Name = "Target Enemies (leave empty = all)",
@@ -411,8 +419,8 @@ return function(Window, scriptInfo)
 
     FarmTab:CreateSlider({
         Name = "Aura Interval",
-        Range = {0.02, 0.12},
-        Increment = 0.005,
+        Range = {0.01, 0.08},
+        Increment = 0.0025,
         CurrentValue = auraInterval,
         Flag = "slimeAuraInterval",
         Callback = function(v) auraInterval = v end,
@@ -456,12 +464,17 @@ return function(Window, scriptInfo)
                 task.spawn(function()
                     while autoFarm do
                         if character and humanoid and humanoid.Health > 0 and rootPart then
-                            local t = getTargets(400)[1]
+                            local t, isNew = getFocusTarget(400)
                             if t then
                                 targetLabel:Set("Target: " .. t.Name)
-                                teleportAbove(t)
+                                if isNew then
+                                    teleportAbove(t)
+                                else
+                                    holdAbove(t)
+                                end
                                 strike(t)
                             else
+                                currentTarget = nil
                                 targetLabel:Set("Target: None")
                             end
                         end
@@ -483,17 +496,19 @@ return function(Window, scriptInfo)
                 statusLabel:Set("Status: Kill Aura ON")
                 task.spawn(function()
                     while killAura do
-                        local targets = getTargets(attackRange)
-                        if #targets > 0 then
-                            targetLabel:Set("Target: " .. tostring(#targets) .. " mobs")
-                            local maxTargets = math.min(#targets, 3)
+                        local t, isNew = getFocusTarget(attackRange)
+                        if t then
+                            targetLabel:Set("Target: " .. t.Name)
+                            if isNew then
+                                teleportAbove(t)
+                            else
+                                holdAbove(t)
+                            end
                             for i = 1, auraBurstHits do
-                                local mob = targets[((i - 1) % maxTargets) + 1]
-                                if mob then
-                                    strike(mob)
-                                end
+                                strike(t)
                             end
                         else
+                            currentTarget = nil
                             targetLabel:Set("Target: None in range")
                         end
                         task.wait(auraInterval)
