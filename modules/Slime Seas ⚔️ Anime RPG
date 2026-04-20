@@ -160,6 +160,23 @@ return function(Window, scriptInfo)
         return hum and hum.Health > 0 and hrp
     end
 
+    local function isCombatEnemy(model)
+        if not model or not model:IsDescendantOf(enemiesFolder()) then return false end
+        if not mobAlive(model) then return false end
+
+        -- ตัด NPC คุย/เควสออก (มักมี ProximityPrompt สำหรับ "Speak")
+        local prompt = model:FindFirstChildWhichIsA("ProximityPrompt", true)
+        if prompt then
+            local action = string.lower(tostring(prompt.ActionText or ""))
+            local object = string.lower(tostring(prompt.ObjectText or ""))
+            if action:find("speak") or action:find("talk") or object:find("npc") then
+                return false
+            end
+        end
+
+        return true
+    end
+
     local function getTargets(maxDist)
         if not rootPart then return {} end
 
@@ -168,7 +185,7 @@ return function(Window, scriptInfo)
             if not container then return end
             local source = container:GetChildren()
             for _, mob in ipairs(source) do
-                if mob:IsA("Model") and mobAlive(mob) and targetAllowed(mob.Name) then
+                if mob:IsA("Model") and isCombatEnemy(mob) and targetAllowed(mob.Name) then
                     local hrp = mob:FindFirstChild("HumanoidRootPart")
                     if hrp then
                         local d = (hrp.Position - rootPart.Position).Magnitude
@@ -492,14 +509,9 @@ return function(Window, scriptInfo)
                 statusLabel:Set("Status: Kill Aura ON")
                 task.spawn(function()
                     while killAura do
-                        local t, isNew = getFocusTarget(attackRange)
+                        local t = getTargets(attackRange)[1]
                         if t then
                             targetLabel:Set("Target: " .. t.Name)
-                            if isNew then
-                                teleportAbove(t)
-                            else
-                                holdAbove(t)
-                            end
                             for i = 1, auraBurstHits do
                                 strike(t)
                             end
