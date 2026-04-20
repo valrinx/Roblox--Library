@@ -13,6 +13,7 @@ return function(Window, scriptInfo)
     local attackRange, tpHeight, farmDelay = 22, 8, 0.12
     local selectedEnemies = {}
     local auraRemote
+    local combatRemotes = {}
     local selectedRemotePath = "Auto"
     local remoteDropdown
     local enemyDropdown
@@ -85,7 +86,39 @@ return function(Window, scriptInfo)
         return candidates
     end
 
+    local function findByPath(path)
+        local ptr = game
+        for segment in string.gmatch(path, "[^%.]+") do
+            ptr = ptr and ptr:FindFirstChild(segment)
+        end
+        return ptr
+    end
+
+    local function resolveCombatRemotes()
+        combatRemotes = {
+            skillDamage = findByPath("ReplicatedStorage.Packages.Knit.Services.CombatService.RF.SkillDamage"),
+            weaponDamage = findByPath("ReplicatedStorage.Packages.Knit.Services.CombatService.RF.WeaponDamage"),
+            executeSkill = findByPath("ReplicatedStorage.Packages.Knit.Services.CombatService.RF.ExecuteSkill"),
+            procEffectDamage = findByPath("ReplicatedStorage.Packages.Knit.Services.CombatService.RF.ProcEffectDamage"),
+            registerAttack = findByPath("ReplicatedStorage.Packages.Knit.Services.CombatService.RF.RegisterAttack"),
+            registerSkillEnd = findByPath("ReplicatedStorage.Packages.Knit.Services.CombatService.RF.RegisterSkillEnd"),
+            scheduleSkillEnd = findByPath("ReplicatedStorage.Packages.Knit.Services.CombatService.RF.ScheduleSkillEnd"),
+            skillExecuted = findByPath("ReplicatedStorage.Packages.Knit.Services.CombatService.RE.SkillExecuted"),
+            inCombatChanged = findByPath("ReplicatedStorage.Packages.Knit.Services.CombatService.RE.InCombatChanged"),
+        }
+    end
+
     local function resolveRemote()
+        resolveCombatRemotes()
+        if combatRemotes.weaponDamage then
+            auraRemote = combatRemotes.weaponDamage
+            return auraRemote
+        end
+        if combatRemotes.skillDamage then
+            auraRemote = combatRemotes.skillDamage
+            return auraRemote
+        end
+
         local candidates = collectCombatRemotes()
         if selectedRemotePath ~= "Auto" then
             for _, c in ipairs(candidates) do
@@ -173,15 +206,63 @@ return function(Window, scriptInfo)
             end
         end
 
-        local remote = auraRemote or resolveRemote()
-        if not remote then return end
-        if remote:IsA("RemoteEvent") then
-            pcall(function() remote:FireServer(target) end)
-            pcall(function() remote:FireServer(target:FindFirstChildOfClass("Humanoid")) end)
-            pcall(function() remote:FireServer(target, target:FindFirstChild("HumanoidRootPart").Position) end)
-        else
-            pcall(function() remote:InvokeServer(target) end)
-            pcall(function() remote:InvokeServer(target:FindFirstChildOfClass("Humanoid")) end)
+        local enemyHum = target:FindFirstChildOfClass("Humanoid")
+        local enemyRoot = target:FindFirstChild("HumanoidRootPart")
+        if not enemyHum or not enemyRoot then return end
+
+        resolveCombatRemotes()
+
+        if combatRemotes.inCombatChanged and combatRemotes.inCombatChanged:IsA("RemoteEvent") then
+            pcall(function()
+                combatRemotes.inCombatChanged:FireServer(true)
+            end)
+        end
+
+        if combatRemotes.skillExecuted and combatRemotes.skillExecuted:IsA("RemoteEvent") then
+            pcall(function()
+                combatRemotes.skillExecuted:FireServer(target, enemyRoot.Position)
+            end)
+        end
+
+        local attackPayloads = {
+            { target },
+            { enemyHum },
+            { target, enemyRoot.Position },
+            { target, enemyHum, enemyRoot.Position },
+            { enemyRoot.Position, target },
+            { target.Name, enemyRoot.Position },
+        }
+
+        local invoked = false
+        local function tryInvoke(remote)
+            if not (remote and remote:IsA("RemoteFunction")) then return end
+            for _, args in ipairs(attackPayloads) do
+                if pcall(function() remote:InvokeServer(unpack(args)) end) then
+                    invoked = true
+                end
+            end
+        end
+
+        tryInvoke(combatRemotes.weaponDamage)
+        tryInvoke(combatRemotes.skillDamage)
+        tryInvoke(combatRemotes.executeSkill)
+        tryInvoke(combatRemotes.procEffectDamage)
+        tryInvoke(combatRemotes.registerAttack)
+        tryInvoke(combatRemotes.registerSkillEnd)
+        tryInvoke(combatRemotes.scheduleSkillEnd)
+
+        if not invoked then
+            local remote = auraRemote or resolveRemote()
+            if not remote then return end
+            if remote:IsA("RemoteEvent") then
+                pcall(function() remote:FireServer(target) end)
+                pcall(function() remote:FireServer(enemyHum) end)
+                pcall(function() remote:FireServer(target, enemyRoot.Position) end)
+            else
+                pcall(function() remote:InvokeServer(target) end)
+                pcall(function() remote:InvokeServer(enemyHum) end)
+                pcall(function() remote:InvokeServer(target, enemyRoot.Position) end)
+            end
         end
     end
 
