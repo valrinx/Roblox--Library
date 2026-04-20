@@ -22,6 +22,8 @@ return function(Window, scriptInfo)
 
     local character, humanoid, rootPart
     local auraRemote
+    local selectedRemotePath = "Auto"
+    local remoteDropdownRef
     local statusLabel
     local targetLabel
 
@@ -50,17 +52,20 @@ return function(Window, scriptInfo)
         if not hum or hum.Health <= 0 then return false end
         if Players:GetPlayerFromCharacter(model) then return false end
 
-        local lowName = string.lower(model.Name)
-        local looksLikeMob = lowName:find("mob") or lowName:find("enemy") or lowName:find("monster") or lowName:find("slime") or lowName:find("npc")
-        local hasEnemyTag = model:FindFirstChild("Enemy") or model:FindFirstChild("Monster") or model:FindFirstChild("Mob")
-        return looksLikeMob or hasEnemyTag ~= nil
+        return model.Parent == workspace:FindFirstChild("Enemies")
+    end
+
+    local function getEnemiesFolder()
+        return workspace:FindFirstChild("Enemies")
     end
 
     local function getMonstersInRange(maxDistance)
         if not rootPart then return {} end
         local result = {}
+        local enemiesFolder = getEnemiesFolder()
+        if not enemiesFolder then return result end
 
-        for _, inst in ipairs(workspace:GetDescendants()) do
+        for _, inst in ipairs(enemiesFolder:GetChildren()) do
             if inst:IsA("Model") and isMonsterModel(inst) then
                 local hrp = inst:FindFirstChild("HumanoidRootPart")
                 if hrp then
@@ -87,23 +92,65 @@ return function(Window, scriptInfo)
         return mobs[1]
     end
 
-    local function resolveAuraRemote()
-        if auraRemote and auraRemote.Parent then return auraRemote end
+    local function getInstancePath(inst)
+        local segments = {}
+        local ptr = inst
+        while ptr and ptr ~= game do
+            table.insert(segments, 1, ptr.Name)
+            ptr = ptr.Parent
+        end
+        return table.concat(segments, ".")
+    end
 
-        local nameHints = {
-            "attack", "damage", "hit", "combat", "swing", "slash", "skill", "aura"
-        }
+    local function collectCombatRemotes()
+        local candidates = {}
+        local nameHints = {"attack", "damage", "hit", "combat", "swing", "slash", "skill", "aura", "weapon", "punch"}
 
         for _, inst in ipairs(ReplicatedStorage:GetDescendants()) do
             if inst:IsA("RemoteEvent") or inst:IsA("RemoteFunction") then
                 local lowName = string.lower(inst.Name)
+                local score = 0
                 for _, key in ipairs(nameHints) do
                     if lowName:find(key) then
-                        auraRemote = inst
-                        return auraRemote
+                        score += 1
                     end
                 end
+                if score > 0 then
+                    table.insert(candidates, {
+                        path = getInstancePath(inst),
+                        ref = inst,
+                        score = score,
+                    })
+                end
             end
+        end
+
+        table.sort(candidates, function(a, b)
+            if a.score == b.score then
+                return a.path < b.path
+            end
+            return a.score > b.score
+        end)
+
+        return candidates
+    end
+
+    local function resolveAuraRemote()
+        if selectedRemotePath ~= "Auto" then
+            for _, c in ipairs(collectCombatRemotes()) do
+                if c.path == selectedRemotePath then
+                    auraRemote = c.ref
+                    return auraRemote
+                end
+            end
+        end
+
+        if auraRemote and auraRemote.Parent then return auraRemote end
+
+        local candidates = collectCombatRemotes()
+        if #candidates > 0 then
+            auraRemote = candidates[1].ref
+            return auraRemote
         end
 
         return nil
@@ -257,6 +304,39 @@ return function(Window, scriptInfo)
                     statusLabel:Set("Status: Idle")
                 end)
             end
+        end,
+    })
+
+    MainTab:CreateButton({
+        Name = "Scan Combat Remotes",
+        Callback = function()
+            local options = {"Auto"}
+            local candidates = collectCombatRemotes()
+            for i = 1, math.min(#candidates, 25) do
+                table.insert(options, candidates[i].path)
+            end
+
+            if remoteDropdownRef and remoteDropdownRef.Refresh then
+                remoteDropdownRef:Refresh(options)
+            end
+
+            print("=== Slime Seas Combat Remote Candidates ===")
+            for i, c in ipairs(candidates) do
+                print(string.format("[%d] score=%d  %s", i, c.score, c.path))
+            end
+            statusLabel:Set("Status: Scanned remotes (check console)")
+        end,
+    })
+
+    remoteDropdownRef = MainTab:CreateDropdown({
+        Name = "Aura Remote (manual override)",
+        Options = {"Auto"},
+        CurrentValue = "Auto",
+        MultipleOptions = false,
+        Flag = "slimeAuraRemote",
+        Callback = function(option)
+            selectedRemotePath = type(option) == "table" and option[1] or option
+            auraRemote = nil
         end,
     })
 
