@@ -20,6 +20,10 @@ return function(Window, scriptInfo)
     local auraBurstHits = 5
     local autoCollectBox = false
     local collectBoxRange = 180
+    local autoQuest = false
+    local questInterval = 1.2
+    local questPromptRange = 3500
+    local selectedIslands = {}
     local selectedEnemies = {}
     local auraRemote
     local combatRemotes = {}
@@ -49,6 +53,10 @@ return function(Window, scriptInfo)
         return workspace:FindFirstChild("Enemies")
     end
 
+    local function mapRoot()
+        return workspace:FindFirstChild("_Map")
+    end
+
     local function getPath(inst)
         local out, ptr = {}, inst
         while ptr and ptr ~= game do
@@ -74,6 +82,30 @@ return function(Window, scriptInfo)
         end
         table.sort(names)
         return names
+    end
+
+    local function collectIslandNames()
+        local root = mapRoot()
+        if not root then return {} end
+        local out = {}
+        for _, child in ipairs(root:GetChildren()) do
+            if child:IsA("Folder") and (string.match(child.Name, "^Island%d+$") or child.Name == "Island11Underground") then
+                table.insert(out, child.Name)
+            end
+        end
+        table.sort(out, function(a, b)
+            local na = tonumber((a:match("^Island(%d+)$")))
+            local nb = tonumber((b:match("^Island(%d+)$")))
+            if na and nb then
+                return na < nb
+            elseif na then
+                return true
+            elseif nb then
+                return false
+            end
+            return a < b
+        end)
+        return out
     end
 
     local function collectCombatRemotes()
@@ -394,6 +426,83 @@ return function(Window, scriptInfo)
         return part and part.Position or nil
     end
 
+    local function isQuestPrompt(prompt)
+        if not prompt or not prompt:IsA("ProximityPrompt") then return false end
+        local action = string.lower(tostring(prompt.ActionText or ""))
+        local object = string.lower(tostring(prompt.ObjectText or ""))
+        local fullName = string.lower(tostring(prompt:GetFullName()))
+
+        if action:find("quest") or object:find("quest") then return true end
+        if action:find("talk") or action:find("speak") then return true end
+        if fullName:find(".npcs.") and (action:find("interact") or object:find("npc")) then return true end
+        return false
+    end
+
+    local function islandSelected(name)
+        if next(selectedIslands) == nil then
+            return true
+        end
+        return selectedIslands[name] == true
+    end
+
+    local function collectQuestPrompts()
+        local root = mapRoot()
+        if not root then return {} end
+        local prompts = {}
+
+        for _, island in ipairs(root:GetChildren()) do
+            if island:IsA("Folder") and islandSelected(island.Name) then
+                local npcs = island:FindFirstChild("NPCs")
+                if npcs then
+                    for _, inst in ipairs(npcs:GetDescendants()) do
+                        if inst:IsA("ProximityPrompt") and isQuestPrompt(inst) then
+                            table.insert(prompts, inst)
+                        end
+                    end
+                end
+            end
+        end
+        return prompts
+    end
+
+    local function runAutoQuestStep()
+        if not (autoQuest and rootPart and humanoid and humanoid.Health > 0) then return end
+
+        local nearestPrompt, nearestPos, nearestDist
+        for _, prompt in ipairs(collectQuestPrompts()) do
+            local pos = getPromptPosition(prompt)
+            if pos then
+                local d = (pos - rootPart.Position).Magnitude
+                if d <= questPromptRange and (not nearestDist or d < nearestDist) then
+                    nearestPrompt, nearestPos, nearestDist = prompt, pos, d
+                end
+            end
+        end
+
+        if nearestPrompt and nearestPos then
+            if activeTween then
+                activeTween:Cancel()
+                activeTween = nil
+            end
+            activeTween = TweenService:Create(
+                rootPart,
+                TweenInfo.new(math.clamp(nearestDist / 120, 0.12, 0.65), Enum.EasingStyle.Linear, Enum.EasingDirection.Out),
+                { CFrame = CFrame.new(nearestPos + Vector3.new(0, 3, 0)) }
+            )
+            activeTween:Play()
+            task.wait(0.15)
+            pcall(function()
+                fireproximityprompt(nearestPrompt)
+                if nearestPrompt.HoldDuration and nearestPrompt.HoldDuration > 0 then
+                    task.wait(math.min(nearestPrompt.HoldDuration, 1))
+                end
+                fireproximityprompt(nearestPrompt)
+            end)
+            lastDebug = "Debug: Quest -> " .. tostring(nearestPrompt.Parent and nearestPrompt.Parent.Name or "prompt")
+            if debugLabel then debugLabel:Set(lastDebug) end
+        end
+    end
+
     local function collectNearbyBoxes()
         if not (autoCollectBox and rootPart and character and humanoid and humanoid.Health > 0) then return end
 
@@ -646,6 +755,77 @@ return function(Window, scriptInfo)
         Callback = function(opt)
             selectedRemotePath = type(opt) == "table" and opt[1] or opt
             auraRemote = nil
+        end,
+    })
+
+    local QuestTab = Window:CreateTab("Quest", 4483362458)
+    local questLabel = QuestTab:CreateLabel("Quest Status: Idle")
+    local islandDropdown
+
+    islandDropdown = QuestTab:CreateDropdown({
+        Name = "Quest Islands (empty = all)",
+        Options = collectIslandNames(),
+        CurrentValue = {},
+        MultipleOptions = true,
+        Flag = "slimeQuestIslands",
+        Callback = function(options)
+            selectedIslands = {}
+            if type(options) == "table" then
+                for k, v in pairs(options) do
+                    if type(k) == "string" and v == true then
+                        selectedIslands[k] = true
+                    elseif type(v) == "string" then
+                        selectedIslands[v] = true
+                    end
+                end
+            end
+        end,
+    })
+
+    QuestTab:CreateButton({
+        Name = "Refresh Island List",
+        Callback = function()
+            if islandDropdown and islandDropdown.Refresh then
+                islandDropdown:Refresh(collectIslandNames())
+            end
+            questLabel:Set("Quest Status: Island list refreshed")
+        end,
+    })
+
+    QuestTab:CreateSlider({
+        Name = "Quest Interval",
+        Range = {0.5, 4},
+        Increment = 0.1,
+        CurrentValue = questInterval,
+        Flag = "slimeQuestInterval",
+        Callback = function(v) questInterval = v end,
+    })
+
+    QuestTab:CreateSlider({
+        Name = "Quest Search Range",
+        Range = {500, 6000},
+        Increment = 100,
+        CurrentValue = questPromptRange,
+        Flag = "slimeQuestRange",
+        Callback = function(v) questPromptRange = v end,
+    })
+
+    QuestTab:CreateToggle({
+        Name = "Auto Quest (NPCs in islands)",
+        CurrentValue = false,
+        Flag = "slimeAutoQuest",
+        Callback = function(v)
+            autoQuest = v
+            if v then
+                questLabel:Set("Quest Status: Running")
+                task.spawn(function()
+                    while autoQuest do
+                        runAutoQuestStep()
+                        task.wait(questInterval)
+                    end
+                    questLabel:Set("Quest Status: Idle")
+                end)
+            end
         end,
     })
 
