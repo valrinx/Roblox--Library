@@ -1,305 +1,313 @@
 -- ============================================================
 --   MODULE: Slime Seas ⚔️ Anime RPG
---   Features: Auto Farm Aura + Infinite Stamina
+--   Clean script style (auto farm + aura + stamina)
 -- ============================================================
 
 return function(Window, scriptInfo)
     local Players = game:GetService("Players")
     local ReplicatedStorage = game:GetService("ReplicatedStorage")
-    local RunService = game:GetService("RunService")
-
-    local player = Players.LocalPlayer
-
-    local AUTO_FARM_INTERVAL = 0.12
-    local AURA_INTERVAL = 0.12
-    local STAMINA_INTERVAL = 0.08
-
-    local autoFarmEnabled = false
-    local auraEnabled = false
-    local infiniteStaminaEnabled = false
-    local keepDistance = 8
-    local auraRange = 22
+    local LocalPlayer = Players.LocalPlayer
 
     local character, humanoid, rootPart
+    local autoFarm, killAura, infStamina, autoEquip = false, false, false, true
+    local attackRange, tpHeight, farmDelay = 22, 8, 0.12
+    local selectedEnemies = {}
     local auraRemote
     local selectedRemotePath = "Auto"
-    local remoteDropdownRef
-    local statusLabel
-    local targetLabel
+    local remoteDropdown
+    local enemyDropdown
 
     local function refreshCharacter()
-        character = player.Character or player.CharacterAdded:Wait()
+        character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
         humanoid = character:WaitForChild("Humanoid")
         rootPart = character:WaitForChild("HumanoidRootPart")
     end
     refreshCharacter()
-
-    player.CharacterAdded:Connect(function()
+    LocalPlayer.CharacterAdded:Connect(function()
         task.wait(0.2)
         refreshCharacter()
     end)
 
-    local function isAlive(model)
-        if not model then return false end
-        local hum = model:FindFirstChildOfClass("Humanoid")
-        local hrp = model:FindFirstChild("HumanoidRootPart")
-        return hum and hum.Health > 0 and hrp
-    end
-
-    local function isMonsterModel(model)
-        if not model or model == character then return false end
-        local hum = model:FindFirstChildOfClass("Humanoid")
-        if not hum or hum.Health <= 0 then return false end
-        if Players:GetPlayerFromCharacter(model) then return false end
-
-        return model.Parent == workspace:FindFirstChild("Enemies")
-    end
-
-    local function getEnemiesFolder()
+    local function enemiesFolder()
         return workspace:FindFirstChild("Enemies")
     end
 
-    local function getMonstersInRange(maxDistance)
-        if not rootPart then return {} end
-        local result = {}
-        local enemiesFolder = getEnemiesFolder()
-        if not enemiesFolder then return result end
+    local function getPath(inst)
+        local out, ptr = {}, inst
+        while ptr and ptr ~= game do
+            table.insert(out, 1, ptr.Name)
+            ptr = ptr.Parent
+        end
+        return table.concat(out, ".")
+    end
 
-        for _, inst in ipairs(enemiesFolder:GetChildren()) do
-            if inst:IsA("Model") and isMonsterModel(inst) then
-                local hrp = inst:FindFirstChild("HumanoidRootPart")
-                if hrp then
-                    local dist = (hrp.Position - rootPart.Position).Magnitude
-                    if dist <= maxDistance then
-                        table.insert(result, inst)
-                    end
+    local function collectEnemyNames()
+        local f = enemiesFolder()
+        if not f then return {} end
+
+        local seen = {}
+        local names = {}
+        for _, mob in ipairs(f:GetChildren()) do
+            if mob:IsA("Model") and mob:FindFirstChild("Humanoid") then
+                if not seen[mob.Name] then
+                    seen[mob.Name] = true
+                    table.insert(names, mob.Name)
                 end
             end
         end
-
-        table.sort(result, function(a, b)
-            local aRoot = a:FindFirstChild("HumanoidRootPart")
-            local bRoot = b:FindFirstChild("HumanoidRootPart")
-            if not aRoot or not bRoot then return false end
-            return (aRoot.Position - rootPart.Position).Magnitude < (bRoot.Position - rootPart.Position).Magnitude
-        end)
-
-        return result
-    end
-
-    local function getClosestMonster(maxDistance)
-        local mobs = getMonstersInRange(maxDistance)
-        return mobs[1]
-    end
-
-    local function getInstancePath(inst)
-        local segments = {}
-        local ptr = inst
-        while ptr and ptr ~= game do
-            table.insert(segments, 1, ptr.Name)
-            ptr = ptr.Parent
-        end
-        return table.concat(segments, ".")
+        table.sort(names)
+        return names
     end
 
     local function collectCombatRemotes()
+        local hints = { "attack", "damage", "hit", "combat", "swing", "slash", "skill", "aura", "weapon", "punch" }
         local candidates = {}
-        local nameHints = {"attack", "damage", "hit", "combat", "swing", "slash", "skill", "aura", "weapon", "punch"}
-
         for _, inst in ipairs(ReplicatedStorage:GetDescendants()) do
             if inst:IsA("RemoteEvent") or inst:IsA("RemoteFunction") then
-                local lowName = string.lower(inst.Name)
+                local n = string.lower(inst.Name)
                 local score = 0
-                for _, key in ipairs(nameHints) do
-                    if lowName:find(key) then
+                for _, key in ipairs(hints) do
+                    if n:find(key) then
                         score += 1
                     end
                 end
                 if score > 0 then
-                    table.insert(candidates, {
-                        path = getInstancePath(inst),
-                        ref = inst,
-                        score = score,
-                    })
+                    table.insert(candidates, { path = getPath(inst), ref = inst, score = score })
                 end
             end
         end
-
         table.sort(candidates, function(a, b)
             if a.score == b.score then
                 return a.path < b.path
             end
             return a.score > b.score
         end)
-
         return candidates
     end
 
-    local function resolveAuraRemote()
+    local function resolveRemote()
+        local candidates = collectCombatRemotes()
         if selectedRemotePath ~= "Auto" then
-            for _, c in ipairs(collectCombatRemotes()) do
+            for _, c in ipairs(candidates) do
                 if c.path == selectedRemotePath then
                     auraRemote = c.ref
                     return auraRemote
                 end
             end
         end
-
-        if auraRemote and auraRemote.Parent then return auraRemote end
-
-        local candidates = collectCombatRemotes()
-        if #candidates > 0 then
-            auraRemote = candidates[1].ref
-            return auraRemote
-        end
-
-        return nil
+        auraRemote = candidates[1] and candidates[1].ref or nil
+        return auraRemote
     end
 
-    local function fireAuraToTarget(target)
-        if not target then return false end
-        local remote = resolveAuraRemote()
-        if not remote then return false end
+    local function targetAllowed(name)
+        if next(selectedEnemies) == nil then
+            return true
+        end
+        return selectedEnemies[name] == true
+    end
 
-        local ok
+    local function mobAlive(model)
+        if not model then return false end
+        local hum = model:FindFirstChildOfClass("Humanoid")
+        local hrp = model:FindFirstChild("HumanoidRootPart")
+        return hum and hum.Health > 0 and hrp
+    end
+
+    local function getTargets(maxDist)
+        local f = enemiesFolder()
+        if not f or not rootPart then return {} end
+
+        local out = {}
+        for _, mob in ipairs(f:GetChildren()) do
+            if mob:IsA("Model") and mobAlive(mob) and targetAllowed(mob.Name) then
+                local hrp = mob:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    local d = (hrp.Position - rootPart.Position).Magnitude
+                    if d <= maxDist then
+                        table.insert(out, mob)
+                    end
+                end
+            end
+        end
+        table.sort(out, function(a, b)
+            local da = (a.HumanoidRootPart.Position - rootPart.Position).Magnitude
+            local db = (b.HumanoidRootPart.Position - rootPart.Position).Magnitude
+            return da < db
+        end)
+        return out
+    end
+
+    local function equipAnyTool()
+        if not autoEquip or not character then return end
+        local equipped = character:FindFirstChildOfClass("Tool")
+        if equipped then return end
+        local backpack = LocalPlayer:FindFirstChildOfClass("Backpack")
+        if not backpack then return end
+        local tool = backpack:FindFirstChildOfClass("Tool")
+        if tool then
+            humanoid:EquipTool(tool)
+        end
+    end
+
+    local function teleportAbove(target)
+        local hrp = target and target:FindFirstChild("HumanoidRootPart")
+        if rootPart and hrp then
+            rootPart.CFrame = hrp.CFrame * CFrame.new(0, tpHeight, 0)
+        end
+    end
+
+    local function strike(target)
+        if not target then return end
+        equipAnyTool()
+
+        local tool = character and character:FindFirstChildOfClass("Tool")
+        if tool then
+            pcall(function() tool:Activate() end)
+            local handle = tool:FindFirstChild("Handle")
+            local enemyRoot = target:FindFirstChild("HumanoidRootPart")
+            if handle and enemyRoot and firetouchinterest then
+                pcall(function()
+                    firetouchinterest(handle, enemyRoot, 0)
+                    firetouchinterest(handle, enemyRoot, 1)
+                end)
+            end
+        end
+
+        local remote = auraRemote or resolveRemote()
+        if not remote then return end
         if remote:IsA("RemoteEvent") then
-            ok = pcall(function()
-                remote:FireServer(target)
-                remote:FireServer(target, true)
-                remote:FireServer(target:FindFirstChildOfClass("Humanoid"))
-            end)
+            pcall(function() remote:FireServer(target) end)
+            pcall(function() remote:FireServer(target:FindFirstChildOfClass("Humanoid")) end)
+            pcall(function() remote:FireServer(target, target:FindFirstChild("HumanoidRootPart").Position) end)
         else
-            ok = pcall(function()
-                remote:InvokeServer(target)
-                remote:InvokeServer(target:FindFirstChildOfClass("Humanoid"))
-            end)
+            pcall(function() remote:InvokeServer(target) end)
+            pcall(function() remote:InvokeServer(target:FindFirstChildOfClass("Humanoid")) end)
         end
-
-        return ok
     end
 
-    local function tpAbove(model)
-        if not rootPart or not isAlive(model) then return end
-        local targetRoot = model:FindFirstChild("HumanoidRootPart")
-        if not targetRoot then return end
-
-        local desired = targetRoot.CFrame * CFrame.new(0, keepDistance, 0)
-        rootPart.CFrame = desired
-    end
-
-    local function forceStamina(container)
-        for _, inst in ipairs(container:GetDescendants()) do
-            local lowName = string.lower(inst.Name)
-            if lowName:find("stamina") or lowName:find("energy") or lowName:find("sprint") then
-                if inst:IsA("NumberValue") or inst:IsA("IntValue") then
-                    local maxName = inst.Name .. "Max"
-                    local maxObj = container:FindFirstChild(maxName, true)
-                    if maxObj and (maxObj:IsA("NumberValue") or maxObj:IsA("IntValue")) then
-                        inst.Value = maxObj.Value
-                    else
-                        inst.Value = math.max(inst.Value, 99999)
-                    end
-                elseif inst:IsA("Attribute") then
-                    -- no-op (Attributes are set via SetAttribute on parent)
-                end
-            end
-        end
-
-        local attrTargets = {character, player}
-        for _, obj in ipairs(attrTargets) do
-            if obj then
-                for _, name in ipairs({"Stamina", "Energy", "Sprint"}) do
-                    local cur = obj:GetAttribute(name)
-                    local max = obj:GetAttribute(name .. "Max")
-                    if typeof(cur) == "number" then
-                        obj:SetAttribute(name, typeof(max) == "number" and max or math.max(cur, 99999))
+    local function lockStamina()
+        local function pump(container)
+            for _, obj in ipairs(container:GetDescendants()) do
+                if obj:IsA("NumberValue") or obj:IsA("IntValue") then
+                    local n = string.lower(obj.Name)
+                    if n:find("stamina") or n:find("energy") or n:find("sprint") then
+                        obj.Value = math.max(obj.Value, 99999)
                     end
                 end
             end
+            for _, a in ipairs({ "Stamina", "Energy", "Sprint" }) do
+                local cur = container:GetAttribute(a)
+                if typeof(cur) == "number" then
+                    container:SetAttribute(a, 99999)
+                end
+            end
         end
+        if character then pump(character) end
+        pump(LocalPlayer)
     end
 
-    -- ============================================================
-    --   AUTO FARM TAB
-    -- ============================================================
-    local MainTab = Window:CreateTab("Auto Farm", 4483362458)
-    statusLabel = MainTab:CreateLabel("Status: Idle")
-    targetLabel = MainTab:CreateLabel("Target: None")
+    -- =========================== UI ============================
+    local FarmTab = Window:CreateTab("Slime Farm", 4483362458)
+    local statusLabel = FarmTab:CreateLabel("Status: Idle")
+    local targetLabel = FarmTab:CreateLabel("Target: None")
 
-    MainTab:CreateSlider({
-        Name = "TP Height (Above Mob)",
-        Range = {5, 20},
-        Increment = 1,
-        Suffix = " studs",
-        CurrentValue = keepDistance,
-        Flag = "slimeTpHeight",
-        Callback = function(value)
-            keepDistance = value
+    enemyDropdown = FarmTab:CreateDropdown({
+        Name = "Target Enemies (leave empty = all)",
+        Options = collectEnemyNames(),
+        CurrentValue = {},
+        MultipleOptions = true,
+        Flag = "slimeEnemySelect",
+        Callback = function(options)
+            selectedEnemies = {}
+            if type(options) == "table" then
+                for k, v in pairs(options) do
+                    if type(k) == "string" and v == true then
+                        selectedEnemies[k] = true
+                    elseif type(v) == "string" then
+                        selectedEnemies[v] = true
+                    end
+                end
+            end
         end,
     })
 
-    MainTab:CreateSlider({
-        Name = "Aura Range",
-        Range = {8, 40},
-        Increment = 1,
-        Suffix = " studs",
-        CurrentValue = auraRange,
-        Flag = "slimeAuraRange",
-        Callback = function(value)
-            auraRange = value
+    FarmTab:CreateButton({
+        Name = "Refresh Enemy List",
+        Callback = function()
+            local list = collectEnemyNames()
+            if enemyDropdown and enemyDropdown.Refresh then
+                enemyDropdown:Refresh(list)
+            end
+            statusLabel:Set("Status: Enemy list refreshed")
         end,
     })
 
-    MainTab:CreateToggle({
-        Name = "Auto TP Above Mob",
+    FarmTab:CreateSlider({
+        Name = "Attack Range",
+        Range = {10, 60},
+        Increment = 1,
+        CurrentValue = attackRange,
+        Flag = "slimeRange",
+        Callback = function(v) attackRange = v end,
+    })
+
+    FarmTab:CreateSlider({
+        Name = "TP Height",
+        Range = {4, 20},
+        Increment = 1,
+        CurrentValue = tpHeight,
+        Flag = "slimeHeight",
+        Callback = function(v) tpHeight = v end,
+    })
+
+    FarmTab:CreateToggle({
+        Name = "Auto Farm (TP + Attack)",
         CurrentValue = false,
-        Flag = "slimeAutoTp",
-        Callback = function(value)
-            autoFarmEnabled = value
-            if value then
-                statusLabel:Set("Status: Auto TP running")
+        Flag = "slimeAutoFarm",
+        Callback = function(v)
+            autoFarm = v
+            if v then
+                statusLabel:Set("Status: Auto Farm ON")
                 task.spawn(function()
-                    while autoFarmEnabled do
+                    while autoFarm do
                         if character and humanoid and humanoid.Health > 0 and rootPart then
-                            local target = getClosestMonster(350)
-                            if target and isAlive(target) then
-                                targetLabel:Set("Target: " .. target.Name)
-                                tpAbove(target)
+                            local t = getTargets(400)[1]
+                            if t then
+                                targetLabel:Set("Target: " .. t.Name)
+                                teleportAbove(t)
+                                strike(t)
                             else
                                 targetLabel:Set("Target: None")
                             end
                         end
-                        task.wait(AUTO_FARM_INTERVAL)
+                        task.wait(farmDelay)
                     end
                     statusLabel:Set("Status: Idle")
-                    targetLabel:Set("Target: None")
                 end)
             end
         end,
     })
 
-    MainTab:CreateToggle({
-        Name = "Aura Damage",
+    FarmTab:CreateToggle({
+        Name = "Kill Aura",
         CurrentValue = false,
-        Flag = "slimeAura",
-        Callback = function(value)
-            auraEnabled = value
-            if value then
-                statusLabel:Set("Status: Aura running")
+        Flag = "slimeKillAura",
+        Callback = function(v)
+            killAura = v
+            if v then
+                statusLabel:Set("Status: Kill Aura ON")
                 task.spawn(function()
-                    while auraEnabled do
-                        if character and humanoid and humanoid.Health > 0 and rootPart then
-                            local targets = getMonstersInRange(auraRange)
-                            if #targets > 0 then
-                                for _, mob in ipairs(targets) do
-                                    fireAuraToTarget(mob)
-                                end
-                                targetLabel:Set("Target: " .. tostring(#targets) .. " mobs")
-                            else
-                                targetLabel:Set("Target: None in range")
+                    while killAura do
+                        local targets = getTargets(attackRange)
+                        if #targets > 0 then
+                            targetLabel:Set("Target: " .. tostring(#targets) .. " mobs")
+                            for _, mob in ipairs(targets) do
+                                strike(mob)
                             end
+                        else
+                            targetLabel:Set("Target: None in range")
                         end
-                        task.wait(AURA_INTERVAL)
+                        task.wait(0.12)
                     end
                     statusLabel:Set("Status: Idle")
                 end)
@@ -307,42 +315,44 @@ return function(Window, scriptInfo)
         end,
     })
 
-    MainTab:CreateButton({
+    FarmTab:CreateToggle({
+        Name = "Auto Equip Weapon",
+        CurrentValue = true,
+        Flag = "slimeAutoEquip",
+        Callback = function(v) autoEquip = v end,
+    })
+
+    FarmTab:CreateButton({
         Name = "Scan Combat Remotes",
         Callback = function()
-            local options = {"Auto"}
+            local options = { "Auto" }
             local candidates = collectCombatRemotes()
-            for i = 1, math.min(#candidates, 25) do
+            for i = 1, math.min(30, #candidates) do
                 table.insert(options, candidates[i].path)
             end
-
-            if remoteDropdownRef and remoteDropdownRef.Refresh then
-                remoteDropdownRef:Refresh(options)
+            if remoteDropdown and remoteDropdown.Refresh then
+                remoteDropdown:Refresh(options)
             end
-
-            print("=== Slime Seas Combat Remote Candidates ===")
+            print("=== Slime Seas Combat Remotes ===")
             for i, c in ipairs(candidates) do
                 print(string.format("[%d] score=%d  %s", i, c.score, c.path))
             end
-            statusLabel:Set("Status: Scanned remotes (check console)")
+            statusLabel:Set("Status: Remote scan done (check console)")
         end,
     })
 
-    remoteDropdownRef = MainTab:CreateDropdown({
-        Name = "Aura Remote (manual override)",
-        Options = {"Auto"},
+    remoteDropdown = FarmTab:CreateDropdown({
+        Name = "Combat Remote Override",
+        Options = { "Auto" },
         CurrentValue = "Auto",
         MultipleOptions = false,
-        Flag = "slimeAuraRemote",
-        Callback = function(option)
-            selectedRemotePath = type(option) == "table" and option[1] or option
+        Flag = "slimeRemote",
+        Callback = function(opt)
+            selectedRemotePath = type(opt) == "table" and opt[1] or opt
             auraRemote = nil
         end,
     })
 
-    -- ============================================================
-    --   PLAYER TAB
-    -- ============================================================
     local PlayerTab = Window:CreateTab("Player", 4483362458)
     local staminaLabel = PlayerTab:CreateLabel("Stamina: Normal")
 
@@ -350,28 +360,17 @@ return function(Window, scriptInfo)
         Name = "Infinite Stamina",
         CurrentValue = false,
         Flag = "slimeInfStamina",
-        Callback = function(value)
-            infiniteStaminaEnabled = value
-            staminaLabel:Set(value and "Stamina: Infinite (ON)" or "Stamina: Normal")
-
-            if value then
+        Callback = function(v)
+            infStamina = v
+            staminaLabel:Set(v and "Stamina: Infinite (ON)" or "Stamina: Normal")
+            if v then
                 task.spawn(function()
-                    while infiniteStaminaEnabled do
-                        if character then
-                            forceStamina(character)
-                        end
-                        forceStamina(player)
-                        task.wait(STAMINA_INTERVAL)
+                    while infStamina do
+                        lockStamina()
+                        task.wait(0.08)
                     end
                 end)
             end
         end,
     })
-
-    -- ลดโอกาสร่วง/ตก ถ้าเกมมีการปรับ Physics ระหว่างฟาร์ม
-    RunService.Heartbeat:Connect(function()
-        if autoFarmEnabled and character and rootPart and humanoid and humanoid.Health > 0 then
-            rootPart.AssemblyLinearVelocity = Vector3.zero
-        end
-    end)
 end
