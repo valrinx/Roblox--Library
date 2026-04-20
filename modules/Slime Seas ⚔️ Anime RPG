@@ -13,6 +13,8 @@ return function(Window, scriptInfo)
     local autoFarm, killAura, infStamina, autoEquip = false, false, false, true
     local attackRange, tpHeight, farmDelay = 22, 8, 0.12
     local tweenTime = 0.1
+    local selectedEffect = "GreatswordSlash1"
+    local comboStep = 0
     local selectedEnemies = {}
     local auraRemote
     local combatRemotes = {}
@@ -101,6 +103,7 @@ return function(Window, scriptInfo)
         combatRemotes = {
             skillDamage = findByPath("ReplicatedStorage.Packages.Knit.Services.CombatService.RF.SkillDamage"),
             weaponDamage = findByPath("ReplicatedStorage.Packages.Knit.Services.CombatService.RF.WeaponDamage"),
+            replicateEffect = findByPath("ReplicatedStorage.Packages.Knit.Services.CombatService.RF.ReplicateEffect"),
             executeSkill = findByPath("ReplicatedStorage.Packages.Knit.Services.CombatService.RF.ExecuteSkill"),
             procEffectDamage = findByPath("ReplicatedStorage.Packages.Knit.Services.CombatService.RF.ProcEffectDamage"),
             registerAttack = findByPath("ReplicatedStorage.Packages.Knit.Services.CombatService.RF.RegisterAttack"),
@@ -226,56 +229,44 @@ return function(Window, scriptInfo)
 
         resolveCombatRemotes()
 
-        if combatRemotes.inCombatChanged and combatRemotes.inCombatChanged:IsA("RemoteEvent") then
-            pcall(function()
-                combatRemotes.inCombatChanged:FireServer(true)
-            end)
-        end
-
-        if combatRemotes.skillExecuted and combatRemotes.skillExecuted:IsA("RemoteEvent") then
-            pcall(function()
-                combatRemotes.skillExecuted:FireServer(target, enemyRoot.Position)
-            end)
-        end
-
-        local attackPayloads = {
-            { target },
-            { enemyHum },
-            { target, enemyRoot.Position },
-            { target, enemyHum, enemyRoot.Position },
-            { enemyRoot.Position, target },
-            { target.Name, enemyRoot.Position },
-        }
-
         local invoked = false
-        local function tryInvoke(remote)
-            if not (remote and remote:IsA("RemoteFunction")) then return end
-            for _, args in ipairs(attackPayloads) do
-                if pcall(function() remote:InvokeServer(unpack(args)) end) then
-                    invoked = true
-                end
+        local now = workspace.DistributedGameTime
+        comboStep = (comboStep % 4) + 1
+
+        if combatRemotes.registerAttack and combatRemotes.registerAttack:IsA("RemoteFunction") then
+            local registerArgs = {
+                {
+                    AttackStart = now,
+                    AttackLength = 0.6185335294629138,
+                    AttackStartKeyframeTime = 0.3036437180203182,
+                    Combo = comboStep,
+                    AttackEndKeyframeTime = 0.46108866396067477,
+                }
+            }
+            if pcall(function() combatRemotes.registerAttack:InvokeServer(unpack(registerArgs)) end) then
+                invoked = true
             end
         end
 
-        tryInvoke(combatRemotes.weaponDamage)
-        tryInvoke(combatRemotes.skillDamage)
-        tryInvoke(combatRemotes.executeSkill)
-        tryInvoke(combatRemotes.procEffectDamage)
-        tryInvoke(combatRemotes.registerAttack)
-        tryInvoke(combatRemotes.registerSkillEnd)
-        tryInvoke(combatRemotes.scheduleSkillEnd)
+        if combatRemotes.replicateEffect and combatRemotes.replicateEffect:IsA("RemoteFunction") and rootPart then
+            if pcall(function() combatRemotes.replicateEffect:InvokeServer(selectedEffect, rootPart) end) then
+                invoked = true
+            end
+        end
+
+        if combatRemotes.weaponDamage and combatRemotes.weaponDamage:IsA("RemoteFunction") then
+            if pcall(function() combatRemotes.weaponDamage:InvokeServer(target) end) then
+                invoked = true
+            end
+        end
 
         if not invoked then
             local remote = auraRemote or resolveRemote()
             if not remote then return end
             if remote:IsA("RemoteEvent") then
                 pcall(function() remote:FireServer(target) end)
-                pcall(function() remote:FireServer(enemyHum) end)
-                pcall(function() remote:FireServer(target, enemyRoot.Position) end)
             else
                 pcall(function() remote:InvokeServer(target) end)
-                pcall(function() remote:InvokeServer(enemyHum) end)
-                pcall(function() remote:InvokeServer(target, enemyRoot.Position) end)
             end
         end
     end
@@ -362,6 +353,24 @@ return function(Window, scriptInfo)
         CurrentValue = tweenTime,
         Flag = "slimeTweenTime",
         Callback = function(v) tweenTime = v end,
+    })
+
+    FarmTab:CreateDropdown({
+        Name = "Attack Effect",
+        Options = {
+            "GreatswordSlash1",
+            "GreatswordSlash2",
+            "GreatswordSlash3",
+            "GreatswordSlash4",
+            "KatanaSlash1",
+            "SurgeSlash",
+        },
+        CurrentValue = "GreatswordSlash1",
+        MultipleOptions = false,
+        Flag = "slimeAttackEffect",
+        Callback = function(v)
+            selectedEffect = type(v) == "table" and v[1] or v
+        end,
     })
 
     FarmTab:CreateToggle({
