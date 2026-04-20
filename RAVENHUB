@@ -24,11 +24,11 @@ local SCRIPTS = {
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/My_knife_farm",
     },
     {
-        name        = "Bee Garden",
-        description = "Teleport | Auto Lucky | Auto Prompt",
-        gameId      = 81535567274521,
-        version     = "v0.6",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/Bee_Garden",
+        name        = "Slime Seas ⚔️ Anime RPG",
+        description = "Teleport | Auto Farm | Kill Aura | Infinite Stamina",
+        gameId      = 99046552174353,
+        version     = "v0.1",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/Slime%20Seas%20%E2%9A%94%EF%B8%8F%20Anime%20RPG",
     },
     --[[
     {
