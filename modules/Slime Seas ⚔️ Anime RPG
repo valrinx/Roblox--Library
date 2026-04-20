@@ -6,17 +6,20 @@
 return function(Window, scriptInfo)
     local Players = game:GetService("Players")
     local ReplicatedStorage = game:GetService("ReplicatedStorage")
+    local TweenService = game:GetService("TweenService")
     local LocalPlayer = Players.LocalPlayer
 
     local character, humanoid, rootPart
     local autoFarm, killAura, infStamina, autoEquip = false, false, false, true
     local attackRange, tpHeight, farmDelay = 22, 8, 0.12
+    local tweenTime = 0.1
     local selectedEnemies = {}
     local auraRemote
     local combatRemotes = {}
     local selectedRemotePath = "Auto"
     local remoteDropdown
     local enemyDropdown
+    local activeTween
 
     local function refreshCharacter()
         character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
@@ -185,7 +188,18 @@ return function(Window, scriptInfo)
     local function teleportAbove(target)
         local hrp = target and target:FindFirstChild("HumanoidRootPart")
         if rootPart and hrp then
-            rootPart.CFrame = hrp.CFrame * CFrame.new(0, tpHeight, 0)
+            local goalCFrame = hrp.CFrame * CFrame.new(0, tpHeight, 0)
+            if activeTween then
+                activeTween:Cancel()
+                activeTween = nil
+            end
+
+            activeTween = TweenService:Create(
+                rootPart,
+                TweenInfo.new(tweenTime, Enum.EasingStyle.Linear, Enum.EasingDirection.Out),
+                { CFrame = goalCFrame }
+            )
+            activeTween:Play()
         end
     end
 
@@ -339,6 +353,15 @@ return function(Window, scriptInfo)
         CurrentValue = tpHeight,
         Flag = "slimeHeight",
         Callback = function(v) tpHeight = v end,
+    })
+
+    FarmTab:CreateSlider({
+        Name = "TP Tween Time",
+        Range = {0.05, 0.35},
+        Increment = 0.01,
+        CurrentValue = tweenTime,
+        Flag = "slimeTweenTime",
+        Callback = function(v) tweenTime = v end,
     })
 
     FarmTab:CreateToggle({
