@@ -431,6 +431,14 @@ return function(Window, scriptInfo)
         local action = string.lower(tostring(prompt.ActionText or ""))
         local object = string.lower(tostring(prompt.ObjectText or ""))
         local fullName = string.lower(tostring(prompt:GetFullName()))
+        local parentName = string.lower(tostring(prompt.Parent and prompt.Parent.Name or ""))
+
+        local merchantKeywords = { "merchant", "shop", "store", "seller", "trader", "blacksmith", "smith", "upgrade" }
+        for _, key in ipairs(merchantKeywords) do
+            if action:find(key) or object:find(key) or parentName:find(key) or fullName:find(key) then
+                return false
+            end
+        end
 
         if action:find("quest") or object:find("quest") then return true end
         if action:find("talk") or action:find("speak") then return true end
@@ -456,6 +464,11 @@ return function(Window, scriptInfo)
                 if npcs then
                     for _, inst in ipairs(npcs:GetDescendants()) do
                         if inst:IsA("ProximityPrompt") and isQuestPrompt(inst) then
+                            local npcModel = inst:FindFirstAncestorOfClass("Model")
+                            local npcName = string.lower(tostring(npcModel and npcModel.Name or ""))
+                            if npcName:find("merchant") or npcName:find("shop") or npcName:find("seller") or npcName:find("trader") then
+                                continue
+                            end
                             table.insert(prompts, inst)
                         end
                     end
@@ -541,13 +554,13 @@ return function(Window, scriptInfo)
     end
 
     -- =========================== UI ============================
-    local FarmTab = Window:CreateTab("Slime Farm", 4483362458)
-    local statusLabel = FarmTab:CreateLabel("Status: Idle")
-    local targetLabel = FarmTab:CreateLabel("Target: None")
-    debugLabel = FarmTab:CreateLabel(lastDebug)
-    errorLabel = FarmTab:CreateLabel(lastError)
+    local CombatTab = Window:CreateTab("Combat", 4483362458)
+    local statusLabel = CombatTab:CreateLabel("Status: Idle")
+    local targetLabel = CombatTab:CreateLabel("Target: None")
+    debugLabel = CombatTab:CreateLabel(lastDebug)
+    errorLabel = CombatTab:CreateLabel(lastError)
 
-    enemyDropdown = FarmTab:CreateDropdown({
+    enemyDropdown = CombatTab:CreateDropdown({
         Name = "Target Enemies (leave empty = all)",
         Options = collectEnemyNames(),
         CurrentValue = {},
@@ -567,7 +580,7 @@ return function(Window, scriptInfo)
         end,
     })
 
-    FarmTab:CreateButton({
+    CombatTab:CreateButton({
         Name = "Refresh Enemy List",
         Callback = function()
             local list = collectEnemyNames()
@@ -578,7 +591,7 @@ return function(Window, scriptInfo)
         end,
     })
 
-    FarmTab:CreateSlider({
+    CombatTab:CreateSlider({
         Name = "Attack Range",
         Range = {10, 60},
         Increment = 1,
@@ -587,7 +600,7 @@ return function(Window, scriptInfo)
         Callback = function(v) attackRange = v end,
     })
 
-    FarmTab:CreateSlider({
+    CombatTab:CreateSlider({
         Name = "TP Height",
         Range = {4, 20},
         Increment = 1,
@@ -596,7 +609,7 @@ return function(Window, scriptInfo)
         Callback = function(v) tpHeight = v end,
     })
 
-    FarmTab:CreateSlider({
+    CombatTab:CreateSlider({
         Name = "TP Tween Time",
         Range = {0.05, 0.35},
         Increment = 0.01,
@@ -605,7 +618,7 @@ return function(Window, scriptInfo)
         Callback = function(v) tweenTime = v end,
     })
 
-    FarmTab:CreateSlider({
+    CombatTab:CreateSlider({
         Name = "Aura Interval",
         Range = {0.01, 0.08},
         Increment = 0.0025,
@@ -614,7 +627,7 @@ return function(Window, scriptInfo)
         Callback = function(v) auraInterval = v end,
     })
 
-    FarmTab:CreateSlider({
+    CombatTab:CreateSlider({
         Name = "Aura Burst Hits",
         Range = {1, 8},
         Increment = 1,
@@ -623,23 +636,7 @@ return function(Window, scriptInfo)
         Callback = function(v) auraBurstHits = v end,
     })
 
-    FarmTab:CreateToggle({
-        Name = "Auto Collect Box (on spawn)",
-        CurrentValue = false,
-        Flag = "slimeAutoCollectBox",
-        Callback = function(v) autoCollectBox = v end,
-    })
-
-    FarmTab:CreateSlider({
-        Name = "Collect Box Range",
-        Range = {50, 400},
-        Increment = 10,
-        CurrentValue = collectBoxRange,
-        Flag = "slimeCollectRange",
-        Callback = function(v) collectBoxRange = v end,
-    })
-
-    FarmTab:CreateDropdown({
+    CombatTab:CreateDropdown({
         Name = "Attack Effect",
         Options = {
             "GreatswordSlash1",
@@ -657,7 +654,7 @@ return function(Window, scriptInfo)
         end,
     })
 
-    FarmTab:CreateToggle({
+    CombatTab:CreateToggle({
         Name = "Auto Farm (TP + Attack)",
         CurrentValue = false,
         Flag = "slimeAutoFarm",
@@ -691,7 +688,7 @@ return function(Window, scriptInfo)
         end,
     })
 
-    FarmTab:CreateToggle({
+    CombatTab:CreateToggle({
         Name = "Kill Aura",
         CurrentValue = false,
         Flag = "slimeKillAura",
@@ -720,14 +717,14 @@ return function(Window, scriptInfo)
         end,
     })
 
-    FarmTab:CreateToggle({
+    CombatTab:CreateToggle({
         Name = "Auto Equip Weapon",
         CurrentValue = true,
         Flag = "slimeAutoEquip",
         Callback = function(v) autoEquip = v end,
     })
 
-    FarmTab:CreateButton({
+    CombatTab:CreateButton({
         Name = "Scan Combat Remotes",
         Callback = function()
             local options = { "Auto" }
@@ -746,7 +743,7 @@ return function(Window, scriptInfo)
         end,
     })
 
-    remoteDropdown = FarmTab:CreateDropdown({
+    remoteDropdown = CombatTab:CreateDropdown({
         Name = "Combat Remote Override",
         Options = { "Auto" },
         CurrentValue = "Auto",
@@ -756,6 +753,28 @@ return function(Window, scriptInfo)
             selectedRemotePath = type(opt) == "table" and opt[1] or opt
             auraRemote = nil
         end,
+    })
+
+    local LootTab = Window:CreateTab("Loot", 4483362458)
+    local lootLabel = LootTab:CreateLabel("Loot Status: Idle")
+
+    LootTab:CreateToggle({
+        Name = "Auto Collect Box (on spawn)",
+        CurrentValue = false,
+        Flag = "slimeAutoCollectBox",
+        Callback = function(v)
+            autoCollectBox = v
+            lootLabel:Set(v and "Loot Status: Auto Collect ON" or "Loot Status: Idle")
+        end,
+    })
+
+    LootTab:CreateSlider({
+        Name = "Collect Box Range",
+        Range = {50, 400},
+        Increment = 10,
+        CurrentValue = collectBoxRange,
+        Flag = "slimeCollectRange",
+        Callback = function(v) collectBoxRange = v end,
     })
 
     local QuestTab = Window:CreateTab("Quest", 4483362458)
