@@ -7,6 +7,7 @@ return function(Window, scriptInfo)
     local Players = game:GetService("Players")
     local ReplicatedStorage = game:GetService("ReplicatedStorage")
     local TweenService = game:GetService("TweenService")
+    local RunService = game:GetService("RunService")
     local LocalPlayer = Players.LocalPlayer
 
     local character, humanoid, rootPart
@@ -17,6 +18,8 @@ return function(Window, scriptInfo)
     local comboStep = 0
     local auraInterval = 0.035
     local auraBurstHits = 5
+    local autoCollectBox = false
+    local collectBoxRange = 180
     local selectedEnemies = {}
     local auraRemote
     local combatRemotes = {}
@@ -240,6 +243,8 @@ return function(Window, scriptInfo)
         local hrp = target and target:FindFirstChild("HumanoidRootPart")
         if rootPart and hrp then
             rootPart.CFrame = hrp.CFrame * CFrame.new(0, tpHeight, 0)
+            rootPart.AssemblyLinearVelocity = Vector3.zero
+            rootPart.AssemblyAngularVelocity = Vector3.zero
         end
     end
 
@@ -365,6 +370,67 @@ return function(Window, scriptInfo)
         pump(LocalPlayer)
     end
 
+    local function isChestPrompt(prompt)
+        if not prompt or not prompt:IsA("ProximityPrompt") then return false end
+        local action = string.lower(tostring(prompt.ActionText or ""))
+        local object = string.lower(tostring(prompt.ObjectText or ""))
+        local parentName = string.lower(tostring(prompt.Parent and prompt.Parent.Name or ""))
+
+        if action:find("speak") or action:find("talk") then return false end
+        if object:find("npc") then return false end
+
+        local looksLikeChest = parentName:find("chest") or parentName:find("box") or parentName:find("crate")
+        return action:find("interact") or looksLikeChest
+    end
+
+    local function getPromptPosition(prompt)
+        if not prompt then return nil end
+        local obj = prompt.Parent
+        if not obj then return nil end
+        if obj:IsA("BasePart") then return obj.Position end
+        if obj:IsA("Attachment") and obj.Parent and obj.Parent:IsA("BasePart") then return obj.Parent.Position end
+        local model = obj:FindFirstAncestorOfClass("Model")
+        local part = model and (model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart"))
+        return part and part.Position or nil
+    end
+
+    local function collectNearbyBoxes()
+        if not (autoCollectBox and rootPart and character and humanoid and humanoid.Health > 0) then return end
+
+        local nearestPrompt, nearestPos, nearestDist
+        for _, prompt in ipairs(workspace:GetDescendants()) do
+            if prompt:IsA("ProximityPrompt") and isChestPrompt(prompt) then
+                local pos = getPromptPosition(prompt)
+                if pos then
+                    local d = (pos - rootPart.Position).Magnitude
+                    if d <= collectBoxRange and (not nearestDist or d < nearestDist) then
+                        nearestPrompt, nearestPos, nearestDist = prompt, pos, d
+                    end
+                end
+            end
+        end
+
+        if nearestPrompt and nearestPos then
+            local moveTo = CFrame.new(nearestPos + Vector3.new(0, 3, 0))
+            if activeTween then
+                activeTween:Cancel()
+                activeTween = nil
+            end
+            activeTween = TweenService:Create(
+                rootPart,
+                TweenInfo.new(math.clamp(nearestDist / 100, 0.08, 0.25), Enum.EasingStyle.Linear, Enum.EasingDirection.Out),
+                { CFrame = moveTo }
+            )
+            activeTween:Play()
+
+            task.wait(0.12)
+            pcall(function()
+                fireproximityprompt(nearestPrompt)
+                fireproximityprompt(nearestPrompt)
+            end)
+        end
+    end
+
     -- =========================== UI ============================
     local FarmTab = Window:CreateTab("Slime Farm", 4483362458)
     local statusLabel = FarmTab:CreateLabel("Status: Idle")
@@ -448,6 +514,22 @@ return function(Window, scriptInfo)
         Callback = function(v) auraBurstHits = v end,
     })
 
+    FarmTab:CreateToggle({
+        Name = "Auto Collect Box (on spawn)",
+        CurrentValue = false,
+        Flag = "slimeAutoCollectBox",
+        Callback = function(v) autoCollectBox = v end,
+    })
+
+    FarmTab:CreateSlider({
+        Name = "Collect Box Range",
+        Range = {50, 400},
+        Increment = 10,
+        CurrentValue = collectBoxRange,
+        Flag = "slimeCollectRange",
+        Callback = function(v) collectBoxRange = v end,
+    })
+
     FarmTab:CreateDropdown({
         Name = "Attack Effect",
         Options = {
@@ -490,6 +572,7 @@ return function(Window, scriptInfo)
                                 currentTarget = nil
                                 targetLabel:Set("Target: None")
                             end
+                            collectNearbyBoxes()
                         end
                         task.wait(farmDelay)
                     end
@@ -519,6 +602,7 @@ return function(Window, scriptInfo)
                             currentTarget = nil
                             targetLabel:Set("Target: None in range")
                         end
+                        collectNearbyBoxes()
                         task.wait(auraInterval)
                     end
                     statusLabel:Set("Status: Idle")
@@ -585,4 +669,10 @@ return function(Window, scriptInfo)
             end
         end,
     })
+
+    RunService.Heartbeat:Connect(function()
+        if autoFarm and currentTarget and mobAlive(currentTarget) and rootPart and humanoid and humanoid.Health > 0 then
+            holdAbove(currentTarget)
+        end
+    end)
 end
