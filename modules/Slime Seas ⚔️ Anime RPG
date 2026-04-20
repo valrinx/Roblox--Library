@@ -22,6 +22,8 @@ return function(Window, scriptInfo)
     local remoteDropdown
     local enemyDropdown
     local activeTween
+    local debugLabel
+    local lastDebug = "Debug: idle"
 
     local function refreshCharacter()
         character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
@@ -36,6 +38,10 @@ return function(Window, scriptInfo)
 
     local function enemiesFolder()
         return workspace:FindFirstChild("Enemies")
+    end
+
+    local function mapFolder()
+        return workspace:FindFirstChild("_Map")
     end
 
     local function getPath(inst)
@@ -153,21 +159,26 @@ return function(Window, scriptInfo)
     end
 
     local function getTargets(maxDist)
-        local f = enemiesFolder()
-        if not f or not rootPart then return {} end
+        if not rootPart then return {} end
 
         local out = {}
-        for _, mob in ipairs(f:GetChildren()) do
-            if mob:IsA("Model") and mobAlive(mob) and targetAllowed(mob.Name) then
-                local hrp = mob:FindFirstChild("HumanoidRootPart")
-                if hrp then
-                    local d = (hrp.Position - rootPart.Position).Magnitude
-                    if d <= maxDist then
-                        table.insert(out, mob)
+        local function addFromContainer(container, deep)
+            if not container then return end
+            local source = deep and container:GetDescendants() or container:GetChildren()
+            for _, mob in ipairs(source) do
+                if mob:IsA("Model") and mobAlive(mob) and targetAllowed(mob.Name) then
+                    local hrp = mob:FindFirstChild("HumanoidRootPart")
+                    if hrp then
+                        local d = (hrp.Position - rootPart.Position).Magnitude
+                        if d <= maxDist then
+                            table.insert(out, mob)
+                        end
                     end
                 end
             end
         end
+        addFromContainer(enemiesFolder(), false)
+        addFromContainer(mapFolder(), true)
         table.sort(out, function(a, b)
             local da = (a.HumanoidRootPart.Position - rootPart.Position).Magnitude
             local db = (b.HumanoidRootPart.Position - rootPart.Position).Magnitude
@@ -254,9 +265,38 @@ return function(Window, scriptInfo)
             end
         end
 
-        if combatRemotes.weaponDamage and combatRemotes.weaponDamage:IsA("RemoteFunction") then
-            if pcall(function() combatRemotes.weaponDamage:InvokeServer(target) end) then
+        local possibleTargets = {
+            target,
+            enemyHum,
+            enemyRoot,
+            target.Parent,
+            target:GetAttribute("CharacterId"),
+            target.Name,
+        }
+
+        local function invokeAndTrack(remote, args)
+            if not (remote and remote:IsA("RemoteFunction")) then return false end
+            local ok, res = pcall(function()
+                return remote:InvokeServer(unpack(args))
+            end)
+            if ok then
                 invoked = true
+                lastDebug = "Debug: OK " .. remote.Name .. " -> " .. tostring(res)
+            else
+                lastDebug = "Debug: ERR " .. remote.Name .. " -> " .. tostring(res)
+            end
+            if debugLabel then
+                debugLabel:Set(lastDebug)
+            end
+            return ok
+        end
+
+        for _, t in ipairs(possibleTargets) do
+            if t ~= nil then
+                invokeAndTrack(combatRemotes.weaponDamage, { t })
+                invokeAndTrack(combatRemotes.skillDamage, { t })
+                invokeAndTrack(combatRemotes.weaponDamage, { t, enemyRoot.Position })
+                invokeAndTrack(combatRemotes.skillDamage, { t, enemyRoot.Position })
             end
         end
 
@@ -296,6 +336,7 @@ return function(Window, scriptInfo)
     local FarmTab = Window:CreateTab("Slime Farm", 4483362458)
     local statusLabel = FarmTab:CreateLabel("Status: Idle")
     local targetLabel = FarmTab:CreateLabel("Target: None")
+    debugLabel = FarmTab:CreateLabel(lastDebug)
 
     enemyDropdown = FarmTab:CreateDropdown({
         Name = "Target Enemies (leave empty = all)",
