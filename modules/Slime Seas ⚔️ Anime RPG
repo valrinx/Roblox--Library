@@ -46,10 +46,6 @@ return function(Window, scriptInfo)
         return workspace:FindFirstChild("Enemies")
     end
 
-    local function mapFolder()
-        return workspace:FindFirstChild("_Map")
-    end
-
     local function getPath(inst)
         local out, ptr = {}, inst
         while ptr and ptr ~= game do
@@ -168,9 +164,9 @@ return function(Window, scriptInfo)
         if not rootPart then return {} end
 
         local out = {}
-        local function addFromContainer(container, deep)
+        local function addFromContainer(container)
             if not container then return end
-            local source = deep and container:GetDescendants() or container:GetChildren()
+            local source = container:GetChildren()
             for _, mob in ipairs(source) do
                 if mob:IsA("Model") and mobAlive(mob) and targetAllowed(mob.Name) then
                     local hrp = mob:FindFirstChild("HumanoidRootPart")
@@ -183,8 +179,8 @@ return function(Window, scriptInfo)
                 end
             end
         end
-        addFromContainer(enemiesFolder(), false)
-        addFromContainer(mapFolder(), true)
+        -- ล็อกเป้าจาก workspace.Enemies เท่านั้น
+        addFromContainer(enemiesFolder())
         table.sort(out, function(a, b)
             local da = (a.HumanoidRootPart.Position - rootPart.Position).Magnitude
             local db = (b.HumanoidRootPart.Position - rootPart.Position).Magnitude
