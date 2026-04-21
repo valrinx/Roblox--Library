@@ -49,6 +49,13 @@ return function(Window, scriptInfo)
     local lastEnemyRefreshAt = 0
     local getCurrentIsland
 
+    local function safeGetCurrentIsland()
+        if type(getCurrentIsland) == "function" then
+            return getCurrentIsland()
+        end
+        return nil, nil
+    end
+
     local function refreshCharacter()
         character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
         humanoid = character:WaitForChild("Humanoid")
@@ -80,7 +87,7 @@ return function(Window, scriptInfo)
     local function collectEnemyNames()
         local f = enemiesFolder()
         if not f then return {} end
-        local _, islandFolder = getCurrentIsland()
+        local _, islandFolder = safeGetCurrentIsland()
         local islandRef = islandFolder and (islandFolder:FindFirstChild("NPCs") or islandFolder:FindFirstChildWhichIsA("BasePart", true))
         local islandPos
         if islandRef and islandRef:IsA("BasePart") then
@@ -188,7 +195,7 @@ return function(Window, scriptInfo)
     end
 
     local function updateCurrentIslandLabel()
-        local name = getCurrentIsland()
+        local name = safeGetCurrentIsland()
         currentIslandName = name or "Unknown"
         if currentIslandLabel then
             currentIslandLabel:Set("Current Island: " .. currentIslandName)
@@ -305,7 +312,7 @@ return function(Window, scriptInfo)
 
     local function getTargets(maxDist)
         if not rootPart then return {} end
-        local _, islandFolder = getCurrentIsland()
+        local _, islandFolder = safeGetCurrentIsland()
         local islandRef = islandFolder and (islandFolder:FindFirstChild("NPCs") or islandFolder:FindFirstChildWhichIsA("BasePart", true))
         local islandPos
         if islandRef and islandRef:IsA("BasePart") then
@@ -561,7 +568,7 @@ return function(Window, scriptInfo)
         local root = mapRoot()
         if not root then return {} end
         local prompts = {}
-        local currentIsland = getCurrentIsland()
+        local currentIsland = safeGetCurrentIsland()
 
         for _, island in ipairs(root:GetChildren()) do
             local islandOk = islandSelected(island.Name)
@@ -628,7 +635,7 @@ return function(Window, scriptInfo)
     local function getMiniBossTargetInCurrentIsland()
         local f = enemiesFolder()
         if not (f and rootPart) then return nil end
-        local islandName = getCurrentIsland()
+        local islandName = safeGetCurrentIsland()
         local validIsland2 = {
             splitterminiboss1 = true,
             splitterminiboss2 = true,
@@ -657,7 +664,7 @@ return function(Window, scriptInfo)
     end
 
     local function findBossSpawnPromptInCurrentIsland()
-        local islandName, islandFolder = getCurrentIsland()
+        local islandName, islandFolder = safeGetCurrentIsland()
         if not (islandName and islandFolder) then return nil end
         for _, inst in ipairs(islandFolder:GetDescendants()) do
             if inst:IsA("ProximityPrompt") then
@@ -702,7 +709,7 @@ return function(Window, scriptInfo)
                 task.wait(math.max(prompt.HoldDuration or 0.8, 0.8))
                 fireproximityprompt(prompt)
             end)
-            lastDebug = "Debug: Spawn MiniBoss @" .. tostring(getCurrentIsland() or "?")
+            lastDebug = "Debug: Spawn MiniBoss @" .. tostring(safeGetCurrentIsland() or "?")
             if debugLabel then debugLabel:Set(lastDebug) end
         end
     end
@@ -1020,7 +1027,7 @@ return function(Window, scriptInfo)
     end
 
     local function teleportToCurrentIslandWaypoint()
-        local island = getCurrentIsland()
+        local island = safeGetCurrentIsland()
         if not island then return end
         local idx = island:match("^Island(%d+)$")
         local wpName = idx and ("Waypoint_island" .. idx) or nil
