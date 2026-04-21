@@ -47,6 +47,7 @@ return function(Window, scriptInfo)
     local currentIslandName = "Unknown"
     local autoIslandRefresh = true
     local lastEnemyRefreshAt = 0
+    local getCurrentIsland
 
     local function refreshCharacter()
         character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
@@ -147,7 +148,7 @@ return function(Window, scriptInfo)
         return nil
     end
 
-    local function getCurrentIsland()
+    function getCurrentIsland()
         local root = mapRoot()
         if not (root and rootPart) then return nil end
 
