@@ -148,7 +148,7 @@ return function(Window, scriptInfo)
         return nil
     end
 
-    function getCurrentIsland()
+    getCurrentIsland = function()
         local root = mapRoot()
         if not (root and rootPart) then return nil end
 
