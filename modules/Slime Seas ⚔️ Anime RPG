@@ -48,6 +48,7 @@ return function(Window, scriptInfo)
     local autoIslandRefresh = true
     local lastEnemyRefreshAt = 0
     local getCurrentIsland
+    local selectedWaypointIsland = "Island2"
 
     local function safeGetCurrentIsland()
         if type(getCurrentIsland) == "function" then
@@ -153,6 +154,55 @@ return function(Window, scriptInfo)
             return "Island" .. tostring(tonumber(idx))
         end
         return nil
+    end
+
+    local function islandToWaypointName(islandName)
+        if not islandName then return nil end
+        if islandName == "Island11Underground" then
+            return "Waypoint_island11Underground"
+        end
+        local idx = islandName:match("^Island(%d+)$")
+        if idx then
+            return "Waypoint_island" .. tostring(tonumber(idx))
+        end
+        return nil
+    end
+
+    local function resolveWaypointPositionByIsland(islandName)
+        local wpName = islandToWaypointName(islandName)
+        if not wpName then return nil, nil end
+
+        local pf = workspace:FindFirstChild("PlayerFolder")
+        local pnode = pf and pf:FindFirstChild(LocalPlayer.Name)
+        if pnode then
+            local wp = pnode:FindFirstChild(wpName, true)
+            if wp then
+                if wp:IsA("BasePart") then
+                    return wp.Position, wpName
+                elseif wp:IsA("CFrameValue") then
+                    return wp.Value.Position, wpName
+                elseif wp:IsA("Vector3Value") then
+                    return wp.Value, wpName
+                elseif wp:IsA("ObjectValue") and wp.Value and wp.Value:IsA("BasePart") then
+                    return wp.Value.Position, wpName
+                end
+            end
+        end
+
+        local root = mapRoot()
+        if root then
+            local fallback = root:FindFirstChild(wpName, true)
+            if fallback then
+                if fallback:IsA("BasePart") then
+                    return fallback.Position, wpName
+                elseif fallback:IsA("CFrameValue") then
+                    return fallback.Value.Position, wpName
+                elseif fallback:IsA("Vector3Value") then
+                    return fallback.Value, wpName
+                end
+            end
+        end
+        return nil, wpName
     end
 
     getCurrentIsland = function()
@@ -1029,28 +1079,22 @@ return function(Window, scriptInfo)
     local function teleportToCurrentIslandWaypoint()
         local island = safeGetCurrentIsland()
         if not island then return end
-        local idx = island:match("^Island(%d+)$")
-        local wpName = idx and ("Waypoint_island" .. idx) or nil
-        if island == "Island11Underground" then
-            wpName = "Waypoint_island11Underground"
-        end
-        if not wpName then return end
-
-        local pf = workspace:FindFirstChild("PlayerFolder")
-        local pnode = pf and pf:FindFirstChild(LocalPlayer.Name)
-        if not pnode then return end
-        local wp = pnode:FindFirstChild(wpName, true)
-        local pos
-        if wp and wp:IsA("BasePart") then
-            pos = wp.Position
-        elseif wp and wp:IsA("CFrameValue") then
-            pos = wp.Value.Position
-        elseif wp and (wp:IsA("Vector3Value")) then
-            pos = wp.Value
-        end
+        local pos, wpName = resolveWaypointPositionByIsland(island)
         if pos and rootPart then
             rootPart.CFrame = CFrame.new(pos + Vector3.new(0, 5, 0))
             bossStatusLabel:Set("Boss Status: Teleported to " .. wpName)
+        else
+            bossStatusLabel:Set("Boss Status: Waypoint not found for " .. tostring(island))
+        end
+    end
+
+    local function teleportToSelectedIslandWaypoint()
+        local pos, wpName = resolveWaypointPositionByIsland(selectedWaypointIsland)
+        if pos and rootPart then
+            rootPart.CFrame = CFrame.new(pos + Vector3.new(0, 5, 0))
+            bossStatusLabel:Set("Boss Status: Teleported to " .. tostring(wpName))
+        else
+            bossStatusLabel:Set("Boss Status: Missing " .. tostring(wpName or selectedWaypointIsland))
         end
     end
 
@@ -1062,6 +1106,25 @@ return function(Window, scriptInfo)
     BossTab:CreateButton({
         Name = "Teleport to Current Island Waypoint",
         Callback = teleportToCurrentIslandWaypoint,
+    })
+
+    BossTab:CreateDropdown({
+        Name = "Saved Waypoint Island",
+        Options = {
+            "Island1","Island2","Island3","Island4","Island5","Island6",
+            "Island7","Island8","Island9","Island10","Island11","Island11Underground"
+        },
+        CurrentValue = "Island2",
+        MultipleOptions = false,
+        Flag = "slimeWaypointIsland",
+        Callback = function(v)
+            selectedWaypointIsland = type(v) == "table" and v[1] or v
+        end,
+    })
+
+    BossTab:CreateButton({
+        Name = "Teleport to Selected Saved Waypoint",
+        Callback = teleportToSelectedIslandWaypoint,
     })
 
     BossTab:CreateSlider({
