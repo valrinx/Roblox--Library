@@ -200,6 +200,28 @@ return function(Window, scriptInfo)
         return nil
     end
 
+    local function findDescByNameCI(root, targetName)
+        if not (root and targetName) then return nil end
+        local t = string.lower(targetName)
+        for _, d in ipairs(root:GetDescendants()) do
+            if string.lower(d.Name) == t then
+                return d
+            end
+        end
+        return nil
+    end
+
+    local function extractPositionFromValueOrPart(obj)
+        if not obj then return nil end
+        if obj:IsA("BasePart") then return obj.Position end
+        if obj:IsA("CFrameValue") then return obj.Value.Position end
+        if obj:IsA("Vector3Value") then return obj.Value end
+        if obj:IsA("ObjectValue") and obj.Value and obj.Value:IsA("BasePart") then
+            return obj.Value.Position
+        end
+        return nil
+    end
+
     local function resolveWaypointPositionByIsland(islandName)
         local wpName = islandToWaypointName(islandName)
         if not wpName then return nil, nil end
@@ -207,30 +229,30 @@ return function(Window, scriptInfo)
         local pf = workspace:FindFirstChild("PlayerFolder")
         local pnode = pf and pf:FindFirstChild(LocalPlayer.Name)
         if pnode then
-            local wp = pnode:FindFirstChild(wpName, true)
-            if wp then
-                if wp:IsA("BasePart") then
-                    return wp.Position, wpName
-                elseif wp:IsA("CFrameValue") then
-                    return wp.Value.Position, wpName
-                elseif wp:IsA("Vector3Value") then
-                    return wp.Value, wpName
-                elseif wp:IsA("ObjectValue") and wp.Value and wp.Value:IsA("BasePart") then
-                    return wp.Value.Position, wpName
-                end
+            local wp = pnode:FindFirstChild(wpName, true) or findDescByNameCI(pnode, wpName)
+            local pos = extractPositionFromValueOrPart(wp)
+            if pos then
+                return pos, wpName
             end
         end
 
         local root = mapRoot()
         if root then
-            local fallback = root:FindFirstChild(wpName, true)
-            if fallback then
-                if fallback:IsA("BasePart") then
-                    return fallback.Position, wpName
-                elseif fallback:IsA("CFrameValue") then
-                    return fallback.Value.Position, wpName
-                elseif fallback:IsA("Vector3Value") then
-                    return fallback.Value, wpName
+            local fallback = root:FindFirstChild(wpName, true) or findDescByNameCI(root, wpName)
+            local pos = extractPositionFromValueOrPart(fallback)
+            if pos then
+                return pos, wpName
+            end
+
+            -- fallback สุดท้าย: วาร์ปไปตำแหน่งอ้างอิงของเกาะนั้นโดยตรง
+            local island = root:FindFirstChild(islandName)
+            if island then
+                local ref = island:FindFirstChild("NPCs") or island:FindFirstChildWhichIsA("BasePart", true)
+                if ref and ref:IsA("Folder") then
+                    ref = ref:FindFirstChildWhichIsA("BasePart", true)
+                end
+                if ref and ref:IsA("BasePart") then
+                    return ref.Position, wpName
                 end
             end
         end
@@ -635,7 +657,6 @@ return function(Window, scriptInfo)
 
         if action:find("quest") or object:find("quest") then return true end
         if action:find("talk") or action:find("speak") then return true end
-        if fullName:find(".npcs.") and (action:find("interact") or object:find("npc")) then return true end
         return false
     end
 
@@ -664,7 +685,9 @@ return function(Window, scriptInfo)
                         if inst:IsA("ProximityPrompt") and isQuestPrompt(inst) then
                             local npcModel = inst:FindFirstAncestorOfClass("Model")
                             local npcName = string.lower(tostring(npcModel and npcModel.Name or ""))
-                            if npcName:find("merchant") or npcName:find("shop") or npcName:find("seller") or npcName:find("trader") then
+                            if npcName:find("merchant") or npcName:find("shop") or npcName:find("seller") or npcName:find("trader")
+                                or npcName:find("race") or npcName:find("promotion")
+                                or npcName == "berserkerpromotion" or npcName == "merlong" then
                                 continue
                             end
                             table.insert(prompts, inst)
@@ -674,6 +697,31 @@ return function(Window, scriptInfo)
             end
         end
         return prompts
+    end
+
+    local function clickAcceptQuestButtons()
+        local pg = LocalPlayer:FindFirstChild("PlayerGui")
+        if not pg then return false end
+        local clicked = false
+        for _, d in ipairs(pg:GetDescendants()) do
+            if d:IsA("TextButton") then
+                local txt = string.lower(tostring(d.Text or ""))
+                if txt:find("accept") then
+                    pcall(function()
+                        d.Visible = true
+                        d:Activate()
+                    end)
+                    pcall(function()
+                        local v = d:IsA("GuiButton")
+                        if v and firesignal and d.MouseButton1Click then
+                            firesignal(d.MouseButton1Click)
+                        end
+                    end)
+                    clicked = true
+                end
+            end
+        end
+        return clicked
     end
 
     local function runAutoQuestStep()
@@ -709,6 +757,8 @@ return function(Window, scriptInfo)
                 end
                 fireproximityprompt(nearestPrompt)
             end)
+            task.wait(0.15)
+            clickAcceptQuestButtons()
             lastDebug = "Debug: Quest -> " .. tostring(nearestPrompt.Parent and nearestPrompt.Parent.Name or "prompt")
             if debugLabel then debugLabel:Set(lastDebug) end
         end
@@ -1113,7 +1163,11 @@ return function(Window, scriptInfo)
         if not island then return end
         local pos, wpName = resolveWaypointPositionByIsland(island)
         if pos and rootPart then
-            rootPart.CFrame = CFrame.new(pos + Vector3.new(0, 5, 0))
+            if character and character.PrimaryPart then
+                character:PivotTo(CFrame.new(pos + Vector3.new(0, 5, 0)))
+            else
+                rootPart.CFrame = CFrame.new(pos + Vector3.new(0, 5, 0))
+            end
             bossStatusLabel:Set("Boss Status: Teleported to " .. wpName)
         else
             bossStatusLabel:Set("Boss Status: Waypoint not found for " .. tostring(island))
@@ -1123,7 +1177,11 @@ return function(Window, scriptInfo)
     local function teleportToSelectedIslandWaypoint()
         local pos, wpName = resolveWaypointPositionByIsland(selectedWaypointIsland)
         if pos and rootPart then
-            rootPart.CFrame = CFrame.new(pos + Vector3.new(0, 5, 0))
+            if character and character.PrimaryPart then
+                character:PivotTo(CFrame.new(pos + Vector3.new(0, 5, 0)))
+            else
+                rootPart.CFrame = CFrame.new(pos + Vector3.new(0, 5, 0))
+            end
             bossStatusLabel:Set("Boss Status: Teleported to " .. tostring(wpName))
         else
             bossStatusLabel:Set("Boss Status: Missing " .. tostring(wpName or selectedWaypointIsland))
