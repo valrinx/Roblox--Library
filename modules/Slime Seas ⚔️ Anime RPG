@@ -57,6 +57,38 @@ return function(Window, scriptInfo)
         return nil, nil
     end
 
+    local function setUiText(uiObj, text)
+        if not uiObj then return end
+        local done = false
+        if type(uiObj.Set) == "function" then
+            local ok = pcall(function() uiObj:Set(text) end)
+            done = ok
+        end
+        if done then return end
+
+        if type(uiObj) == "userdata" or type(uiObj) == "table" then
+            local ok = pcall(function()
+                if uiObj.Text ~= nil then
+                    uiObj.Text = text
+                    done = true
+                end
+            end)
+            if ok and done then return end
+        end
+
+        pcall(function()
+            local holder = uiObj
+            if holder and holder.GetDescendants then
+                for _, d in ipairs(holder:GetDescendants()) do
+                    if d:IsA("TextLabel") then
+                        d.Text = text
+                        break
+                    end
+                end
+            end
+        end)
+    end
+
     local function refreshCharacter()
         character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
         humanoid = character:WaitForChild("Humanoid")
@@ -248,7 +280,7 @@ return function(Window, scriptInfo)
         local name = safeGetCurrentIsland()
         currentIslandName = name or "Unknown"
         if currentIslandLabel then
-            currentIslandLabel:Set("Current Island: " .. currentIslandName)
+            setUiText(currentIslandLabel, "Current Island: " .. currentIslandName)
         end
     end
 
@@ -1073,7 +1105,7 @@ return function(Window, scriptInfo)
 
     local function refreshBossIslandLabel()
         updateCurrentIslandLabel()
-        bossIslandLabel:Set("Boss Island: " .. (currentIslandName or "Unknown"))
+        setUiText(bossIslandLabel, "Boss Island: " .. (currentIslandName or "Unknown"))
     end
 
     local function teleportToCurrentIslandWaypoint()
@@ -1155,6 +1187,24 @@ return function(Window, scriptInfo)
             end
         end,
     })
+
+    local TpTab = Window:CreateTab("TP", 4483362458)
+    TpTab:CreateLabel("Teleport to saved island waypoints")
+    TpTab:CreateLabel("Uses Waypoint_islandX / Waypoint_island11Underground")
+
+    local islandButtons = {
+        "Island1","Island2","Island3","Island4","Island5","Island6",
+        "Island7","Island8","Island9","Island10","Island11","Island11Underground"
+    }
+    for _, islandName in ipairs(islandButtons) do
+        TpTab:CreateButton({
+            Name = "TP " .. islandName,
+            Callback = function()
+                selectedWaypointIsland = islandName
+                teleportToSelectedIslandWaypoint()
+            end,
+        })
+    end
 
     local LootTab = Window:CreateTab("Loot", 4483362458)
     local lootLabel = LootTab:CreateLabel("Loot Status: Idle")
