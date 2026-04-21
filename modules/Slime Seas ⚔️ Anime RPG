@@ -39,6 +39,7 @@ return function(Window, scriptInfo)
     local activeTween
     local debugLabel
     local errorLabel
+    local tpStatusLabel
     local lastDebug = "Debug: idle"
     local lastError = "Last Error: none"
     local currentTarget
@@ -218,6 +219,12 @@ return function(Window, scriptInfo)
         if obj:IsA("Vector3Value") then return obj.Value end
         if obj:IsA("ObjectValue") and obj.Value and obj.Value:IsA("BasePart") then
             return obj.Value.Position
+        end
+        if obj:IsA("Model") then
+            local p = obj:FindFirstChild("Waypoint", true) or obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart", true)
+            if p and p:IsA("BasePart") then
+                return p.Position
+            end
         end
         return nil
     end
@@ -913,7 +920,13 @@ return function(Window, scriptInfo)
         updateCurrentIslandLabel()
         local list = collectEnemyNames()
         if enemyDropdown and enemyDropdown.Refresh then
-            enemyDropdown:Refresh(list)
+            local ok = pcall(function()
+                enemyDropdown:Refresh(list)
+            end)
+            if not ok then
+                -- บางเวอร์ชัน UI คืน object ที่ไม่รองรับ Refresh(list)
+                autoIslandRefresh = false
+            end
         end
     end
 
@@ -1169,8 +1182,14 @@ return function(Window, scriptInfo)
                 rootPart.CFrame = CFrame.new(pos + Vector3.new(0, 5, 0))
             end
             bossStatusLabel:Set("Boss Status: Teleported to " .. wpName)
+            if tpStatusLabel then
+                setUiText(tpStatusLabel, "TP Status: Teleported to " .. wpName)
+            end
         else
             bossStatusLabel:Set("Boss Status: Waypoint not found for " .. tostring(island))
+            if tpStatusLabel then
+                setUiText(tpStatusLabel, "TP Status: Missing " .. tostring(wpName or island))
+            end
         end
     end
 
@@ -1183,38 +1202,20 @@ return function(Window, scriptInfo)
                 rootPart.CFrame = CFrame.new(pos + Vector3.new(0, 5, 0))
             end
             bossStatusLabel:Set("Boss Status: Teleported to " .. tostring(wpName))
+            if tpStatusLabel then
+                setUiText(tpStatusLabel, "TP Status: Teleported to " .. tostring(wpName))
+            end
         else
             bossStatusLabel:Set("Boss Status: Missing " .. tostring(wpName or selectedWaypointIsland))
+            if tpStatusLabel then
+                setUiText(tpStatusLabel, "TP Status: Missing " .. tostring(wpName or selectedWaypointIsland))
+            end
         end
     end
 
     BossTab:CreateButton({
         Name = "Refresh Current Island",
         Callback = refreshBossIslandLabel,
-    })
-
-    BossTab:CreateButton({
-        Name = "Teleport to Current Island Waypoint",
-        Callback = teleportToCurrentIslandWaypoint,
-    })
-
-    BossTab:CreateDropdown({
-        Name = "Saved Waypoint Island",
-        Options = {
-            "Island1","Island2","Island3","Island4","Island5","Island6",
-            "Island7","Island8","Island9","Island10","Island11","Island11Underground"
-        },
-        CurrentValue = "Island2",
-        MultipleOptions = false,
-        Flag = "slimeWaypointIsland",
-        Callback = function(v)
-            selectedWaypointIsland = type(v) == "table" and v[1] or v
-        end,
-    })
-
-    BossTab:CreateButton({
-        Name = "Teleport to Selected Saved Waypoint",
-        Callback = teleportToSelectedIslandWaypoint,
     })
 
     BossTab:CreateSlider({
@@ -1249,6 +1250,12 @@ return function(Window, scriptInfo)
     local TpTab = Window:CreateTab("TP", 4483362458)
     TpTab:CreateLabel("Teleport to saved island waypoints")
     TpTab:CreateLabel("Uses Waypoint_islandX / Waypoint_island11Underground")
+    tpStatusLabel = TpTab:CreateLabel("TP Status: Idle")
+
+    TpTab:CreateButton({
+        Name = "TP Current Island Waypoint",
+        Callback = teleportToCurrentIslandWaypoint,
+    })
 
     local islandButtons = {
         "Island1","Island2","Island3","Island4","Island5","Island6",
