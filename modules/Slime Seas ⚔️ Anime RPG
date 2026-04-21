@@ -21,9 +21,15 @@ return function(Window, scriptInfo)
     local autoCollectBox = false
     local collectBoxRange = 180
     local autoQuest = false
+    local questCurrentIslandOnly = true
     local questInterval = 1.2
     local questPromptRange = 3500
     local selectedIslands = {}
+    local autoMiniBoss = false
+    local bossInterval = 0.4
+    local islandLockRange = 1400
+    local voidOrbDodge = true
+    local voidOrbRange = 35
     local selectedEnemies = {}
     local auraRemote
     local combatRemotes = {}
@@ -37,6 +43,10 @@ return function(Window, scriptInfo)
     local lastError = "Last Error: none"
     local currentTarget
     local targetSwitchDistance = 60
+    local currentIslandLabel
+    local currentIslandName = "Unknown"
+    local autoIslandRefresh = true
+    local lastEnemyRefreshAt = 0
 
     local function refreshCharacter()
         character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
@@ -69,12 +79,26 @@ return function(Window, scriptInfo)
     local function collectEnemyNames()
         local f = enemiesFolder()
         if not f then return {} end
+        local _, islandFolder = getCurrentIsland()
+        local islandRef = islandFolder and (islandFolder:FindFirstChild("NPCs") or islandFolder:FindFirstChildWhichIsA("BasePart", true))
+        local islandPos
+        if islandRef and islandRef:IsA("BasePart") then
+            islandPos = islandRef.Position
+        elseif islandRef and islandRef:IsA("Folder") then
+            local p = islandRef:FindFirstChildWhichIsA("BasePart", true)
+            islandPos = p and p.Position
+        end
 
         local seen = {}
         local names = {}
         for _, mob in ipairs(f:GetChildren()) do
             if mob:IsA("Model") and mob:FindFirstChild("Humanoid") then
-                if not seen[mob.Name] then
+                local hrp = mob:FindFirstChild("HumanoidRootPart")
+                local inIsland = true
+                if islandPos and hrp then
+                    inIsland = (hrp.Position - islandPos).Magnitude <= islandLockRange
+                end
+                if inIsland and not seen[mob.Name] then
                     seen[mob.Name] = true
                     table.insert(names, mob.Name)
                 end
@@ -106,6 +130,68 @@ return function(Window, scriptInfo)
             return a < b
         end)
         return out
+    end
+
+    local function waypointToIsland(name)
+        if not name then return nil end
+        local n = string.lower(name)
+        local base = n:match("^waypoint_(.+)$")
+        if not base then return nil end
+        if base == "island11underground" then
+            return "Island11Underground"
+        end
+        local idx = base:match("^island(%d+)$")
+        if idx then
+            return "Island" .. tostring(tonumber(idx))
+        end
+        return nil
+    end
+
+    local function getCurrentIsland()
+        local root = mapRoot()
+        if not (root and rootPart) then return nil end
+
+        local pf = workspace:FindFirstChild("PlayerFolder")
+        local pnode = pf and pf:FindFirstChild(LocalPlayer.Name)
+        if pnode then
+            for _, d in ipairs(pnode:GetDescendants()) do
+                if d:IsA("BoolValue") and d.Value == true then
+                    local island = waypointToIsland(d.Name)
+                    if island and root:FindFirstChild(island) then
+                        return island, root:FindFirstChild(island)
+                    end
+                end
+            end
+        end
+
+        local bestName, bestIsland, bestDist
+        for _, island in ipairs(root:GetChildren()) do
+            if island:IsA("Folder") and (string.match(island.Name, "^Island%d+$") or island.Name == "Island11Underground") then
+                local ref = island:FindFirstChild("NPCs") or island:FindFirstChildWhichIsA("BasePart", true)
+                local pos
+                if ref and ref:IsA("BasePart") then
+                    pos = ref.Position
+                elseif ref and ref:IsA("Folder") then
+                    local p = ref:FindFirstChildWhichIsA("BasePart", true)
+                    pos = p and p.Position
+                end
+                if pos then
+                    local d = (pos - rootPart.Position).Magnitude
+                    if not bestDist or d < bestDist then
+                        bestDist, bestName, bestIsland = d, island.Name, island
+                    end
+                end
+            end
+        end
+        return bestName, bestIsland
+    end
+
+    local function updateCurrentIslandLabel()
+        local name = getCurrentIsland()
+        currentIslandName = name or "Unknown"
+        if currentIslandLabel then
+            currentIslandLabel:Set("Current Island: " .. currentIslandName)
+        end
     end
 
     local function collectCombatRemotes()
@@ -198,6 +284,10 @@ return function(Window, scriptInfo)
     local function isCombatEnemy(model)
         if not model or not model:IsDescendantOf(enemiesFolder()) then return false end
         if not mobAlive(model) then return false end
+        local lname = string.lower(model.Name)
+        if lname == "berserkerpromotion" or lname == "gobti" or lname == "brigurd" or lname == "merlong" or lname == "maru" then
+            return false
+        end
 
         -- ตัด NPC คุย/เควสออก (มักมี ProximityPrompt สำหรับ "Speak")
         local prompt = model:FindFirstChildWhichIsA("ProximityPrompt", true)
@@ -214,6 +304,15 @@ return function(Window, scriptInfo)
 
     local function getTargets(maxDist)
         if not rootPart then return {} end
+        local _, islandFolder = getCurrentIsland()
+        local islandRef = islandFolder and (islandFolder:FindFirstChild("NPCs") or islandFolder:FindFirstChildWhichIsA("BasePart", true))
+        local islandPos
+        if islandRef and islandRef:IsA("BasePart") then
+            islandPos = islandRef.Position
+        elseif islandRef and islandRef:IsA("Folder") then
+            local p = islandRef:FindFirstChildWhichIsA("BasePart", true)
+            islandPos = p and p.Position
+        end
 
         local out = {}
         local function addFromContainer(container)
@@ -224,7 +323,11 @@ return function(Window, scriptInfo)
                     local hrp = mob:FindFirstChild("HumanoidRootPart")
                     if hrp then
                         local d = (hrp.Position - rootPart.Position).Magnitude
-                        if d <= maxDist then
+                        local inIsland = true
+                        if islandPos then
+                            inIsland = (hrp.Position - islandPos).Magnitude <= islandLockRange
+                        end
+                        if d <= maxDist and inIsland then
                             table.insert(out, mob)
                         end
                     end
@@ -457,9 +560,14 @@ return function(Window, scriptInfo)
         local root = mapRoot()
         if not root then return {} end
         local prompts = {}
+        local currentIsland = getCurrentIsland()
 
         for _, island in ipairs(root:GetChildren()) do
-            if island:IsA("Folder") and islandSelected(island.Name) then
+            local islandOk = islandSelected(island.Name)
+            if questCurrentIslandOnly then
+                islandOk = (island.Name == currentIsland)
+            end
+            if island:IsA("Folder") and islandOk then
                 local npcs = island:FindFirstChild("NPCs")
                 if npcs then
                     for _, inst in ipairs(npcs:GetDescendants()) do
@@ -516,6 +624,114 @@ return function(Window, scriptInfo)
         end
     end
 
+    local function getMiniBossTargetInCurrentIsland()
+        local f = enemiesFolder()
+        if not (f and rootPart) then return nil end
+        local islandName = getCurrentIsland()
+        local validIsland2 = {
+            splitterminiboss1 = true,
+            splitterminiboss2 = true,
+            splitterminiboss3 = true,
+        }
+        local best, bestDist
+        for _, mob in ipairs(f:GetChildren()) do
+            if mob:IsA("Model") and mobAlive(mob) then
+                local n = string.lower(mob.Name)
+                local looksBoss = n:find("miniboss") or n:find("boss")
+                if islandName == "Island2" then
+                    looksBoss = validIsland2[n] or looksBoss
+                end
+                if looksBoss then
+                    local hrp = mob:FindFirstChild("HumanoidRootPart")
+                    if hrp then
+                        local d = (hrp.Position - rootPart.Position).Magnitude
+                        if not bestDist or d < bestDist then
+                            best, bestDist = mob, d
+                        end
+                    end
+                end
+            end
+        end
+        return best
+    end
+
+    local function findBossSpawnPromptInCurrentIsland()
+        local islandName, islandFolder = getCurrentIsland()
+        if not (islandName and islandFolder) then return nil end
+        for _, inst in ipairs(islandFolder:GetDescendants()) do
+            if inst:IsA("ProximityPrompt") then
+                local path = string.lower(inst:GetFullName())
+                local action = string.lower(tostring(inst.ActionText or ""))
+                local object = string.lower(tostring(inst.ObjectText or ""))
+                if path:find("bossspawnbutton") or action:find("spawn") or object:find("boss") then
+                    return inst
+                end
+            end
+        end
+        return nil
+    end
+
+    local function runAutoMiniBossStep()
+        if not (autoMiniBoss and rootPart and humanoid and humanoid.Health > 0) then return end
+        local boss = getMiniBossTargetInCurrentIsland()
+        if boss then
+            currentTarget = boss
+            teleportAbove(boss)
+            holdAbove(boss)
+            strike(boss)
+            return
+        end
+
+        local prompt = findBossSpawnPromptInCurrentIsland()
+        local pos = prompt and getPromptPosition(prompt)
+        if prompt and pos then
+            if activeTween then
+                activeTween:Cancel()
+                activeTween = nil
+            end
+            activeTween = TweenService:Create(
+                rootPart,
+                TweenInfo.new(0.25, Enum.EasingStyle.Linear, Enum.EasingDirection.Out),
+                { CFrame = CFrame.new(pos + Vector3.new(0, 3, 0)) }
+            )
+            activeTween:Play()
+            task.wait(0.18)
+            pcall(function()
+                fireproximityprompt(prompt)
+                task.wait(math.max(prompt.HoldDuration or 0.8, 0.8))
+                fireproximityprompt(prompt)
+            end)
+            lastDebug = "Debug: Spawn MiniBoss @" .. tostring(getCurrentIsland() or "?")
+            if debugLabel then debugLabel:Set(lastDebug) end
+        end
+    end
+
+    local function dodgeVoidOrbIfNeeded()
+        if not (voidOrbDodge and rootPart and humanoid and humanoid.Health > 0) then return end
+        local nearest, nearestDist
+        for _, d in ipairs(workspace:GetDescendants()) do
+            if d:IsA("BasePart") then
+                local n = string.lower(d.Name)
+                if n:find("voidorb") or n:find("void_orb") then
+                    local dist = (d.Position - rootPart.Position).Magnitude
+                    if dist <= voidOrbRange and (not nearestDist or dist < nearestDist) then
+                        nearest, nearestDist = d, dist
+                    end
+                end
+            end
+        end
+        if nearest then
+            local away = (rootPart.Position - nearest.Position)
+            if away.Magnitude < 0.1 then
+                away = Vector3.new(1, 0, 0)
+            end
+            away = away.Unit
+            local dodgePos = rootPart.Position + (away * 14) + Vector3.new(0, 5, 0)
+            rootPart.CFrame = CFrame.new(dodgePos)
+            rootPart.AssemblyLinearVelocity = Vector3.zero
+        end
+    end
+
     local function collectNearbyBoxes()
         if not (autoCollectBox and rootPart and character and humanoid and humanoid.Health > 0) then return end
 
@@ -553,8 +769,17 @@ return function(Window, scriptInfo)
         end
     end
 
+    local function refreshEnemyDropdownByIsland()
+        updateCurrentIslandLabel()
+        local list = collectEnemyNames()
+        if enemyDropdown and enemyDropdown.Refresh then
+            enemyDropdown:Refresh(list)
+        end
+    end
+
     -- =========================== UI ============================
     local CombatTab = Window:CreateTab("Combat", 4483362458)
+    currentIslandLabel = CombatTab:CreateLabel("Current Island: " .. currentIslandName)
     local statusLabel = CombatTab:CreateLabel("Status: Idle")
     local targetLabel = CombatTab:CreateLabel("Target: None")
     debugLabel = CombatTab:CreateLabel(lastDebug)
@@ -579,15 +804,25 @@ return function(Window, scriptInfo)
             end
         end,
     })
+    refreshEnemyDropdownByIsland()
 
     CombatTab:CreateButton({
         Name = "Refresh Enemy List",
         Callback = function()
-            local list = collectEnemyNames()
-            if enemyDropdown and enemyDropdown.Refresh then
-                enemyDropdown:Refresh(list)
-            end
+            refreshEnemyDropdownByIsland()
             statusLabel:Set("Status: Enemy list refreshed")
+        end,
+    })
+
+    CombatTab:CreateToggle({
+        Name = "Auto Refresh Enemy List by Current Island",
+        CurrentValue = true,
+        Flag = "slimeAutoRefreshEnemyByIsland",
+        Callback = function(v)
+            autoIslandRefresh = v
+            if v then
+                refreshEnemyDropdownByIsland()
+            end
         end,
     })
 
@@ -636,6 +871,22 @@ return function(Window, scriptInfo)
         Callback = function(v) auraBurstHits = v end,
     })
 
+    CombatTab:CreateToggle({
+        Name = "Dodge VoidOrb While Farming",
+        CurrentValue = true,
+        Flag = "slimeDodgeVoidOrb",
+        Callback = function(v) voidOrbDodge = v end,
+    })
+
+    CombatTab:CreateSlider({
+        Name = "VoidOrb Dodge Range",
+        Range = {15, 80},
+        Increment = 1,
+        CurrentValue = voidOrbRange,
+        Flag = "slimeVoidOrbRange",
+        Callback = function(v) voidOrbRange = v end,
+    })
+
     CombatTab:CreateDropdown({
         Name = "Attack Effect",
         Options = {
@@ -665,6 +916,7 @@ return function(Window, scriptInfo)
                 task.spawn(function()
                     while autoFarm do
                         if character and humanoid and humanoid.Health > 0 and rootPart then
+                            dodgeVoidOrbIfNeeded()
                             local t, isNew = getFocusTarget(400)
                             if t then
                                 targetLabel:Set("Target: " .. t.Name)
@@ -699,6 +951,7 @@ return function(Window, scriptInfo)
                 task.spawn(function()
                     while killAura do
                         local t = getTargets(attackRange)[1]
+                        dodgeVoidOrbIfNeeded()
                         if t then
                             targetLabel:Set("Target: " .. t.Name)
                             for i = 1, auraBurstHits do
@@ -755,6 +1008,83 @@ return function(Window, scriptInfo)
         end,
     })
 
+    local BossTab = Window:CreateTab("Boss", 4483362458)
+    local bossIslandLabel = BossTab:CreateLabel("Boss Island: " .. currentIslandName)
+    local bossStatusLabel = BossTab:CreateLabel("Boss Status: Idle")
+    BossTab:CreateLabel("Island2 MiniBoss: SplitterMiniboss1/2/3")
+
+    local function refreshBossIslandLabel()
+        updateCurrentIslandLabel()
+        bossIslandLabel:Set("Boss Island: " .. (currentIslandName or "Unknown"))
+    end
+
+    local function teleportToCurrentIslandWaypoint()
+        local island = getCurrentIsland()
+        if not island then return end
+        local idx = island:match("^Island(%d+)$")
+        local wpName = idx and ("Waypoint_island" .. idx) or nil
+        if island == "Island11Underground" then
+            wpName = "Waypoint_island11Underground"
+        end
+        if not wpName then return end
+
+        local pf = workspace:FindFirstChild("PlayerFolder")
+        local pnode = pf and pf:FindFirstChild(LocalPlayer.Name)
+        if not pnode then return end
+        local wp = pnode:FindFirstChild(wpName, true)
+        local pos
+        if wp and wp:IsA("BasePart") then
+            pos = wp.Position
+        elseif wp and wp:IsA("CFrameValue") then
+            pos = wp.Value.Position
+        elseif wp and (wp:IsA("Vector3Value")) then
+            pos = wp.Value
+        end
+        if pos and rootPart then
+            rootPart.CFrame = CFrame.new(pos + Vector3.new(0, 5, 0))
+            bossStatusLabel:Set("Boss Status: Teleported to " .. wpName)
+        end
+    end
+
+    BossTab:CreateButton({
+        Name = "Refresh Current Island",
+        Callback = refreshBossIslandLabel,
+    })
+
+    BossTab:CreateButton({
+        Name = "Teleport to Current Island Waypoint",
+        Callback = teleportToCurrentIslandWaypoint,
+    })
+
+    BossTab:CreateSlider({
+        Name = "Boss Loop Interval",
+        Range = {0.2, 1.5},
+        Increment = 0.05,
+        CurrentValue = bossInterval,
+        Flag = "slimeBossInterval",
+        Callback = function(v) bossInterval = v end,
+    })
+
+    BossTab:CreateToggle({
+        Name = "Auto MiniBoss (Current Island Only)",
+        CurrentValue = false,
+        Flag = "slimeAutoMiniBoss",
+        Callback = function(v)
+            autoMiniBoss = v
+            if v then
+                bossStatusLabel:Set("Boss Status: Running")
+                task.spawn(function()
+                    while autoMiniBoss do
+                        refreshBossIslandLabel()
+                        runAutoMiniBossStep()
+                        task.wait(bossInterval)
+                    end
+                    bossStatusLabel:Set("Boss Status: Idle")
+                end)
+            end
+        end,
+    })
+
     local LootTab = Window:CreateTab("Loot", 4483362458)
     local lootLabel = LootTab:CreateLabel("Loot Status: Idle")
 
@@ -779,6 +1109,8 @@ return function(Window, scriptInfo)
 
     local QuestTab = Window:CreateTab("Quest", 4483362458)
     local questLabel = QuestTab:CreateLabel("Quest Status: Idle")
+    QuestTab:CreateLabel("Quest NPC examples: Gobti, Brigurd, Maru")
+    QuestTab:CreateLabel("Excluded from quest: BerserkerPromotion, Merchant/Shop NPCs")
     local islandDropdown
 
     islandDropdown = QuestTab:CreateDropdown({
@@ -830,6 +1162,13 @@ return function(Window, scriptInfo)
     })
 
     QuestTab:CreateToggle({
+        Name = "Quest: Current Island Only",
+        CurrentValue = true,
+        Flag = "slimeQuestCurrentIslandOnly",
+        Callback = function(v) questCurrentIslandOnly = v end,
+    })
+
+    QuestTab:CreateToggle({
         Name = "Auto Quest (NPCs in islands)",
         CurrentValue = false,
         Flag = "slimeAutoQuest",
@@ -870,7 +1209,16 @@ return function(Window, scriptInfo)
     })
 
     RunService.Heartbeat:Connect(function()
+        updateCurrentIslandLabel()
+        if autoIslandRefresh and (tick() - lastEnemyRefreshAt) > 2.5 then
+            refreshEnemyDropdownByIsland()
+            lastEnemyRefreshAt = tick()
+        end
+
         if autoFarm and currentTarget and mobAlive(currentTarget) and rootPart and humanoid and humanoid.Health > 0 then
+            holdAbove(currentTarget)
+        end
+        if autoMiniBoss and currentTarget and mobAlive(currentTarget) and rootPart and humanoid and humanoid.Health > 0 then
             holdAbove(currentTarget)
         end
     end)
