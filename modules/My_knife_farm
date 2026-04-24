@@ -160,7 +160,7 @@ return function(Window, scriptInfo)
 
     MainTab:CreateDropdown({
         Name = "Select Rarities to KEEP",
-        Options = {"Common","Rare","Epic","Elite","Legendary","Mythic","Secret","Limited","Exclusive","Timeless","Godly","Soul","Fruit","Ninja","Historical"},
+        Options = {"Common","Rare","Epic","Elite","Legendary","Mythic","Secret","Limited","Exclusive","Timeless","Godly","Soul","Fruit","Ninja","Historical","Shadow","Frost","Demon","Arsenal"},
         MultipleOptions = true,
         Flag = "swordDD",
         Callback = function(Options) selectedSwordRarity = Options end,
