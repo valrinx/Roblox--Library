@@ -13,6 +13,10 @@ return function(Window, scriptInfo)
         autoMineDelay = 1.2,
         autoMineUseTween = false,
         autoMineTweenSpeed = 45,
+        safeProfileEnabled = true,
+        safeNearbyPauseEnabled = true,
+        safeNearbyRadius = 70,
+        safeSellCooldown = 6,
         oreIgnoreList = {},
         autoSellEnabled = false,
         autoSellOreCount = 8,
@@ -62,6 +66,14 @@ return function(Window, scriptInfo)
         autoSettingsLoaded.autoMineDelay = tonumber(decoded.autoMineDelay) or autoSettingsLoaded.autoMineDelay
         autoSettingsLoaded.autoMineUseTween = decoded.autoMineUseTween == true
         autoSettingsLoaded.autoMineTweenSpeed = tonumber(decoded.autoMineTweenSpeed) or autoSettingsLoaded.autoMineTweenSpeed
+        if decoded.safeProfileEnabled ~= nil then
+            autoSettingsLoaded.safeProfileEnabled = decoded.safeProfileEnabled == true
+        end
+        if decoded.safeNearbyPauseEnabled ~= nil then
+            autoSettingsLoaded.safeNearbyPauseEnabled = decoded.safeNearbyPauseEnabled == true
+        end
+        autoSettingsLoaded.safeNearbyRadius = tonumber(decoded.safeNearbyRadius) or autoSettingsLoaded.safeNearbyRadius
+        autoSettingsLoaded.safeSellCooldown = tonumber(decoded.safeSellCooldown) or autoSettingsLoaded.safeSellCooldown
         autoSettingsLoaded.oreIgnoreList = sanitizeStringArray(decoded.oreIgnoreList)
         autoSettingsLoaded.autoSellEnabled = decoded.autoSellEnabled == true
         autoSettingsLoaded.autoSellOreCount = tonumber(decoded.autoSellOreCount) or autoSettingsLoaded.autoSellOreCount
@@ -2169,6 +2181,10 @@ return function(Window, scriptInfo)
         local autoMineDelay = math.clamp(autoSettingsLoaded.autoMineDelay, 0, 5)
         local autoMineUseTween = autoSettingsLoaded.autoMineUseTween
         local autoMineTweenSpeed = math.clamp(autoSettingsLoaded.autoMineTweenSpeed, 10, 120)
+        local safeProfileEnabled = autoSettingsLoaded.safeProfileEnabled ~= false
+        local safeNearbyPauseEnabled = autoSettingsLoaded.safeNearbyPauseEnabled ~= false
+        local safeNearbyRadius = math.clamp(tonumber(autoSettingsLoaded.safeNearbyRadius) or 70, 20, 200)
+        local safeSellCooldown = math.clamp(tonumber(autoSettingsLoaded.safeSellCooldown) or 6, 2, 20)
         local OreIgnoreList = autoSettingsLoaded.oreIgnoreList
         local autoSellEnabled = autoSettingsLoaded.autoSellEnabled
         local autoSellThread
@@ -2193,6 +2209,10 @@ return function(Window, scriptInfo)
                     autoMineDelay = autoMineDelay,
                     autoMineUseTween = autoMineUseTween,
                     autoMineTweenSpeed = autoMineTweenSpeed,
+                    safeProfileEnabled = safeProfileEnabled,
+                    safeNearbyPauseEnabled = safeNearbyPauseEnabled,
+                    safeNearbyRadius = safeNearbyRadius,
+                    safeSellCooldown = safeSellCooldown,
                     oreIgnoreList = OreIgnoreList,
                     autoSellEnabled = autoSellEnabled,
                     autoSellOreCount = autoSellOreCount,
@@ -2230,6 +2250,25 @@ return function(Window, scriptInfo)
                         local sameTargetLoops = 0
                         local stuckResetLoops = 16
                         local blockedTargetUntil = {}
+                        local nextMineAllowedAt = 0
+                        local nextEquipAllowedAt = 0
+
+                        local function randomRange(minValue, maxValue)
+                            return minValue + (maxValue - minValue) * math.random()
+                        end
+
+                        local function hasNearbyPlayers(rootPart, radius)
+                            if not rootPart then return false end
+                            for _, otherPlayer in ipairs(Players:GetPlayers()) do
+                                if otherPlayer ~= LocalPlayer and otherPlayer.Character then
+                                    local otherRoot = otherPlayer.Character:FindFirstChild("HumanoidRootPart")
+                                    if otherRoot and (otherRoot.Position - rootPart.Position).Magnitude <= radius then
+                                        return true
+                                    end
+                                end
+                            end
+                            return false
+                        end
                         local function resolveActivateRemote(tool)
                             local madCommEvents = ReplicatedStorage:FindFirstChild("MadCommEvents")
                             -- Fallback for Ultimate Mining Tycoon (captured remote id)
@@ -2369,7 +2408,12 @@ return function(Window, scriptInfo)
                             local dist = toOre.Magnitude
                             if dist < 8 then return end
                             local targetPos = orePart.Position - toOre.Unit * 5 + Vector3.new(0, 2.5, 0)
-                            local duration = math.clamp(dist / math.max(autoMineTweenSpeed, 1), 0.08, 0.35)
+                            local maxDuration = safeProfileEnabled and 0.55 or 0.35
+                            local minDuration = safeProfileEnabled and 0.12 or 0.08
+                            local duration = math.clamp(dist / math.max(autoMineTweenSpeed, 1), minDuration, maxDuration)
+                            if safeProfileEnabled then
+                                duration = duration + randomRange(0.01, 0.06)
+                            end
                             if activeTween then
                                 pcall(function() activeTween:Cancel() end)
                             end
@@ -2389,13 +2433,30 @@ return function(Window, scriptInfo)
                             local isPickaxe = Tool and string.lower(Tool.Name):find("pickaxe") ~= nil
                             if Tool and Tool.Parent == LocalPlayer.InnoBackpack and isPickaxe then
                                 local equipRemote = Tool:FindFirstChild("EquipRemote")
-                                if equipRemote then
+                                local canEquip = true
+                                if safeProfileEnabled and os.clock() < nextEquipAllowedAt then
+                                    canEquip = false
+                                end
+                                if equipRemote and canEquip then
                                     equipRemote:FireServer(true)
+                                    if safeProfileEnabled then
+                                        nextEquipAllowedAt = os.clock() + randomRange(0.8, 1.5)
+                                    end
                                     task.wait(0.2)
                                 end
                             end
                             local root = Character and Character:FindFirstChild("HumanoidRootPart")
                             if root then
+                                if safeProfileEnabled and safeNearbyPauseEnabled and hasNearbyPlayers(root, safeNearbyRadius) then
+                                    if activeTween then
+                                        pcall(function() activeTween:Cancel() end)
+                                        activeTween = nil
+                                    end
+                                    resetTargetLock()
+                                    OreLabel:Set("Auto Mine Status: paused (players nearby)")
+                                    task.wait(randomRange(0.3, 0.7))
+                                    continue
+                                end
                                 local humanoid = Character:FindFirstChildOfClass("Humanoid")
                                 if humanoid and humanoid.SeatPart then
                                     if activeTween then
@@ -2462,6 +2523,10 @@ return function(Window, scriptInfo)
                                     local args = {10, gridPos}
                                     local activateRemote = resolveActivateRemote(Tool)
                                     if activateRemote then
+                                        if safeProfileEnabled and os.clock() < nextMineAllowedAt then
+                                            task.wait(math.max(0.03, nextMineAllowedAt - os.clock()))
+                                            continue
+                                        end
                                         activateRemote:FireServer(table.unpack(args))
                                         markTargetLoop(closestBlock, renderPart)
                                         if sameTargetLoops >= stuckResetLoops then
@@ -2476,7 +2541,12 @@ return function(Window, scriptInfo)
                                         OreLabel:Set("Auto Mine Status: Activate remote missing")
                                         resetTargetLock()
                                     end
-                                    task.wait(autoMineDelay)
+                                    local waitDelay = autoMineDelay
+                                    if safeProfileEnabled then
+                                        waitDelay = math.max(waitDelay, 0.45) + randomRange(0.06, 0.38)
+                                        nextMineAllowedAt = os.clock() + waitDelay
+                                    end
+                                    task.wait(waitDelay)
                                     continue
                                 else
                                     if activeTween then
@@ -2487,7 +2557,11 @@ return function(Window, scriptInfo)
                                     OreLabel:Set("Auto Mine Status: no target in range")
                                 end
                             end
-                            task.wait(0.03)
+                            if safeProfileEnabled then
+                                task.wait(randomRange(0.06, 0.14))
+                            else
+                                task.wait(0.03)
+                            end
                         end
                         if activeTween then
                             pcall(function() activeTween:Cancel() end)
@@ -2556,6 +2630,50 @@ return function(Window, scriptInfo)
                 saveAutoSettings()
             end,
         })
+
+        local SafeProfileSection = Farm:CreateSection("🛡️ Safe Profile")
+        Farm:CreateToggle({
+            Name = "Safe Profile",
+            CurrentValue = safeProfileEnabled,
+            Flag = "SafeProfileEnabled",
+            Callback = function(Value)
+                safeProfileEnabled = Value
+                saveAutoSettings()
+            end,
+        })
+        Farm:CreateToggle({
+            Name = "Pause When Players Nearby",
+            CurrentValue = safeNearbyPauseEnabled,
+            Flag = "SafeNearbyPause",
+            Callback = function(Value)
+                safeNearbyPauseEnabled = Value
+                saveAutoSettings()
+            end,
+        })
+        Farm:CreateSlider({
+            Name = "Nearby Pause Radius",
+            Range = {20, 200},
+            Increment = 5,
+            Suffix = " studs",
+            CurrentValue = safeNearbyRadius,
+            Flag = "SafeNearbyRadius",
+            Callback = function(Value)
+                safeNearbyRadius = Value
+                saveAutoSettings()
+            end,
+        })
+        Farm:CreateSlider({
+            Name = "Auto Sell Cooldown",
+            Range = {2, 20},
+            Increment = 1,
+            Suffix = "s",
+            CurrentValue = safeSellCooldown,
+            Flag = "SafeSellCooldown",
+            Callback = function(Value)
+                safeSellCooldown = Value
+                saveAutoSettings()
+            end,
+        })
     
         local oreIgnoreOptions = {}
         local okOreOptions, resultOreOptions = pcall(getOreIgnoreOptions)
@@ -2617,6 +2735,19 @@ return function(Window, scriptInfo)
                 if autoSellEnabled then
                     if not autoSellThread then
                         autoSellThread = task.spawn(function()
+                            local lastAutoSellAt = 0
+                            local function hasNearbyPlayersForSell(rootPart, radius)
+                                if not rootPart then return false end
+                                for _, otherPlayer in ipairs(game.Players:GetPlayers()) do
+                                    if otherPlayer ~= game.Players.LocalPlayer and otherPlayer.Character then
+                                        local otherRoot = otherPlayer.Character:FindFirstChild("HumanoidRootPart")
+                                        if otherRoot and (otherRoot.Position - rootPart.Position).Magnitude <= radius then
+                                            return true
+                                        end
+                                    end
+                                end
+                                return false
+                            end
                             while autoSellEnabled do
                                 local player = game.Players.LocalPlayer
                                 local character = player.Character or player.CharacterAdded:Wait()
@@ -2636,6 +2767,14 @@ return function(Window, scriptInfo)
                                 if currentOres >= autoSellOreCount then
                                     local hrp = character:FindFirstChild("HumanoidRootPart")
                                     if hrp then
+                                        if safeProfileEnabled and safeNearbyPauseEnabled and hasNearbyPlayersForSell(hrp, safeNearbyRadius) then
+                                            task.wait(0.8)
+                                            continue
+                                        end
+                                        if safeProfileEnabled and (os.clock() - lastAutoSellAt) < safeSellCooldown then
+                                            task.wait(0.25)
+                                            continue
+                                        end
                                         local oldCFrame = hrp.CFrame
                                         local cargoPrompt = nil
                                         local positionCargoVolume = nil
@@ -2676,11 +2815,12 @@ return function(Window, scriptInfo)
                                             
                                             if cargoPrompt and positionCargoVolume then
                                                 tweenHumanoidRootPart(hrp, positionCargoVolume.CFrame * CFrame.new(0, 3, 0), 0.18)
-                                                task.wait(0.3)
+                                                task.wait(safeProfileEnabled and 0.38 or 0.3)
                                                 cargoPrompt.HoldDuration = 0
                                                 fireproximityprompt(cargoPrompt)
-                                                task.wait(0.3)
+                                                task.wait(safeProfileEnabled and 0.42 or 0.3)
                                                 tweenHumanoidRootPart(hrp, oldCFrame, 0.18)
+                                                lastAutoSellAt = os.clock()
                                                 Rayfield:Notify({
                                                     Title = "Auto Sell",
                                                     Content = "Sold " .. currentOres .. " ores successfully!",
@@ -2706,7 +2846,7 @@ return function(Window, scriptInfo)
                                         end
                                     end
                                 end
-                                task.wait(0.5)
+                                task.wait(safeProfileEnabled and 0.65 or 0.5)
                             end
                         end)
                     end
