@@ -32,6 +32,7 @@
 - ปรับ `RAVENHUB` ระบบคัดโหลดโมดูลให้รองรับ `placeIds/gameIds` และเพิ่มตัวตรวจจับแมพสำรองของ UMT
 - แก้ `modules/Ultimate Mining Tycoon` ไม่ให้เรียก destroy อัตโนมัติตอนเริ่มโหลด (แก้ปัญหาเมนูปิดเองทันที)
 - แก้ `RAVENHUB` ให้ retry โหลดโมดูลที่ใช้ detector นานสูงสุด 30 วินาที และกันโหลดซ้ำด้วย `loadedScripts`
+- ปรับระบบ cleanup: ใช้ `Destroy Hub` ใน `RAVENHUB` เป็นตัวกลางเรียก cleanup ของโมดูล (รวม `Ultimate Mining Tycoon`) แทนการ destroy UI เองในโมดูล
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
