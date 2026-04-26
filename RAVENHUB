@@ -19,21 +19,21 @@ local SCRIPTS = {
     {
         name        = "My Knife Farm",
         description = "Auto Roll | Auto Buy | Auto Sell | Anti AFK",
-        gameId      = 125003919504672,
+        gameIds     = {125003919504672},
         version     = "v0.4",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/My_knife_farm",
     },
     {
         name        = "Slime Seas ⚔️ Anime RPG",
         description = "Teleport | Auto Farm | Kill Aura | Infinite Stamina",
-        gameId      = 99046552174353,
+        gameIds     = {99046552174353},
         version     = "v0.1",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/Slime%20Seas%20%E2%9A%94%EF%B8%8F%20Anime%20RPG",
     },
     {
         name        = "Ultimate Mining Tycoon",
         description = "Auto Mine | Auto Sell | Ore ESP | Teleport",
-        gameId      = 18680867089,
+        placeIds    = {18680867089},
         version     = "v1.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/Ultimate%20Mining%20Tycoon",
     },
@@ -99,9 +99,44 @@ HomeTab:CreateDropdown({
 -- ============================================================
 
 local currentPlaceId = game.PlaceId
+local currentGameId  = game.GameId
+
+local function containsId(idList, value)
+    if not idList then return false end
+    for _, id in ipairs(idList) do
+        if id == value then
+            return true
+        end
+    end
+    return false
+end
+
+local function shouldLoadScript(scriptInfo)
+    if scriptInfo.universal == true then
+        return true
+    end
+
+    if scriptInfo.placeIds and containsId(scriptInfo.placeIds, currentPlaceId) then
+        return true
+    end
+
+    if scriptInfo.gameIds and containsId(scriptInfo.gameIds, currentGameId) then
+        return true
+    end
+
+    -- backward compatibility for old schema
+    if scriptInfo.gameId == 0 then
+        return true
+    end
+    if scriptInfo.gameId == currentPlaceId or scriptInfo.gameId == currentGameId then
+        return true
+    end
+
+    return false
+end
 
 for _, scriptInfo in ipairs(SCRIPTS) do
-    if scriptInfo.gameId == 0 or scriptInfo.gameId == currentPlaceId then
+    if shouldLoadScript(scriptInfo) then
         task.spawn(function()
             local ok, result = pcall(function()
                 local raw = game:HttpGet(scriptInfo.moduleUrl)
