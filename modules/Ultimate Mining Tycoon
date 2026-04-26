@@ -1583,20 +1583,10 @@ return function(Window, scriptInfo)
                 pcall(function() conn:Disconnect() end)
             end
             cleanupConnections = {}
-
-            pcall(function() Window:Destroy() end)
-            pcall(function() Rayfield:Destroy() end)
-            _G.UH_UMT_Destroy = nil
         end
-
-        _G.UH_UMT_Destroy = destroyScript
-
-        Misc:CreateButton({
-            Name = "Destroy Menu (Reload Script)",
-            Callback = function()
-                destroyScript()
-            end,
-        })
+        if scriptInfo and type(scriptInfo.registerCleanup) == "function" then
+            scriptInfo.registerCleanup(destroyScript)
+        end
     
         -- Notification timer
         task.spawn(function()
