@@ -1,6 +1,7 @@
 return function(Window, scriptInfo)
 
-    local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+    -- Use Hub's Rayfield instance to avoid reinitializing UI library
+    local Rayfield = (scriptInfo and scriptInfo.hubRayfield) or loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
     local scriptRunning = true
     local cleanupConnections = {}
     local infiniteJumpConnection = nil
