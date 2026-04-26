@@ -815,7 +815,7 @@ return function(Window, scriptInfo)
             ["Precious"]         = Color3.fromRGB(255, 210, 90),
             ["Gemstone"]         = Color3.fromRGB(255, 120, 220),
             ["Mythic"]           = Color3.fromRGB(255, 110, 110),
-            ["Unknown"]          = Color3.fromRGB(255, 255, 255),
+            ["Unknown"]          = Color3.fromRGB(255, 145, 70),
         }
 
         local oreCategoryByName = {
@@ -827,7 +827,31 @@ return function(Window, scriptInfo)
             ["Topaz"] = "Gemstone", ["Emerald"] = "Gemstone", ["Sapphire"] = "Gemstone", ["Ruby"] = "Gemstone", ["Diamond"] = "Gemstone",
             ["Mithril"] = "Mythic", ["Adamantium"] = "Mythic", ["Unobtanium"] = "Mythic", ["Poudretteite"] = "Mythic",
             ["Zultanite"] = "Mythic", ["Grandidierite"] = "Mythic", ["Musgravite"] = "Mythic", ["Painite"] = "Mythic",
+            -- Runtime mesh names seen in this game
+            ["OreMesh"] = "Rare Metal",
+            ["CubicBlockMetal"] = "Common Metal",
+            ["ShaleMetalBlock"] = "Rare Metal",
+            ["GemBlockMesh"] = "Gemstone",
         }
+        local function getTargetGridPosition(target, renderPart)
+            local gridPos = target:GetAttribute("ChunkPosition") or target:GetAttribute("GridPosition")
+            if not gridPos and renderPart then
+                gridPos = renderPart:GetAttribute("ChunkPosition") or renderPart:GetAttribute("GridPosition")
+            end
+            return gridPos
+        end
+
+        local function isMineableTarget(target, renderPart)
+            if not target then return false end
+            if target:GetAttribute("MineId") or target:GetAttribute("OreId") then
+                return true
+            end
+            if renderPart and (renderPart:GetAttribute("MineId") or renderPart:GetAttribute("OreId")) then
+                return true
+            end
+            return getTargetGridPosition(target, renderPart) ~= nil
+        end
+
     
         local function getOreRenderPart(target)
             if not target then return nil end
@@ -1096,26 +1120,32 @@ return function(Window, scriptInfo)
                                         return table.find(OreIgnoreList, oreName) ~= nil
                                     end
 
-                                    for _,v in pairs(workspace.PlacedOre:GetChildren()) do
-                                        local renderPart = getOreRenderPart(v)
-                                        if renderPart then
-                                            local oreName = getOreName(v)
-                                            if isIgnoredOre(oreName) then
-                                                continue
-                                            end
-                                            local dist = (root.Position - renderPart.Position).Magnitude
-                                            if dist <= autoMineRange and dist < closestDist then
-                                                closestBlock = v
-                                                closestDist = dist
+                                    local oreContainers = {
+                                        workspace:FindFirstChild("PlacedOre"),
+                                        workspace:FindFirstChild("SpawnedBlocks"),
+                                    }
+
+                                    for _, container in ipairs(oreContainers) do
+                                        if container then
+                                            for _,v in pairs(container:GetChildren()) do
+                                                local renderPart = getOreRenderPart(v)
+                                                if renderPart and isMineableTarget(v, renderPart) then
+                                                    local oreName = getOreName(v)
+                                                    if isIgnoredOre(oreName) then
+                                                        continue
+                                                    end
+                                                    local dist = (root.Position - renderPart.Position).Magnitude
+                                                    if dist <= autoMineRange and dist < closestDist then
+                                                        closestBlock = v
+                                                        closestDist = dist
+                                                    end
+                                                end
                                             end
                                         end
                                     end
                                     if closestBlock then
                                         local renderPart = getOreRenderPart(closestBlock)
-                                        local gridPos = closestBlock:GetAttribute("ChunkPosition") or closestBlock:GetAttribute("GridPosition")
-                                        if not gridPos and renderPart then
-                                            gridPos = renderPart:GetAttribute("ChunkPosition") or renderPart:GetAttribute("GridPosition")
-                                        end
+                                        local gridPos = getTargetGridPosition(closestBlock, renderPart)
                                         if not gridPos then
                                             local worldPos = renderPart and renderPart.Position
                                             if not worldPos then
