@@ -775,11 +775,11 @@ if game.PlaceId == 18680867089 then
     -- ESP SYSTEM — Highlight-based (per-ore mesh color + distance)
     -- ============================================================
     local ESP = {
-        enabled      = false,
-        maxDistance  = 200,
-        filterOre    = "All",   -- "All" หรือชื่อ ore เฉพาะ
-        activeVisuals = {},      -- [part] = { highlight, billboard }
-        connections  = {},
+        enabled       = false,
+        maxDistance   = 100,   -- ← default ตรงกับ slider
+        filterOre     = "All",
+        activeVisuals = {},
+        connections   = {},
     }
 
     local oreColors = {
@@ -814,7 +814,6 @@ if game.PlaceId == 18680867089 then
         ["Painite"]      = Color3.fromRGB(255, 50,  100),
     }
 
-    -- ดึงชื่อ ore จาก attribute (fallback → part.Name)
     local function getOreName(part)
         local n = part:GetAttribute("MineId") or part:GetAttribute("OreId") or part:GetAttribute("OreName")
         if not n or n == "" or n == "Part" or n == "MeshPart" or n == "OreMesh" then
@@ -824,26 +823,23 @@ if game.PlaceId == 18680867089 then
         return n
     end
 
-    -- สร้าง Highlight + BillboardGui ให้ part หนึ่งชิ้น
     local function espApply(part)
         if not ESP.enabled then return end
-        if ESP.activeVisuals[part] then return end  -- ซ้ำ
+        if ESP.activeVisuals[part] then return end
         local oreName = getOreName(part)
         if ESP.filterOre ~= "All" and oreName ~= ESP.filterOre then return end
 
         local color = oreColors[oreName] or Color3.fromRGB(255, 255, 255)
 
-        -- Highlight ทำให้ mesh ทั้งก้อนเรืองแสงเหมือนในรูป
         local hl = Instance.new("Highlight")
-        hl.Name       = "UH_ESP_Highlight"
-        hl.FillColor  = color
-        hl.OutlineColor = color:Lerp(Color3.new(1,1,1), 0.4)
+        hl.Name                = "UH_ESP_Highlight"
+        hl.FillColor           = color
+        hl.OutlineColor        = color:Lerp(Color3.new(1, 1, 1), 0.4)
         hl.FillTransparency    = 0.35
         hl.OutlineTransparency = 0
-        hl.DepthMode  = Enum.HighlightDepthMode.AlwaysOnTop
-        hl.Parent     = part
+        hl.DepthMode           = Enum.HighlightDepthMode.AlwaysOnTop
+        hl.Parent              = part
 
-        -- BillboardGui แสดงชื่อ + ระยะ
         local bb = Instance.new("BillboardGui")
         bb.Name        = "UH_ESP_Billboard"
         bb.Size        = UDim2.new(0, 120, 0, 36)
@@ -852,20 +848,19 @@ if game.PlaceId == 18680867089 then
         bb.Parent      = part
 
         local lbl = Instance.new("TextLabel")
-        lbl.Size                 = UDim2.new(1, 0, 1, 0)
+        lbl.Size                   = UDim2.new(1, 0, 1, 0)
         lbl.BackgroundTransparency = 1
-        lbl.TextColor3           = color
-        lbl.TextStrokeColor3     = Color3.new(0, 0, 0)
+        lbl.TextColor3             = color
+        lbl.TextStrokeColor3       = Color3.new(0, 0, 0)
         lbl.TextStrokeTransparency = 0
-        lbl.Font                 = Enum.Font.GothamBold
-        lbl.TextSize             = 13
-        lbl.TextScaled           = false
-        lbl.Text                 = oreName
-        lbl.Parent               = bb
+        lbl.Font                   = Enum.Font.GothamBold
+        lbl.TextSize               = 13
+        lbl.TextScaled             = false
+        lbl.Text                   = oreName
+        lbl.Parent                 = bb
 
         ESP.activeVisuals[part] = { highlight = hl, billboard = bb, label = lbl }
 
-        -- ลบ visual เมื่อ part ถูกทำลาย
         local conn = part.AncestryChanged:Connect(function()
             if not part.Parent then
                 if hl and hl.Parent then hl:Destroy() end
@@ -876,7 +871,6 @@ if game.PlaceId == 18680867089 then
         table.insert(ESP.connections, conn)
     end
 
-    -- ลบ ESP ทั้งหมด
     local function espClearAll()
         for part, v in pairs(ESP.activeVisuals) do
             if v.highlight and v.highlight.Parent then v.highlight:Destroy() end
@@ -887,19 +881,22 @@ if game.PlaceId == 18680867089 then
         ESP.connections = {}
     end
 
-    -- scan ore ที่มีอยู่ทั้งหมด
     local function espScanAll()
-        local folders = { workspace:FindFirstChild("PlacedOre"), workspace:FindFirstChild("SpawnedBlocks") }
+        local folders = {
+            workspace:FindFirstChild("PlacedOre"),
+            workspace:FindFirstChild("SpawnedBlocks"),
+        }
         for _, folder in ipairs(folders) do
             if folder then
                 for _, child in ipairs(folder:GetChildren()) do
-                    if child:IsA("BasePart") then espApply(child) end
+                    if child:IsA("BasePart") then
+                        espApply(child)
+                    end
                 end
             end
         end
     end
 
-    -- ดึงรายชื่อ ore ที่มีในเกม (สำหรับ dropdown filter)
     local function getOreTypes()
         local types = {"All"}
         local seen = {}
@@ -916,7 +913,7 @@ if game.PlaceId == 18680867089 then
         return types
     end
 
-    -- RenderStepped: อัปเดต label ระยะ + toggle visibility ตาม maxDistance
+    -- RenderStepped: อัปเดต label ระยะ + toggle visibility ตาม ESP.maxDistance
     game:GetService("RunService").RenderStepped:Connect(function()
         if not ESP.enabled then return end
         local char = game.Players.LocalPlayer.Character
@@ -936,23 +933,32 @@ if game.PlaceId == 18680867089 then
         end
     end)
 
-    -- ฟัง ChildAdded สำหรับ ore ใหม่
+    -- ── watchFolder: ใช้ WaitForChild เพื่อรับมือกับ map โหลดช้า ──────────
     local function watchFolder(folder)
         if not folder then return end
         folder.ChildAdded:Connect(function(child)
             if child:IsA("BasePart") then
-                task.wait(0.1)  -- รอให้ attribute load
+                task.wait(0.1)   -- รอให้ attribute load ก่อน
                 espApply(child)
             end
         end)
     end
-    watchFolder(workspace:FindFirstChild("PlacedOre"))
-    watchFolder(workspace:FindFirstChild("SpawnedBlocks"))
+
+    -- รอ folder จริงๆ ก่อน watch (กันกรณี map ยังไม่โหลด)
+    task.spawn(function()
+        local placedOre    = workspace:WaitForChild("PlacedOre",    30)
+        local spawnedBlocks = workspace:WaitForChild("SpawnedBlocks", 30)
+        watchFolder(placedOre)
+        watchFolder(spawnedBlocks)
+    end)
 
     -- Respawn: clear แล้ว scan ใหม่
     game.Players.LocalPlayer.CharacterAdded:Connect(function()
         espClearAll()
-        if ESP.enabled then espScanAll() end
+        if ESP.enabled then
+            task.wait(1)   -- รอ character + map settle
+            espScanAll()
+        end
     end)
 
     -- Auto Mine Section
@@ -1352,19 +1358,35 @@ if game.PlaceId == 18680867089 then
         end,
     })
 
-    -- Ore ESP section
+    -- ============================================================
+    -- ORE ESP UI — FIX: เชื่อมตรงกับ ESP object จริง
+    -- ============================================================
     local OreSection = Farm:CreateSection("⚙️ Ore ESP Selection")
-    local OreLabel2 = Farm:CreateLabel("Reveals every type of ore found throughout mining.")
+    Farm:CreateLabel("Reveals every type of ore found throughout mining.")
 
-    local blocksEspButton = Farm:CreateToggle({
+    -- ── Toggle: เซต ESP.enabled โดยตรง + scan/clear ทันที ─────────────────
+    Farm:CreateToggle({
         Name = "Ore ESP",
         CurrentValue = false,
         Flag = nil,
         Callback = function(Value)
-            _G.espEnabled = Value
+            ESP.enabled = Value          -- ✅ ชี้ตรงที่ ESP object
+            if Value then
+                espScanAll()             -- ✅ scan ore ที่มีอยู่ทันที
+                Rayfield:Notify({
+                    Title = "Ore ESP",
+                    Content = "ESP เปิดแล้ว — scanning ore...",
+                    Duration = 2,
+                    Image = "eye",
+                })
+            else
+                espClearAll()            -- ✅ ลบ visual ทันที
+            end
         end,
     })
-    local distanceSlider = Farm:CreateSlider({
+
+    -- ── Slider: เซต ESP.maxDistance โดยตรง ────────────────────────────────
+    Farm:CreateSlider({
         Name = "Ore ESP Distance",
         Range = {0, 500},
         Increment = 5,
@@ -1372,7 +1394,49 @@ if game.PlaceId == 18680867089 then
         CurrentValue = 100,
         Flag = nil,
         Callback = function(Value)
-            _G.maxDistance = Value
+            ESP.maxDistance = Value      -- ✅ ชี้ตรงที่ ESP object
+        end,
+    })
+
+    -- ── Dropdown: filter ชื่อ ore ────────────────────────────────────────
+    Farm:CreateDropdown({
+        Name = "ESP Filter Ore Type",
+        Options = getOreTypes(),
+        CurrentOption = {"All"},
+        MultipleOptions = false,
+        Flag = nil,
+        Callback = function(Option)
+            local selected = type(Option) == "table" and Option[1] or Option
+            ESP.filterOre = selected or "All"
+            -- ถ้า ESP เปิดอยู่ ให้ clear แล้ว scan ใหม่ด้วย filter ใหม่
+            if ESP.enabled then
+                espClearAll()
+                espScanAll()
+            end
+        end,
+    })
+
+    -- ── Button: Refresh scan (กรณี ore spawn ใหม่แต่ไม่ trigger ChildAdded) ──
+    Farm:CreateButton({
+        Name = "Refresh ESP Scan",
+        Callback = function()
+            if ESP.enabled then
+                espClearAll()
+                espScanAll()
+                Rayfield:Notify({
+                    Title = "ESP Refreshed",
+                    Content = "Re-scanned ore in workspace.",
+                    Duration = 2,
+                    Image = "refresh-cw",
+                })
+            else
+                Rayfield:Notify({
+                    Title = "ESP ปิดอยู่",
+                    Content = "เปิด Ore ESP ก่อนแล้วค่อย Refresh",
+                    Duration = 2,
+                    Image = "eye-off",
+                })
+            end
         end,
     })
 
