@@ -52,6 +52,7 @@
 - แก้ซ้ำกรณี `attempt to call a nil value` ที่ `resolveOreName`: เพิ่ม safe fallback สำหรับหา `renderPart` เมื่อ helper function ยังไม่พร้อม เพื่อกันสคริปต์หยุดระหว่างสร้างแท็บ Farm
 - harden ระบบชื่อแร่/ดีบักเพิ่ม: ตรวจชนิดข้อมูลให้เป็น `Instance` ก่อนเรียกเมธอด (`IsA`, `FindFirstChildWhichIsA`) และเปลี่ยน icon แจ้งเตือนใน Ore Debug เป็น asset id ที่ Rayfield รองรับ เพื่อลด error ระหว่างโหลด UI
 - เพิ่ม guard ให้ `Auto Mine/Tween` หยุดชั่วคราวตอนผู้เล่นนั่งยานพาหนะ (`Humanoid.SeatPart`) และแสดงสถานะ `paused (in vehicle)` เพื่อลดการชนกับระบบรถของเกม (`InnoVehicles`)
+- เพิ่มการเดาชื่อแร่เชิงลึกใน Ore ESP: สแกน descendant hints/ชื่อ node แบบ normalize + keyword match กับรายชื่อแร่ที่รู้จัก และเพิ่ม fallback mapping `runtime name -> ชื่อจริง` (ใช้ได้แม้ `MineId/OreId` เป็น `N/A`)
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
