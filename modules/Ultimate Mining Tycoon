@@ -1089,36 +1089,50 @@ return function(Window, scriptInfo)
 
         local function collectOreCandidatesFromInstance(instance, bucket, baseScore, scanDescendants)
             if not isInstance(instance) then return end
+            local function hasOreKeyHint(text)
+                local n = string.lower(tostring(text or ""))
+                return n:find("ore", 1, true)
+                    or n:find("mine", 1, true)
+                    or n:find("resource", 1, true)
+                    or n:find("metal", 1, true)
+                    or n:find("gem", 1, true)
+                    or n:find("id", 1, true)
+                    or n:find("type", 1, true)
+            end
 
-            local attrKeys = { "OreName", "MineId", "OreId", "ResourceName", "DisplayName", "ItemName", "Name" }
+            local attrKeys = { "OreName", "MineId", "OreId", "ResourceName", "DisplayName", "ItemName" }
             for _, key in ipairs(attrKeys) do
                 local value = getStringAttribute(instance, key)
                 local fromAttr = canonicalizeOreName(value) or pickKnownOreFromText(value)
                 if fromAttr then
-                    scoreOreCandidate(bucket, fromAttr, baseScore + 10)
+                    scoreOreCandidate(bucket, fromAttr, baseScore + 12)
                 end
             end
 
-            local fromInstanceName = canonicalizeOreName(instance.Name) or pickKnownOreFromText(instance.Name)
-            if fromInstanceName then
-                scoreOreCandidate(bucket, fromInstanceName, baseScore + 4)
-            end
-
             local function scanOne(desc)
+                if not isInstance(desc) then return end
+                if desc.Name == "UH_ESP_Billboard" or desc.Name == "UH_ESP_Highlight" then
+                    return
+                end
+                if desc:IsA("BillboardGui") or desc:IsA("TextLabel") or desc:IsA("TextButton") then
+                    return
+                end
+
                 if desc:IsA("StringValue") then
+                    if not hasOreKeyHint(desc.Name) then
+                        return
+                    end
                     local fromValueName = canonicalizeOreName(desc.Name) or pickKnownOreFromText(desc.Name)
                     local fromValueText = canonicalizeOreName(desc.Value) or pickKnownOreFromText(desc.Value)
-                    if fromValueName then scoreOreCandidate(bucket, fromValueName, baseScore + 5) end
-                    if fromValueText then scoreOreCandidate(bucket, fromValueText, baseScore + 7) end
+                    if fromValueName then scoreOreCandidate(bucket, fromValueName, baseScore + 6) end
+                    if fromValueText then scoreOreCandidate(bucket, fromValueText, baseScore + 9) end
                 elseif desc:IsA("IntValue") or desc:IsA("NumberValue") then
+                    if not hasOreKeyHint(desc.Name) then
+                        return
+                    end
                     local fromNumericName = canonicalizeOreName(desc.Name) or pickKnownOreFromText(desc.Name)
                     if fromNumericName then
-                        scoreOreCandidate(bucket, fromNumericName, baseScore + 3)
-                    end
-                else
-                    local fromDescName = canonicalizeOreName(desc.Name) or pickKnownOreFromText(desc.Name)
-                    if fromDescName then
-                        scoreOreCandidate(bucket, fromDescName, baseScore + 1)
+                        scoreOreCandidate(bucket, fromNumericName, baseScore + 4)
                     end
                 end
             end
@@ -1162,10 +1176,10 @@ return function(Window, scriptInfo)
             if not bestName then
                 return nil, 0
             end
-            if bestScore < 14 then
+            if bestScore < 18 then
                 return nil, bestScore
             end
-            if bestScore - secondBest < 3 then
+            if bestScore - secondBest < 5 then
                 return nil, bestScore
             end
             return bestName, bestScore
@@ -1177,6 +1191,11 @@ return function(Window, scriptInfo)
             local changed = false
             local signature = makeOreSignature(target, renderPart)
             local coarseSignature = makeOreSignatureCoarse(target, renderPart)
+            local oreId = getOreIdentifierDeep(target, renderPart)
+            -- Prevent poisoning memory when there is no reliable ID source.
+            if not oreId then
+                return
+            end
             if signature and not oreNameBySignature[signature] then
                 oreNameBySignature[signature] = inferredName
                 oreInferenceStats.learned = oreInferenceStats.learned + 1
@@ -1186,7 +1205,6 @@ return function(Window, scriptInfo)
                 oreNameBySignatureCoarse[coarseSignature] = inferredName
                 changed = true
             end
-            local oreId = getOreIdentifierDeep(target, renderPart)
             if oreId and not oreNameById[oreId] and inferredScore >= 18 then
                 oreNameById[oreId] = inferredName
                 changed = true
@@ -2377,12 +2395,17 @@ return function(Window, scriptInfo)
                 end
             end
             local loadState = settingsLoadOk and "load:ok" or (canReadSettingsFile and "load:none/new" or "load:off")
+            local saveErrorText = ""
+            if settingsLastSaveError then
+                saveErrorText = " | err:" .. string.sub(tostring(settingsLastSaveError), 1, 22)
+            end
             OreLearningStatusLabel:Set(string.format(
-                "Ore Memory: %d entries | learned:%d | %s | %s",
+                "Ore Memory: %d entries | learned:%d | %s | %s%s",
                 memoryCount,
                 oreInferenceStats.learned,
                 loadState,
-                ioState
+                ioState,
+                saveErrorText
             ))
         end
         updateOreLearningStatus()
