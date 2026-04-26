@@ -916,6 +916,7 @@ return function(Window, scriptInfo)
         local oreNameBySignatureCoarse = autoSettingsLoaded.oreNameBySignatureCoarse
         local oreNameByColorSignature = autoSettingsLoaded.oreNameByColorSignature
         local oreInferenceStats = { learned = 0 }
+        local useStrictColorRules = true
         local getOreRenderPart
         local getOreIdentifierDeep
         local knownOreNames = {
@@ -1110,6 +1111,18 @@ return function(Window, scriptInfo)
             return table.concat({ className, material, color, meshId }, "|")
         end
 
+        -- Rule-based mapping from real in-game samples (Dex/Properties), no guessing.
+        local oreNameByStaticColorSignature = {
+            -- ShaleMetalBlock (Tin sample)
+            ["MeshPart|Plastic|64,116,199|rbxassetid://109851935916635"] = "Tin",
+            -- OreMesh (Tin sample)
+            ["MeshPart|Plastic|133,171,185|rbxassetid://18890509556"] = "Tin",
+            -- CrystallineMetalOre (Vanadium sample)
+            ["MeshPart|Plastic|166,64,46|rbxassetid://107025224910125"] = "Vanadium",
+            -- SolidStone sample (shown as Explosives!)
+            ["MeshPart|Glacier|15,12,20|rbxassetid://93787691661882"] = "Explosives",
+        }
+
         local function scoreOreCandidate(bucket, candidate, score)
             if not candidate or not score then return end
             bucket[candidate] = (bucket[candidate] or 0) + score
@@ -1214,6 +1227,9 @@ return function(Window, scriptInfo)
         end
 
         local function autoLearnOreMapping(target, renderPart)
+            if useStrictColorRules then
+                return
+            end
             local inferredName, inferredScore = inferOreNameFromTarget(target, renderPart)
             if not inferredName then return end
             local changed = false
@@ -1274,6 +1290,9 @@ return function(Window, scriptInfo)
                     return oreNameBySignatureCoarse[coarseSignature], "coarse"
                 end
                 local colorSignature = makeOreColorSignature(target, renderPart)
+                if colorSignature and oreNameByStaticColorSignature[colorSignature] then
+                    return oreNameByStaticColorSignature[colorSignature], "static-color"
+                end
                 if colorSignature and oreNameByColorSignature[colorSignature] then
                     return oreNameByColorSignature[colorSignature], "color"
                 end
@@ -1461,6 +1480,9 @@ return function(Window, scriptInfo)
                 coarseSignature = makeOreSignatureCoarse(target, renderPart)
             end
             local colorSignature = makeOreColorSignature(target, renderPart)
+            if colorSignature and oreNameByStaticColorSignature[colorSignature] then
+                return oreNameByStaticColorSignature[colorSignature]
+            end
             autoLearnOreMapping(target, renderPart)
             if signature and oreNameBySignature[signature] then
                 return oreNameBySignature[signature]
@@ -1468,11 +1490,18 @@ return function(Window, scriptInfo)
             if coarseSignature and oreNameBySignatureCoarse[coarseSignature] then
                 return oreNameBySignatureCoarse[coarseSignature]
             end
+            if colorSignature and oreNameByColorSignature[colorSignature] then
+                return oreNameByColorSignature[colorSignature]
+            end
             local runtimeName = normalizeOreToken(isInstance(target) and target.Name or nil)
             local genericRuntime = runtimeName == "OreMesh" or runtimeName == "CrystallineMetalOre" or runtimeName == "CubicBlockMetal" or runtimeName == "ShaleMetalBlock" or runtimeName == "GemBlockMesh"
             if runtimeName and not genericRuntime and oreNameByRuntime[runtimeName] then
                 return oreNameByRuntime[runtimeName]
             end
+            if useStrictColorRules then
+                return "Unknown"
+            end
+
             local candidates = {
                 getNameFromAttributes(target),
                 getNameFromAttributes(renderPart),
@@ -1540,6 +1569,7 @@ return function(Window, scriptInfo)
             if type(makeOreSignatureCoarse) == "function" then
                 coarseSignature = makeOreSignatureCoarse(target, renderPart)
             end
+            local colorSignature = makeOreColorSignature(target, renderPart)
 
             local resolvedName = normalizeOreToken(forcedName)
             if not resolvedName or resolvedName == "" then
@@ -1913,7 +1943,7 @@ return function(Window, scriptInfo)
                     writefile(SETTINGS_FILE, HttpService:JSONEncode(payload))
                 end)
                 settingsSaveOk = okWrite
-                settingsLastSaveError = okWrite and nil or tostring(errWrite)
+                settingsLastSaveError = okWrite and nil or (errWrite and tostring(errWrite) or "unknown")
             end)
         end
 
