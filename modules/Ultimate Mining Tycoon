@@ -1847,6 +1847,9 @@ return function(Window, scriptInfo)
                         local LocalPlayer = Players.LocalPlayer
                         local lockedTarget = nil
                         local activeTween = nil
+                        local lastTargetSignature = nil
+                        local sameTargetLoops = 0
+                        local stuckResetLoops = 16
                         local function resolveActivateRemote(tool)
                             local madCommEvents = ReplicatedStorage:FindFirstChild("MadCommEvents")
                             -- Fallback for Ultimate Mining Tycoon (captured remote id)
@@ -1928,6 +1931,22 @@ return function(Window, scriptInfo)
                             return dist <= (autoMineRange + 8)
                         end
 
+                        local function markTargetLoop(target, renderPart)
+                            local sig = makeOreSignature(target, renderPart) or tostring(target)
+                            if sig == lastTargetSignature then
+                                sameTargetLoops = sameTargetLoops + 1
+                            else
+                                lastTargetSignature = sig
+                                sameTargetLoops = 1
+                            end
+                        end
+
+                        local function resetTargetLock()
+                            lockedTarget = nil
+                            lastTargetSignature = nil
+                            sameTargetLoops = 0
+                        end
+
                         local function tweenToOre(rootPart, orePart)
                             if not autoMineUseTween then
                                 if activeTween then
@@ -1997,7 +2016,7 @@ return function(Window, scriptInfo)
                                 if isTargetValid(lockedTarget, root) then
                                     closestBlock = lockedTarget
                                 else
-                                    lockedTarget = nil
+                                    resetTargetLock()
                                     for _, container in ipairs(oreContainers) do
                                         if container then
                                             for _,v in pairs(container:GetChildren()) do
@@ -2041,9 +2060,17 @@ return function(Window, scriptInfo)
                                     local activateRemote = resolveActivateRemote(Tool)
                                     if activateRemote then
                                         activateRemote:FireServer(table.unpack(args))
-                                        OreLabel:Set("Auto Mine Status: mining " .. tostring(oreName) .. " (locked)")
+                                        markTargetLoop(closestBlock, renderPart)
+                                        if sameTargetLoops >= stuckResetLoops then
+                                            OreLabel:Set("Auto Mine Status: re-targeting (stuck)")
+                                            resetTargetLock()
+                                            task.wait(0.08)
+                                            continue
+                                        end
+                                        OreLabel:Set("Auto Mine Status: mining " .. tostring(oreName) .. " (locked x" .. tostring(sameTargetLoops) .. ")")
                                     else
                                         OreLabel:Set("Auto Mine Status: Activate remote missing")
+                                        resetTargetLock()
                                     end
                                     task.wait(autoMineDelay)
                                     continue
@@ -2052,6 +2079,7 @@ return function(Window, scriptInfo)
                                         pcall(function() activeTween:Cancel() end)
                                         activeTween = nil
                                     end
+                                    resetTargetLock()
                                     OreLabel:Set("Auto Mine Status: no target in range")
                                 end
                             end
