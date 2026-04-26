@@ -1373,6 +1373,9 @@ return function(Window, scriptInfo)
         end
 
         local function getNeighborConsensusName(target, renderPart)
+            if useStrictColorRules then
+                return nil
+            end
             if not isInstance(target) or not isInstance(renderPart) then
                 return nil
             end
@@ -1521,7 +1524,7 @@ return function(Window, scriptInfo)
             end
             local mappedName, mappedSource = getMappedOreNameOnly(target, renderPart)
             if mappedName then
-                if mappedSource ~= "id" then
+                if (not useStrictColorRules) and mappedSource ~= "id" then
                     local consensus = getNeighborConsensusName(target, renderPart)
                     if consensus and consensus ~= mappedName then
                         local signature = makeOreSignature(target, renderPart)
@@ -1532,6 +1535,10 @@ return function(Window, scriptInfo)
                     end
                 end
                 return mappedName
+            end
+
+            if useStrictColorRules then
+                return "Unknown"
             end
 
             local directColorName = classifyOreByDirectColor(target, renderPart)
@@ -1566,10 +1573,6 @@ return function(Window, scriptInfo)
             if runtimeName and not genericRuntime and oreNameByRuntime[runtimeName] then
                 return oreNameByRuntime[runtimeName]
             end
-            if useStrictColorRules then
-                return "Unknown"
-            end
-
             local candidates = {
                 getNameFromAttributes(target),
                 getNameFromAttributes(renderPart),
@@ -1762,6 +1765,15 @@ return function(Window, scriptInfo)
             return nil
         end
 
+        local function getOreNameForEsp(target, renderPart)
+            local name = nil
+            if useStrictColorRules then
+                name = (select(1, getMappedOreNameOnly(target, renderPart)))
+                return name or "Unknown"
+            end
+            return getOreName(target)
+        end
+
         local function getOreName(target)
             if not target then
                 return "OreMesh"
@@ -1809,7 +1821,7 @@ return function(Window, scriptInfo)
             local renderPart = getOreRenderPart(target)
             if not renderPart then return end
 
-            local oreName = getOreName(target)
+            local oreName = getOreNameForEsp(target, renderPart)
             if ESP.filterOre ~= "All" and oreName ~= ESP.filterOre then return end
     
             local color = getOreColor(target, oreName, renderPart)
@@ -1937,7 +1949,9 @@ return function(Window, scriptInfo)
                         v.highlight.Enabled = visible
                         v.billboard.Enabled = visible
                         if visible then
-                            v.label.Text = string.format("%s\n[%d studs]", getOreName(target), math.floor(dist))
+                            local renderPart = getOreRenderPart(target)
+                            local oreName = getOreNameForEsp(target, renderPart)
+                            v.label.Text = string.format("%s\n[%d studs]", oreName, math.floor(dist))
                         end
                     end
                 end
