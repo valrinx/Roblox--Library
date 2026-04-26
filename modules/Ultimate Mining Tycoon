@@ -2020,17 +2020,50 @@ return function(Window, scriptInfo)
 
         local function getOreIgnoreOptions()
             local options = {}
-            for _, oreName in ipairs(getOreTypes()) do
-                if oreName ~= "All" then
-                    table.insert(options, oreName)
+            local seen = {}
+            local function pushName(name)
+                if type(name) ~= "string" then return end
+                local canonical = canonicalizeOreName(name) or normalizeOreToken(name)
+                if not canonical or canonical == "All" then return end
+                if genericOreNames[canonical] and canonical ~= "OreMesh" then
+                    return
+                end
+                if not seen[canonical] then
+                    seen[canonical] = true
+                    table.insert(options, canonical)
                 end
             end
+
+            -- Always include the full known ore catalog first.
+            for _, oreName in ipairs(knownOreNames) do
+                pushName(oreName)
+            end
+            pushName("OreMesh")
+
+            -- Include user-learned mappings so ignored list can cover inferred names too.
+            for _, mappedName in pairs(oreNameById or {}) do pushName(mappedName) end
+            for _, mappedName in pairs(oreNameByRuntime or {}) do pushName(mappedName) end
+            for _, mappedName in pairs(oreNameBySignature or {}) do pushName(mappedName) end
+            for _, mappedName in pairs(oreNameBySignatureCoarse or {}) do pushName(mappedName) end
+            for _, mappedName in pairs(oreNameByColorSignature or {}) do pushName(mappedName) end
+
+            -- Keep currently spawned ore names for compatibility with dynamic maps.
+            for _, oreName in ipairs(getOreTypes()) do
+                if oreName ~= "All" then
+                    pushName(oreName)
+                end
+            end
+
+            table.sort(options, function(a, b)
+                return string.lower(a) < string.lower(b)
+            end)
+
             if #options == 0 then
                 options = {
-                    "Tin", "Iron", "Lead", "Cobalt", "Aluminium", "Silver", "Uranium", "Vanadium",
-                    "Tungsten", "Gold", "Titanium", "Palladium", "Plutonium", "Mithril", "Thorium",
-                    "Iridium", "Adamantium", "Rhodium", "Unobtanium", "Topaz", "Emerald", "Sapphire",
-                    "Ruby", "Diamond", "Poudretteite", "Zultanite", "Grandidierite", "Musgravite", "Painite", "OreMesh",
+                    "Adamantium", "Aluminium", "Cobalt", "Diamond", "Emerald", "Gold", "Grandidierite",
+                    "Iron", "Iridium", "Lead", "Mithril", "Musgravite", "OreMesh", "Palladium", "Painite",
+                    "Plutonium", "Poudretteite", "Rhodium", "Ruby", "Sapphire", "Silver", "Sliver", "Thorium",
+                    "Tin", "Titanium", "Topaz", "Tungsten", "Unobtanium", "Uranium", "Vanadium", "Zultanite",
                 }
             end
             return options
