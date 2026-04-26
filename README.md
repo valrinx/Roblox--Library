@@ -81,6 +81,7 @@
 - ปรับ `Ore ESP` เป็นโหมดไม่เดา (strict): ปิด neighbor-consensus สำหรับ strict mode และให้ ESP แสดงชื่อเฉพาะจาก mapping ที่ยืนยันแล้ว (`id/static-color/color-signature`) เท่านั้น; ไม่ตรงให้ขึ้น `Unknown` เพื่อกันทับซ้อน/เดามั่ว
 - ปรับสีไฮไลท์ `Ore ESP` ให้ตรง `part.Color` มากขึ้น: ตัดการผสมสีโดยตั้ง `OutlineColor = FillColor` และตั้ง `FillTransparency = 0` เพื่อไม่ให้ blend กับฉากหลัง/แสง
 - แก้สีไฮไลท์ยังเพี้ยน (โดยเฉพาะ `Neon`): เปลี่ยน visual ของ ESP จาก `Highlight` เป็น `BoxHandleAdornment` (ใช้ `Color3` ตรง + คุม transparency เอง) เพื่อให้สีตรงกับ `part.Color` มากที่สุด
+- แก้ `Ore ESP` สีเขียว/ผิดสีทั้งที่ Properties เป็นสีอื่น: ปรับ `getOreRenderPart()` ให้เลือก `MeshPart`/ชิ้นที่เห็นจริงก่อน (และ fallback เป็น `BasePart` ที่ใหญ่สุด) เพื่ออ่าน `part.Color` จากชิ้นที่ถูกต้อง ไม่หลุดไปอ่านจาก part ลูกที่สีคนละตัว
 - เพิ่มระบบแชร์ mapping ชื่อแร่ให้คนอื่นไม่ต้องตั้งเอง: รองรับ `sharedOreNameByColorSignature` (นำเข้า/ส่งออก JSON ผ่านปุ่ม Export/Import) และให้ ESP ใช้ shared map ก่อน map ส่วนตัวในโหมด strict
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
