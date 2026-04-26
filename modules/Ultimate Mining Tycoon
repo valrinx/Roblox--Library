@@ -20,6 +20,7 @@ return function(Window, scriptInfo)
         oreNameByRuntime = {},
         oreNameBySignature = {},
         oreNameBySignatureCoarse = {},
+        oreNameByColorSignature = {},
     }
     local saveSettingsTaskId = 0
     local saveAutoSettings
@@ -74,6 +75,9 @@ return function(Window, scriptInfo)
         end
         if isStringMap(decoded.oreNameBySignatureCoarse) then
             autoSettingsLoaded.oreNameBySignatureCoarse = decoded.oreNameBySignatureCoarse
+        end
+        if isStringMap(decoded.oreNameByColorSignature) then
+            autoSettingsLoaded.oreNameByColorSignature = decoded.oreNameByColorSignature
         end
         settingsLoadOk = true
     end)
@@ -910,6 +914,7 @@ return function(Window, scriptInfo)
         local oreNameByRuntime = autoSettingsLoaded.oreNameByRuntime
         local oreNameBySignature = autoSettingsLoaded.oreNameBySignature
         local oreNameBySignatureCoarse = autoSettingsLoaded.oreNameBySignatureCoarse
+        local oreNameByColorSignature = autoSettingsLoaded.oreNameByColorSignature
         local oreInferenceStats = { learned = 0 }
         local getOreRenderPart
         local getOreIdentifierDeep
@@ -1086,6 +1091,25 @@ return function(Window, scriptInfo)
             }, "|")
         end
 
+        local function makeOreColorSignature(target, renderPart)
+            local part = renderPart
+            if not isInstance(part) and type(getOreRenderPart) == "function" then
+                part = getOreRenderPart(target)
+            end
+            if not isInstance(part) then
+                return nil
+            end
+
+            local className = part.ClassName or "Part"
+            local material = tostring(part.Material or "Plastic")
+            local color = colorToShortString(part.Color)
+            local meshId = ""
+            if part:IsA("MeshPart") then
+                meshId = normalizeOreToken(part.MeshId) or ""
+            end
+            return table.concat({ className, material, color, meshId }, "|")
+        end
+
         local function scoreOreCandidate(bucket, candidate, score)
             if not candidate or not score then return end
             bucket[candidate] = (bucket[candidate] or 0) + score
@@ -1195,6 +1219,7 @@ return function(Window, scriptInfo)
             local changed = false
             local signature = makeOreSignature(target, renderPart)
             local coarseSignature = makeOreSignatureCoarse(target, renderPart)
+            local colorSignature = makeOreColorSignature(target, renderPart)
             local oreId = nil
             if type(getOreIdentifierDeep) == "function" then
                 oreId = getOreIdentifierDeep(target, renderPart)
@@ -1210,6 +1235,10 @@ return function(Window, scriptInfo)
             end
             if coarseSignature and not oreNameBySignatureCoarse[coarseSignature] then
                 oreNameBySignatureCoarse[coarseSignature] = inferredName
+                changed = true
+            end
+            if colorSignature and not oreNameByColorSignature[colorSignature] then
+                oreNameByColorSignature[colorSignature] = inferredName
                 changed = true
             end
             if oreId and not oreNameById[oreId] and inferredScore >= 18 then
@@ -1244,8 +1273,13 @@ return function(Window, scriptInfo)
                 if coarseSignature and oreNameBySignatureCoarse[coarseSignature] then
                     return oreNameBySignatureCoarse[coarseSignature], "coarse"
                 end
+                local colorSignature = makeOreColorSignature(target, renderPart)
+                if colorSignature and oreNameByColorSignature[colorSignature] then
+                    return oreNameByColorSignature[colorSignature], "color"
+                end
                 local runtimeName = normalizeOreToken(isInstance(target) and target.Name or nil)
-                if runtimeName and oreNameByRuntime[runtimeName] then
+                local genericRuntime = runtimeName == "OreMesh" or runtimeName == "CrystallineMetalOre" or runtimeName == "CubicBlockMetal" or runtimeName == "ShaleMetalBlock" or runtimeName == "GemBlockMesh"
+                if runtimeName and not genericRuntime and oreNameByRuntime[runtimeName] then
                     return oreNameByRuntime[runtimeName], "runtime"
                 end
                 return nil, nil
@@ -1426,6 +1460,7 @@ return function(Window, scriptInfo)
             if type(makeOreSignatureCoarse) == "function" then
                 coarseSignature = makeOreSignatureCoarse(target, renderPart)
             end
+            local colorSignature = makeOreColorSignature(target, renderPart)
             autoLearnOreMapping(target, renderPart)
             if signature and oreNameBySignature[signature] then
                 return oreNameBySignature[signature]
@@ -1434,7 +1469,8 @@ return function(Window, scriptInfo)
                 return oreNameBySignatureCoarse[coarseSignature]
             end
             local runtimeName = normalizeOreToken(isInstance(target) and target.Name or nil)
-            if runtimeName and oreNameByRuntime[runtimeName] then
+            local genericRuntime = runtimeName == "OreMesh" or runtimeName == "CrystallineMetalOre" or runtimeName == "CubicBlockMetal" or runtimeName == "ShaleMetalBlock" or runtimeName == "GemBlockMesh"
+            if runtimeName and not genericRuntime and oreNameByRuntime[runtimeName] then
                 return oreNameByRuntime[runtimeName]
             end
             local candidates = {
@@ -1451,9 +1487,12 @@ return function(Window, scriptInfo)
                 table.insert(candidates, 1, inferredName)
             end
 
-            for _, name in ipairs(candidates) do
-                if isMeaningfulOreName(name) then
-                    return name
+            local hasReliableId = type(getOreIdentifierDeep) == "function" and getOreIdentifierDeep(target, renderPart) ~= nil
+            if hasReliableId then
+                for _, name in ipairs(candidates) do
+                    if isMeaningfulOreName(name) then
+                        return name
+                    end
                 end
             end
 
@@ -1466,9 +1505,11 @@ return function(Window, scriptInfo)
                 return renderPartName
             end
 
-            for _, name in ipairs(candidates) do
-                if name then
-                    return name
+            if hasReliableId then
+                for _, name in ipairs(candidates) do
+                    if name then
+                        return name
+                    end
                 end
             end
 
@@ -1516,11 +1557,17 @@ return function(Window, scriptInfo)
                 if coarseSignature then
                     oreNameBySignatureCoarse[coarseSignature] = resolvedName
                 end
+                if colorSignature then
+                    oreNameByColorSignature[colorSignature] = resolvedName
+                end
             else
                 if signature then
                     oreNameBySignature[signature] = resolvedName
                     if coarseSignature then
                         oreNameBySignatureCoarse[coarseSignature] = resolvedName
+                    end
+                    if colorSignature then
+                        oreNameByColorSignature[colorSignature] = resolvedName
                     end
                 else
                     local runtimeName = normalizeOreToken(isInstance(target) and target.Name or nil)
@@ -1860,6 +1907,7 @@ return function(Window, scriptInfo)
                     oreNameByRuntime = oreNameByRuntime,
                     oreNameBySignature = oreNameBySignature,
                     oreNameBySignatureCoarse = oreNameBySignatureCoarse,
+                    oreNameByColorSignature = oreNameByColorSignature,
                 }
                 local okWrite, errWrite = pcall(function()
                     writefile(SETTINGS_FILE, HttpService:JSONEncode(payload))
@@ -1887,6 +1935,7 @@ return function(Window, scriptInfo)
                         local lastTargetSignature = nil
                         local sameTargetLoops = 0
                         local stuckResetLoops = 16
+                        local blockedTargetUntil = {}
                         local function resolveActivateRemote(tool)
                             local madCommEvents = ReplicatedStorage:FindFirstChild("MadCommEvents")
                             -- Fallback for Ultimate Mining Tycoon (captured remote id)
@@ -1984,6 +2033,26 @@ return function(Window, scriptInfo)
                             sameTargetLoops = 0
                         end
 
+                        local function getTargetKey(target, renderPart)
+                            return makeOreSignature(target, renderPart) or tostring(target)
+                        end
+
+                        local function isTargetTemporarilyBlocked(target, renderPart)
+                            local key = getTargetKey(target, renderPart)
+                            local t = blockedTargetUntil[key]
+                            if not t then return false end
+                            if t <= os.clock() then
+                                blockedTargetUntil[key] = nil
+                                return false
+                            end
+                            return true
+                        end
+
+                        local function blockTargetTemporarily(target, renderPart, seconds)
+                            local key = getTargetKey(target, renderPart)
+                            blockedTargetUntil[key] = os.clock() + (seconds or 2.0)
+                        end
+
                         local function tweenToOre(rootPart, orePart)
                             if not autoMineUseTween then
                                 if activeTween then
@@ -2059,6 +2128,9 @@ return function(Window, scriptInfo)
                                             for _,v in pairs(container:GetChildren()) do
                                                 local renderPart = getOreRenderPart(v)
                                                 if renderPart then
+                                                    if isTargetTemporarilyBlocked(v, renderPart) then
+                                                        continue
+                                                    end
                                                     local oreName = getOreName(v)
                                                     if isIgnoredOre(oreName) then
                                                         continue
@@ -2100,6 +2172,7 @@ return function(Window, scriptInfo)
                                         markTargetLoop(closestBlock, renderPart)
                                         if sameTargetLoops >= stuckResetLoops then
                                             OreLabel:Set("Auto Mine Status: re-targeting (stuck)")
+                                            blockTargetTemporarily(closestBlock, renderPart, 2.5)
                                             resetTargetLock()
                                             task.wait(0.08)
                                             continue
@@ -2521,7 +2594,7 @@ return function(Window, scriptInfo)
         end
 
         local function updateOreLearningStatus()
-            local memoryCount = countTableEntries(oreNameById) + countTableEntries(oreNameBySignature) + countTableEntries(oreNameBySignatureCoarse)
+            local memoryCount = countTableEntries(oreNameById) + countTableEntries(oreNameBySignature) + countTableEntries(oreNameBySignatureCoarse) + countTableEntries(oreNameByColorSignature)
             local ioState = "save:off"
             if canWriteSettingsFile then
                 ioState = settingsSaveOk and "save:ok" or "save:pending"
