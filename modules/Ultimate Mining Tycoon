@@ -1919,7 +1919,7 @@ return function(Window, scriptInfo)
             lbl.Text                   = oreName
             lbl.Parent                 = bb
     
-            ESP.activeVisuals[target] = { visual = visual, billboard = bb, label = lbl }
+            ESP.activeVisuals[target] = { visual = visual, billboard = bb, label = lbl, renderPart = renderPart }
     
             local conn = target.AncestryChanged:Connect(function()
                 if not target.Parent then
@@ -2020,6 +2020,32 @@ return function(Window, scriptInfo)
                         if visible then
                             local renderPart = getOreRenderPart(target)
                             local oreName = getOreNameForEsp(target, renderPart)
+                            local color = getOreColor(target, oreName, renderPart)
+
+                            -- Keep ESP color/adornee in sync (no manual refresh needed).
+                            if v.renderPart ~= renderPart then
+                                v.renderPart = renderPart
+                                if v.visual and v.visual:IsA("BoxHandleAdornment") and renderPart then
+                                    v.visual.Adornee = renderPart
+                                end
+                                if v.billboard and renderPart then
+                                    v.billboard.Adornee = renderPart
+                                end
+                            end
+                            if v.visual then
+                                if v.visual:IsA("Highlight") then
+                                    v.visual.FillColor = color
+                                    v.visual.OutlineColor = color
+                                elseif v.visual:IsA("BoxHandleAdornment") then
+                                    v.visual.Color3 = color
+                                    if renderPart and renderPart:IsA("BasePart") then
+                                        v.visual.Size = renderPart.Size + Vector3.new(0.05, 0.05, 0.05)
+                                    end
+                                end
+                            end
+                            if v.label then
+                                v.label.TextColor3 = color
+                            end
                             v.label.Text = string.format("%s\n[%d studs]", oreName, math.floor(dist))
                         end
                     end
