@@ -26,6 +26,10 @@
 
 ### Change Log (Roblox--Library)
 - เริ่มเพิ่มเอกสารภาพรวมของโปรเจกต์ใน `README.md`
+- แก้ `modules/Ultimate Mining Tycoon` ให้ Ore ESP ติดกับแร่ที่เป็นทั้ง `BasePart` และ `Model`
+- เพิ่มปุ่ม `Destroy Menu (Reload Script)` ใน `modules/Ultimate Mining Tycoon` เพื่อปิดสคริปต์และรันใหม่ได้ทันที
+- แก้ `modules/My_knife_farm` ไม่ให้ fallback ไป `Plots.Plot_1` แบบตายตัว
+- ปรับ `RAVENHUB` ระบบคัดโหลดโมดูลให้รองรับ `placeIds/gameIds` และเพิ่มตัวตรวจจับแมพสำรองของ UMT
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
