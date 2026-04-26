@@ -67,6 +67,8 @@
 - แก้ `Auto Mine` อาการค้างเป้าซ้ำ (ขุดไม่ต่อเนื่อง): เพิ่มระบบตรวจ `stuck target` จากการล็อกก้อนเดิมหลายรอบติด และบังคับ `re-target` อัตโนมัติเมื่อเกิน threshold เพื่อลดการต้องปิด/เปิด Auto Mine เอง
 - แก้ error `AutoMine/OreESP` (`attempt to call a nil value` ที่ `getMappedOreNameOnly`): ทำ forward declaration ให้ `getOreIdentifierDeep` (แก้ลำดับ scope ของ Lua) และใส่ guard เช็กชนิดฟังก์ชันก่อนเรียกในเส้นทาง resolve/map
 - harden ซ้ำจุด crash `getMappedOreNameOnly`: ครอบ lookup ด้วย `pcall` และเปลี่ยน parser ใน `makeOreSignatureCoarse` จาก `string.split` เป็น `string.gmatch` เพื่อกัน environment ที่ไม่มี helper แล้วเด้ง `attempt to call a nil value`
+- ปรับแก้ตามข้อมูล Dex จริงของ ore (`CrystallineMetalOre`): เพิ่ม memory ชั้น `color signature` (Class/Material/Color/MeshId) และลดการพึ่ง runtime mapping generic เพื่อลดชื่อแร่มั่ว
+- แก้ `Auto Mine` ค้างก้อนเดิมเพิ่ม: ใส่ระบบ `temporary target blacklist` เมื่อ detect stuck แล้ว re-target ไปก้อนอื่นอัตโนมัติ ลดการวนขุดก้อนเดิมซ้ำ
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
