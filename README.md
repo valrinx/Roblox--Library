@@ -64,6 +64,7 @@
 - ปรับระบบจำชื่อแร่ให้ติดมากขึ้น: เพิ่ม `coarse signature` (Material/Color/MeshId/TextureID) เป็นชั้น fallback ของ memory และบันทึกลงไฟล์ settings พร้อมสถานะ `load/save` ใน UI เพื่อเช็กได้ว่าเซฟจริงหรือไม่
 - ลดการเดาชื่อผิดของ ESP: จำกัดแหล่ง inference ให้เชื่อเฉพาะ metadata ที่มีคีย์บอกความเป็นแร่ (ore/mine/resource/...) และตัดข้อมูลจาก UI descendants ออก พร้อมเพิ่ม threshold ความมั่นใจและไม่ auto-learn ถ้าไม่มี `OreId/MineId`
 - แก้เคสชื่อแร่หลุดเดี่ยว (outlier) เช่น `Plutonium` โผล่ในกลุ่ม `Titanium`: เพิ่มระบบ `neighbor consensus` (majority vote จากก้อนใกล้เคียงที่มีแมพเชื่อถือได้) เพื่อ auto-correct ชื่อที่แมพผิดในระดับ signature/coarse
+- แก้ `Auto Mine` อาการค้างเป้าซ้ำ (ขุดไม่ต่อเนื่อง): เพิ่มระบบตรวจ `stuck target` จากการล็อกก้อนเดิมหลายรอบติด และบังคับ `re-target` อัตโนมัติเมื่อเกิน threshold เพื่อลดการต้องปิด/เปิด Auto Mine เอง
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
