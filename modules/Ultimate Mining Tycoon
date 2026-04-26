@@ -1827,10 +1827,37 @@ return function(Window, scriptInfo)
             end,
         })
     
+        local oreIgnoreOptions = {}
+        local okOreOptions, resultOreOptions = pcall(getOreIgnoreOptions)
+        if okOreOptions and type(resultOreOptions) == "table" then
+            oreIgnoreOptions = resultOreOptions
+        else
+            oreIgnoreOptions = {
+                "Tin", "Iron", "Lead", "Cobalt", "Aluminium", "Silver", "Uranium", "Vanadium",
+                "Tungsten", "Gold", "Titanium", "Palladium", "Plutonium", "Mithril", "Thorium",
+                "Iridium", "Adamantium", "Rhodium", "Unobtanium", "Topaz", "Emerald", "Sapphire",
+                "Ruby", "Diamond", "Poudretteite", "Zultanite", "Grandidierite", "Musgravite", "Painite", "OreMesh",
+            }
+        end
+
+        local savedIgnoreSet = {}
+        for _, name in ipairs(oreIgnoreOptions) do
+            savedIgnoreSet[name] = true
+        end
+        local sanitizedIgnoreList = {}
+        if type(OreIgnoreList) == "table" then
+            for _, name in ipairs(OreIgnoreList) do
+                if type(name) == "string" and savedIgnoreSet[name] then
+                    table.insert(sanitizedIgnoreList, name)
+                end
+            end
+        end
+        OreIgnoreList = sanitizedIgnoreList
+
         local OreIgnoreDropdown = Farm:CreateDropdown({
             Name = "Ore Ignore List",
-            Options = getOreIgnoreOptions(),
-            CurrentOption = OreIgnoreList,
+            Options = oreIgnoreOptions,
+            CurrentOption = {},
             MultipleOptions = true,
             Flag = "OreIgnoreList",
             Callback = function(Options)
@@ -1838,6 +1865,13 @@ return function(Window, scriptInfo)
                 saveAutoSettings()
             end,
         })
+        if #OreIgnoreList > 0 then
+            task.defer(function()
+                pcall(function()
+                    OreIgnoreDropdown:Set(OreIgnoreList)
+                end)
+            end)
+        end
     
         -- Auto Sell Section
         local AutoSellSection = Farm:CreateSection("💰 Auto Sell")
