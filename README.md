@@ -37,6 +37,7 @@
 - แก้ล่าสุด: ส่ง `hubRayfield` จาก `RAVENHUB` เข้าโมดูล และให้ UMT ใช้ instance เดิมแทนการ `loadstring` Rayfield ใหม่
 - ปรับระบบอ่านชื่อแร่ใน `modules/Ultimate Mining Tycoon`: อ่านจาก attributes/descendants + normalize ชื่อ (ตัด `Block/Mesh`, แยก CamelCase) และ cache ชื่อเพื่อลดชื่อผิดแบบ `Unknown/GemBlockMesh`
 - ปรับกลับเป็นแบบเดิมตามคำสั่ง: ชื่อแร่ใช้แหล่งข้อมูลหลักเดิม และกรณีไม่ทราบชื่อให้แสดง `OreMesh` แทน `Unknown`
+- แก้ fallback ชื่อแร่เพิ่มเติม: กรณีชื่อ generic เป็น `SurfaceAppearance` ให้แสดง `OreMesh` แทน
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
