@@ -1830,7 +1830,8 @@ return function(Window, scriptInfo)
             hl.Name                = "UH_ESP_Highlight"
             hl.FillColor           = color
             hl.OutlineColor        = color
-            hl.FillTransparency    = 0.35
+            -- Use solid fill so the perceived color matches part.Color (no background blend).
+            hl.FillTransparency    = 0
             hl.OutlineTransparency = 0
             hl.DepthMode           = Enum.HighlightDepthMode.AlwaysOnTop
             hl.Adornee             = target
