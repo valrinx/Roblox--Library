@@ -13,6 +13,8 @@ return function(Window, scriptInfo)
         autoMineDelay = 1.2,
         autoMineUseTween = false,
         autoMineTweenSpeed = 45,
+        teleportTweenSpeed = 120,
+        teleportTweenMaxDuration = 2.2,
         safeProfileEnabled = true,
         safeNearbyPauseEnabled = true,
         safeNearbyRadius = 70,
@@ -66,6 +68,8 @@ return function(Window, scriptInfo)
         autoSettingsLoaded.autoMineDelay = tonumber(decoded.autoMineDelay) or autoSettingsLoaded.autoMineDelay
         autoSettingsLoaded.autoMineUseTween = decoded.autoMineUseTween == true
         autoSettingsLoaded.autoMineTweenSpeed = tonumber(decoded.autoMineTweenSpeed) or autoSettingsLoaded.autoMineTweenSpeed
+        autoSettingsLoaded.teleportTweenSpeed = tonumber(decoded.teleportTweenSpeed) or autoSettingsLoaded.teleportTweenSpeed
+        autoSettingsLoaded.teleportTweenMaxDuration = tonumber(decoded.teleportTweenMaxDuration) or autoSettingsLoaded.teleportTweenMaxDuration
         if decoded.safeProfileEnabled ~= nil then
             autoSettingsLoaded.safeProfileEnabled = decoded.safeProfileEnabled == true
         end
@@ -135,8 +139,8 @@ return function(Window, scriptInfo)
         local initialLoad = false
         
         local TweenService = game:GetService("TweenService")
-        local TELEPORT_TWEEN_SPEED = 220
-        local TELEPORT_TWEEN_MAX_DURATION = 1.2
+        local TELEPORT_TWEEN_SPEED = math.clamp(tonumber(autoSettingsLoaded.teleportTweenSpeed) or 120, 30, 260)
+        local TELEPORT_TWEEN_MAX_DURATION = math.clamp(tonumber(autoSettingsLoaded.teleportTweenMaxDuration) or 2.2, 0.6, 5)
 
         local function tweenHumanoidRootPart(hrp, targetCFrame, durationOverride)
             if not hrp or not targetCFrame then
@@ -202,6 +206,35 @@ return function(Window, scriptInfo)
         local Farm = Window:CreateTab("Farm", "pickaxe") 
     
         local Teleport = Window:CreateTab("Teleport", "map")
+        local TeleportTweenSection = Teleport:CreateSection("⚙️ Teleport Tween")
+        Teleport:CreateSlider({
+            Name = "Teleport Tween Speed",
+            Range = {30, 260},
+            Increment = 5,
+            Suffix = " studs/s",
+            CurrentValue = TELEPORT_TWEEN_SPEED,
+            Flag = "TeleportTweenSpeed",
+            Callback = function(Value)
+                TELEPORT_TWEEN_SPEED = Value
+                if saveAutoSettings then
+                    saveAutoSettings()
+                end
+            end,
+        })
+        Teleport:CreateSlider({
+            Name = "Teleport Max Duration",
+            Range = {1, 50},
+            Increment = 1,
+            Suffix = " x0.1s",
+            CurrentValue = math.floor(TELEPORT_TWEEN_MAX_DURATION * 10 + 0.5),
+            Flag = "TeleportTweenMaxDuration",
+            Callback = function(Value)
+                TELEPORT_TWEEN_MAX_DURATION = Value / 10
+                if saveAutoSettings then
+                    saveAutoSettings()
+                end
+            end,
+        })
     
         -- Mobile tab
         local MobileSupport = Window:CreateTab("Mobile", "smartphone")
@@ -2209,6 +2242,8 @@ return function(Window, scriptInfo)
                     autoMineDelay = autoMineDelay,
                     autoMineUseTween = autoMineUseTween,
                     autoMineTweenSpeed = autoMineTweenSpeed,
+                    teleportTweenSpeed = TELEPORT_TWEEN_SPEED,
+                    teleportTweenMaxDuration = TELEPORT_TWEEN_MAX_DURATION,
                     safeProfileEnabled = safeProfileEnabled,
                     safeNearbyPauseEnabled = safeNearbyPauseEnabled,
                     safeNearbyRadius = safeNearbyRadius,
