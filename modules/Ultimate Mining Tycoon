@@ -1111,17 +1111,9 @@ return function(Window, scriptInfo)
             return table.concat({ className, material, color, meshId }, "|")
         end
 
-        -- Rule-based mapping from real in-game samples (Dex/Properties), no guessing.
-        local oreNameByStaticColorSignature = {
-            -- ShaleMetalBlock (Tin sample)
-            ["MeshPart|Plastic|64,116,199|rbxassetid://109851935916635"] = "Tin",
-            -- OreMesh (Tin sample)
-            ["MeshPart|Plastic|133,171,185|rbxassetid://18890509556"] = "Tin",
-            -- CrystallineMetalOre (Vanadium sample)
-            ["MeshPart|Plastic|166,64,46|rbxassetid://107025224910125"] = "Vanadium",
-            -- SolidStone sample (shown as Explosives!)
-            ["MeshPart|Glacier|15,12,20|rbxassetid://93787691661882"] = "Explosives",
-        }
+        -- Static table intentionally starts empty to avoid hardcoded wrong names.
+        -- Populate only with verified mappings.
+        local oreNameByStaticColorSignature = {}
 
         local function scoreOreCandidate(bucket, candidate, score)
             if not candidate or not score then return end
@@ -1275,6 +1267,16 @@ return function(Window, scriptInfo)
                 if oreId and oreNameById[oreId] then
                     return oreNameById[oreId], "id"
                 end
+                local colorSignature = makeOreColorSignature(target, renderPart)
+                if colorSignature and oreNameByStaticColorSignature[colorSignature] then
+                    return oreNameByStaticColorSignature[colorSignature], "static-color"
+                end
+                if useStrictColorRules then
+                    if colorSignature and oreNameByColorSignature[colorSignature] then
+                        return oreNameByColorSignature[colorSignature], "color"
+                    end
+                    return nil, nil
+                end
                 local signature = nil
                 if type(makeOreSignature) == "function" then
                     signature = makeOreSignature(target, renderPart)
@@ -1288,10 +1290,6 @@ return function(Window, scriptInfo)
                 end
                 if coarseSignature and oreNameBySignatureCoarse[coarseSignature] then
                     return oreNameBySignatureCoarse[coarseSignature], "coarse"
-                end
-                local colorSignature = makeOreColorSignature(target, renderPart)
-                if colorSignature and oreNameByStaticColorSignature[colorSignature] then
-                    return oreNameByStaticColorSignature[colorSignature], "static-color"
                 end
                 if colorSignature and oreNameByColorSignature[colorSignature] then
                     return oreNameByColorSignature[colorSignature], "color"
@@ -1581,23 +1579,24 @@ return function(Window, scriptInfo)
 
             if oreId then
                 oreNameById[oreId] = resolvedName
-                if signature then
-                    oreNameBySignature[signature] = resolvedName
-                end
-                if coarseSignature then
-                    oreNameBySignatureCoarse[coarseSignature] = resolvedName
-                end
                 if colorSignature then
                     oreNameByColorSignature[colorSignature] = resolvedName
                 end
-            else
-                if signature then
-                    oreNameBySignature[signature] = resolvedName
+                if not useStrictColorRules then
+                    if signature then
+                        oreNameBySignature[signature] = resolvedName
+                    end
                     if coarseSignature then
                         oreNameBySignatureCoarse[coarseSignature] = resolvedName
                     end
-                    if colorSignature then
-                        oreNameByColorSignature[colorSignature] = resolvedName
+                end
+            else
+                if colorSignature then
+                    oreNameByColorSignature[colorSignature] = resolvedName
+                elseif signature and not useStrictColorRules then
+                    oreNameBySignature[signature] = resolvedName
+                    if coarseSignature then
+                        oreNameBySignatureCoarse[coarseSignature] = resolvedName
                     end
                 else
                     local runtimeName = normalizeOreToken(isInstance(target) and target.Name or nil)
@@ -2736,6 +2735,33 @@ return function(Window, scriptInfo)
                     espClearAll()
                     espScanAll()
                 end
+            end,
+        })
+
+        Farm:CreateButton({
+            Name = "Reset Learned Ore Maps",
+            Callback = function()
+                oreNameById = {}
+                oreNameByRuntime = {}
+                oreNameBySignature = {}
+                oreNameBySignatureCoarse = {}
+                oreNameByColorSignature = {}
+                oreNameCache = setmetatable({}, { __mode = "k" })
+                oreInferenceStats.learned = 0
+                if saveAutoSettings then
+                    saveAutoSettings()
+                end
+                updateOreLearningStatus()
+                if ESP.enabled then
+                    espClearAll()
+                    espScanAll()
+                end
+                Rayfield:Notify({
+                    Title = "Ore Mapping Reset",
+                    Content = "Cleared learned ore mappings. Static rules remain unchanged.",
+                    Duration = 4,
+                    Image = "refresh-cw",
+                })
             end,
         })
 
