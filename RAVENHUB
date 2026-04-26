@@ -178,6 +178,8 @@ local function loadScriptModule(scriptInfo)
                 "module must return function, got: " .. type(moduleFunc))
 
             local runtimeInfo = table.clone(scriptInfo)
+            runtimeInfo.hubRayfield = Rayfield
+            runtimeInfo.hubWindow = Window
             runtimeInfo.registerCleanup = function(cleanupFn)
                 if type(cleanupFn) == "function" then
                     scriptCleanupHandlers[scriptInfo.name] = cleanupFn
