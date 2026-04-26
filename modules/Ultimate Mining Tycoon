@@ -771,210 +771,189 @@ if game.PlaceId == 18680867089 then
         end,
     })
     
-    -- Initialize ESP globals
-    if not _G.espFolder then
-        _G.espFolder = Instance.new("Folder")
-        _G.espFolder.Name = "OreESP"
-        _G.espFolder.Parent = game.CoreGui
-        _G.espParts = {}
-        _G.espEnabled = false
-        _G.maxDistance = 500
-        _G.oreColors = {
-            ["Tin"] = Color3.fromRGB(180, 180, 160),
-            ["Iron"] = Color3.fromRGB(250, 211, 95),
-            ["Lead"] = Color3.fromRGB(50, 50, 70),
-            ["Cobalt"] = Color3.fromRGB(30, 100, 255),
-            ["Aluminium"] = Color3.fromRGB(220, 220, 230),
-            ["Silver"] = Color3.fromRGB(192, 192, 192),
-            ["Uranium"] = Color3.fromRGB(0, 255, 100),
-            ["Vanadium"] = Color3.fromRGB(255, 50, 50),
-            ["Tungsten"] = Color3.fromRGB(70, 90, 100),
-            ["Gold"] = Color3.fromRGB(255, 215, 0),
-            ["Titanium"] = Color3.fromRGB(120, 120, 140),
-            ["Palladium"] = Color3.fromRGB(255, 180, 0),
-            ["Plutonium"] = Color3.fromRGB(0, 255, 255),
-            ["Mithril"] = Color3.fromRGB(50, 200, 150),
-            ["Thorium"] = Color3.fromRGB(100, 255, 100),
-            ["Iridium"] = Color3.fromRGB(200, 230, 255),
-            ["Adamantium"] = Color3.fromRGB(100, 255, 150),
-            ["Rhodium"] = Color3.fromRGB(220, 220, 255),
-            ["Unobtanium"] = Color3.fromRGB(255, 0, 255),
-            ["Topaz"] = Color3.fromRGB(255, 200, 0),
-            ["Emerald"] = Color3.fromRGB(0, 255, 100),
-            ["Sapphire"] = Color3.fromRGB(0, 100, 255),
-            ["Ruby"] = Color3.fromRGB(255, 0, 50),
-            ["Diamond"] = Color3.fromRGB(200, 255, 255),
-            ["Poudretteite"] = Color3.fromRGB(255, 100, 255),
-            ["Zultanite"] = Color3.fromRGB(255, 150, 100),
-            ["Grandidierite"] = Color3.fromRGB(0, 200, 150),
-            ["Musgravite"] = Color3.fromRGB(100, 150, 200),
-            ["Painite"] = Color3.fromRGB(255, 50, 100),
-        }
-        
-        _G.createESP = function(part)
-            local mineId = part:GetAttribute("MineId") or part:GetAttribute("OreId") or part:GetAttribute("OreName")
-            
-            if not mineId or mineId == "Unknown" or mineId == "Part" or mineId == "MeshPart" or mineId == "OreMesh" then
-                mineId = part.Name
-                if mineId == "OreMesh" or mineId == "Part" or mineId == "MeshPart" then
-                    mineId = "Unknown"
-                end
-            end
-            
-            local color = _G.oreColors[mineId] or Color3.fromRGB(255, 255, 255)
-            local box = Instance.new("BoxHandleAdornment")
-            box.Adornee = part
-            box.Parent = _G.espFolder
-            box.AlwaysOnTop = true
-            box.ZIndex = 1
-            box.Size = part.Size
-            box.Transparency = 0.5
-            box.Color3 = color
-            box.Visible = false
-            local glowBox = Instance.new("BoxHandleAdornment")
-            glowBox.Adornee = part
-            glowBox.Parent = _G.espFolder
-            glowBox.AlwaysOnTop = true
-            glowBox.ZIndex = 0
-            glowBox.Size = part.Size * 1.05
-            glowBox.Transparency = 0.8
-            glowBox.Color3 = color:Lerp(Color3.new(1, 1, 1), 0.3)
-            glowBox.Visible = false
-            local billboard = Instance.new("BillboardGui")
-            billboard.Adornee = part
-            billboard.Parent = _G.espFolder
-            billboard.Size = UDim2.new(0, 100, 0, 20)
-            billboard.StudsOffset = Vector3.new(0, part.Size.Y/2 + 1, 0)
-            billboard.AlwaysOnTop = true
-            billboard.Enabled = false
-            local textLabel = Instance.new("TextLabel")
-            textLabel.Parent = billboard
-            textLabel.Size = UDim2.new(1, 0, 1, 0)
-            textLabel.BackgroundTransparency = 1
-            textLabel.Text = mineId
-            textLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-            textLabel.TextStrokeTransparency = 0
-            textLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
-            textLabel.Font = Enum.Font.GothamBold
-            textLabel.TextScaled = true
-            _G.espParts[part] = {box = box, glowBox = glowBox, billboard = billboard}
+    -- ============================================================
+    -- ESP SYSTEM — Highlight-based (per-ore mesh color + distance)
+    -- ============================================================
+    local ESP = {
+        enabled      = false,
+        maxDistance  = 200,
+        filterOre    = "All",   -- "All" หรือชื่อ ore เฉพาะ
+        activeVisuals = {},      -- [part] = { highlight, billboard }
+        connections  = {},
+    }
+
+    local oreColors = {
+        ["Tin"]          = Color3.fromRGB(180, 180, 160),
+        ["Iron"]         = Color3.fromRGB(250, 211, 95),
+        ["Lead"]         = Color3.fromRGB(50,  50,  70),
+        ["Cobalt"]       = Color3.fromRGB(30,  100, 255),
+        ["Aluminium"]    = Color3.fromRGB(220, 220, 230),
+        ["Silver"]       = Color3.fromRGB(192, 192, 192),
+        ["Uranium"]      = Color3.fromRGB(0,   255, 100),
+        ["Vanadium"]     = Color3.fromRGB(255, 50,  50),
+        ["Tungsten"]     = Color3.fromRGB(70,  90,  100),
+        ["Gold"]         = Color3.fromRGB(255, 215, 0),
+        ["Titanium"]     = Color3.fromRGB(120, 120, 140),
+        ["Palladium"]    = Color3.fromRGB(255, 180, 0),
+        ["Plutonium"]    = Color3.fromRGB(0,   255, 255),
+        ["Mithril"]      = Color3.fromRGB(50,  200, 150),
+        ["Thorium"]      = Color3.fromRGB(100, 255, 100),
+        ["Iridium"]      = Color3.fromRGB(200, 230, 255),
+        ["Adamantium"]   = Color3.fromRGB(100, 255, 150),
+        ["Rhodium"]      = Color3.fromRGB(220, 220, 255),
+        ["Unobtanium"]   = Color3.fromRGB(255, 0,   255),
+        ["Topaz"]        = Color3.fromRGB(255, 200, 0),
+        ["Emerald"]      = Color3.fromRGB(0,   200, 80),
+        ["Sapphire"]     = Color3.fromRGB(0,   100, 255),
+        ["Ruby"]         = Color3.fromRGB(255, 0,   50),
+        ["Diamond"]      = Color3.fromRGB(200, 255, 255),
+        ["Poudretteite"] = Color3.fromRGB(255, 100, 255),
+        ["Zultanite"]    = Color3.fromRGB(255, 150, 100),
+        ["Grandidierite"]= Color3.fromRGB(0,   200, 150),
+        ["Musgravite"]   = Color3.fromRGB(100, 150, 200),
+        ["Painite"]      = Color3.fromRGB(255, 50,  100),
+    }
+
+    -- ดึงชื่อ ore จาก attribute (fallback → part.Name)
+    local function getOreName(part)
+        local n = part:GetAttribute("MineId") or part:GetAttribute("OreId") or part:GetAttribute("OreName")
+        if not n or n == "" or n == "Part" or n == "MeshPart" or n == "OreMesh" then
+            n = part.Name
         end
-        
-        _G.setupExistingBlocks = function()
-            local placedOre = game:GetService("Workspace"):FindFirstChild("PlacedOre")
-            if placedOre then
-                for _, block in ipairs(placedOre:GetChildren()) do
-                    if (block:IsA("Part") or block:IsA("MeshPart") or block:IsA("BasePart")) and not _G.espParts[block] then
-                        _G.createESP(block)
-                    end
-                end
-            end
-            
-            local spawnedBlocks = game:GetService("Workspace"):FindFirstChild("SpawnedBlocks")
-            if spawnedBlocks then
-                for _, block in ipairs(spawnedBlocks:GetChildren()) do
-                    if (block:IsA("Part") or block:IsA("MeshPart") or block:IsA("BasePart")) and not _G.espParts[block] then
-                        _G.createESP(block)
-                    end
-                end
-            end
-        end
-        
-        local placedOre = game:GetService("Workspace"):FindFirstChild("PlacedOre")
-        if placedOre then
-            _G.placedOreAddedConnection = placedOre.ChildAdded:Connect(function(child)
-                if child:IsA("Part") or child:IsA("MeshPart") or child:IsA("BasePart") then
-                    task.wait(0.1)
-                    _G.createESP(child)
-                end
-            end)
-            _G.placedOreRemovedConnection = placedOre.ChildRemoved:Connect(function(child)
-                if _G.espParts[child] then
-                    _G.espParts[child].box:Destroy()
-                    if _G.espParts[child].glowBox then _G.espParts[child].glowBox:Destroy() end
-                    _G.espParts[child].billboard:Destroy()
-                    _G.espParts[child] = nil
-                end
-            end)
-        end
-        
-        local spawnedBlocks = game:GetService("Workspace"):FindFirstChild("SpawnedBlocks")
-        if spawnedBlocks then
-            _G.childAddedConnection = spawnedBlocks.ChildAdded:Connect(function(child)
-                if child:IsA("Part") or child:IsA("MeshPart") or child:IsA("BasePart") then
-                    task.wait(0.1)
-                    _G.createESP(child)
-                end
-            end)
-            _G.childRemovedConnection = spawnedBlocks.ChildRemoved:Connect(function(child)
-                if _G.espParts[child] then
-                    _G.espParts[child].box:Destroy()
-                    if _G.espParts[child].glowBox then _G.espParts[child].glowBox:Destroy() end
-                    _G.espParts[child].billboard:Destroy()
-                    _G.espParts[child] = nil
-                end
-            end)
-        end
-        
-        _G.pulseTime = 0
-        _G.updateConnection = game:GetService("RunService").RenderStepped:Connect(function(deltaTime)
-            local player = game.Players.LocalPlayer
-            local character = player.Character
-            if not character then return end
-            local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
-            if not humanoidRootPart then return end
-            _G.pulseTime = _G.pulseTime + deltaTime
-            local pulseValue = (math.sin(_G.pulseTime * 2) + 1) / 2
-            for part, esp in pairs(_G.espParts) do
-                if part and part.Parent then
-                    if _G.espEnabled then
-                        local distance = (humanoidRootPart.Position - part.Position).Magnitude
-                        local isVisible = distance <= _G.maxDistance
-                        esp.box.Visible = isVisible
-                        if esp.glowBox then esp.glowBox.Visible = isVisible end
-                        esp.billboard.Enabled = isVisible
-                        if isVisible and esp.glowBox then
-                            local baseSize = part.Size * 1.05
-                            local pulseSize = baseSize * (1 + pulseValue * 0.1)
-                            esp.glowBox.Size = pulseSize
-                            esp.glowBox.Transparency = 0.7 + (pulseValue * 0.2)
-                        end
-                        if isVisible and esp.billboard.Enabled then
-                            local textLabel = esp.billboard:FindFirstChildOfClass("TextLabel")
-                            if textLabel then
-                                local mineId = part:GetAttribute("MineId") or part:GetAttribute("OreId") or part:GetAttribute("OreName")
-                                if not mineId or mineId == "Part" or mineId == "MeshPart" or mineId == "OreMesh" then
-                                    mineId = part.Name
-                                    if mineId == "OreMesh" or mineId == "Part" or mineId == "MeshPart" then
-                                        mineId = "Unknown"
-                                    end
-                                end
-                                textLabel.Text = mineId .. "\n" .. string.format("%.1f", distance) .. " studs"
-                            end
-                        end
-                    else
-                        esp.box.Visible = false
-                        if esp.glowBox then esp.glowBox.Visible = false end
-                        esp.billboard.Enabled = false
-                    end
-                end
-            end
-        end)
-        
-        _G.characterAddedConnection = game.Players.LocalPlayer.CharacterAdded:Connect(function(newCharacter)
-            for part, esp in pairs(_G.espParts) do
-                if esp.box then esp.box:Destroy() end
-                if esp.glowBox then esp.glowBox:Destroy() end
-                if esp.billboard then esp.billboard:Destroy() end
-            end
-            _G.espParts = {}
-            if _G.espEnabled then
-                _G.setupExistingBlocks()
-            end
-        end)
-        
-        _G.setupExistingBlocks()
+        if n == "OreMesh" or n == "Part" or n == "MeshPart" then n = "Unknown" end
+        return n
     end
+
+    -- สร้าง Highlight + BillboardGui ให้ part หนึ่งชิ้น
+    local function espApply(part)
+        if not ESP.enabled then return end
+        if ESP.activeVisuals[part] then return end  -- ซ้ำ
+        local oreName = getOreName(part)
+        if ESP.filterOre ~= "All" and oreName ~= ESP.filterOre then return end
+
+        local color = oreColors[oreName] or Color3.fromRGB(255, 255, 255)
+
+        -- Highlight ทำให้ mesh ทั้งก้อนเรืองแสงเหมือนในรูป
+        local hl = Instance.new("Highlight")
+        hl.Name       = "UH_ESP_Highlight"
+        hl.FillColor  = color
+        hl.OutlineColor = color:Lerp(Color3.new(1,1,1), 0.4)
+        hl.FillTransparency    = 0.35
+        hl.OutlineTransparency = 0
+        hl.DepthMode  = Enum.HighlightDepthMode.AlwaysOnTop
+        hl.Parent     = part
+
+        -- BillboardGui แสดงชื่อ + ระยะ
+        local bb = Instance.new("BillboardGui")
+        bb.Name        = "UH_ESP_Billboard"
+        bb.Size        = UDim2.new(0, 120, 0, 36)
+        bb.StudsOffset = Vector3.new(0, 2.5, 0)
+        bb.AlwaysOnTop = true
+        bb.Parent      = part
+
+        local lbl = Instance.new("TextLabel")
+        lbl.Size                 = UDim2.new(1, 0, 1, 0)
+        lbl.BackgroundTransparency = 1
+        lbl.TextColor3           = color
+        lbl.TextStrokeColor3     = Color3.new(0, 0, 0)
+        lbl.TextStrokeTransparency = 0
+        lbl.Font                 = Enum.Font.GothamBold
+        lbl.TextSize             = 13
+        lbl.TextScaled           = false
+        lbl.Text                 = oreName
+        lbl.Parent               = bb
+
+        ESP.activeVisuals[part] = { highlight = hl, billboard = bb, label = lbl }
+
+        -- ลบ visual เมื่อ part ถูกทำลาย
+        local conn = part.AncestryChanged:Connect(function()
+            if not part.Parent then
+                if hl and hl.Parent then hl:Destroy() end
+                if bb and bb.Parent then bb:Destroy() end
+                ESP.activeVisuals[part] = nil
+            end
+        end)
+        table.insert(ESP.connections, conn)
+    end
+
+    -- ลบ ESP ทั้งหมด
+    local function espClearAll()
+        for part, v in pairs(ESP.activeVisuals) do
+            if v.highlight and v.highlight.Parent then v.highlight:Destroy() end
+            if v.billboard and v.billboard.Parent then v.billboard:Destroy() end
+        end
+        ESP.activeVisuals = {}
+        for _, c in ipairs(ESP.connections) do c:Disconnect() end
+        ESP.connections = {}
+    end
+
+    -- scan ore ที่มีอยู่ทั้งหมด
+    local function espScanAll()
+        local folders = { workspace:FindFirstChild("PlacedOre"), workspace:FindFirstChild("SpawnedBlocks") }
+        for _, folder in ipairs(folders) do
+            if folder then
+                for _, child in ipairs(folder:GetChildren()) do
+                    if child:IsA("BasePart") then espApply(child) end
+                end
+            end
+        end
+    end
+
+    -- ดึงรายชื่อ ore ที่มีในเกม (สำหรับ dropdown filter)
+    local function getOreTypes()
+        local types = {"All"}
+        local seen = {}
+        local placedOre = workspace:FindFirstChild("PlacedOre")
+        if placedOre then
+            for _, ore in ipairs(placedOre:GetChildren()) do
+                local n = getOreName(ore)
+                if not seen[n] then
+                    table.insert(types, n)
+                    seen[n] = true
+                end
+            end
+        end
+        return types
+    end
+
+    -- RenderStepped: อัปเดต label ระยะ + toggle visibility ตาม maxDistance
+    game:GetService("RunService").RenderStepped:Connect(function()
+        if not ESP.enabled then return end
+        local char = game.Players.LocalPlayer.Character
+        local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+
+        for part, v in pairs(ESP.activeVisuals) do
+            if part and part.Parent then
+                local dist = (hrp.Position - part.Position).Magnitude
+                local visible = dist <= ESP.maxDistance
+                v.highlight.Enabled = visible
+                v.billboard.Enabled = visible
+                if visible then
+                    v.label.Text = string.format("%s\n[%d studs]", getOreName(part), math.floor(dist))
+                end
+            end
+        end
+    end)
+
+    -- ฟัง ChildAdded สำหรับ ore ใหม่
+    local function watchFolder(folder)
+        if not folder then return end
+        folder.ChildAdded:Connect(function(child)
+            if child:IsA("BasePart") then
+                task.wait(0.1)  -- รอให้ attribute load
+                espApply(child)
+            end
+        end)
+    end
+    watchFolder(workspace:FindFirstChild("PlacedOre"))
+    watchFolder(workspace:FindFirstChild("SpawnedBlocks"))
+
+    -- Respawn: clear แล้ว scan ใหม่
+    game.Players.LocalPlayer.CharacterAdded:Connect(function()
+        espClearAll()
+        if ESP.enabled then espScanAll() end
+    end)
 
     -- Auto Mine Section
     local AutoMineSection = Farm:CreateSection("⛏️ Auto Mining")
