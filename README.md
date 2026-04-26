@@ -79,6 +79,7 @@
 - ปรับ `Ore ESP` ให้ใช้สีไฮไลท์จาก `part.Color` ของก้อนแร่โดยตรง (รวมสีข้อความป้าย) แทนการไล่สีตามความหายาก
 - บันทึกข้อผิดพลาดและแก้ไข: การ “เดาชื่อแร่จาก palette สีที่ hardcode” ทำให้ชื่อเพี้ยนได้ (เช่น `Aluminium` ถูกเดาเป็น `Vanadium`) จึงปรับ `direct color classifier` ให้ใช้เฉพาะสีจาก mapping ที่ยืนยันแล้ว (`oreNameByColorSignature`) เท่านั้น และถ้าไม่มั่นใจให้เป็น `Unknown` แทนการเดามั่ว
 - ปรับ `Ore ESP` เป็นโหมดไม่เดา (strict): ปิด neighbor-consensus สำหรับ strict mode และให้ ESP แสดงชื่อเฉพาะจาก mapping ที่ยืนยันแล้ว (`id/static-color/color-signature`) เท่านั้น; ไม่ตรงให้ขึ้น `Unknown` เพื่อกันทับซ้อน/เดามั่ว
+- ปรับสีไฮไลท์ `Ore ESP` ให้ตรง `part.Color` มากขึ้น: ตัดการผสมสีโดยตั้ง `OutlineColor = FillColor` และตั้ง `FillTransparency = 0` เพื่อไม่ให้ blend กับฉากหลัง/แสง
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
