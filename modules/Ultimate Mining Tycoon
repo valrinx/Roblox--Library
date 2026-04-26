@@ -807,6 +807,27 @@ return function(Window, scriptInfo)
             ["Musgravite"]   = Color3.fromRGB(100, 150, 200),
             ["Painite"]      = Color3.fromRGB(255, 50,  100),
         }
+
+        local oreCategoryColors = {
+            ["Common Metal"]     = Color3.fromRGB(200, 200, 200),
+            ["Rare Metal"]       = Color3.fromRGB(120, 170, 255),
+            ["Radioactive"]      = Color3.fromRGB(80, 255, 120),
+            ["Precious"]         = Color3.fromRGB(255, 210, 90),
+            ["Gemstone"]         = Color3.fromRGB(255, 120, 220),
+            ["Mythic"]           = Color3.fromRGB(255, 110, 110),
+            ["Unknown"]          = Color3.fromRGB(255, 255, 255),
+        }
+
+        local oreCategoryByName = {
+            ["Tin"] = "Common Metal", ["Iron"] = "Common Metal", ["Lead"] = "Common Metal", ["Aluminium"] = "Common Metal",
+            ["Silver"] = "Rare Metal", ["Cobalt"] = "Rare Metal", ["Tungsten"] = "Rare Metal", ["Titanium"] = "Rare Metal",
+            ["Vanadium"] = "Rare Metal", ["Rhodium"] = "Rare Metal", ["Iridium"] = "Rare Metal", ["Palladium"] = "Rare Metal",
+            ["Uranium"] = "Radioactive", ["Plutonium"] = "Radioactive", ["Thorium"] = "Radioactive",
+            ["Gold"] = "Precious",
+            ["Topaz"] = "Gemstone", ["Emerald"] = "Gemstone", ["Sapphire"] = "Gemstone", ["Ruby"] = "Gemstone", ["Diamond"] = "Gemstone",
+            ["Mithril"] = "Mythic", ["Adamantium"] = "Mythic", ["Unobtanium"] = "Mythic", ["Poudretteite"] = "Mythic",
+            ["Zultanite"] = "Mythic", ["Grandidierite"] = "Mythic", ["Musgravite"] = "Mythic", ["Painite"] = "Mythic",
+        }
     
         local function getOreRenderPart(target)
             if not target then return nil end
@@ -829,6 +850,15 @@ return function(Window, scriptInfo)
             return n
         end
 
+        local function getOreCategory(oreName)
+            return oreCategoryByName[oreName] or "Unknown"
+        end
+
+        local function getOreColor(oreName)
+            local category = getOreCategory(oreName)
+            return oreCategoryColors[category] or oreColors[oreName] or Color3.fromRGB(255, 255, 255)
+        end
+
         local function getTargetPosition(target)
             local renderPart = getOreRenderPart(target)
             if renderPart then
@@ -849,7 +879,7 @@ return function(Window, scriptInfo)
             local oreName = getOreName(target)
             if ESP.filterOre ~= "All" and oreName ~= ESP.filterOre then return end
     
-            local color = oreColors[oreName] or Color3.fromRGB(255, 255, 255)
+            local color = getOreColor(oreName)
     
             local hl = Instance.new("Highlight")
             hl.Name                = "UH_ESP_Highlight"
@@ -933,6 +963,24 @@ return function(Window, scriptInfo)
                 end
             end
             return types
+        end
+
+        local function getOreIgnoreOptions()
+            local options = {}
+            for _, oreName in ipairs(getOreTypes()) do
+                if oreName ~= "All" then
+                    table.insert(options, oreName)
+                end
+            end
+            if #options == 0 then
+                options = {
+                    "Tin", "Iron", "Lead", "Cobalt", "Aluminium", "Silver", "Uranium", "Vanadium",
+                    "Tungsten", "Gold", "Titanium", "Palladium", "Plutonium", "Mithril", "Thorium",
+                    "Iridium", "Adamantium", "Rhodium", "Unobtanium", "Topaz", "Emerald", "Sapphire",
+                    "Ruby", "Diamond", "Poudretteite", "Zultanite", "Grandidierite", "Musgravite", "Painite", "OreMesh",
+                }
+            end
+            return options
         end
     
         trackConnection(game:GetService("RunService").RenderStepped:Connect(function()
@@ -1042,12 +1090,20 @@ return function(Window, scriptInfo)
                                         task.wait(0.1)
                                         continue
                                     end
+                                    local function isIgnoredOre(oreName)
+                                        if type(OreIgnoreList) ~= "table" then return false end
+                                        if OreIgnoreList[oreName] == true then return true end
+                                        return table.find(OreIgnoreList, oreName) ~= nil
+                                    end
+
                                     for _,v in pairs(workspace.PlacedOre:GetChildren()) do
-                                        if v:IsA("MeshPart") and v:GetAttribute("MineId") then
-                                            if table.find(OreIgnoreList, v:GetAttribute("MineId")) then
+                                        local renderPart = getOreRenderPart(v)
+                                        if renderPart then
+                                            local oreName = getOreName(v)
+                                            if isIgnoredOre(oreName) then
                                                 continue
                                             end
-                                            local dist = (root.Position - v.Position).Magnitude
+                                            local dist = (root.Position - renderPart.Position).Magnitude
                                             if dist <= autoMineRange and dist < closestDist then
                                                 closestBlock = v
                                                 closestDist = dist
@@ -1055,9 +1111,17 @@ return function(Window, scriptInfo)
                                         end
                                     end
                                     if closestBlock then
+                                        local renderPart = getOreRenderPart(closestBlock)
                                         local gridPos = closestBlock:GetAttribute("ChunkPosition") or closestBlock:GetAttribute("GridPosition")
+                                        if not gridPos and renderPart then
+                                            gridPos = renderPart:GetAttribute("ChunkPosition") or renderPart:GetAttribute("GridPosition")
+                                        end
                                         if not gridPos then
-                                            local worldPos = closestBlock.Position
+                                            local worldPos = renderPart and renderPart.Position
+                                            if not worldPos then
+                                                task.wait(0.03)
+                                                continue
+                                            end
                                             gridPos = Vector3int16.new(
                                                 math.floor(worldPos.X / 4),
                                                 math.floor(worldPos.Y / 4),
@@ -1112,7 +1176,7 @@ return function(Window, scriptInfo)
     
         local OreIgnoreDropdown = Farm:CreateDropdown({
             Name = "Ore Ignore List",
-            Options = {"Tin", "Iron", "Lead", "Cobalt", "Aluminium", "Silver", "Uranium", "Vanadium", "Tungsten", "Gold", "Titanium", "Palladium", "Plutonium", "Mithril", "Thorium", "Iridium", "Adamantium", "Rhodium", "Unobtanium", "Topaz", "Emerald", "Sapphire", "Ruby", "Diamond", "Poudretteite", "Zultanite", "Grandidierite", "Musgravite", "Painite"},
+            Options = getOreIgnoreOptions(),
             CurrentOption = {},
             MultipleOptions = true,
             Flag = "OreIgnoreList",
