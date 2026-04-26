@@ -142,9 +142,18 @@ return function(Window, scriptInfo)
         local TELEPORT_TWEEN_SPEED = math.clamp(tonumber(autoSettingsLoaded.teleportTweenSpeed) or 120, 30, 260)
         local TELEPORT_TWEEN_MAX_DURATION = math.clamp(tonumber(autoSettingsLoaded.teleportTweenMaxDuration) or 2.2, 0.6, 5)
 
-        local function tweenHumanoidRootPart(hrp, targetCFrame, durationOverride)
+        local activeRootTweens = setmetatable({}, { __mode = "k" })
+
+        local function tweenHumanoidRootPart(hrp, targetCFrame, durationOverride, waitForCompletion)
             if not hrp or not targetCFrame then
                 return false
+            end
+            local previousTween = activeRootTweens[hrp]
+            if previousTween then
+                pcall(function()
+                    previousTween:Cancel()
+                end)
+                activeRootTweens[hrp] = nil
             end
             local distance = (hrp.Position - targetCFrame.Position).Magnitude
             local duration = durationOverride
@@ -156,6 +165,12 @@ return function(Window, scriptInfo)
                 TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
                 { CFrame = targetCFrame }
             )
+            activeRootTweens[hrp] = tween
+            local shouldWait = waitForCompletion ~= false
+            if not shouldWait then
+                tween:Play()
+                return true
+            end
             local finished = false
             local connection
             connection = tween.Completed:Connect(function()
@@ -168,6 +183,9 @@ return function(Window, scriptInfo)
             end
             if connection then
                 connection:Disconnect()
+            end
+            if activeRootTweens[hrp] == tween then
+                activeRootTweens[hrp] = nil
             end
             return true
         end
@@ -568,12 +586,12 @@ return function(Window, scriptInfo)
                         
                         local oreCount = countOres()
                         
-                        tweenHumanoidRootPart(hrp, positionCargoVolume.CFrame * CFrame.new(0, 3, 0), 0.18)
+                        tweenHumanoidRootPart(hrp, positionCargoVolume.CFrame * CFrame.new(0, 3, 0))
                         task.wait(0.3)
                         cargoPrompt.HoldDuration = 0
                         fireproximityprompt(cargoPrompt)
                         task.wait(0.3)
-                        tweenHumanoidRootPart(hrp, savedCFrame, 0.18)
+                        tweenHumanoidRootPart(hrp, savedCFrame)
                         
                         Rayfield:Notify({
                             Title = "Ore Sold",
@@ -726,7 +744,7 @@ return function(Window, scriptInfo)
                                 })
                                 return
                             end
-                            tweenHumanoidRootPart(playerRoot, CFrame.new(vehicleSpawnerPos), 0.18)
+                            tweenHumanoidRootPart(playerRoot, CFrame.new(vehicleSpawnerPos))
                             task.wait(0.3)
                             proximityPrompt.HoldDuration = 0
                             fireproximityprompt(proximityPrompt)
@@ -847,7 +865,7 @@ return function(Window, scriptInfo)
                         return
                     end
                     local shopPos = activationPoint.Position
-                    tweenHumanoidRootPart(hrp, CFrame.new(shopPos + Vector3.new(0, 2, 0)), 0.18)
+                    tweenHumanoidRootPart(hrp, CFrame.new(shopPos + Vector3.new(0, 2, 0)))
                     task.wait(0.5)
                     proximityPrompt.HoldDuration = 0
                     fireproximityprompt(proximityPrompt)
@@ -873,7 +891,7 @@ return function(Window, scriptInfo)
                         local currentCharacter = player.Character
                         local currentHrp = currentCharacter:FindFirstChild("HumanoidRootPart")
                         if currentHrp then
-                            tweenHumanoidRootPart(currentHrp, originalPosition, 0.18)
+                            tweenHumanoidRootPart(currentHrp, originalPosition)
                             Rayfield:Notify({
                                 Title = shopName,
                                 Content = "Returned to original position",
@@ -2213,7 +2231,7 @@ return function(Window, scriptInfo)
         local autoMineRange = math.clamp(autoSettingsLoaded.autoMineRange, 5, 50)
         local autoMineDelay = math.clamp(autoSettingsLoaded.autoMineDelay, 0, 5)
         local autoMineUseTween = autoSettingsLoaded.autoMineUseTween
-        local autoMineTweenSpeed = math.clamp(autoSettingsLoaded.autoMineTweenSpeed, 10, 120)
+        local autoMineTweenSpeed = TELEPORT_TWEEN_SPEED
         local safeProfileEnabled = autoSettingsLoaded.safeProfileEnabled ~= false
         local safeNearbyPauseEnabled = autoSettingsLoaded.safeNearbyPauseEnabled ~= false
         local safeNearbyRadius = math.clamp(tonumber(autoSettingsLoaded.safeNearbyRadius) or 70, 20, 200)
@@ -2241,7 +2259,7 @@ return function(Window, scriptInfo)
                     autoMineRange = autoMineRange,
                     autoMineDelay = autoMineDelay,
                     autoMineUseTween = autoMineUseTween,
-                    autoMineTweenSpeed = autoMineTweenSpeed,
+                    autoMineTweenSpeed = TELEPORT_TWEEN_SPEED,
                     teleportTweenSpeed = TELEPORT_TWEEN_SPEED,
                     teleportTweenMaxDuration = TELEPORT_TWEEN_MAX_DURATION,
                     safeProfileEnabled = safeProfileEnabled,
@@ -2277,10 +2295,8 @@ return function(Window, scriptInfo)
                     autoMineThread = task.spawn(function()
                         local ReplicatedStorage = game:GetService("ReplicatedStorage")
                         local Players = game:GetService("Players")
-                        local TweenService = game:GetService("TweenService")
                         local LocalPlayer = Players.LocalPlayer
                         local lockedTarget = nil
-                        local activeTween = nil
                         local lastTargetSignature = nil
                         local sameTargetLoops = 0
                         local stuckResetLoops = 16
@@ -2423,41 +2439,19 @@ return function(Window, scriptInfo)
 
                         local function tweenToOre(rootPart, orePart)
                             if not autoMineUseTween then
-                                if activeTween then
-                                    pcall(function() activeTween:Cancel() end)
-                                    activeTween = nil
-                                end
                                 return
                             end
                             if not rootPart or not orePart then return end
                             local character = rootPart.Parent
                             local humanoid = character and character:FindFirstChildOfClass("Humanoid")
                             if humanoid and humanoid.SeatPart then
-                                if activeTween then
-                                    pcall(function() activeTween:Cancel() end)
-                                    activeTween = nil
-                                end
                                 return
                             end
                             local toOre = orePart.Position - rootPart.Position
                             local dist = toOre.Magnitude
                             if dist < 8 then return end
                             local targetPos = orePart.Position - toOre.Unit * 5 + Vector3.new(0, 2.5, 0)
-                            local maxDuration = safeProfileEnabled and 0.55 or 0.35
-                            local minDuration = safeProfileEnabled and 0.12 or 0.08
-                            local duration = math.clamp(dist / math.max(autoMineTweenSpeed, 1), minDuration, maxDuration)
-                            if safeProfileEnabled then
-                                duration = duration + randomRange(0.01, 0.06)
-                            end
-                            if activeTween then
-                                pcall(function() activeTween:Cancel() end)
-                            end
-                            activeTween = TweenService:Create(
-                                rootPart,
-                                TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out),
-                                { CFrame = CFrame.new(targetPos) }
-                            )
-                            activeTween:Play()
+                            tweenHumanoidRootPart(rootPart, CFrame.new(targetPos), nil, false)
                         end
 
                         while autoMineEnabled do
@@ -2483,10 +2477,6 @@ return function(Window, scriptInfo)
                             local root = Character and Character:FindFirstChild("HumanoidRootPart")
                             if root then
                                 if safeProfileEnabled and safeNearbyPauseEnabled and hasNearbyPlayers(root, safeNearbyRadius) then
-                                    if activeTween then
-                                        pcall(function() activeTween:Cancel() end)
-                                        activeTween = nil
-                                    end
                                     resetTargetLock()
                                     OreLabel:Set("Auto Mine Status: paused (players nearby)")
                                     task.wait(randomRange(0.3, 0.7))
@@ -2494,10 +2484,6 @@ return function(Window, scriptInfo)
                                 end
                                 local humanoid = Character:FindFirstChildOfClass("Humanoid")
                                 if humanoid and humanoid.SeatPart then
-                                    if activeTween then
-                                        pcall(function() activeTween:Cancel() end)
-                                        activeTween = nil
-                                    end
                                     OreLabel:Set("Auto Mine Status: paused (in vehicle)")
                                     task.wait(0.15)
                                     continue
@@ -2584,10 +2570,6 @@ return function(Window, scriptInfo)
                                     task.wait(waitDelay)
                                     continue
                                 else
-                                    if activeTween then
-                                        pcall(function() activeTween:Cancel() end)
-                                        activeTween = nil
-                                    end
                                     resetTargetLock()
                                     OreLabel:Set("Auto Mine Status: no target in range")
                                 end
@@ -2597,10 +2579,6 @@ return function(Window, scriptInfo)
                             else
                                 task.wait(0.03)
                             end
-                        end
-                        if activeTween then
-                            pcall(function() activeTween:Cancel() end)
-                            activeTween = nil
                         end
                     end)
                 else
@@ -2654,14 +2632,15 @@ return function(Window, scriptInfo)
         })
 
         Farm:CreateSlider({
-            Name = "Tween Speed",
-            Range = {10, 120},
-            Increment = 1,
+            Name = "Global Tween Speed (All Movement)",
+            Range = {30, 260},
+            Increment = 5,
             Suffix = " studs/s",
-            CurrentValue = autoMineTweenSpeed,
+            CurrentValue = TELEPORT_TWEEN_SPEED,
             Flag = "AutoMineTweenSpeed",
             Callback = function(Value)
                 autoMineTweenSpeed = Value
+                TELEPORT_TWEEN_SPEED = Value
                 saveAutoSettings()
             end,
         })
@@ -2849,12 +2828,12 @@ return function(Window, scriptInfo)
                                             end
                                             
                                             if cargoPrompt and positionCargoVolume then
-                                                tweenHumanoidRootPart(hrp, positionCargoVolume.CFrame * CFrame.new(0, 3, 0), 0.18)
+                                                tweenHumanoidRootPart(hrp, positionCargoVolume.CFrame * CFrame.new(0, 3, 0))
                                                 task.wait(safeProfileEnabled and 0.38 or 0.3)
                                                 cargoPrompt.HoldDuration = 0
                                                 fireproximityprompt(cargoPrompt)
                                                 task.wait(safeProfileEnabled and 0.42 or 0.3)
-                                                tweenHumanoidRootPart(hrp, oldCFrame, 0.18)
+                                                tweenHumanoidRootPart(hrp, oldCFrame)
                                                 lastAutoSellAt = os.clock()
                                                 Rayfield:Notify({
                                                     Title = "Auto Sell",
@@ -3005,12 +2984,12 @@ return function(Window, scriptInfo)
                                         return count
                                     end
                                     local oreCount = countOres()
-                                    tweenHumanoidRootPart(hrp, positionCargoVolume.CFrame * CFrame.new(0, 3, 0), 0.18)
+                                    tweenHumanoidRootPart(hrp, positionCargoVolume.CFrame * CFrame.new(0, 3, 0))
                                     task.wait(0.3)
                                     cargoPrompt.HoldDuration = 0
                                     fireproximityprompt(cargoPrompt)
                                     task.wait(0.3)
-                                    tweenHumanoidRootPart(hrp, savedCFrame, 0.18)
+                                    tweenHumanoidRootPart(hrp, savedCFrame)
                                     Rayfield:Notify({
                                         Title = "Ore Sold",
                                         Content = "Successfully sold " .. oreCount .. " ores.",
