@@ -835,6 +835,7 @@ return function(Window, scriptInfo)
         }
         local oreNameCache = setmetatable({}, { __mode = "k" })
         local oreNameById = {}
+        local getOreRenderPart
         local genericOreNames = {
             ["Part"] = true,
             ["MeshPart"] = true,
@@ -1056,7 +1057,7 @@ return function(Window, scriptInfo)
         end
 
     
-        local function getOreRenderPart(target)
+        getOreRenderPart = function(target)
             if not target then return nil end
             if target:IsA("BasePart") then return target end
             if target:IsA("Model") then
