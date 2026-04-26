@@ -40,6 +40,8 @@
 - แก้ fallback ชื่อแร่เพิ่มเติม: กรณีชื่อ generic เป็น `SurfaceAppearance` ให้แสดง `OreMesh` แทน
 - ปรับ `modules/Ultimate Mining Tycoon` ให้สี ESP แยกตามหมวดหมู่แร่ (Common Metal / Rare Metal / Radioactive / Precious / Gemstone / Mythic / Unknown)
 - ปรับ `Auto Mine` ให้คัดแร่ด้วยชื่อจากระบบ ESP (`getOreName`) และใช้ `Ore Ignore List` จากชื่อเดียวกันแทนการเช็ค `MineId`
+- แก้เพิ่มจากผลทดสอบ: map สีให้ชื่อ runtime ในเกม (`OreMesh`, `CubicBlockMetal`, `ShaleMetalBlock`, `GemBlockMesh`) และปรับ `Unknown` ให้เป็นสีส้มเพื่อแยกชัด
+- แก้เพิ่ม `Auto Mine` ให้สแกนทั้ง `PlacedOre` และ `SpawnedBlocks` พร้อมคัดเฉพาะก้อนที่มีข้อมูลขุดได้จริง (`MineId/OreId/ChunkPosition/GridPosition`)
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
