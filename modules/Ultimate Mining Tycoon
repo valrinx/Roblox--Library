@@ -1214,6 +1214,71 @@ return function(Window, scriptInfo)
             end
         end
 
+        local function getMappedOreNameOnly(target, renderPart)
+            local oreId = getOreIdentifierDeep(target, renderPart)
+            if oreId and oreNameById[oreId] then
+                return oreNameById[oreId], "id"
+            end
+            local signature = makeOreSignature(target, renderPart)
+            if signature and oreNameBySignature[signature] then
+                return oreNameBySignature[signature], "signature"
+            end
+            local coarseSignature = makeOreSignatureCoarse(target, renderPart)
+            if coarseSignature and oreNameBySignatureCoarse[coarseSignature] then
+                return oreNameBySignatureCoarse[coarseSignature], "coarse"
+            end
+            local runtimeName = normalizeOreToken(isInstance(target) and target.Name or nil)
+            if runtimeName and oreNameByRuntime[runtimeName] then
+                return oreNameByRuntime[runtimeName], "runtime"
+            end
+            return nil, nil
+        end
+
+        local function getNeighborConsensusName(target, renderPart)
+            if not isInstance(target) or not isInstance(renderPart) then
+                return nil
+            end
+            local parent = target.Parent
+            if not isInstance(parent) then
+                return nil
+            end
+
+            local votes = {}
+            local total = 0
+            for _, neighbor in ipairs(parent:GetChildren()) do
+                if neighbor ~= target and (neighbor:IsA("BasePart") or neighbor:IsA("Model")) then
+                    local neighborRender = getOreRenderPart(neighbor)
+                    if isInstance(neighborRender) then
+                        local dist = (neighborRender.Position - renderPart.Position).Magnitude
+                        if dist <= 14 then
+                            local name, source = getMappedOreNameOnly(neighbor, neighborRender)
+                            if name and source ~= "runtime" then
+                                votes[name] = (votes[name] or 0) + 1
+                                total = total + 1
+                            end
+                        end
+                    end
+                end
+            end
+
+            if total < 3 then
+                return nil
+            end
+
+            local bestName, bestCount = nil, 0
+            for name, count in pairs(votes) do
+                if count > bestCount then
+                    bestName = name
+                    bestCount = count
+                end
+            end
+
+            if bestName and (bestCount / total) >= 0.7 then
+                return bestName
+            end
+            return nil
+        end
+
         local function getNameFromAttributes(instance)
             if not instance then return nil end
             local keys = { "OreName", "MineId", "OreId", "ResourceName", "DisplayName", "ItemName", "Name" }
@@ -1316,18 +1381,23 @@ return function(Window, scriptInfo)
                     renderPart = target:FindFirstChildWhichIsA("BasePart", true)
                 end
             end
-            local oreId = getOreIdentifierDeep(target, renderPart)
-            if oreId and oreNameById[oreId] then
-                return oreNameById[oreId]
+            local mappedName, mappedSource = getMappedOreNameOnly(target, renderPart)
+            if mappedName then
+                if mappedSource ~= "id" then
+                    local consensus = getNeighborConsensusName(target, renderPart)
+                    if consensus and consensus ~= mappedName then
+                        local signature = makeOreSignature(target, renderPart)
+                        local coarseSignature = makeOreSignatureCoarse(target, renderPart)
+                        if signature then oreNameBySignature[signature] = consensus end
+                        if coarseSignature then oreNameBySignatureCoarse[coarseSignature] = consensus end
+                        mappedName = consensus
+                    end
+                end
+                return mappedName
             end
+
             local signature = makeOreSignature(target, renderPart)
-            if signature and oreNameBySignature[signature] then
-                return oreNameBySignature[signature]
-            end
             local coarseSignature = makeOreSignatureCoarse(target, renderPart)
-            if coarseSignature and oreNameBySignatureCoarse[coarseSignature] then
-                return oreNameBySignatureCoarse[coarseSignature]
-            end
             autoLearnOreMapping(target, renderPart)
             if signature and oreNameBySignature[signature] then
                 return oreNameBySignature[signature]
