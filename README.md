@@ -24,7 +24,7 @@
 - เขียนคอมเมนต์เฉพาะจุดที่ logic ซับซ้อน
 - ตรวจสอบ input และสถานะเกมก่อน execute logic สำคัญ
 
-### Change Log (Roblox--Library)
+### Change Log (Roblox--Library/Ultimate Mining Tycoon)
 - เริ่มเพิ่มเอกสารภาพรวมของโปรเจกต์ใน `README.md`
 - แก้ `modules/Ultimate Mining Tycoon` ให้ Ore ESP ติดกับแร่ที่เป็นทั้ง `BasePart` และ `Model`
 - เพิ่มปุ่ม `Destroy Menu (Reload Script)` ใน `modules/Ultimate Mining Tycoon` เพื่อปิดสคริปต์และรันใหม่ได้ทันที
