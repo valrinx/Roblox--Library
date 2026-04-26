@@ -19,7 +19,7 @@ local SCRIPTS = {
     {
         name        = "My Knife Farm",
         description = "Auto Roll | Auto Buy | Auto Sell | Anti AFK",
-        gameId      = 0,
+        gameId      = 125003919504672,
         version     = "v0.4",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/My_knife_farm",
     },
