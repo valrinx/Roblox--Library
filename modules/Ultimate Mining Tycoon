@@ -935,7 +935,19 @@ return function(Window, scriptInfo)
         end
 
         local function resolveOreName(target)
-            local renderPart = getOreRenderPart(target)
+            local renderPart = nil
+            if type(getOreRenderPart) == "function" then
+                renderPart = getOreRenderPart(target)
+            elseif target then
+                -- Safe fallback in case render helper is not initialized yet
+                if target:IsA("BasePart") then
+                    renderPart = target
+                elseif target:IsA("Model") then
+                    renderPart = target.PrimaryPart or target:FindFirstChildWhichIsA("BasePart", true)
+                elseif target.FindFirstChildWhichIsA then
+                    renderPart = target:FindFirstChildWhichIsA("BasePart", true)
+                end
+            end
             local oreId = getOreIdentifierDeep(target, renderPart)
             if oreId and oreNameById[oreId] then
                 return oreNameById[oreId]
