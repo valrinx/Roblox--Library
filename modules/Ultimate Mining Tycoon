@@ -917,6 +917,7 @@ return function(Window, scriptInfo)
         local oreNameByColorSignature = autoSettingsLoaded.oreNameByColorSignature
         local oreInferenceStats = { learned = 0 }
         local useStrictColorRules = true
+        local useDirectColorClassifier = true
         local getOreRenderPart
         local getOreIdentifierDeep
         local knownOreNames = {
@@ -1008,6 +1009,16 @@ return function(Window, scriptInfo)
                 math.floor(color.G * 255 + 0.5),
                 math.floor(color.B * 255 + 0.5)
             )
+        end
+
+        local function colorDistanceSq(a, b)
+            if typeof(a) ~= "Color3" or typeof(b) ~= "Color3" then
+                return math.huge
+            end
+            local ar, ag, ab = a.R * 255, a.G * 255, a.B * 255
+            local br, bg, bb = b.R * 255, b.G * 255, b.B * 255
+            local dr, dg, db = ar - br, ag - bg, ab - bb
+            return (dr * dr) + (dg * dg) + (db * db)
         end
 
         local function numberToShortString(n)
@@ -1109,6 +1120,47 @@ return function(Window, scriptInfo)
                 meshId = normalizeOreToken(part.MeshId) or ""
             end
             return table.concat({ className, material, color, meshId }, "|")
+        end
+
+        local function classifyOreByDirectColor(target, renderPart)
+            if not useDirectColorClassifier then
+                return nil
+            end
+            local part = renderPart
+            if not isInstance(part) and type(getOreRenderPart) == "function" then
+                part = getOreRenderPart(target)
+            end
+            if not isInstance(part) then
+                return nil
+            end
+
+            local bestName, bestDist = nil, math.huge
+            local secondDist = math.huge
+            for oreName, oreColor in pairs(oreColors) do
+                if oreName ~= "Sliver" then
+                    local d = colorDistanceSq(part.Color, oreColor)
+                    if d < bestDist then
+                        secondDist = bestDist
+                        bestDist = d
+                        bestName = oreName
+                    elseif d < secondDist then
+                        secondDist = d
+                    end
+                end
+            end
+
+            -- Require reasonable confidence:
+            -- 1) absolute closeness and 2) margin against second-best.
+            if not bestName then
+                return nil
+            end
+            if bestDist > 3500 then
+                return nil
+            end
+            if (secondDist - bestDist) < 350 then
+                return nil
+            end
+            return bestName
         end
 
         -- Static table intentionally starts empty to avoid hardcoded wrong names.
@@ -1467,6 +1519,11 @@ return function(Window, scriptInfo)
                     end
                 end
                 return mappedName
+            end
+
+            local directColorName = classifyOreByDirectColor(target, renderPart)
+            if directColorName then
+                return directColorName
             end
 
             local signature = nil
