@@ -21,6 +21,7 @@ return function(Window, scriptInfo)
         oreNameBySignature = {},
         oreNameBySignatureCoarse = {},
         oreNameByColorSignature = {},
+        sharedOreNameByColorSignature = {},
     }
     local saveSettingsTaskId = 0
     local saveAutoSettings
@@ -78,6 +79,9 @@ return function(Window, scriptInfo)
         end
         if isStringMap(decoded.oreNameByColorSignature) then
             autoSettingsLoaded.oreNameByColorSignature = decoded.oreNameByColorSignature
+        end
+        if isStringMap(decoded.sharedOreNameByColorSignature) then
+            autoSettingsLoaded.sharedOreNameByColorSignature = decoded.sharedOreNameByColorSignature
         end
         settingsLoadOk = true
     end)
@@ -850,6 +854,7 @@ return function(Window, scriptInfo)
             filterOre     = "All",
             activeVisuals = {},
             connections   = {},
+            useAdornment  = true, -- more color-accurate than Highlight
         }
     
         local oreColors = {
@@ -914,7 +919,10 @@ return function(Window, scriptInfo)
         local oreNameByRuntime = autoSettingsLoaded.oreNameByRuntime
         local oreNameBySignature = autoSettingsLoaded.oreNameBySignature
         local oreNameBySignatureCoarse = autoSettingsLoaded.oreNameBySignatureCoarse
+        -- local learned mappings (per-user)
         local oreNameByColorSignature = autoSettingsLoaded.oreNameByColorSignature
+        -- shared mappings (ship with script or import/export)
+        local sharedOreNameByColorSignature = autoSettingsLoaded.sharedOreNameByColorSignature
         local oreInferenceStats = { learned = 0 }
         local useStrictColorRules = true
         local useDirectColorClassifier = true
@@ -1180,6 +1188,20 @@ return function(Window, scriptInfo)
         -- Populate only with verified mappings.
         local oreNameByStaticColorSignature = {}
 
+        local function mergeStringMap(dst, src)
+            if type(dst) ~= "table" or type(src) ~= "table" then return end
+            for k, v in pairs(src) do
+                if type(k) == "string" and type(v) == "string" and k ~= "" and v ~= "" then
+                    dst[k] = v
+                end
+            end
+        end
+
+        -- Allow hub to pass preloaded mappings into this module.
+        if scriptInfo and type(scriptInfo.preloadedOreColorMap) == "table" then
+            mergeStringMap(sharedOreNameByColorSignature, scriptInfo.preloadedOreColorMap)
+        end
+
         local function scoreOreCandidate(bucket, candidate, score)
             if not candidate or not score then return end
             bucket[candidate] = (bucket[candidate] or 0) + score
@@ -1335,6 +1357,9 @@ return function(Window, scriptInfo)
                 local colorSignature = makeOreColorSignature(target, renderPart)
                 if colorSignature and oreNameByStaticColorSignature[colorSignature] then
                     return oreNameByStaticColorSignature[colorSignature], "static-color"
+                end
+                if colorSignature and sharedOreNameByColorSignature[colorSignature] then
+                    return sharedOreNameByColorSignature[colorSignature], "shared-color"
                 end
                 if useStrictColorRules then
                     if colorSignature and oreNameByColorSignature[colorSignature] then
@@ -1826,16 +1851,30 @@ return function(Window, scriptInfo)
     
             local color = getOreColor(target, oreName, renderPart)
     
-            local hl = Instance.new("Highlight")
-            hl.Name                = "UH_ESP_Highlight"
-            hl.FillColor           = color
-            hl.OutlineColor        = color
-            -- Use solid fill so the perceived color matches part.Color (no background blend).
-            hl.FillTransparency    = 0
-            hl.OutlineTransparency = 0
-            hl.DepthMode           = Enum.HighlightDepthMode.AlwaysOnTop
-            hl.Adornee             = target
-            hl.Parent              = target
+            local visual = nil
+            if ESP.useAdornment then
+                local box = Instance.new("BoxHandleAdornment")
+                box.Name = "UH_ESP_Box"
+                box.Adornee = renderPart
+                box.AlwaysOnTop = true
+                box.ZIndex = 10
+                box.Color3 = color
+                box.Transparency = 0.15
+                box.Size = renderPart.Size + Vector3.new(0.05, 0.05, 0.05)
+                box.Parent = renderPart
+                visual = box
+            else
+                local hl = Instance.new("Highlight")
+                hl.Name                = "UH_ESP_Highlight"
+                hl.FillColor           = color
+                hl.OutlineColor        = color
+                hl.FillTransparency    = 0
+                hl.OutlineTransparency = 0
+                hl.DepthMode           = Enum.HighlightDepthMode.AlwaysOnTop
+                hl.Adornee             = target
+                hl.Parent              = target
+                visual = hl
+            end
     
             local bb = Instance.new("BillboardGui")
             bb.Name        = "UH_ESP_Billboard"
@@ -1857,11 +1896,11 @@ return function(Window, scriptInfo)
             lbl.Text                   = oreName
             lbl.Parent                 = bb
     
-            ESP.activeVisuals[target] = { highlight = hl, billboard = bb, label = lbl }
+            ESP.activeVisuals[target] = { visual = visual, billboard = bb, label = lbl }
     
             local conn = target.AncestryChanged:Connect(function()
                 if not target.Parent then
-                    if hl and hl.Parent then hl:Destroy() end
+                    if visual and visual.Parent then visual:Destroy() end
                     if bb and bb.Parent then bb:Destroy() end
                     ESP.activeVisuals[target] = nil
                     oreNameCache[target] = nil
@@ -1872,7 +1911,7 @@ return function(Window, scriptInfo)
     
         local function espClearAll()
             for target, v in pairs(ESP.activeVisuals) do
-                if v.highlight and v.highlight.Parent then v.highlight:Destroy() end
+                if v.visual and v.visual.Parent then v.visual:Destroy() end
                 if v.billboard and v.billboard.Parent then v.billboard:Destroy() end
             end
             ESP.activeVisuals = {}
@@ -1941,13 +1980,19 @@ return function(Window, scriptInfo)
                     if target and target.Parent then
                         local pos = getTargetPosition(target)
                         if not pos then
-                            v.highlight.Enabled = false
+                            if v.visual and v.visual:IsA("Highlight") then
+                                v.visual.Enabled = false
+                            end
                             v.billboard.Enabled = false
                             continue
                         end
                         local dist = (hrp.Position - pos).Magnitude
                         local visible = dist <= ESP.maxDistance
-                        v.highlight.Enabled = visible
+                        if v.visual and v.visual:IsA("Highlight") then
+                            v.visual.Enabled = visible
+                        elseif v.visual and v.visual:IsA("BoxHandleAdornment") then
+                            v.visual.Visible = visible
+                        end
                         v.billboard.Enabled = visible
                         if visible then
                             local renderPart = getOreRenderPart(target)
@@ -2030,6 +2075,7 @@ return function(Window, scriptInfo)
                     oreNameBySignature = oreNameBySignature,
                     oreNameBySignatureCoarse = oreNameBySignatureCoarse,
                     oreNameByColorSignature = oreNameByColorSignature,
+                    sharedOreNameByColorSignature = sharedOreNameByColorSignature,
                 }
                 local okWrite, errWrite = pcall(function()
                     writefile(SETTINGS_FILE, HttpService:JSONEncode(payload))
@@ -2828,6 +2874,89 @@ return function(Window, scriptInfo)
                     espClearAll()
                     espScanAll()
                 end
+            end,
+        })
+
+        local function encodeSharedColorMap()
+            return HttpService:JSONEncode(sharedOreNameByColorSignature)
+        end
+
+        local function decodeSharedColorMap(text)
+            if type(text) ~= "string" or text == "" then
+                return nil, "Empty input"
+            end
+            local ok, decoded = pcall(function()
+                return HttpService:JSONDecode(text)
+            end)
+            if not ok or type(decoded) ~= "table" then
+                return nil, "Invalid JSON"
+            end
+            if not isStringMap(decoded) then
+                return nil, "Expected string map { signature: name }"
+            end
+            return decoded, nil
+        end
+
+        Farm:CreateButton({
+            Name = "Export Shared Color Map (Copy)",
+            Callback = function()
+                local text = encodeSharedColorMap()
+                if type(setclipboard) == "function" then
+                    pcall(function() setclipboard(text) end)
+                end
+                Rayfield:Notify({
+                    Title = "Exported",
+                    Content = "Shared color map copied (or ready). Size: " .. tostring(#text) .. " chars.",
+                    Duration = 4,
+                    Image = "clipboard",
+                })
+            end,
+        })
+
+        local importBuffer = ""
+        Farm:CreateInput({
+            Name = "Import Shared Color Map (JSON)",
+            CurrentValue = "",
+            PlaceholderText = "Paste JSON here",
+            RemoveTextAfterFocusLost = false,
+            Flag = "ImportSharedColorMap",
+            Callback = function(Text)
+                importBuffer = Text or ""
+            end,
+        })
+
+        Farm:CreateButton({
+            Name = "Apply Imported Shared Map",
+            Callback = function()
+                local decoded, err = decodeSharedColorMap(importBuffer)
+                if not decoded then
+                    Rayfield:Notify({
+                        Title = "Import Failed",
+                        Content = err,
+                        Duration = 4,
+                        Image = "circle-x",
+                    })
+                    return
+                end
+                mergeStringMap(sharedOreNameByColorSignature, decoded)
+                if saveAutoSettings then
+                    saveAutoSettings()
+                end
+                updateOreLearningStatus()
+                if ESP.enabled then
+                    espClearAll()
+                    espScanAll()
+                end
+                Rayfield:Notify({
+                    Title = "Imported",
+                    Content = "Applied shared color map entries: " .. tostring((function()
+                        local n = 0
+                        for _ in pairs(decoded) do n = n + 1 end
+                        return n
+                    end)()),
+                    Duration = 4,
+                    Image = "check-circle",
+                })
             end,
         })
 
