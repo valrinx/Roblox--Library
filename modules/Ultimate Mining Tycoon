@@ -1069,7 +1069,10 @@ return function(Window, scriptInfo)
             if not signature then
                 return nil
             end
-            local parts = string.split(signature, "|")
+            local parts = {}
+            for part in string.gmatch(signature, "([^|]+)") do
+                table.insert(parts, part)
+            end
             if #parts < 7 then
                 return signature
             end
@@ -1219,32 +1222,38 @@ return function(Window, scriptInfo)
         end
 
         local function getMappedOreNameOnly(target, renderPart)
-            local oreId = nil
-            if type(getOreIdentifierDeep) == "function" then
-                oreId = getOreIdentifierDeep(target, renderPart)
+            local ok, mapped, source = pcall(function()
+                local oreId = nil
+                if type(getOreIdentifierDeep) == "function" then
+                    oreId = getOreIdentifierDeep(target, renderPart)
+                end
+                if oreId and oreNameById[oreId] then
+                    return oreNameById[oreId], "id"
+                end
+                local signature = nil
+                if type(makeOreSignature) == "function" then
+                    signature = makeOreSignature(target, renderPart)
+                end
+                if signature and oreNameBySignature[signature] then
+                    return oreNameBySignature[signature], "signature"
+                end
+                local coarseSignature = nil
+                if type(makeOreSignatureCoarse) == "function" then
+                    coarseSignature = makeOreSignatureCoarse(target, renderPart)
+                end
+                if coarseSignature and oreNameBySignatureCoarse[coarseSignature] then
+                    return oreNameBySignatureCoarse[coarseSignature], "coarse"
+                end
+                local runtimeName = normalizeOreToken(isInstance(target) and target.Name or nil)
+                if runtimeName and oreNameByRuntime[runtimeName] then
+                    return oreNameByRuntime[runtimeName], "runtime"
+                end
+                return nil, nil
+            end)
+            if not ok then
+                return nil, nil
             end
-            if oreId and oreNameById[oreId] then
-                return oreNameById[oreId], "id"
-            end
-            local signature = nil
-            if type(makeOreSignature) == "function" then
-                signature = makeOreSignature(target, renderPart)
-            end
-            if signature and oreNameBySignature[signature] then
-                return oreNameBySignature[signature], "signature"
-            end
-            local coarseSignature = nil
-            if type(makeOreSignatureCoarse) == "function" then
-                coarseSignature = makeOreSignatureCoarse(target, renderPart)
-            end
-            if coarseSignature and oreNameBySignatureCoarse[coarseSignature] then
-                return oreNameBySignatureCoarse[coarseSignature], "coarse"
-            end
-            local runtimeName = normalizeOreToken(isInstance(target) and target.Name or nil)
-            if runtimeName and oreNameByRuntime[runtimeName] then
-                return oreNameByRuntime[runtimeName], "runtime"
-            end
-            return nil, nil
+            return mapped, source
         end
 
         local function getNeighborConsensusName(target, renderPart)
