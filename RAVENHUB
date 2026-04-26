@@ -33,7 +33,9 @@ local SCRIPTS = {
     {
         name        = "Ultimate Mining Tycoon",
         description = "Auto Mine | Auto Sell | Ore ESP | Teleport",
+        -- รองรับทั้ง PlaceId และ GameId เพื่อกันกรณีแมพย่อย/ซับเพลส
         placeIds    = {18680867089},
+        gameIds     = {18680867089},
         version     = "v1.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/Ultimate%20Mining%20Tycoon",
     },
