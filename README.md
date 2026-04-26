@@ -85,6 +85,7 @@
 - แก้ `Ore ESP` สีเขียว/ผิดสีทั้งที่ Properties เป็นสีอื่น: ปรับ `getOreRenderPart()` ให้เลือก `MeshPart`/ชิ้นที่เห็นจริงก่อน (และ fallback เป็น `BasePart` ที่ใหญ่สุด) เพื่ออ่าน `part.Color` จากชิ้นที่ถูกต้อง ไม่หลุดไปอ่านจาก part ลูกที่สีคนละตัว
 - เพิ่มระบบแชร์ mapping ชื่อแร่ให้คนอื่นไม่ต้องตั้งเอง: รองรับ `sharedOreNameByColorSignature` (นำเข้า/ส่งออก JSON ผ่านปุ่ม Export/Import) และให้ ESP ใช้ shared map ก่อน map ส่วนตัวในโหมด strict
 - เปลี่ยนระบบวาร์ปหลักทั้งหมดใน `modules/Ultimate Mining Tycoon` ให้ใช้ Tween (`tweenHumanoidRootPart`) แทนการเซ็ต `CFrame` ตรง เพื่อให้การย้ายตำแหน่งลื่นและสม่ำเสมอทั้ง Teleport/Waypoint/Shop/Sell/Vehicle
+- แก้ `Ore Ignore List` ให้แสดงรายการแร่ครบทั้งระบบ (จาก `knownOreNames` + mapping ที่เรียนรู้) ไม่ยึดเฉพาะแร่ที่กำลังสปอนใน `PlacedOre` เพื่อเลือก ignore ได้ครบตั้งแต่เริ่ม
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
