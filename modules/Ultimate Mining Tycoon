@@ -833,6 +833,209 @@ return function(Window, scriptInfo)
             ["ShaleMetalBlock"] = "Rare Metal",
             ["GemBlockMesh"] = "Gemstone",
         }
+        local oreNameCache = setmetatable({}, { __mode = "k" })
+        local oreNameById = {}
+        local genericOreNames = {
+            ["Part"] = true,
+            ["MeshPart"] = true,
+            ["Model"] = true,
+            ["Unknown"] = true,
+            ["SurfaceAppearance"] = true,
+            ["OreMesh"] = true,
+            ["CrystallineMetalOre"] = true,
+            ["CubicBlockMetal"] = true,
+            ["ShaleMetalBlock"] = true,
+            ["GemBlockMesh"] = true,
+        }
+
+        local function normalizeOreToken(value)
+            if value == nil then return nil end
+            local text = tostring(value)
+            text = text:gsub("^%s+", ""):gsub("%s+$", "")
+            if text == "" then return nil end
+            return text
+        end
+
+        local function isMeaningfulOreName(name)
+            local n = normalizeOreToken(name)
+            return n and not genericOreNames[n]
+        end
+
+        local function getStringAttribute(instance, key)
+            if not instance then return nil end
+            local ok, value = pcall(function()
+                return instance:GetAttribute(key)
+            end)
+            if not ok then return nil end
+            return normalizeOreToken(value)
+        end
+
+        local function getNameFromAttributes(instance)
+            if not instance then return nil end
+            local keys = { "OreName", "MineId", "OreId", "ResourceName", "DisplayName", "ItemName", "Name" }
+            for _, key in ipairs(keys) do
+                local value = getStringAttribute(instance, key)
+                if isMeaningfulOreName(value) then
+                    return value
+                end
+            end
+            for _, key in ipairs(keys) do
+                local value = getStringAttribute(instance, key)
+                if value then
+                    return value
+                end
+            end
+            return nil
+        end
+
+        local function getOreIdentifier(instance)
+            if not instance then return nil end
+            local keys = { "MineId", "OreId", "ResourceId", "BlockId", "Id" }
+            for _, key in ipairs(keys) do
+                local value = getStringAttribute(instance, key)
+                if value then
+                    return value
+                end
+            end
+            return nil
+        end
+
+        local function getOreIdentifierDeep(target, renderPart)
+            local direct = getOreIdentifier(target) or getOreIdentifier(renderPart)
+            if direct then return direct end
+
+            local function scanDescendants(instance)
+                if not instance or not instance.GetDescendants then return nil end
+                for _, desc in ipairs(instance:GetDescendants()) do
+                    local found = getOreIdentifier(desc)
+                    if found then
+                        return found
+                    end
+                end
+                return nil
+            end
+
+            return scanDescendants(target) or scanDescendants(renderPart)
+        end
+
+        local function getNameFromValueObjects(instance)
+            if not instance then return nil end
+            local preferred = { "OreName", "MineId", "OreId", "ResourceName", "DisplayName", "ItemName" }
+            for _, key in ipairs(preferred) do
+                local valueObj = instance:FindFirstChild(key, true)
+                if valueObj and valueObj:IsA("StringValue") then
+                    local value = normalizeOreToken(valueObj.Value)
+                    if isMeaningfulOreName(value) then
+                        return value
+                    end
+                end
+            end
+            return nil
+        end
+
+        local function resolveOreName(target)
+            local renderPart = getOreRenderPart(target)
+            local oreId = getOreIdentifierDeep(target, renderPart)
+            if oreId and oreNameById[oreId] then
+                return oreNameById[oreId]
+            end
+            local candidates = {
+                getNameFromAttributes(target),
+                getNameFromAttributes(renderPart),
+                getNameFromValueObjects(target),
+                getNameFromValueObjects(renderPart),
+            }
+
+            for _, name in ipairs(candidates) do
+                if isMeaningfulOreName(name) then
+                    return name
+                end
+            end
+
+            local targetName = normalizeOreToken(target and target.Name)
+            local renderPartName = normalizeOreToken(renderPart and renderPart.Name)
+            if isMeaningfulOreName(targetName) then
+                return targetName
+            end
+            if isMeaningfulOreName(renderPartName) then
+                return renderPartName
+            end
+
+            for _, name in ipairs(candidates) do
+                if name then
+                    return name
+                end
+            end
+
+            if targetName then
+                return targetName
+            end
+            if renderPartName then
+                return renderPartName
+            end
+
+            return "OreMesh"
+        end
+
+        local function registerOreIdName(target, forcedName)
+            if not target then
+                return false, "No target ore"
+            end
+            local renderPart = getOreRenderPart(target)
+            local oreId = getOreIdentifierDeep(target, renderPart)
+            if not oreId then
+                return false, "No MineId/OreId found"
+            end
+
+            local resolvedName = normalizeOreToken(forcedName)
+            if not resolvedName or resolvedName == "" then
+                resolvedName = resolveOreName(target)
+            end
+            if not isMeaningfulOreName(resolvedName) then
+                return false, "Name is generic (" .. tostring(resolvedName) .. ")"
+            end
+
+            oreNameById[oreId] = resolvedName
+            oreNameCache[target] = resolvedName
+            return true, string.format("Mapped %s -> %s", tostring(oreId), resolvedName)
+        end
+
+        local function findOreTargetFromInstance(instance)
+            local node = instance
+            local placedOre = workspace:FindFirstChild("PlacedOre")
+            local spawnedBlocks = workspace:FindFirstChild("SpawnedBlocks")
+            while node and node.Parent do
+                if (placedOre and node.Parent == placedOre) or (spawnedBlocks and node.Parent == spawnedBlocks) then
+                    return node
+                end
+                node = node.Parent
+            end
+            return nil
+        end
+
+        local function getLookedOreTarget()
+            local players = game:GetService("Players")
+            local localPlayer = players.LocalPlayer
+            local camera = workspace.CurrentCamera
+            if not localPlayer or not camera then return nil end
+
+            local viewport = camera.ViewportSize
+            local ray = camera:ViewportPointToRay(viewport.X * 0.5, viewport.Y * 0.5)
+            local params = RaycastParams.new()
+            params.FilterType = Enum.RaycastFilterType.Blacklist
+            params.FilterDescendantsInstances = { localPlayer.Character }
+
+            local hit = workspace:Raycast(ray.Origin, ray.Direction * 700, params)
+            if hit and hit.Instance then
+                return findOreTargetFromInstance(hit.Instance)
+            end
+
+            local mouse = localPlayer:GetMouse()
+            if mouse and mouse.Target then
+                return findOreTargetFromInstance(mouse.Target)
+            end
+            return nil
+        end
         local function getTargetGridPosition(target, renderPart)
             local gridPos = target:GetAttribute("ChunkPosition") or target:GetAttribute("GridPosition")
             if not gridPos and renderPart then
@@ -867,14 +1070,16 @@ return function(Window, scriptInfo)
         end
 
         local function getOreName(target)
-            local n = target:GetAttribute("MineId") or target:GetAttribute("OreId") or target:GetAttribute("OreName")
-            if not n or n == "" or n == "Part" or n == "MeshPart" or n == "OreMesh" then
-                n = target.Name
+            if not target then
+                return "OreMesh"
             end
-            if not n or n == "" or n == "Unknown" or n == "Part" or n == "MeshPart" or n == "Model" or n == "SurfaceAppearance" then
-                n = "OreMesh"
+            local cached = oreNameCache[target]
+            if cached and cached ~= "" then
+                return cached
             end
-            return n
+            local resolved = resolveOreName(target)
+            oreNameCache[target] = resolved
+            return resolved
         end
 
         local function getOreCategory(oreName)
@@ -945,6 +1150,7 @@ return function(Window, scriptInfo)
                     if hl and hl.Parent then hl:Destroy() end
                     if bb and bb.Parent then bb:Destroy() end
                     ESP.activeVisuals[target] = nil
+                    oreNameCache[target] = nil
                 end
             end)
             table.insert(ESP.connections, conn)
@@ -1611,6 +1817,80 @@ return function(Window, scriptInfo)
         -- ORE ESP UI
         local OreSection = Farm:CreateSection("⚙️ Ore ESP Selection")
         Farm:CreateLabel("Reveals every type of ore found throughout mining.")
+        local OreDebugSection = Farm:CreateSection("🧪 Ore Name Debug / Mapping")
+        local OreDebugLabel = Farm:CreateLabel("Look at ore and press capture button")
+        local OreManualName = ""
+
+        Farm:CreateInput({
+            Name = "Manual Ore Name (optional)",
+            CurrentValue = "",
+            PlaceholderText = "Example: Titanium",
+            RemoveTextAfterFocusLost = false,
+            Flag = "OreManualNameInput",
+            Callback = function(Text)
+                OreManualName = Text or ""
+            end,
+        })
+
+        Farm:CreateButton({
+            Name = "Capture Looked Ore (show id/name)",
+            Callback = function()
+                local target = getLookedOreTarget()
+                if not target then
+                    OreDebugLabel:Set("Ore Debug: no ore in crosshair")
+                    Rayfield:Notify({
+                        Title = "Ore Debug",
+                        Content = "No ore found in your crosshair.",
+                        Duration = 3,
+                        Image = "circle-x",
+                    })
+                    return
+                end
+
+                local renderPart = getOreRenderPart(target)
+                local oreId = getOreIdentifierDeep(target, renderPart) or "N/A"
+                local oreName = resolveOreName(target)
+                local text = string.format("Ore Debug: %s | id: %s", tostring(oreName), tostring(oreId))
+                OreDebugLabel:Set(text)
+                Rayfield:Notify({
+                    Title = "Ore Captured",
+                    Content = text,
+                    Duration = 4,
+                    Image = "search",
+                })
+            end,
+        })
+
+        Farm:CreateButton({
+            Name = "Map Looked Ore Id -> Name",
+            Callback = function()
+                local target = getLookedOreTarget()
+                if not target then
+                    OreDebugLabel:Set("Ore Map: no ore in crosshair")
+                    Rayfield:Notify({
+                        Title = "Ore Mapping",
+                        Content = "No ore found in your crosshair.",
+                        Duration = 3,
+                        Image = "circle-x",
+                    })
+                    return
+                end
+
+                local ok, message = registerOreIdName(target, OreManualName)
+                OreDebugLabel:Set("Ore Map: " .. message)
+                Rayfield:Notify({
+                    Title = ok and "Ore Mapping Saved" or "Ore Mapping Failed",
+                    Content = message,
+                    Duration = 4,
+                    Image = ok and "check-circle" or "circle-x",
+                })
+
+                if ok and ESP.enabled then
+                    espClearAll()
+                    espScanAll()
+                end
+            end,
+        })
     
         Farm:CreateToggle({
             Name = "Ore ESP",
