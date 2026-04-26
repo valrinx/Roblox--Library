@@ -912,6 +912,7 @@ return function(Window, scriptInfo)
         local oreNameBySignatureCoarse = autoSettingsLoaded.oreNameBySignatureCoarse
         local oreInferenceStats = { learned = 0 }
         local getOreRenderPart
+        local getOreIdentifierDeep
         local knownOreNames = {
             "Tin", "Iron", "Lead", "Cobalt", "Aluminium", "Silver", "Sliver", "Uranium", "Vanadium",
             "Tungsten", "Gold", "Titanium", "Palladium", "Plutonium", "Mithril", "Thorium",
@@ -1191,7 +1192,10 @@ return function(Window, scriptInfo)
             local changed = false
             local signature = makeOreSignature(target, renderPart)
             local coarseSignature = makeOreSignatureCoarse(target, renderPart)
-            local oreId = getOreIdentifierDeep(target, renderPart)
+            local oreId = nil
+            if type(getOreIdentifierDeep) == "function" then
+                oreId = getOreIdentifierDeep(target, renderPart)
+            end
             -- Prevent poisoning memory when there is no reliable ID source.
             if not oreId then
                 return
@@ -1215,15 +1219,24 @@ return function(Window, scriptInfo)
         end
 
         local function getMappedOreNameOnly(target, renderPart)
-            local oreId = getOreIdentifierDeep(target, renderPart)
+            local oreId = nil
+            if type(getOreIdentifierDeep) == "function" then
+                oreId = getOreIdentifierDeep(target, renderPart)
+            end
             if oreId and oreNameById[oreId] then
                 return oreNameById[oreId], "id"
             end
-            local signature = makeOreSignature(target, renderPart)
+            local signature = nil
+            if type(makeOreSignature) == "function" then
+                signature = makeOreSignature(target, renderPart)
+            end
             if signature and oreNameBySignature[signature] then
                 return oreNameBySignature[signature], "signature"
             end
-            local coarseSignature = makeOreSignatureCoarse(target, renderPart)
+            local coarseSignature = nil
+            if type(makeOreSignatureCoarse) == "function" then
+                coarseSignature = makeOreSignatureCoarse(target, renderPart)
+            end
             if coarseSignature and oreNameBySignatureCoarse[coarseSignature] then
                 return oreNameBySignatureCoarse[coarseSignature], "coarse"
             end
@@ -1309,7 +1322,7 @@ return function(Window, scriptInfo)
             return nil
         end
 
-        local function getOreIdentifierDeep(target, renderPart)
+        getOreIdentifierDeep = function(target, renderPart)
             local direct = getOreIdentifier(target) or getOreIdentifier(renderPart)
             if direct then return direct end
 
@@ -1396,8 +1409,14 @@ return function(Window, scriptInfo)
                 return mappedName
             end
 
-            local signature = makeOreSignature(target, renderPart)
-            local coarseSignature = makeOreSignatureCoarse(target, renderPart)
+            local signature = nil
+            if type(makeOreSignature) == "function" then
+                signature = makeOreSignature(target, renderPart)
+            end
+            local coarseSignature = nil
+            if type(makeOreSignatureCoarse) == "function" then
+                coarseSignature = makeOreSignatureCoarse(target, renderPart)
+            end
             autoLearnOreMapping(target, renderPart)
             if signature and oreNameBySignature[signature] then
                 return oreNameBySignature[signature]
@@ -1459,9 +1478,18 @@ return function(Window, scriptInfo)
                 return false, "No target ore"
             end
             local renderPart = getOreRenderPart(target)
-            local oreId = getOreIdentifierDeep(target, renderPart)
-            local signature = makeOreSignature(target, renderPart)
-            local coarseSignature = makeOreSignatureCoarse(target, renderPart)
+            local oreId = nil
+            if type(getOreIdentifierDeep) == "function" then
+                oreId = getOreIdentifierDeep(target, renderPart)
+            end
+            local signature = nil
+            if type(makeOreSignature) == "function" then
+                signature = makeOreSignature(target, renderPart)
+            end
+            local coarseSignature = nil
+            if type(makeOreSignatureCoarse) == "function" then
+                coarseSignature = makeOreSignatureCoarse(target, renderPart)
+            end
 
             local resolvedName = normalizeOreToken(forcedName)
             if not resolvedName or resolvedName == "" then
