@@ -2614,6 +2614,16 @@ return function(Window, scriptInfo)
         local OreLearningStatusLabel = Farm:CreateLabel("Ore Memory: checking...")
         local OreManualName = ""
 
+        local function safeSetUiText(element, text)
+            if not element or type(element.Set) ~= "function" then
+                return false
+            end
+            local ok = pcall(function()
+                element:Set(text)
+            end)
+            return ok
+        end
+
         local function countTableEntries(tbl)
             local n = 0
             if type(tbl) ~= "table" then return 0 end
@@ -2637,7 +2647,7 @@ return function(Window, scriptInfo)
             if settingsLastSaveError then
                 saveErrorText = " | err:" .. string.sub(tostring(settingsLastSaveError), 1, 22)
             end
-            OreLearningStatusLabel:Set(string.format(
+            safeSetUiText(OreLearningStatusLabel, string.format(
                 "Ore Memory: %d entries | learned:%d | %s | %s%s",
                 memoryCount,
                 oreInferenceStats.learned,
@@ -2670,7 +2680,7 @@ return function(Window, scriptInfo)
             Callback = function()
                 local target = getLookedOreTarget()
                 if not target then
-                    OreDebugLabel:Set("Ore Debug: no ore in crosshair")
+                    safeSetUiText(OreDebugLabel, "Ore Debug: no ore in crosshair")
                     Rayfield:Notify({
                         Title = "Ore Debug",
                         Content = "No ore found in your crosshair.",
@@ -2687,7 +2697,7 @@ return function(Window, scriptInfo)
                 local signature = makeOreSignature(target, renderPart)
                 local signatureText = signature and ("sig:" .. string.sub(signature, 1, 36) .. "...") or "sig:N/A"
                 local text = string.format("Ore Debug: %s | id: %s | runtime: %s | %s", tostring(oreName), tostring(oreId), tostring(runtimeName), signatureText)
-                OreDebugLabel:Set(text)
+                safeSetUiText(OreDebugLabel, text)
                 Rayfield:Notify({
                     Title = "Ore Captured",
                     Content = text,
@@ -2702,7 +2712,7 @@ return function(Window, scriptInfo)
             Callback = function()
                 local target = getLookedOreTarget()
                 if not target then
-                    OreDebugLabel:Set("Ore Map: no ore in crosshair")
+                    safeSetUiText(OreDebugLabel, "Ore Map: no ore in crosshair")
                     Rayfield:Notify({
                         Title = "Ore Mapping",
                         Content = "No ore found in your crosshair.",
@@ -2713,7 +2723,7 @@ return function(Window, scriptInfo)
                 end
 
                 local ok, message = registerOreIdName(target, OreManualName)
-                OreDebugLabel:Set("Ore Map: " .. message)
+                safeSetUiText(OreDebugLabel, "Ore Map: " .. message)
                 updateOreLearningStatus()
                 Rayfield:Notify({
                     Title = ok and "Ore Mapping Saved" or "Ore Mapping Failed",
