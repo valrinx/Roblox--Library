@@ -2738,43 +2738,146 @@ return function(Window, scriptInfo)
             end,
         })
 
+        local function performOreMappingReset()
+            oreNameById = {}
+            oreNameByRuntime = {}
+            oreNameBySignature = {}
+            oreNameBySignatureCoarse = {}
+            oreNameByColorSignature = {}
+            oreNameCache = setmetatable({}, { __mode = "k" })
+            oreInferenceStats.learned = 0
+            if saveAutoSettings then
+                saveAutoSettings()
+            end
+            updateOreLearningStatus()
+            if ESP.enabled then
+                espClearAll()
+                espScanAll()
+            end
+            Rayfield:Notify({
+                Title = "Ore Mapping Reset",
+                Content = "Cleared learned ore mappings. Static rules remain unchanged.",
+                Duration = 4,
+                Image = "refresh-cw",
+            })
+        end
+
+        local function showResetConfirmPopup(onConfirm)
+            local players = game:GetService("Players")
+            local localPlayer = players.LocalPlayer
+            local playerGui = localPlayer and localPlayer:FindFirstChildOfClass("PlayerGui")
+            if not playerGui then
+                Rayfield:Notify({
+                    Title = "Reset Confirmation",
+                    Content = "PlayerGui not available. Try again.",
+                    Duration = 3,
+                    Image = "circle-x",
+                })
+                return
+            end
+
+            local existing = playerGui:FindFirstChild("UH_ResetConfirmPopup")
+            if existing then
+                existing:Destroy()
+            end
+
+            local screenGui = Instance.new("ScreenGui")
+            screenGui.Name = "UH_ResetConfirmPopup"
+            screenGui.ResetOnSpawn = false
+            screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+            screenGui.Parent = playerGui
+
+            local overlay = Instance.new("Frame")
+            overlay.Name = "Overlay"
+            overlay.Size = UDim2.fromScale(1, 1)
+            overlay.Position = UDim2.fromScale(0, 0)
+            overlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+            overlay.BackgroundTransparency = 0.35
+            overlay.BorderSizePixel = 0
+            overlay.Parent = screenGui
+
+            local modal = Instance.new("Frame")
+            modal.Name = "Modal"
+            modal.Size = UDim2.fromOffset(420, 190)
+            modal.Position = UDim2.fromScale(0.5, 0.5)
+            modal.AnchorPoint = Vector2.new(0.5, 0.5)
+            modal.BackgroundColor3 = Color3.fromRGB(24, 26, 33)
+            modal.BorderSizePixel = 0
+            modal.Parent = overlay
+
+            local corner = Instance.new("UICorner")
+            corner.CornerRadius = UDim.new(0, 10)
+            corner.Parent = modal
+
+            local title = Instance.new("TextLabel")
+            title.Name = "Title"
+            title.Size = UDim2.new(1, -20, 0, 34)
+            title.Position = UDim2.fromOffset(10, 10)
+            title.BackgroundTransparency = 1
+            title.Text = "Confirm Reset Learned Ore Maps"
+            title.TextColor3 = Color3.fromRGB(255, 255, 255)
+            title.TextXAlignment = Enum.TextXAlignment.Left
+            title.Font = Enum.Font.GothamBold
+            title.TextSize = 16
+            title.Parent = modal
+
+            local message = Instance.new("TextLabel")
+            message.Name = "Message"
+            message.Size = UDim2.new(1, -20, 0, 72)
+            message.Position = UDim2.fromOffset(10, 48)
+            message.BackgroundTransparency = 1
+            message.Text = "This will delete all learned ore mappings (ID/signature/color). This action cannot be undone."
+            message.TextWrapped = true
+            message.TextColor3 = Color3.fromRGB(225, 225, 225)
+            message.TextXAlignment = Enum.TextXAlignment.Left
+            message.TextYAlignment = Enum.TextYAlignment.Top
+            message.Font = Enum.Font.Gotham
+            message.TextSize = 14
+            message.Parent = modal
+
+            local cancelButton = Instance.new("TextButton")
+            cancelButton.Name = "Cancel"
+            cancelButton.Size = UDim2.fromOffset(120, 34)
+            cancelButton.Position = UDim2.new(1, -260, 1, -48)
+            cancelButton.BackgroundColor3 = Color3.fromRGB(58, 62, 74)
+            cancelButton.Text = "Cancel"
+            cancelButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+            cancelButton.Font = Enum.Font.GothamBold
+            cancelButton.TextSize = 14
+            cancelButton.Parent = modal
+            Instance.new("UICorner", cancelButton).CornerRadius = UDim.new(0, 8)
+
+            local confirmButton = Instance.new("TextButton")
+            confirmButton.Name = "Confirm"
+            confirmButton.Size = UDim2.fromOffset(120, 34)
+            confirmButton.Position = UDim2.new(1, -130, 1, -48)
+            confirmButton.BackgroundColor3 = Color3.fromRGB(178, 64, 64)
+            confirmButton.Text = "Confirm Reset"
+            confirmButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+            confirmButton.Font = Enum.Font.GothamBold
+            confirmButton.TextSize = 14
+            confirmButton.Parent = modal
+            Instance.new("UICorner", confirmButton).CornerRadius = UDim.new(0, 8)
+
+            local function closePopup()
+                if screenGui and screenGui.Parent then
+                    screenGui:Destroy()
+                end
+            end
+
+            trackConnection(cancelButton.MouseButton1Click:Connect(closePopup))
+            trackConnection(confirmButton.MouseButton1Click:Connect(function()
+                closePopup()
+                if onConfirm then
+                    onConfirm()
+                end
+            end))
+        end
+
         Farm:CreateButton({
             Name = "Reset Learned Ore Maps",
             Callback = function()
-                local now = os.clock()
-                _G.uhOreResetConfirmUntil = _G.uhOreResetConfirmUntil or 0
-                if now > _G.uhOreResetConfirmUntil then
-                    _G.uhOreResetConfirmUntil = now + 6
-                    Rayfield:Notify({
-                        Title = "Confirm Reset",
-                        Content = "Press 'Reset Learned Ore Maps' again within 6s to confirm.",
-                        Duration = 4,
-                        Image = "alert-triangle",
-                    })
-                    return
-                end
-                _G.uhOreResetConfirmUntil = 0
-                oreNameById = {}
-                oreNameByRuntime = {}
-                oreNameBySignature = {}
-                oreNameBySignatureCoarse = {}
-                oreNameByColorSignature = {}
-                oreNameCache = setmetatable({}, { __mode = "k" })
-                oreInferenceStats.learned = 0
-                if saveAutoSettings then
-                    saveAutoSettings()
-                end
-                updateOreLearningStatus()
-                if ESP.enabled then
-                    espClearAll()
-                    espScanAll()
-                end
-                Rayfield:Notify({
-                    Title = "Ore Mapping Reset",
-                    Content = "Cleared learned ore mappings. Static rules remain unchanged.",
-                    Duration = 4,
-                    Image = "refresh-cw",
-                })
+                showResetConfirmPopup(performOreMappingReset)
             end,
         })
 
