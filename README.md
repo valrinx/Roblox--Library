@@ -38,6 +38,8 @@
 - ปรับระบบอ่านชื่อแร่ใน `modules/Ultimate Mining Tycoon`: อ่านจาก attributes/descendants + normalize ชื่อ (ตัด `Block/Mesh`, แยก CamelCase) และ cache ชื่อเพื่อลดชื่อผิดแบบ `Unknown/GemBlockMesh`
 - ปรับกลับเป็นแบบเดิมตามคำสั่ง: ชื่อแร่ใช้แหล่งข้อมูลหลักเดิม และกรณีไม่ทราบชื่อให้แสดง `OreMesh` แทน `Unknown`
 - แก้ fallback ชื่อแร่เพิ่มเติม: กรณีชื่อ generic เป็น `SurfaceAppearance` ให้แสดง `OreMesh` แทน
+- ปรับ `modules/Ultimate Mining Tycoon` ให้สี ESP แยกตามหมวดหมู่แร่ (Common Metal / Rare Metal / Radioactive / Precious / Gemstone / Mythic / Unknown)
+- ปรับ `Auto Mine` ให้คัดแร่ด้วยชื่อจากระบบ ESP (`getOreName`) และใช้ `Ore Ignore List` จากชื่อเดียวกันแทนการเช็ค `MineId`
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
