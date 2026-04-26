@@ -1079,6 +1079,20 @@ return function(Window, scriptInfo)
                         local ReplicatedStorage = game:GetService("ReplicatedStorage")
                         local Players = game:GetService("Players")
                         local LocalPlayer = Players.LocalPlayer
+                        local function resolveActivateRemote(tool)
+                            if not tool then return nil end
+                            local madCommId = tool:GetAttribute("MadCommId")
+                            local madCommEvents = ReplicatedStorage:FindFirstChild("MadCommEvents")
+                            if madCommId and madCommEvents then
+                                local commFolder = madCommEvents:FindFirstChild(tostring(madCommId))
+                                local remote = commFolder and commFolder:FindFirstChild("Activate")
+                                if remote then
+                                    return remote
+                                end
+                            end
+                            return tool:FindFirstChild("Activate", true)
+                        end
+
                         local function GetTool()
                             for _,v in pairs(LocalPlayer.Character:GetChildren()) do
                                 if v:FindFirstChild("EquipRemote") and string.lower(v.Name):find("pickaxe") then
@@ -1099,7 +1113,7 @@ return function(Window, scriptInfo)
                             local Tool = GetTool()
                             if not Tool then task.wait(0.1) continue end
                             local isPickaxe = string.lower(Tool.Name):find("pickaxe") ~= nil
-                            if Tool.Parent == LocalPlayer.InnoBackpack and not isPickaxe then
+                            if Tool.Parent == LocalPlayer.InnoBackpack and isPickaxe then
                                 local equipRemote = Tool:FindFirstChild("EquipRemote")
                                 if equipRemote then
                                     equipRemote:FireServer(true)
@@ -1159,12 +1173,9 @@ return function(Window, scriptInfo)
                                             )
                                         end
                                         local args = {10, gridPos}
-                                        local madCommId = Tool:GetAttribute("MadCommId")
-                                        if madCommId and ReplicatedStorage.MadCommEvents and ReplicatedStorage.MadCommEvents[madCommId] then
-                                            local activateRemote = ReplicatedStorage.MadCommEvents[madCommId].Activate
-                                            if activateRemote then
-                                                activateRemote:FireServer(table.unpack(args))
-                                            end
+                                        local activateRemote = resolveActivateRemote(Tool)
+                                        if activateRemote then
+                                            activateRemote:FireServer(table.unpack(args))
                                         end
                                         task.wait(autoMineDelay)
                                         continue
