@@ -900,12 +900,23 @@ return function(Window, scriptInfo)
         local oreNameById = autoSettingsLoaded.oreNameById
         local oreNameByRuntime = autoSettingsLoaded.oreNameByRuntime
         local oreNameBySignature = autoSettingsLoaded.oreNameBySignature
+        local oreInferenceStats = { learned = 0 }
         local getOreRenderPart
         local knownOreNames = {
             "Tin", "Iron", "Lead", "Cobalt", "Aluminium", "Silver", "Sliver", "Uranium", "Vanadium",
             "Tungsten", "Gold", "Titanium", "Palladium", "Plutonium", "Mithril", "Thorium",
             "Iridium", "Adamantium", "Rhodium", "Unobtanium", "Topaz", "Emerald", "Sapphire",
             "Ruby", "Diamond", "Poudretteite", "Zultanite", "Grandidierite", "Musgravite", "Painite",
+        }
+        local knownOreCanonical = {
+            ["tin"] = "Tin", ["iron"] = "Iron", ["lead"] = "Lead", ["cobalt"] = "Cobalt", ["aluminium"] = "Aluminium",
+            ["silver"] = "Silver", ["sliver"] = "Sliver", ["uranium"] = "Uranium", ["vanadium"] = "Vanadium",
+            ["tungsten"] = "Tungsten", ["gold"] = "Gold", ["titanium"] = "Titanium", ["palladium"] = "Palladium",
+            ["plutonium"] = "Plutonium", ["mithril"] = "Mithril", ["thorium"] = "Thorium", ["iridium"] = "Iridium",
+            ["adamantium"] = "Adamantium", ["rhodium"] = "Rhodium", ["unobtanium"] = "Unobtanium",
+            ["topaz"] = "Topaz", ["emerald"] = "Emerald", ["sapphire"] = "Sapphire", ["ruby"] = "Ruby", ["diamond"] = "Diamond",
+            ["poudretteite"] = "Poudretteite", ["zultanite"] = "Zultanite", ["grandidierite"] = "Grandidierite",
+            ["musgravite"] = "Musgravite", ["painite"] = "Painite",
         }
         local genericOreNames = {
             ["Part"] = true,
@@ -962,6 +973,12 @@ return function(Window, scriptInfo)
                 end
             end
             return nil
+        end
+
+        local function canonicalizeOreName(name)
+            local normalized = normalizeNameForMatch(name)
+            if not normalized then return nil end
+            return knownOreCanonical[normalized]
         end
 
         local function colorToShortString(color)
@@ -1034,6 +1051,115 @@ return function(Window, scriptInfo)
                 return nil
             end
             return signature
+        end
+
+        local function scoreOreCandidate(bucket, candidate, score)
+            if not candidate or not score then return end
+            bucket[candidate] = (bucket[candidate] or 0) + score
+        end
+
+        local function collectOreCandidatesFromInstance(instance, bucket, baseScore, scanDescendants)
+            if not isInstance(instance) then return end
+
+            local attrKeys = { "OreName", "MineId", "OreId", "ResourceName", "DisplayName", "ItemName", "Name" }
+            for _, key in ipairs(attrKeys) do
+                local value = getStringAttribute(instance, key)
+                local fromAttr = canonicalizeOreName(value) or pickKnownOreFromText(value)
+                if fromAttr then
+                    scoreOreCandidate(bucket, fromAttr, baseScore + 10)
+                end
+            end
+
+            local fromInstanceName = canonicalizeOreName(instance.Name) or pickKnownOreFromText(instance.Name)
+            if fromInstanceName then
+                scoreOreCandidate(bucket, fromInstanceName, baseScore + 4)
+            end
+
+            local function scanOne(desc)
+                if desc:IsA("StringValue") then
+                    local fromValueName = canonicalizeOreName(desc.Name) or pickKnownOreFromText(desc.Name)
+                    local fromValueText = canonicalizeOreName(desc.Value) or pickKnownOreFromText(desc.Value)
+                    if fromValueName then scoreOreCandidate(bucket, fromValueName, baseScore + 5) end
+                    if fromValueText then scoreOreCandidate(bucket, fromValueText, baseScore + 7) end
+                elseif desc:IsA("IntValue") or desc:IsA("NumberValue") then
+                    local fromNumericName = canonicalizeOreName(desc.Name) or pickKnownOreFromText(desc.Name)
+                    if fromNumericName then
+                        scoreOreCandidate(bucket, fromNumericName, baseScore + 3)
+                    end
+                else
+                    local fromDescName = canonicalizeOreName(desc.Name) or pickKnownOreFromText(desc.Name)
+                    if fromDescName then
+                        scoreOreCandidate(bucket, fromDescName, baseScore + 1)
+                    end
+                end
+            end
+
+            if scanDescendants and instance.GetDescendants then
+                local ok, descendants = pcall(function()
+                    return instance:GetDescendants()
+                end)
+                if ok and type(descendants) == "table" then
+                    local limit = math.min(#descendants, 180)
+                    for i = 1, limit do
+                        local desc = descendants[i]
+                        if isInstance(desc) then
+                            scanOne(desc)
+                        end
+                    end
+                end
+            end
+        end
+
+        local function inferOreNameFromTarget(target, renderPart)
+            local bucket = {}
+            collectOreCandidatesFromInstance(target, bucket, 12, true)
+            collectOreCandidatesFromInstance(renderPart, bucket, 10, true)
+            if isInstance(target) and isInstance(target.Parent) then
+                collectOreCandidatesFromInstance(target.Parent, bucket, 6, false)
+            end
+
+            local bestName, bestScore = nil, -math.huge
+            local secondBest = -math.huge
+            for name, score in pairs(bucket) do
+                if score > bestScore then
+                    secondBest = bestScore
+                    bestScore = score
+                    bestName = name
+                elseif score > secondBest then
+                    secondBest = score
+                end
+            end
+
+            if not bestName then
+                return nil, 0
+            end
+            if bestScore < 14 then
+                return nil, bestScore
+            end
+            if bestScore - secondBest < 3 then
+                return nil, bestScore
+            end
+            return bestName, bestScore
+        end
+
+        local function autoLearnOreMapping(target, renderPart)
+            local inferredName, inferredScore = inferOreNameFromTarget(target, renderPart)
+            if not inferredName then return end
+            local changed = false
+            local signature = makeOreSignature(target, renderPart)
+            if signature and not oreNameBySignature[signature] then
+                oreNameBySignature[signature] = inferredName
+                oreInferenceStats.learned = oreInferenceStats.learned + 1
+                changed = true
+            end
+            local oreId = getOreIdentifierDeep(target, renderPart)
+            if oreId and not oreNameById[oreId] and inferredScore >= 18 then
+                oreNameById[oreId] = inferredName
+                changed = true
+            end
+            if changed and saveAutoSettings then
+                saveAutoSettings()
+            end
         end
 
         local function getNameFromAttributes(instance)
@@ -1146,6 +1272,10 @@ return function(Window, scriptInfo)
             if signature and oreNameBySignature[signature] then
                 return oreNameBySignature[signature]
             end
+            autoLearnOreMapping(target, renderPart)
+            if signature and oreNameBySignature[signature] then
+                return oreNameBySignature[signature]
+            end
             local runtimeName = normalizeOreToken(isInstance(target) and target.Name or nil)
             if runtimeName and oreNameByRuntime[runtimeName] then
                 return oreNameByRuntime[runtimeName]
@@ -1158,6 +1288,11 @@ return function(Window, scriptInfo)
                 getNameFromDescendantHints(target),
                 getNameFromDescendantHints(renderPart),
             }
+
+            local inferredName = inferOreNameFromTarget(target, renderPart)
+            if inferredName then
+                table.insert(candidates, 1, inferredName)
+            end
 
             for _, name in ipairs(candidates) do
                 if isMeaningfulOreName(name) then
@@ -1456,27 +1591,32 @@ return function(Window, scriptInfo)
         end
     
         trackConnection(game:GetService("RunService").RenderStepped:Connect(function()
-            if not ESP.enabled then return end
-            local char = game.Players.LocalPlayer.Character
-            local hrp  = char and char:FindFirstChild("HumanoidRootPart")
-            if not hrp then return end
-    
-            for target, v in pairs(ESP.activeVisuals) do
-                if target and target.Parent then
-                    local pos = getTargetPosition(target)
-                    if not pos then
-                        v.highlight.Enabled = false
-                        v.billboard.Enabled = false
-                        continue
-                    end
-                    local dist = (hrp.Position - pos).Magnitude
-                    local visible = dist <= ESP.maxDistance
-                    v.highlight.Enabled = visible
-                    v.billboard.Enabled = visible
-                    if visible then
-                        v.label.Text = string.format("%s\n[%d studs]", getOreName(target), math.floor(dist))
+            local ok = pcall(function()
+                if not ESP.enabled then return end
+                local char = game.Players.LocalPlayer.Character
+                local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+                if not hrp then return end
+        
+                for target, v in pairs(ESP.activeVisuals) do
+                    if target and target.Parent then
+                        local pos = getTargetPosition(target)
+                        if not pos then
+                            v.highlight.Enabled = false
+                            v.billboard.Enabled = false
+                            continue
+                        end
+                        local dist = (hrp.Position - pos).Magnitude
+                        local visible = dist <= ESP.maxDistance
+                        v.highlight.Enabled = visible
+                        v.billboard.Enabled = visible
+                        if visible then
+                            v.label.Text = string.format("%s\n[%d studs]", getOreName(target), math.floor(dist))
+                        end
                     end
                 end
+            end)
+            if not ok then
+                -- Keep Farm tab alive even if one ore object is malformed.
             end
         end))
     
