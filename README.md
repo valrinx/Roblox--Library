@@ -44,6 +44,7 @@
 - แก้เพิ่ม `Auto Mine` ให้สแกนทั้ง `PlacedOre` และ `SpawnedBlocks` พร้อมคัดเฉพาะก้อนที่มีข้อมูลขุดได้จริง (`MineId/OreId/ChunkPosition/GridPosition`)
 - แก้บัค `Auto Mine` ยังเงียบ: ปรับเงื่อนไข equip pickaxe จาก backpack ให้ถูกต้อง และแก้การหา `Activate` remote ให้รองรับ `MadCommId` ทุกชนิด (ค้นผ่าน `FindFirstChild(tostring(MadCommId))`)
 - อ้างอิง packet ที่จับได้: เพิ่ม fallback `MadCommEvents["1726"].Activate` ใน `Auto Mine` และเพิ่มการหา `GridPosition/ChunkPosition` จาก descendants เพื่อให้ยิงขุดตรงกับ remote ของแมพ
+- แก้เพิ่ม `Auto Mine` รอบล่าสุด: ไม่บังคับ dependency กับ tool ก่อนยิงขุด (หากหา remote ได้จะยิงทันที) และเพิ่มสถานะ debug ใน `OreLabel` เช่น `mining ...`, `no target in range`, `Activate remote missing`
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
