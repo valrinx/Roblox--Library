@@ -59,6 +59,8 @@
 - แก้บัคลำดับ scope ของฟังก์ชัน (`makeOreSignature` เรียก `isInstance` ก่อนประกาศ): ย้าย `isInstance` ให้ประกาศก่อนใช้งาน เพื่อลด error `attempt to call a nil value` ตอนโหลดโมดูล
 - harden เพิ่มที่ `makeOreSignature`: ครอบการคำนวณด้วย `pcall` + safe resolve ของ `getOreRenderPart` เพื่อตัดกรณี `attempt to call a nil value` ที่เกิดซ้ำระหว่างโหลดแท็บ Farm
 - ปรับความแม่นชื่อแร่ ESP เพิ่มเติม: รองรับชื่อ `Sliver` (ตามข้อมูลในเกม), ปรับ matcher ให้เช็คแบบคำเต็ม (word boundary) และจำกัด descendant hint เฉพาะ `StringValue` ที่เกี่ยวกับ ore/resource เพื่อลดการเดาผิดเป็น `Tin/Iron` จากชื่อย่อยที่ไม่เกี่ยวข้อง
+- เพิ่มระบบ `auto ore inference + auto learning`: ดึง candidate ชื่อแร่จาก attributes/value objects/บริบท parent แบบให้คะแนนความมั่นใจ และบันทึก `signature/id -> name` อัตโนมัติเมื่อ confidence สูง เพื่อลดการ map มือเป็นหลัก
+- เพิ่ม hardening สำหรับแท็บ Farm/ESP: ครอบงานอัปเดต `RenderStepped` ด้วย `pcall` กันเคส object แร่ผิดรูปพา UI ล้มทั้งแท็บ
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
