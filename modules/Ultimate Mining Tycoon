@@ -823,7 +823,7 @@ return function(Window, scriptInfo)
             if not n or n == "" or n == "Part" or n == "MeshPart" or n == "OreMesh" then
                 n = target.Name
             end
-            if not n or n == "" or n == "Unknown" or n == "Part" or n == "MeshPart" or n == "Model" then
+            if not n or n == "" or n == "Unknown" or n == "Part" or n == "MeshPart" or n == "Model" or n == "SurfaceAppearance" then
                 n = "OreMesh"
             end
             return n
