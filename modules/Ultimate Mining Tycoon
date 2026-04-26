@@ -835,7 +835,14 @@ return function(Window, scriptInfo)
         }
         local oreNameCache = setmetatable({}, { __mode = "k" })
         local oreNameById = {}
+        local oreNameByRuntime = {}
         local getOreRenderPart
+        local knownOreNames = {
+            "Tin", "Iron", "Lead", "Cobalt", "Aluminium", "Silver", "Uranium", "Vanadium",
+            "Tungsten", "Gold", "Titanium", "Palladium", "Plutonium", "Mithril", "Thorium",
+            "Iridium", "Adamantium", "Rhodium", "Unobtanium", "Topaz", "Emerald", "Sapphire",
+            "Ruby", "Diamond", "Poudretteite", "Zultanite", "Grandidierite", "Musgravite", "Painite",
+        }
         local genericOreNames = {
             ["Part"] = true,
             ["MeshPart"] = true,
@@ -869,6 +876,26 @@ return function(Window, scriptInfo)
             end)
             if not ok then return nil end
             return normalizeOreToken(value)
+        end
+
+        local function normalizeNameForMatch(name)
+            local text = normalizeOreToken(name)
+            if not text then return nil end
+            text = text:gsub("([a-z])([A-Z])", "%1 %2")
+            text = text:gsub("[_%-%./]", " ")
+            text = text:gsub("%s+", " ")
+            return string.lower(text)
+        end
+
+        local function pickKnownOreFromText(name)
+            local normalized = normalizeNameForMatch(name)
+            if not normalized then return nil end
+            for _, ore in ipairs(knownOreNames) do
+                if normalized:find(string.lower(ore), 1, true) then
+                    return ore
+                end
+            end
+            return nil
         end
 
         local function getNameFromAttributes(instance)
@@ -938,6 +965,28 @@ return function(Window, scriptInfo)
             return nil
         end
 
+        local function getNameFromDescendantHints(instance)
+            if not isInstance(instance) or not instance.GetDescendants then
+                return nil
+            end
+
+            for _, desc in ipairs(instance:GetDescendants()) do
+                local fromNodeName = pickKnownOreFromText(desc.Name)
+                if fromNodeName then
+                    return fromNodeName
+                end
+
+                if desc:IsA("StringValue") then
+                    local fromStringValue = pickKnownOreFromText(desc.Value)
+                    if fromStringValue then
+                        return fromStringValue
+                    end
+                end
+            end
+
+            return nil
+        end
+
         local function resolveOreName(target)
             local renderPart = nil
             if type(getOreRenderPart) == "function" then
@@ -956,11 +1005,17 @@ return function(Window, scriptInfo)
             if oreId and oreNameById[oreId] then
                 return oreNameById[oreId]
             end
+            local runtimeName = normalizeOreToken(isInstance(target) and target.Name or nil)
+            if runtimeName and oreNameByRuntime[runtimeName] then
+                return oreNameByRuntime[runtimeName]
+            end
             local candidates = {
                 getNameFromAttributes(target),
                 getNameFromAttributes(renderPart),
                 getNameFromValueObjects(target),
                 getNameFromValueObjects(renderPart),
+                getNameFromDescendantHints(target),
+                getNameFromDescendantHints(renderPart),
             }
 
             for _, name in ipairs(candidates) do
@@ -1000,9 +1055,6 @@ return function(Window, scriptInfo)
             end
             local renderPart = getOreRenderPart(target)
             local oreId = getOreIdentifierDeep(target, renderPart)
-            if not oreId then
-                return false, "No MineId/OreId found"
-            end
 
             local resolvedName = normalizeOreToken(forcedName)
             if not resolvedName or resolvedName == "" then
@@ -1012,9 +1064,24 @@ return function(Window, scriptInfo)
                 return false, "Name is generic (" .. tostring(resolvedName) .. ")"
             end
 
-            oreNameById[oreId] = resolvedName
+            if oreId then
+                oreNameById[oreId] = resolvedName
+            else
+                local runtimeName = normalizeOreToken(isInstance(target) and target.Name or nil)
+                if not runtimeName then
+                    runtimeName = normalizeOreToken(renderPart and renderPart.Name)
+                end
+                if not runtimeName then
+                    return false, "No MineId/OreId and no runtime name"
+                end
+                oreNameByRuntime[runtimeName] = resolvedName
+            end
             oreNameCache[target] = resolvedName
-            return true, string.format("Mapped %s -> %s", tostring(oreId), resolvedName)
+            if oreId then
+                return true, string.format("Mapped %s -> %s", tostring(oreId), resolvedName)
+            end
+            local runtimeName = normalizeOreToken(isInstance(target) and target.Name or nil) or "runtime-name"
+            return true, string.format("Mapped runtime %s -> %s", runtimeName, resolvedName)
         end
 
         local function findOreTargetFromInstance(instance)
@@ -1886,7 +1953,8 @@ return function(Window, scriptInfo)
                 local renderPart = getOreRenderPart(target)
                 local oreId = getOreIdentifierDeep(target, renderPart) or "N/A"
                 local oreName = resolveOreName(target)
-                local text = string.format("Ore Debug: %s | id: %s", tostring(oreName), tostring(oreId))
+                local runtimeName = (isInstance(target) and target.Name) or (renderPart and renderPart.Name) or "N/A"
+                local text = string.format("Ore Debug: %s | id: %s | runtime: %s", tostring(oreName), tostring(oreId), tostring(runtimeName))
                 OreDebugLabel:Set(text)
                 Rayfield:Notify({
                     Title = "Ore Captured",
@@ -1927,6 +1995,8 @@ return function(Window, scriptInfo)
                 end
             end,
         })
+
+        Farm:CreateLabel("Tip: if id is N/A, mapping will use runtime name (e.g. OreMesh) as fallback.")
     
         Farm:CreateToggle({
             Name = "Ore ESP",
