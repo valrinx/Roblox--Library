@@ -1090,7 +1090,38 @@ return function(Window, scriptInfo)
                                     return remote
                                 end
                             end
+                            -- Fallback for Ultimate Mining Tycoon (captured remote id)
+                            if madCommEvents then
+                                local fallbackFolder = madCommEvents:FindFirstChild("1726")
+                                local fallbackRemote = fallbackFolder and fallbackFolder:FindFirstChild("Activate")
+                                if fallbackRemote then
+                                    return fallbackRemote
+                                end
+                            end
                             return tool:FindFirstChild("Activate", true)
+                        end
+
+                        local function getDescendantGridPosition(target)
+                            if not target or not target.GetDescendants then return nil end
+                            for _, desc in ipairs(target:GetDescendants()) do
+                                if desc:IsA("Instance") then
+                                    local p = desc:GetAttribute("ChunkPosition") or desc:GetAttribute("GridPosition")
+                                    if p then return p end
+                                end
+                            end
+                            return nil
+                        end
+
+                        local function getTargetGridPositionDeep(target, renderPart)
+                            local gridPos = getTargetGridPosition(target, renderPart)
+                            if gridPos then return gridPos end
+                            gridPos = getDescendantGridPosition(target)
+                            if gridPos then return gridPos end
+                            if renderPart then
+                                gridPos = getDescendantGridPosition(renderPart)
+                                if gridPos then return gridPos end
+                            end
+                            return nil
                         end
 
                         local function GetTool()
@@ -1159,7 +1190,7 @@ return function(Window, scriptInfo)
                                     end
                                     if closestBlock then
                                         local renderPart = getOreRenderPart(closestBlock)
-                                        local gridPos = getTargetGridPosition(closestBlock, renderPart)
+                                        local gridPos = getTargetGridPositionDeep(closestBlock, renderPart)
                                         if not gridPos then
                                             local worldPos = renderPart and renderPart.Position
                                             if not worldPos then
