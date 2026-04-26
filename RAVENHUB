@@ -105,8 +105,9 @@ local currentGameId  = game.GameId
 
 local function containsId(idList, value)
     if not idList then return false end
+    local valueStr = tostring(value)
     for _, id in ipairs(idList) do
-        if id == value then
+        if tostring(id) == valueStr then
             return true
         end
     end
@@ -114,6 +115,10 @@ local function containsId(idList, value)
 end
 
 local function shouldLoadScript(scriptInfo)
+    if scriptInfo.detector and scriptInfo.detector() then
+        return true
+    end
+
     if scriptInfo.universal == true then
         return true
     end
@@ -135,6 +140,17 @@ local function shouldLoadScript(scriptInfo)
     end
 
     return false
+end
+
+-- map fingerprint fallback for cases where PlaceId/GameId differs across sub-places
+for _, scriptInfo in ipairs(SCRIPTS) do
+    if scriptInfo.name == "Ultimate Mining Tycoon" then
+        scriptInfo.detector = function()
+            return workspace:FindFirstChild("PlacedOre") ~= nil
+                and workspace:FindFirstChild("SpawnedBlocks") ~= nil
+        end
+        break
+    end
 end
 
 for _, scriptInfo in ipairs(SCRIPTS) do
