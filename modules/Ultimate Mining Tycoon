@@ -979,6 +979,10 @@ return function(Window, scriptInfo)
             return string.format("%.2f", n)
         end
 
+        local function isInstance(value)
+            return typeof(value) == "Instance"
+        end
+
         local function makeOreSignature(target, renderPart)
             local part = renderPart
             if not part and type(getOreRenderPart) == "function" then
@@ -1036,10 +1040,6 @@ return function(Window, scriptInfo)
                 end
             end
             return nil
-        end
-
-        local function isInstance(value)
-            return typeof(value) == "Instance"
         end
 
         local function getOreIdentifier(instance)
