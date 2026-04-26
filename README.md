@@ -69,6 +69,7 @@
 - harden ซ้ำจุด crash `getMappedOreNameOnly`: ครอบ lookup ด้วย `pcall` และเปลี่ยน parser ใน `makeOreSignatureCoarse` จาก `string.split` เป็น `string.gmatch` เพื่อกัน environment ที่ไม่มี helper แล้วเด้ง `attempt to call a nil value`
 - ปรับแก้ตามข้อมูล Dex จริงของ ore (`CrystallineMetalOre`): เพิ่ม memory ชั้น `color signature` (Class/Material/Color/MeshId) และลดการพึ่ง runtime mapping generic เพื่อลดชื่อแร่มั่ว
 - แก้ `Auto Mine` ค้างก้อนเดิมเพิ่ม: ใส่ระบบ `temporary target blacklist` เมื่อ detect stuck แล้ว re-target ไปก้อนอื่นอัตโนมัติ ลดการวนขุดก้อนเดิมซ้ำ
+- ปรับระบบแยกชื่อแร่เป็นโหมด `strict color-signature`: ใช้ rule จาก Dex (`ClassName+Material+Color+MeshId`) เป็นแหล่งจริงก่อนทุกอย่าง, ปิดการ auto-learn เดาในโหมดนี้, และ fallback เป็น `Unknown` เมื่อไม่ตรง rule เพื่อหยุดการเดามั่ว
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
