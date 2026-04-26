@@ -73,6 +73,7 @@
 - แก้ Rayfield callback error จากการอัปเดตข้อความสถานะใน Label (`Title is not a valid member of Frame "Label"`): ครอบการ `Set` ของ UI label ด้วย `pcall` ผ่าน helper `safeSetUiText` เพื่อกันเมนูล่มกลางใช้งาน
 - ปรับลำดับ priority ของ mapping ในโหมด strict เพิ่ม: ให้ `static color-signature` และ `color-signature` มาก่อน signature/coarse เสมอ และตอน map manual จะบันทึกสีเป็นหลักใน strict mode เพื่อลดการทับค่าผิดจาก signature เก่า
 - ปรับความปลอดภัยของ rule เริ่มต้น: ลบ preset ชื่อแร่แบบ hardcoded ที่ยังไม่ยืนยันออก (เริ่ม static table ว่าง) และเพิ่มปุ่ม `Reset Learned Ore Maps` ในแท็บ Farm เพื่อเคลียร์ mapping ที่เรียนรู้ผิดได้ทันที
+- เพิ่มชั้นยืนยันก่อนรีเซ็ต mapping: ปุ่ม `Reset Learned Ore Maps` ต้องกดซ้ำภายใน 6 วินาทีจึงจะรีเซ็ตจริง (กันการเผลอกดจากตำแหน่งปุ่มที่อยู่ใกล้กัน)
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
