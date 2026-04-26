@@ -66,6 +66,7 @@
 - แก้เคสชื่อแร่หลุดเดี่ยว (outlier) เช่น `Plutonium` โผล่ในกลุ่ม `Titanium`: เพิ่มระบบ `neighbor consensus` (majority vote จากก้อนใกล้เคียงที่มีแมพเชื่อถือได้) เพื่อ auto-correct ชื่อที่แมพผิดในระดับ signature/coarse
 - แก้ `Auto Mine` อาการค้างเป้าซ้ำ (ขุดไม่ต่อเนื่อง): เพิ่มระบบตรวจ `stuck target` จากการล็อกก้อนเดิมหลายรอบติด และบังคับ `re-target` อัตโนมัติเมื่อเกิน threshold เพื่อลดการต้องปิด/เปิด Auto Mine เอง
 - แก้ error `AutoMine/OreESP` (`attempt to call a nil value` ที่ `getMappedOreNameOnly`): ทำ forward declaration ให้ `getOreIdentifierDeep` (แก้ลำดับ scope ของ Lua) และใส่ guard เช็กชนิดฟังก์ชันก่อนเรียกในเส้นทาง resolve/map
+- harden ซ้ำจุด crash `getMappedOreNameOnly`: ครอบ lookup ด้วย `pcall` และเปลี่ยน parser ใน `makeOreSignatureCoarse` จาก `string.split` เป็น `string.gmatch` เพื่อกัน environment ที่ไม่มี helper แล้วเด้ง `attempt to call a nil value`
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
