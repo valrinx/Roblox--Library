@@ -1,5 +1,52 @@
+task.spawn(function()
+    pcall(function()
+        local madComm = game:GetService("ReplicatedStorage"):WaitForChild("MadCommEvents", 10)
+        local ev = madComm and madComm:WaitForChild("6", 10)
+        if ev then ev:Destroy() end
+    end)
+end)
+
+task.spawn(function()
+    pcall(function()
+        local gui = game:GetService("CoreGui"):WaitForChild("RobloxGui", 10)
+        if gui then
+            local function checkDesc(desc)
+                if desc.Name == "ScriptEditor" then
+                    desc:Destroy()
+                end
+            end
+            
+            for _, desc in ipairs(gui:GetDescendants()) do
+                checkDesc(desc)
+            end
+            
+            gui.DescendantAdded:Connect(checkDesc)
+        end
+    end)
+end)
+
 if game.PlaceId == 18680867089 then
     
+    local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+    
+    local Window = Rayfield:CreateWindow({
+       Name = "UtilityHub | Ultimate Mining Tycoon",
+       Icon = 0,
+       LoadingTitle = "Ultimate Mining Tycoon",
+       LoadingSubtitle = "Loading Utility Hub...",
+       Theme = "Default", 
+    
+        DisableRayfieldPrompts = true,
+        DisableBuildWarnings = true,
+    
+        ConfigurationSaving = {
+            Enabled = false,
+            FolderName = nil,
+            FileName = nil
+        },
+      
+    })
+    local initialLoad = false
     
     -- Teleport helper function and tables (must be before any tab creation)
     local function TeleportPlayer(position, locationName)
