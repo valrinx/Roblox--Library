@@ -31,10 +31,10 @@ local SCRIPTS = {
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/Slime%20Seas%20%E2%9A%94%EF%B8%8F%20Anime%20RPG",
     },
     {
-        name        = "[UPD] Ultimate Mining Tycoon",
-        description = "Teleport | Auto Farm | Ore ESP",
+        name        = "Ultimate Mining Tycoon",
+        description = "Auto Mine | Auto Sell | Ore ESP | Teleport",
         gameId      = 18680867089,
-        version     = "v0.1",
+        version     = "v1.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/Ultimate%20Mining%20Tycoon",
     },
     --[[
