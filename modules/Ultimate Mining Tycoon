@@ -774,6 +774,7 @@ return function(Window, scriptInfo)
             filterOre     = "All",
             activeVisuals = {},
             connections   = {},
+            oreNameCache  = {},
         }
     
         local oreColors = {
@@ -818,12 +819,71 @@ return function(Window, scriptInfo)
             return nil
         end
 
-        local function getOreName(target)
-            local n = target:GetAttribute("MineId") or target:GetAttribute("OreId") or target:GetAttribute("OreName")
-            if not n or n == "" or n == "Part" or n == "MeshPart" or n == "OreMesh" then
-                n = target.Name
+        local genericNames = {
+            ["part"] = true, ["meshpart"] = true, ["oremesh"] = true, ["model"] = true,
+            ["unknown"] = true, ["cubicblockmetal"] = true, ["gemblockmesh"] = true,
+        }
+
+        local oreAttributeKeys = { "MineId", "OreId", "OreName", "OreType", "Resource", "ResourceType", "BlockType", "Type" }
+
+        local function normalizeOreName(name)
+            if not name then return nil end
+            local n = tostring(name)
+            n = n:gsub("^%s+", ""):gsub("%s+$", "")
+            if n == "" then return nil end
+            n = n:gsub("[%[%]%(%){}]", "")
+            n = n:gsub("(%l)(%u)", "%1 %2")
+            n = n:gsub("_", " ")
+            n = n:gsub("%s+", " ")
+            n = n:gsub("%f[%a][Bb]lock%f[%A]", "")
+            n = n:gsub("%f[%a][Mm]esh%f[%A]", "")
+            n = n:gsub("%s+", " ")
+            n = n:gsub("^%s+", ""):gsub("%s+$", "")
+            local lower = n:lower()
+            if genericNames[lower] then return nil end
+            if lower:find("unknown", 1, true) then return nil end
+            return n
+        end
+
+        local function readOreNameFromAttributes(obj)
+            if not obj then return nil end
+            for _, key in ipairs(oreAttributeKeys) do
+                local v = obj:GetAttribute(key)
+                local n = normalizeOreName(v)
+                if n then return n end
             end
-            if n == "OreMesh" or n == "Part" or n == "MeshPart" then n = "Unknown" end
+            return nil
+        end
+
+        local function readOreNameFromDescendants(target)
+            if not target or not target.GetDescendants then return nil end
+            for _, desc in ipairs(target:GetDescendants()) do
+                local fromAttr = readOreNameFromAttributes(desc)
+                if fromAttr then return fromAttr end
+
+                if desc:IsA("StringValue") or desc:IsA("TextLabel") then
+                    local text = desc:IsA("StringValue") and desc.Value or desc.Text
+                    local normalized = normalizeOreName(text)
+                    if normalized then return normalized end
+                end
+
+                local fromName = normalizeOreName(desc.Name)
+                if fromName then return fromName end
+            end
+            return nil
+        end
+
+        local function getOreName(target)
+            if ESP.oreNameCache[target] then
+                return ESP.oreNameCache[target]
+            end
+
+            local n = readOreNameFromAttributes(target)
+                or readOreNameFromDescendants(target)
+                or normalizeOreName(target.Name)
+                or "Unknown Ore"
+
+            ESP.oreNameCache[target] = n
             return n
         end
 
@@ -886,6 +946,7 @@ return function(Window, scriptInfo)
                     if hl and hl.Parent then hl:Destroy() end
                     if bb and bb.Parent then bb:Destroy() end
                     ESP.activeVisuals[target] = nil
+                    ESP.oreNameCache[target] = nil
                 end
             end)
             table.insert(ESP.connections, conn)
@@ -897,6 +958,7 @@ return function(Window, scriptInfo)
                 if v.billboard and v.billboard.Parent then v.billboard:Destroy() end
             end
             ESP.activeVisuals = {}
+            ESP.oreNameCache = {}
             for _, c in ipairs(ESP.connections) do c:Disconnect() end
             ESP.connections = {}
         end
