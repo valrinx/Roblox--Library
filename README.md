@@ -86,6 +86,7 @@
 - เพิ่มระบบแชร์ mapping ชื่อแร่ให้คนอื่นไม่ต้องตั้งเอง: รองรับ `sharedOreNameByColorSignature` (นำเข้า/ส่งออก JSON ผ่านปุ่ม Export/Import) และให้ ESP ใช้ shared map ก่อน map ส่วนตัวในโหมด strict
 - เปลี่ยนระบบวาร์ปหลักทั้งหมดใน `modules/Ultimate Mining Tycoon` ให้ใช้ Tween (`tweenHumanoidRootPart`) แทนการเซ็ต `CFrame` ตรง เพื่อให้การย้ายตำแหน่งลื่นและสม่ำเสมอทั้ง Teleport/Waypoint/Shop/Sell/Vehicle
 - แก้ `Ore Ignore List` ให้แสดงรายการแร่ครบทั้งระบบ (จาก `knownOreNames` + mapping ที่เรียนรู้) ไม่ยึดเฉพาะแร่ที่กำลังสปอนใน `PlacedOre` เพื่อเลือก ignore ได้ครบตั้งแต่เริ่ม
+- เพิ่มโหมด `Safe Profile` ใน `modules/Ultimate Mining Tycoon`: ปรับ Auto Mine/Auto Sell ให้สุ่มจังหวะมากขึ้น, ใส่ cooldown, ชะลอ tween, และ pause อัตโนมัติเมื่อมีผู้เล่นอยู่ใกล้ เพื่อลดพฤติกรรมที่ดูผิดธรรมชาติ
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
