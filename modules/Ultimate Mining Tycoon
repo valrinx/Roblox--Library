@@ -5,6 +5,69 @@ return function(Window, scriptInfo)
     local scriptRunning = true
     local cleanupConnections = {}
     local infiniteJumpConnection = nil
+    local HttpService = game:GetService("HttpService")
+    local SETTINGS_FILE = "RavenHub_UMT_AutoSettings.json"
+    local autoSettingsLoaded = {
+        autoMineEnabled = false,
+        autoMineRange = 10,
+        autoMineDelay = 1.2,
+        autoMineUseTween = false,
+        autoMineTweenSpeed = 45,
+        oreIgnoreList = {},
+        autoSellEnabled = false,
+        autoSellOreCount = 8,
+        oreNameById = {},
+        oreNameByRuntime = {},
+        oreNameBySignature = {},
+    }
+    local saveSettingsTaskId = 0
+    local saveAutoSettings
+
+    local function isStringMap(tbl)
+        if type(tbl) ~= "table" then return false end
+        for k, v in pairs(tbl) do
+            if type(k) ~= "string" or type(v) ~= "string" then
+                return false
+            end
+        end
+        return true
+    end
+
+    local function sanitizeStringArray(tbl)
+        if type(tbl) ~= "table" then return {} end
+        local out = {}
+        for _, value in ipairs(tbl) do
+            if type(value) == "string" and value ~= "" then
+                table.insert(out, value)
+            end
+        end
+        return out
+    end
+
+    pcall(function()
+        local canRead = type(isfile) == "function" and type(readfile) == "function"
+        if not canRead or not isfile(SETTINGS_FILE) then return end
+        local decoded = HttpService:JSONDecode(readfile(SETTINGS_FILE))
+        if type(decoded) ~= "table" then return end
+
+        autoSettingsLoaded.autoMineEnabled = decoded.autoMineEnabled == true
+        autoSettingsLoaded.autoMineRange = tonumber(decoded.autoMineRange) or autoSettingsLoaded.autoMineRange
+        autoSettingsLoaded.autoMineDelay = tonumber(decoded.autoMineDelay) or autoSettingsLoaded.autoMineDelay
+        autoSettingsLoaded.autoMineUseTween = decoded.autoMineUseTween == true
+        autoSettingsLoaded.autoMineTweenSpeed = tonumber(decoded.autoMineTweenSpeed) or autoSettingsLoaded.autoMineTweenSpeed
+        autoSettingsLoaded.oreIgnoreList = sanitizeStringArray(decoded.oreIgnoreList)
+        autoSettingsLoaded.autoSellEnabled = decoded.autoSellEnabled == true
+        autoSettingsLoaded.autoSellOreCount = tonumber(decoded.autoSellOreCount) or autoSettingsLoaded.autoSellOreCount
+        if isStringMap(decoded.oreNameById) then
+            autoSettingsLoaded.oreNameById = decoded.oreNameById
+        end
+        if isStringMap(decoded.oreNameByRuntime) then
+            autoSettingsLoaded.oreNameByRuntime = decoded.oreNameByRuntime
+        end
+        if isStringMap(decoded.oreNameBySignature) then
+            autoSettingsLoaded.oreNameBySignature = decoded.oreNameBySignature
+        end
+    end)
 
     local function trackConnection(connection)
         if connection then
@@ -834,8 +897,9 @@ return function(Window, scriptInfo)
             ["GemBlockMesh"] = "Gemstone",
         }
         local oreNameCache = setmetatable({}, { __mode = "k" })
-        local oreNameById = {}
-        local oreNameByRuntime = {}
+        local oreNameById = autoSettingsLoaded.oreNameById
+        local oreNameByRuntime = autoSettingsLoaded.oreNameByRuntime
+        local oreNameBySignature = autoSettingsLoaded.oreNameBySignature
         local getOreRenderPart
         local knownOreNames = {
             "Tin", "Iron", "Lead", "Cobalt", "Aluminium", "Silver", "Uranium", "Vanadium",
@@ -896,6 +960,64 @@ return function(Window, scriptInfo)
                 end
             end
             return nil
+        end
+
+        local function colorToShortString(color)
+            if typeof(color) ~= "Color3" then
+                return "0,0,0"
+            end
+            return string.format(
+                "%d,%d,%d",
+                math.floor(color.R * 255 + 0.5),
+                math.floor(color.G * 255 + 0.5),
+                math.floor(color.B * 255 + 0.5)
+            )
+        end
+
+        local function numberToShortString(n)
+            if type(n) ~= "number" then return "0" end
+            return string.format("%.2f", n)
+        end
+
+        local function makeOreSignature(target, renderPart)
+            local part = renderPart
+            if not part and type(getOreRenderPart) == "function" then
+                part = getOreRenderPart(target)
+            end
+            if not isInstance(part) then
+                return nil
+            end
+
+            local className = part.ClassName or "Part"
+            local nodeName = normalizeOreToken(part.Name) or "Unknown"
+            local material = tostring(part.Material or "Plastic")
+            local color = colorToShortString(part.Color)
+            local size = part.Size
+            local sizeText = "0,0,0"
+            if typeof(size) == "Vector3" then
+                sizeText = table.concat({
+                    numberToShortString(size.X),
+                    numberToShortString(size.Y),
+                    numberToShortString(size.Z),
+                }, ",")
+            end
+
+            local meshId = ""
+            local textureId = ""
+            if part:IsA("MeshPart") then
+                meshId = normalizeOreToken(part.MeshId) or ""
+                textureId = normalizeOreToken(part.TextureID) or ""
+            end
+
+            return table.concat({
+                className,
+                nodeName,
+                material,
+                color,
+                sizeText,
+                meshId,
+                textureId,
+            }, "|")
         end
 
         local function getNameFromAttributes(instance)
@@ -1005,6 +1127,10 @@ return function(Window, scriptInfo)
             if oreId and oreNameById[oreId] then
                 return oreNameById[oreId]
             end
+            local signature = makeOreSignature(target, renderPart)
+            if signature and oreNameBySignature[signature] then
+                return oreNameBySignature[signature]
+            end
             local runtimeName = normalizeOreToken(isInstance(target) and target.Name or nil)
             if runtimeName and oreNameByRuntime[runtimeName] then
                 return oreNameByRuntime[runtimeName]
@@ -1055,6 +1181,7 @@ return function(Window, scriptInfo)
             end
             local renderPart = getOreRenderPart(target)
             local oreId = getOreIdentifierDeep(target, renderPart)
+            local signature = makeOreSignature(target, renderPart)
 
             local resolvedName = normalizeOreToken(forcedName)
             if not resolvedName or resolvedName == "" then
@@ -1066,19 +1193,32 @@ return function(Window, scriptInfo)
 
             if oreId then
                 oreNameById[oreId] = resolvedName
+                if signature then
+                    oreNameBySignature[signature] = resolvedName
+                end
             else
-                local runtimeName = normalizeOreToken(isInstance(target) and target.Name or nil)
-                if not runtimeName then
-                    runtimeName = normalizeOreToken(renderPart and renderPart.Name)
+                if signature then
+                    oreNameBySignature[signature] = resolvedName
+                else
+                    local runtimeName = normalizeOreToken(isInstance(target) and target.Name or nil)
+                    if not runtimeName then
+                        runtimeName = normalizeOreToken(renderPart and renderPart.Name)
+                    end
+                    if not runtimeName then
+                        return false, "No MineId/OreId and no runtime/signature"
+                    end
+                    oreNameByRuntime[runtimeName] = resolvedName
                 end
-                if not runtimeName then
-                    return false, "No MineId/OreId and no runtime name"
-                end
-                oreNameByRuntime[runtimeName] = resolvedName
             end
             oreNameCache[target] = resolvedName
+            if saveAutoSettings then
+                saveAutoSettings()
+            end
             if oreId then
                 return true, string.format("Mapped %s -> %s", tostring(oreId), resolvedName)
+            end
+            if signature then
+                return true, "Mapped signature -> " .. tostring(resolvedName)
             end
             local runtimeName = normalizeOreToken(isInstance(target) and target.Name or nil) or "runtime-name"
             return true, string.format("Mapped runtime %s -> %s", runtimeName, resolvedName)
@@ -1355,20 +1495,52 @@ return function(Window, scriptInfo)
         local AutoMineSection = Farm:CreateSection("⛏️ Auto Mining")
         local OreLabel = Farm:CreateLabel("Auto Mine Status: Idle")
     
-        local autoMineEnabled = false
+        local autoMineEnabled = autoSettingsLoaded.autoMineEnabled
         local autoMineThread
-        local autoMineRange = 10
-        local autoMineDelay = 1.2
-        local autoMineUseTween = false
-        local autoMineTweenSpeed = 45
-        local OreIgnoreList = {}
+        local autoMineRange = math.clamp(autoSettingsLoaded.autoMineRange, 5, 50)
+        local autoMineDelay = math.clamp(autoSettingsLoaded.autoMineDelay, 0, 5)
+        local autoMineUseTween = autoSettingsLoaded.autoMineUseTween
+        local autoMineTweenSpeed = math.clamp(autoSettingsLoaded.autoMineTweenSpeed, 10, 120)
+        local OreIgnoreList = autoSettingsLoaded.oreIgnoreList
+        local autoSellEnabled = autoSettingsLoaded.autoSellEnabled
+        local autoSellThread
+        local autoSellThreshold = 90
+        local autoSellOreCount = math.clamp(autoSettingsLoaded.autoSellOreCount, 1, 64)
     
+        saveAutoSettings = function()
+            if type(writefile) ~= "function" then return end
+            saveSettingsTaskId = saveSettingsTaskId + 1
+            local currentTaskId = saveSettingsTaskId
+            task.delay(0.2, function()
+                if currentTaskId ~= saveSettingsTaskId then
+                    return
+                end
+                local payload = {
+                    autoMineEnabled = autoMineEnabled,
+                    autoMineRange = autoMineRange,
+                    autoMineDelay = autoMineDelay,
+                    autoMineUseTween = autoMineUseTween,
+                    autoMineTweenSpeed = autoMineTweenSpeed,
+                    oreIgnoreList = OreIgnoreList,
+                    autoSellEnabled = autoSellEnabled,
+                    autoSellOreCount = autoSellOreCount,
+                    oreNameById = oreNameById,
+                    oreNameByRuntime = oreNameByRuntime,
+                    oreNameBySignature = oreNameBySignature,
+                }
+                pcall(function()
+                    writefile(SETTINGS_FILE, HttpService:JSONEncode(payload))
+                end)
+            end)
+        end
+
         local AutoMineToggle = Farm:CreateToggle({
             Name = "Auto Mine",
-            CurrentValue = false,
+            CurrentValue = autoMineEnabled,
             Flag = "AutoMineToggle",
             Callback = function(state)
                 autoMineEnabled = state
+                saveAutoSettings()
                 if autoMineEnabled then
                     autoMineThread = task.spawn(function()
                         local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -1598,16 +1770,24 @@ return function(Window, scriptInfo)
                 end
             end,
         })
+        if autoMineEnabled then
+            task.defer(function()
+                pcall(function()
+                    AutoMineToggle:Set(true)
+                end)
+            end)
+        end
     
         local RangeSlider = Farm:CreateSlider({
             Name = "Auto Mine Range",
             Range = {5, 50},
             Increment = 1,
             Suffix = " studs",
-            CurrentValue = 10,
+            CurrentValue = autoMineRange,
             Flag = "AutoMineRange",
             Callback = function(Value)
                 autoMineRange = Value
+                saveAutoSettings()
             end,
         })
     
@@ -1616,19 +1796,21 @@ return function(Window, scriptInfo)
             Range = {0, 5},
             Increment = 0.001,
             Suffix = "s",
-            CurrentValue = 1.2,
+            CurrentValue = autoMineDelay,
             Flag = "MiningDelay",
             Callback = function(Value)
                 autoMineDelay = Value
+                saveAutoSettings()
             end,
         })
 
         Farm:CreateToggle({
             Name = "Tween to Ore (Experimental)",
-            CurrentValue = false,
+            CurrentValue = autoMineUseTween,
             Flag = "AutoMineTween",
             Callback = function(Value)
                 autoMineUseTween = Value
+                saveAutoSettings()
             end,
         })
 
@@ -1637,38 +1819,37 @@ return function(Window, scriptInfo)
             Range = {10, 120},
             Increment = 1,
             Suffix = " studs/s",
-            CurrentValue = 45,
+            CurrentValue = autoMineTweenSpeed,
             Flag = "AutoMineTweenSpeed",
             Callback = function(Value)
                 autoMineTweenSpeed = Value
+                saveAutoSettings()
             end,
         })
     
         local OreIgnoreDropdown = Farm:CreateDropdown({
             Name = "Ore Ignore List",
             Options = getOreIgnoreOptions(),
-            CurrentOption = {},
+            CurrentOption = OreIgnoreList,
             MultipleOptions = true,
             Flag = "OreIgnoreList",
             Callback = function(Options)
                 OreIgnoreList = Options
+                saveAutoSettings()
             end,
         })
     
         -- Auto Sell Section
         local AutoSellSection = Farm:CreateSection("💰 Auto Sell")
         
-        local autoSellEnabled = false
-        local autoSellThread
-        local autoSellThreshold = 90
-        local autoSellOreCount = 8
     
         local AutoSellToggle = Farm:CreateToggle({
             Name = "Auto Sell",
-            CurrentValue = false,
+            CurrentValue = autoSellEnabled,
             Flag = "AutoSellToggle",
             Callback = function(state)
                 autoSellEnabled = state
+                saveAutoSettings()
                 if autoSellEnabled then
                     if not autoSellThread then
                         autoSellThread = task.spawn(function()
@@ -1771,10 +1952,17 @@ return function(Window, scriptInfo)
                 end
             end,
         })
+        if autoSellEnabled then
+            task.defer(function()
+                pcall(function()
+                    AutoSellToggle:Set(true)
+                end)
+            end)
+        end
         
         local AutoSellOreCountInput = Farm:CreateInput({
             Name = "Ore Capacity (Max: 64)",
-            CurrentValue = "8",
+            CurrentValue = tostring(autoSellOreCount),
             PlaceholderText = "Enter ore capacity (1-64)",
             RemoveTextAfterFocusLost = false,
             Flag = "AutoSellOreCount",
@@ -1793,6 +1981,7 @@ return function(Window, scriptInfo)
                         value = 1
                     end
                     autoSellOreCount = value
+                    saveAutoSettings()
                 else
                     Rayfield:Notify({
                         Title = "Invalid Input",
@@ -1954,7 +2143,9 @@ return function(Window, scriptInfo)
                 local oreId = getOreIdentifierDeep(target, renderPart) or "N/A"
                 local oreName = resolveOreName(target)
                 local runtimeName = (isInstance(target) and target.Name) or (renderPart and renderPart.Name) or "N/A"
-                local text = string.format("Ore Debug: %s | id: %s | runtime: %s", tostring(oreName), tostring(oreId), tostring(runtimeName))
+                local signature = makeOreSignature(target, renderPart)
+                local signatureText = signature and ("sig:" .. string.sub(signature, 1, 36) .. "...") or "sig:N/A"
+                local text = string.format("Ore Debug: %s | id: %s | runtime: %s | %s", tostring(oreName), tostring(oreId), tostring(runtimeName), signatureText)
                 OreDebugLabel:Set(text)
                 Rayfield:Notify({
                     Title = "Ore Captured",
