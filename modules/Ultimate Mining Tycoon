@@ -1829,7 +1829,7 @@ return function(Window, scriptInfo)
             local hl = Instance.new("Highlight")
             hl.Name                = "UH_ESP_Highlight"
             hl.FillColor           = color
-            hl.OutlineColor        = color:Lerp(Color3.new(1, 1, 1), 0.4)
+            hl.OutlineColor        = color
             hl.FillTransparency    = 0.35
             hl.OutlineTransparency = 0
             hl.DepthMode           = Enum.HighlightDepthMode.AlwaysOnTop
