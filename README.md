@@ -56,6 +56,7 @@
 - เพิ่มระบบบันทึกการตั้งค่าอัตโนมัติของ `modules/Ultimate Mining Tycoon` ลงไฟล์ `RavenHub_UMT_AutoSettings.json` (Auto Mine/Auto Sell/Tween/Range/Delay/Ore Ignore/Ore Mapping) พร้อมโหลดคืนอัตโนมัติเมื่อรันครั้งถัดไป
 - ปรับระบบ mapping ชื่อแร่ให้แม่นขึ้น: เพิ่ม `ore signature` (ClassName/Name/Material/Color/Size/MeshId/TextureID) เพื่อ map `signature -> ชื่อจริง` แทนการเหมารวมด้วย runtime name (`OreMesh`) เพียงอย่างเดียว
 - แก้ความเสถียรของแท็บ `Farm`: sanitize ค่า `Ore Ignore List` ที่โหลดจากไฟล์ก่อนผูกเข้ากับ Rayfield dropdown และ fallback options แบบปลอดภัย เพื่อลดโอกาส UI พังกลางโหลดจนเห็นแค่บางส่วน
+- แก้บัคลำดับ scope ของฟังก์ชัน (`makeOreSignature` เรียก `isInstance` ก่อนประกาศ): ย้าย `isInstance` ให้ประกาศก่อนใช้งาน เพื่อลด error `attempt to call a nil value` ตอนโหลดโมดูล
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
