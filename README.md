@@ -42,6 +42,7 @@
 - ปรับ `Auto Mine` ให้คัดแร่ด้วยชื่อจากระบบ ESP (`getOreName`) และใช้ `Ore Ignore List` จากชื่อเดียวกันแทนการเช็ค `MineId`
 - แก้เพิ่มจากผลทดสอบ: map สีให้ชื่อ runtime ในเกม (`OreMesh`, `CubicBlockMetal`, `ShaleMetalBlock`, `GemBlockMesh`) และปรับ `Unknown` ให้เป็นสีส้มเพื่อแยกชัด
 - แก้เพิ่ม `Auto Mine` ให้สแกนทั้ง `PlacedOre` และ `SpawnedBlocks` พร้อมคัดเฉพาะก้อนที่มีข้อมูลขุดได้จริง (`MineId/OreId/ChunkPosition/GridPosition`)
+- แก้บัค `Auto Mine` ยังเงียบ: ปรับเงื่อนไข equip pickaxe จาก backpack ให้ถูกต้อง และแก้การหา `Activate` remote ให้รองรับ `MadCommId` ทุกชนิด (ค้นผ่าน `FindFirstChild(tostring(MadCommId))`)
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
