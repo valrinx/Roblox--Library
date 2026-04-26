@@ -27,26 +27,6 @@ end)
 
 if game.PlaceId == 18680867089 then
     
-    local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
-    
-    local Window = Rayfield:CreateWindow({
-       Name = "UtilityHub | Ultimate Mining Tycoon",
-       Icon = 0,
-       LoadingTitle = "Ultimate Mining Tycoon",
-       LoadingSubtitle = "Loading Utility Hub...",
-       Theme = "Default", 
-    
-        DisableRayfieldPrompts = true,
-        DisableBuildWarnings = true,
-    
-        ConfigurationSaving = {
-            Enabled = false,
-            FolderName = nil,
-            FileName = nil
-        },
-      
-    })
-    local initialLoad = false
     
     -- Teleport helper function and tables (must be before any tab creation)
     local function TeleportPlayer(position, locationName)
