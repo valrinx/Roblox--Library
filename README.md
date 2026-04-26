@@ -71,6 +71,8 @@
 - แก้ `Auto Mine` ค้างก้อนเดิมเพิ่ม: ใส่ระบบ `temporary target blacklist` เมื่อ detect stuck แล้ว re-target ไปก้อนอื่นอัตโนมัติ ลดการวนขุดก้อนเดิมซ้ำ
 - ปรับระบบแยกชื่อแร่เป็นโหมด `strict color-signature`: ใช้ rule จาก Dex (`ClassName+Material+Color+MeshId`) เป็นแหล่งจริงก่อนทุกอย่าง, ปิดการ auto-learn เดาในโหมดนี้, และ fallback เป็น `Unknown` เมื่อไม่ตรง rule เพื่อหยุดการเดามั่ว
 - แก้ Rayfield callback error จากการอัปเดตข้อความสถานะใน Label (`Title is not a valid member of Frame "Label"`): ครอบการ `Set` ของ UI label ด้วย `pcall` ผ่าน helper `safeSetUiText` เพื่อกันเมนูล่มกลางใช้งาน
+- ปรับลำดับ priority ของ mapping ในโหมด strict เพิ่ม: ให้ `static color-signature` และ `color-signature` มาก่อน signature/coarse เสมอ และตอน map manual จะบันทึกสีเป็นหลักใน strict mode เพื่อลดการทับค่าผิดจาก signature เก่า
+- ปรับความปลอดภัยของ rule เริ่มต้น: ลบ preset ชื่อแร่แบบ hardcoded ที่ยังไม่ยืนยันออก (เริ่ม static table ว่าง) และเพิ่มปุ่ม `Reset Learned Ore Maps` ในแท็บ Farm เพื่อเคลียร์ mapping ที่เรียนรู้ผิดได้ทันที
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
