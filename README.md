@@ -50,6 +50,7 @@
 - เพิ่มเครื่องมือ `Ore Name Debug / Mapping` ใน `modules/Ultimate Mining Tycoon`: จับ ore ที่กำลังเล็ง, แสดง `MineId/OreId + ชื่อที่ resolve ได้`, และบันทึกแมพ `id -> ชื่อจริง` แบบ manual เพื่อให้ Ore ESP แสดงชื่อจริงได้แม่นขึ้นในแมพที่ใช้ชื่อ runtime
 - แก้ error โหลดโมดูล `Ultimate Mining Tycoon` (`attempt to call a nil value`): ทำ forward declaration ให้ `getOreRenderPart` เพื่อให้ `resolveOreName` เรียกใช้งานได้ถูกต้องตามลำดับ scope
 - แก้ซ้ำกรณี `attempt to call a nil value` ที่ `resolveOreName`: เพิ่ม safe fallback สำหรับหา `renderPart` เมื่อ helper function ยังไม่พร้อม เพื่อกันสคริปต์หยุดระหว่างสร้างแท็บ Farm
+- harden ระบบชื่อแร่/ดีบักเพิ่ม: ตรวจชนิดข้อมูลให้เป็น `Instance` ก่อนเรียกเมธอด (`IsA`, `FindFirstChildWhichIsA`) และเปลี่ยน icon แจ้งเตือนใน Ore Debug เป็น asset id ที่ Rayfield รองรับ เพื่อลด error ระหว่างโหลด UI
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
