@@ -47,6 +47,7 @@
 - แก้เพิ่ม `Auto Mine` รอบล่าสุด: ไม่บังคับ dependency กับ tool ก่อนยิงขุด (หากหา remote ได้จะยิงทันที) และเพิ่มสถานะ debug ใน `OreLabel` เช่น `mining ...`, `no target in range`, `Activate remote missing`
 - แก้เพิ่ม `Auto Mine` จากสถานะ `no target in range`: ผ่อนเงื่อนไขเลือกเป้าให้ยึดก้อนที่มี `BasePart` จริง (ไม่บังคับ attribute), รองรับ target ที่เป็น Folder/Nested object และให้ resolve remote `1726` ได้แม้หา tool ไม่เจอ
 - ปรับ `Auto Mine` ให้ไม่หลุด target โดยเพิ่มระบบล็อกเป้า (target lock) และแสดงสถานะ `mining <ore> (locked)` พร้อมเพิ่มโหมด `Tween to Ore (Experimental)` และตัวปรับ `Tween Speed` เพื่อวิ่งเข้าหาแร่ก่อนขุด
+- เพิ่มเครื่องมือ `Ore Name Debug / Mapping` ใน `modules/Ultimate Mining Tycoon`: จับ ore ที่กำลังเล็ง, แสดง `MineId/OreId + ชื่อที่ resolve ได้`, และบันทึกแมพ `id -> ชื่อจริง` แบบ manual เพื่อให้ Ore ESP แสดงชื่อจริงได้แม่นขึ้นในแมพที่ใช้ชื่อ runtime
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
