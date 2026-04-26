@@ -860,6 +860,9 @@ return function(Window, scriptInfo)
                 if target.PrimaryPart then return target.PrimaryPart end
                 return target:FindFirstChildWhichIsA("BasePart", true)
             end
+            if target.FindFirstChildWhichIsA then
+                return target:FindFirstChildWhichIsA("BasePart", true)
+            end
             return nil
         end
 
@@ -1080,22 +1083,22 @@ return function(Window, scriptInfo)
                         local Players = game:GetService("Players")
                         local LocalPlayer = Players.LocalPlayer
                         local function resolveActivateRemote(tool)
-                            if not tool then return nil end
-                            local madCommId = tool:GetAttribute("MadCommId")
                             local madCommEvents = ReplicatedStorage:FindFirstChild("MadCommEvents")
-                            if madCommId and madCommEvents then
-                                local commFolder = madCommEvents:FindFirstChild(tostring(madCommId))
-                                local remote = commFolder and commFolder:FindFirstChild("Activate")
-                                if remote then
-                                    return remote
-                                end
-                            end
                             -- Fallback for Ultimate Mining Tycoon (captured remote id)
                             if madCommEvents then
                                 local fallbackFolder = madCommEvents:FindFirstChild("1726")
                                 local fallbackRemote = fallbackFolder and fallbackFolder:FindFirstChild("Activate")
                                 if fallbackRemote then
                                     return fallbackRemote
+                                end
+                            end
+                            if not tool then return nil end
+                            local madCommId = tool:GetAttribute("MadCommId")
+                            if madCommId and madCommEvents then
+                                local commFolder = madCommEvents:FindFirstChild(tostring(madCommId))
+                                local remote = commFolder and commFolder:FindFirstChild("Activate")
+                                if remote then
+                                    return remote
                                 end
                             end
                             return tool:FindFirstChild("Activate", true)
@@ -1168,7 +1171,7 @@ return function(Window, scriptInfo)
                                     if container then
                                         for _,v in pairs(container:GetChildren()) do
                                             local renderPart = getOreRenderPart(v)
-                                            if renderPart and isMineableTarget(v, renderPart) then
+                                            if renderPart then
                                                 local oreName = getOreName(v)
                                                 if isIgnoredOre(oreName) then
                                                     continue
