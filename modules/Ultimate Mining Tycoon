@@ -984,44 +984,54 @@ return function(Window, scriptInfo)
         end
 
         local function makeOreSignature(target, renderPart)
-            local part = renderPart
-            if not part and type(getOreRenderPart) == "function" then
-                part = getOreRenderPart(target)
-            end
-            if not isInstance(part) then
+            local ok, signature = pcall(function()
+                local part = isInstance(renderPart) and renderPart or nil
+                if not part and type(getOreRenderPart) == "function" then
+                    local okRender, resolvedPart = pcall(getOreRenderPart, target)
+                    if okRender and isInstance(resolvedPart) then
+                        part = resolvedPart
+                    end
+                end
+                if not isInstance(part) then
+                    return nil
+                end
+
+                local className = part.ClassName or "Part"
+                local nodeName = normalizeOreToken(part.Name) or "Unknown"
+                local material = tostring(part.Material or "Plastic")
+                local color = colorToShortString(part.Color)
+                local size = part.Size
+                local sizeText = "0,0,0"
+                if typeof(size) == "Vector3" then
+                    sizeText = table.concat({
+                        numberToShortString(size.X),
+                        numberToShortString(size.Y),
+                        numberToShortString(size.Z),
+                    }, ",")
+                end
+
+                local meshId = ""
+                local textureId = ""
+                if part:IsA("MeshPart") then
+                    meshId = normalizeOreToken(part.MeshId) or ""
+                    textureId = normalizeOreToken(part.TextureID) or ""
+                end
+
+                return table.concat({
+                    className,
+                    nodeName,
+                    material,
+                    color,
+                    sizeText,
+                    meshId,
+                    textureId,
+                }, "|")
+            end)
+
+            if not ok then
                 return nil
             end
-
-            local className = part.ClassName or "Part"
-            local nodeName = normalizeOreToken(part.Name) or "Unknown"
-            local material = tostring(part.Material or "Plastic")
-            local color = colorToShortString(part.Color)
-            local size = part.Size
-            local sizeText = "0,0,0"
-            if typeof(size) == "Vector3" then
-                sizeText = table.concat({
-                    numberToShortString(size.X),
-                    numberToShortString(size.Y),
-                    numberToShortString(size.Z),
-                }, ",")
-            end
-
-            local meshId = ""
-            local textureId = ""
-            if part:IsA("MeshPart") then
-                meshId = normalizeOreToken(part.MeshId) or ""
-                textureId = normalizeOreToken(part.TextureID) or ""
-            end
-
-            return table.concat({
-                className,
-                nodeName,
-                material,
-                color,
-                sizeText,
-                meshId,
-                textureId,
-            }, "|")
+            return signature
         end
 
         local function getNameFromAttributes(instance)
