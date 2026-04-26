@@ -122,13 +122,47 @@ return function(Window, scriptInfo)
     
         local initialLoad = false
         
+        local TweenService = game:GetService("TweenService")
+        local TELEPORT_TWEEN_SPEED = 220
+        local TELEPORT_TWEEN_MAX_DURATION = 1.2
+
+        local function tweenHumanoidRootPart(hrp, targetCFrame, durationOverride)
+            if not hrp or not targetCFrame then
+                return false
+            end
+            local distance = (hrp.Position - targetCFrame.Position).Magnitude
+            local duration = durationOverride
+            if type(duration) ~= "number" then
+                duration = math.clamp(distance / TELEPORT_TWEEN_SPEED, 0.08, TELEPORT_TWEEN_MAX_DURATION)
+            end
+            local tween = TweenService:Create(
+                hrp,
+                TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                { CFrame = targetCFrame }
+            )
+            local finished = false
+            local connection
+            connection = tween.Completed:Connect(function()
+                finished = true
+            end)
+            tween:Play()
+            local startedAt = os.clock()
+            while not finished and (os.clock() - startedAt) < (duration + 0.3) do
+                task.wait()
+            end
+            if connection then
+                connection:Disconnect()
+            end
+            return true
+        end
+
         -- Teleport helper function and tables (must be before any tab creation)
         local function TeleportPlayer(position, locationName)
             local player = game.Players.LocalPlayer
             local character = player.Character or player.CharacterAdded:Wait()
             local hrp = character:FindFirstChild("HumanoidRootPart")
             if hrp then
-                hrp.CFrame = CFrame.new(position)
+                tweenHumanoidRootPart(hrp, CFrame.new(position))
                 Rayfield:Notify({
                     Title = "Teleported",
                     Content = "Successfully teleported to " .. locationName,
@@ -213,7 +247,7 @@ return function(Window, scriptInfo)
                     local hrp = character:FindFirstChild("HumanoidRootPart")
                     if targetHRP and hrp then
                         local offset = targetHRP.CFrame.LookVector * -5 + Vector3.new(0, 3, 0)
-                        hrp.CFrame = targetHRP.CFrame + offset
+                        tweenHumanoidRootPart(hrp, targetHRP.CFrame + offset)
                         Rayfield:Notify({
                             Title = "Teleported",
                             Content = "Successfully teleported to " .. targetPlayer.Name,
@@ -317,7 +351,7 @@ return function(Window, scriptInfo)
                             local character = player.Character or player.CharacterAdded:Wait()
                             local hrp = character:FindFirstChild("HumanoidRootPart")
                             if hrp then
-                                hrp.CFrame = CFrame.new(centrePart.Position + Vector3.new(0, 2, 0))
+                                tweenHumanoidRootPart(hrp, CFrame.new(centrePart.Position + Vector3.new(0, 2, 0)))
                                 Rayfield:Notify({
                                     Title = "Teleported",
                                     Content = "Successfully teleported to " .. selectedPlot,
@@ -382,7 +416,7 @@ return function(Window, scriptInfo)
                             local character = player.Character or player.CharacterAdded:Wait()
                             local hrp = character:FindFirstChild("HumanoidRootPart")
                             if hrp then
-                                hrp.CFrame = CFrame.new(centrePart.Position + Vector3.new(0, 2, 0))
+                                tweenHumanoidRootPart(hrp, CFrame.new(centrePart.Position + Vector3.new(0, 2, 0)))
                                 Rayfield:Notify({
                                     Title = "Teleported",
                                     Content = "Successfully teleported to your tycoon slot.",
@@ -489,12 +523,12 @@ return function(Window, scriptInfo)
                         
                         local oreCount = countOres()
                         
-                        hrp.CFrame = positionCargoVolume.CFrame * CFrame.new(0, 3, 0)
+                        tweenHumanoidRootPart(hrp, positionCargoVolume.CFrame * CFrame.new(0, 3, 0), 0.18)
                         task.wait(0.3)
                         cargoPrompt.HoldDuration = 0
                         fireproximityprompt(cargoPrompt)
                         task.wait(0.3)
-                        hrp.CFrame = savedCFrame
+                        tweenHumanoidRootPart(hrp, savedCFrame, 0.18)
                         
                         Rayfield:Notify({
                             Title = "Ore Sold",
@@ -559,7 +593,7 @@ return function(Window, scriptInfo)
                 local hrp = character:FindFirstChild("HumanoidRootPart")
                 
                 if hrp and _G.savedWaypoint then
-                    hrp.CFrame = _G.savedWaypoint
+                    tweenHumanoidRootPart(hrp, _G.savedWaypoint)
                     Rayfield:Notify({
                         Title = "Teleported to Waypoint",
                         Content = "Successfully teleported to saved waypoint.",
@@ -637,7 +671,17 @@ return function(Window, scriptInfo)
                         end
                         
                         if vehicleSpawner and proximityPrompt then
-                            game.Workspace[player.Name].HumanoidRootPart.CFrame = CFrame.new(vehicleSpawnerPos)
+                            local playerRoot = game.Workspace[player.Name] and game.Workspace[player.Name]:FindFirstChild("HumanoidRootPart")
+                            if not playerRoot then
+                                Rayfield:Notify({
+                                    Title = "Error",
+                                    Content = "Character not found. Try again.",
+                                    Duration = 3,
+                                    Image = "circle-x",
+                                })
+                                return
+                            end
+                            tweenHumanoidRootPart(playerRoot, CFrame.new(vehicleSpawnerPos), 0.18)
                             task.wait(0.3)
                             proximityPrompt.HoldDuration = 0
                             fireproximityprompt(proximityPrompt)
@@ -758,7 +802,7 @@ return function(Window, scriptInfo)
                         return
                     end
                     local shopPos = activationPoint.Position
-                    hrp.CFrame = CFrame.new(shopPos + Vector3.new(0, 2, 0))
+                    tweenHumanoidRootPart(hrp, CFrame.new(shopPos + Vector3.new(0, 2, 0)), 0.18)
                     task.wait(0.5)
                     proximityPrompt.HoldDuration = 0
                     fireproximityprompt(proximityPrompt)
@@ -784,7 +828,7 @@ return function(Window, scriptInfo)
                         local currentCharacter = player.Character
                         local currentHrp = currentCharacter:FindFirstChild("HumanoidRootPart")
                         if currentHrp then
-                            currentHrp.CFrame = originalPosition
+                            tweenHumanoidRootPart(currentHrp, originalPosition, 0.18)
                             Rayfield:Notify({
                                 Title = shopName,
                                 Content = "Returned to original position",
@@ -2598,12 +2642,12 @@ return function(Window, scriptInfo)
                                             end
                                             
                                             if cargoPrompt and positionCargoVolume then
-                                                hrp.CFrame = positionCargoVolume.CFrame * CFrame.new(0, 3, 0)
+                                                tweenHumanoidRootPart(hrp, positionCargoVolume.CFrame * CFrame.new(0, 3, 0), 0.18)
                                                 task.wait(0.3)
                                                 cargoPrompt.HoldDuration = 0
                                                 fireproximityprompt(cargoPrompt)
                                                 task.wait(0.3)
-                                                hrp.CFrame = oldCFrame
+                                                tweenHumanoidRootPart(hrp, oldCFrame, 0.18)
                                                 Rayfield:Notify({
                                                     Title = "Auto Sell",
                                                     Content = "Sold " .. currentOres .. " ores successfully!",
@@ -2753,12 +2797,12 @@ return function(Window, scriptInfo)
                                         return count
                                     end
                                     local oreCount = countOres()
-                                    hrp.CFrame = positionCargoVolume.CFrame * CFrame.new(0, 3, 0)
+                                    tweenHumanoidRootPart(hrp, positionCargoVolume.CFrame * CFrame.new(0, 3, 0), 0.18)
                                     task.wait(0.3)
                                     cargoPrompt.HoldDuration = 0
                                     fireproximityprompt(cargoPrompt)
                                     task.wait(0.3)
-                                    hrp.CFrame = savedCFrame
+                                    tweenHumanoidRootPart(hrp, savedCFrame, 0.18)
                                     Rayfield:Notify({
                                         Title = "Ore Sold",
                                         Content = "Successfully sold " .. oreCount .. " ores.",
@@ -3320,7 +3364,7 @@ return function(Window, scriptInfo)
                             local character = player.Character or player.CharacterAdded:Wait()
                             local hrp = character:FindFirstChild("HumanoidRootPart")
                             if hrp and _G.savedWaypoint then
-                                hrp.CFrame = _G.savedWaypoint
+                                tweenHumanoidRootPart(hrp, _G.savedWaypoint)
                                 Rayfield:Notify({ Title = "Teleported to Waypoint", Content = "Successfully teleported to saved waypoint.", Duration = 3, Image = "map" })
                             else
                                 Rayfield:Notify({ Title = "Error", Content = "No waypoint set or character not found.", Duration = 3, Image = "circle-x" })
