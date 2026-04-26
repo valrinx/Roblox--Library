@@ -157,10 +157,12 @@ for _, scriptInfo in ipairs(SCRIPTS) do
 end
 
 local loadedScripts = {}
+local scriptCleanupHandlers = {}
 
 local function loadScriptModule(scriptInfo)
     if loadedScripts[scriptInfo.name] then return end
     loadedScripts[scriptInfo.name] = true
+    scriptCleanupHandlers[scriptInfo.name] = nil
 
     task.spawn(function()
         local ok, result = pcall(function()
@@ -175,10 +177,18 @@ local function loadScriptModule(scriptInfo)
             assert(type(moduleFunc) == "function",
                 "module must return function, got: " .. type(moduleFunc))
 
-            moduleFunc(Window, scriptInfo)
+            local runtimeInfo = table.clone(scriptInfo)
+            runtimeInfo.registerCleanup = function(cleanupFn)
+                if type(cleanupFn) == "function" then
+                    scriptCleanupHandlers[scriptInfo.name] = cleanupFn
+                end
+            end
+
+            moduleFunc(Window, runtimeInfo)
         end)
         if not ok then
             loadedScripts[scriptInfo.name] = nil
+            scriptCleanupHandlers[scriptInfo.name] = nil
             warn("[RAVEN HUB] Failed to load '" .. scriptInfo.name .. "': " .. tostring(result))
         end
     end)
@@ -208,5 +218,13 @@ local HubSettingsTab = Window:CreateTab("Hub Settings", 4483362458)
 
 HubSettingsTab:CreateButton({
     Name = "Destroy Hub",
-    Callback = function() Rayfield:Destroy() end,
+    Callback = function()
+        for scriptName, cleanupFn in pairs(scriptCleanupHandlers) do
+            local ok, err = pcall(cleanupFn)
+            if not ok then
+                warn("[RAVEN HUB] Cleanup failed for '" .. tostring(scriptName) .. "': " .. tostring(err))
+            end
+        end
+        Rayfield:Destroy()
+    end,
 })
