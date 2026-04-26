@@ -19,19 +19,27 @@ return function(Window, scriptInfo)
 
     local myPlot = nil
 
+    local function isUsablePlot(plotFolder)
+        return plotFolder
+            and plotFolder:IsA("Folder")
+            and plotFolder:FindFirstChild("Plot_Models")
+            and plotFolder.Plot_Models:FindFirstChild("BaseModel")
+    end
+
     local function assignMyPlot()
         local function clean(str) return str:gsub("%W", ""):lower() end
         local myCleanName        = clean(player.Name)
         local myCleanDisplayName = clean(player.DisplayName)
-        for i = 1, 8 do
-            local plotFolder = Plots:FindFirstChild("Plot_" .. i)
-            if plotFolder then
-                local nameplate = plotFolder:FindFirstChild("Plot_Models")
-                    and plotFolder.Plot_Models:FindFirstChild("BaseModel")
-                    and plotFolder.Plot_Models.BaseModel:FindFirstChild("BillBoardC")
-                if nameplate then
-                    local textLabel  = nameplate.Nameplate.SurfaceGui.NameOf
-                    local cleanLabel = clean(textLabel.Text)
+        for _, plotFolder in ipairs(Plots:GetChildren()) do
+            if isUsablePlot(plotFolder) then
+                local baseModel = plotFolder.Plot_Models.BaseModel
+                local nameplate = baseModel:FindFirstChild("BillBoardC")
+                local textLabel = nameplate
+                    and nameplate:FindFirstChild("Nameplate")
+                    and nameplate.Nameplate:FindFirstChild("SurfaceGui")
+                    and nameplate.Nameplate.SurfaceGui:FindFirstChild("NameOf")
+                if textLabel and textLabel:IsA("TextLabel") then
+                    local cleanLabel = clean(textLabel.Text or "")
                     if string.find(cleanLabel, myCleanName) or string.find(cleanLabel, myCleanDisplayName) then
                         myPlot = plotFolder
                         break
@@ -43,9 +51,15 @@ return function(Window, scriptInfo)
 
     assignMyPlot()
     if not myPlot then
-        myPlot = Plots.Plot_1
-        warn("Plot detection failed. Using Plot_1 as fallback.")
+        for _, plotFolder in ipairs(Plots:GetChildren()) do
+            if isUsablePlot(plotFolder) then
+                myPlot = plotFolder
+                warn("Plot detection failed. Using first available plot fallback: " .. plotFolder.Name)
+                break
+            end
+        end
     end
+    assert(myPlot, "Plot detection failed: no usable plot found in Workspace.Plots")
 
     -- ── References ──────────────────────────────────────────
 
