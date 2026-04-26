@@ -12,10 +12,6 @@ return function(Window, scriptInfo)
         return connection
     end
 
-    if _G.UH_UMT_Destroy then
-        pcall(_G.UH_UMT_Destroy)
-    end
-    
     task.spawn(function()
         pcall(function()
             local madComm = game:GetService("ReplicatedStorage"):WaitForChild("MadCommEvents", 10)
