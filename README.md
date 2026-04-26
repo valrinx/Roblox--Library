@@ -61,6 +61,7 @@
 - ปรับความแม่นชื่อแร่ ESP เพิ่มเติม: รองรับชื่อ `Sliver` (ตามข้อมูลในเกม), ปรับ matcher ให้เช็คแบบคำเต็ม (word boundary) และจำกัด descendant hint เฉพาะ `StringValue` ที่เกี่ยวกับ ore/resource เพื่อลดการเดาผิดเป็น `Tin/Iron` จากชื่อย่อยที่ไม่เกี่ยวข้อง
 - เพิ่มระบบ `auto ore inference + auto learning`: ดึง candidate ชื่อแร่จาก attributes/value objects/บริบท parent แบบให้คะแนนความมั่นใจ และบันทึก `signature/id -> name` อัตโนมัติเมื่อ confidence สูง เพื่อลดการ map มือเป็นหลัก
 - เพิ่ม hardening สำหรับแท็บ Farm/ESP: ครอบงานอัปเดต `RenderStepped` ด้วย `pcall` กันเคส object แร่ผิดรูปพา UI ล้มทั้งแท็บ
+- ปรับระบบจำชื่อแร่ให้ติดมากขึ้น: เพิ่ม `coarse signature` (Material/Color/MeshId/TextureID) เป็นชั้น fallback ของ memory และบันทึกลงไฟล์ settings พร้อมสถานะ `load/save` ใน UI เพื่อเช็กได้ว่าเซฟจริงหรือไม่
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
