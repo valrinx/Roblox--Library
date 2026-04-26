@@ -19,9 +19,15 @@ return function(Window, scriptInfo)
         oreNameById = {},
         oreNameByRuntime = {},
         oreNameBySignature = {},
+        oreNameBySignatureCoarse = {},
     }
     local saveSettingsTaskId = 0
     local saveAutoSettings
+    local canReadSettingsFile = type(isfile) == "function" and type(readfile) == "function"
+    local canWriteSettingsFile = type(writefile) == "function"
+    local settingsLoadOk = false
+    local settingsSaveOk = false
+    local settingsLastSaveError = nil
 
     local function isStringMap(tbl)
         if type(tbl) ~= "table" then return false end
@@ -45,8 +51,7 @@ return function(Window, scriptInfo)
     end
 
     pcall(function()
-        local canRead = type(isfile) == "function" and type(readfile) == "function"
-        if not canRead or not isfile(SETTINGS_FILE) then return end
+        if not canReadSettingsFile or not isfile(SETTINGS_FILE) then return end
         local decoded = HttpService:JSONDecode(readfile(SETTINGS_FILE))
         if type(decoded) ~= "table" then return end
 
@@ -67,6 +72,10 @@ return function(Window, scriptInfo)
         if isStringMap(decoded.oreNameBySignature) then
             autoSettingsLoaded.oreNameBySignature = decoded.oreNameBySignature
         end
+        if isStringMap(decoded.oreNameBySignatureCoarse) then
+            autoSettingsLoaded.oreNameBySignatureCoarse = decoded.oreNameBySignatureCoarse
+        end
+        settingsLoadOk = true
     end)
 
     local function trackConnection(connection)
@@ -900,6 +909,7 @@ return function(Window, scriptInfo)
         local oreNameById = autoSettingsLoaded.oreNameById
         local oreNameByRuntime = autoSettingsLoaded.oreNameByRuntime
         local oreNameBySignature = autoSettingsLoaded.oreNameBySignature
+        local oreNameBySignatureCoarse = autoSettingsLoaded.oreNameBySignatureCoarse
         local oreInferenceStats = { learned = 0 }
         local getOreRenderPart
         local knownOreNames = {
@@ -1053,6 +1063,25 @@ return function(Window, scriptInfo)
             return signature
         end
 
+        local function makeOreSignatureCoarse(target, renderPart)
+            local signature = makeOreSignature(target, renderPart)
+            if not signature then
+                return nil
+            end
+            local parts = string.split(signature, "|")
+            if #parts < 7 then
+                return signature
+            end
+            -- Coarse signature ignores volatile fields (part name/size).
+            return table.concat({
+                parts[1] or "",
+                parts[3] or "",
+                parts[4] or "",
+                parts[6] or "",
+                parts[7] or "",
+            }, "|")
+        end
+
         local function scoreOreCandidate(bucket, candidate, score)
             if not candidate or not score then return end
             bucket[candidate] = (bucket[candidate] or 0) + score
@@ -1147,9 +1176,14 @@ return function(Window, scriptInfo)
             if not inferredName then return end
             local changed = false
             local signature = makeOreSignature(target, renderPart)
+            local coarseSignature = makeOreSignatureCoarse(target, renderPart)
             if signature and not oreNameBySignature[signature] then
                 oreNameBySignature[signature] = inferredName
                 oreInferenceStats.learned = oreInferenceStats.learned + 1
+                changed = true
+            end
+            if coarseSignature and not oreNameBySignatureCoarse[coarseSignature] then
+                oreNameBySignatureCoarse[coarseSignature] = inferredName
                 changed = true
             end
             local oreId = getOreIdentifierDeep(target, renderPart)
@@ -1272,9 +1306,16 @@ return function(Window, scriptInfo)
             if signature and oreNameBySignature[signature] then
                 return oreNameBySignature[signature]
             end
+            local coarseSignature = makeOreSignatureCoarse(target, renderPart)
+            if coarseSignature and oreNameBySignatureCoarse[coarseSignature] then
+                return oreNameBySignatureCoarse[coarseSignature]
+            end
             autoLearnOreMapping(target, renderPart)
             if signature and oreNameBySignature[signature] then
                 return oreNameBySignature[signature]
+            end
+            if coarseSignature and oreNameBySignatureCoarse[coarseSignature] then
+                return oreNameBySignatureCoarse[coarseSignature]
             end
             local runtimeName = normalizeOreToken(isInstance(target) and target.Name or nil)
             if runtimeName and oreNameByRuntime[runtimeName] then
@@ -1332,6 +1373,7 @@ return function(Window, scriptInfo)
             local renderPart = getOreRenderPart(target)
             local oreId = getOreIdentifierDeep(target, renderPart)
             local signature = makeOreSignature(target, renderPart)
+            local coarseSignature = makeOreSignatureCoarse(target, renderPart)
 
             local resolvedName = normalizeOreToken(forcedName)
             if not resolvedName or resolvedName == "" then
@@ -1346,9 +1388,15 @@ return function(Window, scriptInfo)
                 if signature then
                     oreNameBySignature[signature] = resolvedName
                 end
+                if coarseSignature then
+                    oreNameBySignatureCoarse[coarseSignature] = resolvedName
+                end
             else
                 if signature then
                     oreNameBySignature[signature] = resolvedName
+                    if coarseSignature then
+                        oreNameBySignatureCoarse[coarseSignature] = resolvedName
+                    end
                 else
                     local runtimeName = normalizeOreToken(isInstance(target) and target.Name or nil)
                     if not runtimeName then
@@ -1663,7 +1711,11 @@ return function(Window, scriptInfo)
         local autoSellOreCount = math.clamp(autoSettingsLoaded.autoSellOreCount, 1, 64)
     
         saveAutoSettings = function()
-            if type(writefile) ~= "function" then return end
+            if not canWriteSettingsFile then
+                settingsSaveOk = false
+                settingsLastSaveError = "writefile unavailable"
+                return
+            end
             saveSettingsTaskId = saveSettingsTaskId + 1
             local currentTaskId = saveSettingsTaskId
             task.delay(0.2, function()
@@ -1682,10 +1734,13 @@ return function(Window, scriptInfo)
                     oreNameById = oreNameById,
                     oreNameByRuntime = oreNameByRuntime,
                     oreNameBySignature = oreNameBySignature,
+                    oreNameBySignatureCoarse = oreNameBySignatureCoarse,
                 }
-                pcall(function()
+                local okWrite, errWrite = pcall(function()
                     writefile(SETTINGS_FILE, HttpService:JSONEncode(payload))
                 end)
+                settingsSaveOk = okWrite
+                settingsLastSaveError = okWrite and nil or tostring(errWrite)
             end)
         end
 
@@ -2300,7 +2355,43 @@ return function(Window, scriptInfo)
         Farm:CreateLabel("Reveals every type of ore found throughout mining.")
         local OreDebugSection = Farm:CreateSection("🧪 Ore Name Debug / Mapping")
         local OreDebugLabel = Farm:CreateLabel("Look at ore and press capture button")
+        local OreLearningStatusLabel = Farm:CreateLabel("Ore Memory: checking...")
         local OreManualName = ""
+
+        local function countTableEntries(tbl)
+            local n = 0
+            if type(tbl) ~= "table" then return 0 end
+            for _ in pairs(tbl) do
+                n = n + 1
+            end
+            return n
+        end
+
+        local function updateOreLearningStatus()
+            local memoryCount = countTableEntries(oreNameById) + countTableEntries(oreNameBySignature) + countTableEntries(oreNameBySignatureCoarse)
+            local ioState = "save:off"
+            if canWriteSettingsFile then
+                ioState = settingsSaveOk and "save:ok" or "save:pending"
+                if settingsLastSaveError then
+                    ioState = "save:error"
+                end
+            end
+            local loadState = settingsLoadOk and "load:ok" or (canReadSettingsFile and "load:none/new" or "load:off")
+            OreLearningStatusLabel:Set(string.format(
+                "Ore Memory: %d entries | learned:%d | %s | %s",
+                memoryCount,
+                oreInferenceStats.learned,
+                loadState,
+                ioState
+            ))
+        end
+        updateOreLearningStatus()
+        task.spawn(function()
+            while scriptRunning do
+                task.wait(2)
+                updateOreLearningStatus()
+            end
+        end)
 
         Farm:CreateInput({
             Name = "Manual Ore Name (optional)",
@@ -2362,6 +2453,7 @@ return function(Window, scriptInfo)
 
                 local ok, message = registerOreIdName(target, OreManualName)
                 OreDebugLabel:Set("Ore Map: " .. message)
+                updateOreLearningStatus()
                 Rayfield:Notify({
                     Title = ok and "Ore Mapping Saved" or "Ore Mapping Failed",
                     Content = message,
@@ -2376,7 +2468,7 @@ return function(Window, scriptInfo)
             end,
         })
 
-        Farm:CreateLabel("Tip: if id is N/A, mapping will use runtime name (e.g. OreMesh) as fallback.")
+        Farm:CreateLabel("Tip: if id is N/A, mapping uses ore signature (strict+coarse), not runtime name only.")
     
         Farm:CreateToggle({
             Name = "Ore ESP",
