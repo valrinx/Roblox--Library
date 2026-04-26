@@ -1766,7 +1766,15 @@ return function(Window, scriptInfo)
             return oreCategoryByName[oreName] or "Unknown"
         end
 
-        local function getOreColor(oreName)
+        local function getOreColor(target, oreName, renderPart)
+            local part = renderPart
+            if not isInstance(part) then
+                part = getOreRenderPart(target)
+            end
+            if isInstance(part) and typeof(part.Color) == "Color3" then
+                -- Use the ore part's actual in-game color directly.
+                return part.Color
+            end
             local category = getOreCategory(oreName)
             return oreCategoryColors[category] or oreColors[oreName] or Color3.fromRGB(255, 255, 255)
         end
@@ -1791,7 +1799,7 @@ return function(Window, scriptInfo)
             local oreName = getOreName(target)
             if ESP.filterOre ~= "All" and oreName ~= ESP.filterOre then return end
     
-            local color = getOreColor(oreName)
+            local color = getOreColor(target, oreName, renderPart)
     
             local hl = Instance.new("Highlight")
             hl.Name                = "UH_ESP_Highlight"
