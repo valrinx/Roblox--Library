@@ -2901,7 +2901,12 @@ return function(Window, scriptInfo)
         })
 
         local function encodeSharedColorMap()
-            return HttpService:JSONEncode(sharedOreNameByColorSignature)
+            -- Encode as an object to avoid empty-table ambiguity ({} sometimes encodes as []).
+            return HttpService:JSONEncode({
+                version = 1,
+                kind = "OreColorSignatureMap",
+                data = sharedOreNameByColorSignature,
+            })
         end
 
         local function decodeSharedColorMap(text)
@@ -2914,10 +2919,14 @@ return function(Window, scriptInfo)
             if not ok or type(decoded) ~= "table" then
                 return nil, "Invalid JSON"
             end
-            if not isStringMap(decoded) then
-                return nil, "Expected string map { signature: name }"
+            -- Backwards compatible: accept either raw map or wrapped object.
+            if isStringMap(decoded) then
+                return decoded, nil
             end
-            return decoded, nil
+            if type(decoded.data) == "table" and isStringMap(decoded.data) then
+                return decoded.data, nil
+            end
+            return nil, "Expected { data: { signature: name } }"
         end
 
         Farm:CreateButton({
