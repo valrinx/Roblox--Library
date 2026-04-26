@@ -2741,6 +2741,19 @@ return function(Window, scriptInfo)
         Farm:CreateButton({
             Name = "Reset Learned Ore Maps",
             Callback = function()
+                local now = os.clock()
+                _G.uhOreResetConfirmUntil = _G.uhOreResetConfirmUntil or 0
+                if now > _G.uhOreResetConfirmUntil then
+                    _G.uhOreResetConfirmUntil = now + 6
+                    Rayfield:Notify({
+                        Title = "Confirm Reset",
+                        Content = "Press 'Reset Learned Ore Maps' again within 6s to confirm.",
+                        Duration = 4,
+                        Image = "alert-triangle",
+                    })
+                    return
+                end
+                _G.uhOreResetConfirmUntil = 0
                 oreNameById = {}
                 oreNameByRuntime = {}
                 oreNameBySignature = {}
