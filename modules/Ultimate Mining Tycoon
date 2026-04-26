@@ -1060,7 +1060,7 @@ return function(Window, scriptInfo)
     
         -- Auto Mine Section
         local AutoMineSection = Farm:CreateSection("⛏️ Auto Mining")
-        local OreLabel = Farm:CreateLabel("ＥｎｔｅｒＲａｎｇｅ ＮＯＰＬＡＹ")
+        local OreLabel = Farm:CreateLabel("Auto Mine Status: Idle")
     
         local autoMineEnabled = false
         local autoMineThread
@@ -1142,75 +1142,75 @@ return function(Window, scriptInfo)
                             local Character = LocalPlayer.Character
                             if not Character then task.wait(0.1) continue end
                             local Tool = GetTool()
-                            if not Tool then task.wait(0.1) continue end
-                            local isPickaxe = string.lower(Tool.Name):find("pickaxe") ~= nil
-                            if Tool.Parent == LocalPlayer.InnoBackpack and isPickaxe then
+                            local isPickaxe = Tool and string.lower(Tool.Name):find("pickaxe") ~= nil
+                            if Tool and Tool.Parent == LocalPlayer.InnoBackpack and isPickaxe then
                                 local equipRemote = Tool:FindFirstChild("EquipRemote")
                                 if equipRemote then
                                     equipRemote:FireServer(true)
                                     task.wait(0.2)
                                 end
                             end
-                            if (Tool.Parent == LocalPlayer.Character) or (Tool.Parent == LocalPlayer.InnoBackpack and isPickaxe) then
-                                local root = Character and Character:FindFirstChild("HumanoidRootPart")
-                                if root then
-                                    local closestBlock, closestDist = nil, math.huge
-                                    if not workspace:FindFirstChild("PlacedOre") then
-                                        task.wait(0.1)
-                                        continue
-                                    end
-                                    local function isIgnoredOre(oreName)
-                                        if type(OreIgnoreList) ~= "table" then return false end
-                                        if OreIgnoreList[oreName] == true then return true end
-                                        return table.find(OreIgnoreList, oreName) ~= nil
-                                    end
+                            local root = Character and Character:FindFirstChild("HumanoidRootPart")
+                            if root then
+                                local closestBlock, closestDist = nil, math.huge
+                                local function isIgnoredOre(oreName)
+                                    if type(OreIgnoreList) ~= "table" then return false end
+                                    if OreIgnoreList[oreName] == true then return true end
+                                    return table.find(OreIgnoreList, oreName) ~= nil
+                                end
 
-                                    local oreContainers = {
-                                        workspace:FindFirstChild("PlacedOre"),
-                                        workspace:FindFirstChild("SpawnedBlocks"),
-                                    }
+                                local oreContainers = {
+                                    workspace:FindFirstChild("PlacedOre"),
+                                    workspace:FindFirstChild("SpawnedBlocks"),
+                                }
 
-                                    for _, container in ipairs(oreContainers) do
-                                        if container then
-                                            for _,v in pairs(container:GetChildren()) do
-                                                local renderPart = getOreRenderPart(v)
-                                                if renderPart and isMineableTarget(v, renderPart) then
-                                                    local oreName = getOreName(v)
-                                                    if isIgnoredOre(oreName) then
-                                                        continue
-                                                    end
-                                                    local dist = (root.Position - renderPart.Position).Magnitude
-                                                    if dist <= autoMineRange and dist < closestDist then
-                                                        closestBlock = v
-                                                        closestDist = dist
-                                                    end
+                                for _, container in ipairs(oreContainers) do
+                                    if container then
+                                        for _,v in pairs(container:GetChildren()) do
+                                            local renderPart = getOreRenderPart(v)
+                                            if renderPart and isMineableTarget(v, renderPart) then
+                                                local oreName = getOreName(v)
+                                                if isIgnoredOre(oreName) then
+                                                    continue
+                                                end
+                                                local dist = (root.Position - renderPart.Position).Magnitude
+                                                if dist <= autoMineRange and dist < closestDist then
+                                                    closestBlock = v
+                                                    closestDist = dist
                                                 end
                                             end
                                         end
                                     end
-                                    if closestBlock then
-                                        local renderPart = getOreRenderPart(closestBlock)
-                                        local gridPos = getTargetGridPositionDeep(closestBlock, renderPart)
-                                        if not gridPos then
-                                            local worldPos = renderPart and renderPart.Position
-                                            if not worldPos then
-                                                task.wait(0.03)
-                                                continue
-                                            end
-                                            gridPos = Vector3int16.new(
-                                                math.floor(worldPos.X / 4),
-                                                math.floor(worldPos.Y / 4),
-                                                math.floor(worldPos.Z / 4)
-                                            )
+                                end
+                                if closestBlock then
+                                    local renderPart = getOreRenderPart(closestBlock)
+                                    local oreName = getOreName(closestBlock)
+                                    local gridPos = getTargetGridPositionDeep(closestBlock, renderPart)
+                                    if not gridPos then
+                                        local worldPos = renderPart and renderPart.Position
+                                        if not worldPos then
+                                            OreLabel:Set("Auto Mine Status: target no position")
+                                            task.wait(0.03)
+                                            continue
                                         end
-                                        local args = {10, gridPos}
-                                        local activateRemote = resolveActivateRemote(Tool)
-                                        if activateRemote then
-                                            activateRemote:FireServer(table.unpack(args))
-                                        end
-                                        task.wait(autoMineDelay)
-                                        continue
+                                        gridPos = Vector3int16.new(
+                                            math.floor(worldPos.X / 4),
+                                            math.floor(worldPos.Y / 4),
+                                            math.floor(worldPos.Z / 4)
+                                        )
                                     end
+                                    local args = {10, gridPos}
+                                    local activateRemote = resolveActivateRemote(Tool)
+                                    if activateRemote then
+                                        activateRemote:FireServer(table.unpack(args))
+                                        OreLabel:Set("Auto Mine Status: mining " .. tostring(oreName))
+                                    else
+                                        OreLabel:Set("Auto Mine Status: Activate remote missing")
+                                    end
+                                    task.wait(autoMineDelay)
+                                    continue
+                                else
+                                    OreLabel:Set("Auto Mine Status: no target in range")
                                 end
                             end
                             task.wait(0.03)
@@ -1218,6 +1218,7 @@ return function(Window, scriptInfo)
                     end)
                 else
                     autoMineEnabled = false
+                    OreLabel:Set("Auto Mine Status: Idle")
                 end
             end,
         })
