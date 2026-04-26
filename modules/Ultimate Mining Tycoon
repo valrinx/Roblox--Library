@@ -1400,6 +1400,15 @@ return function(Window, scriptInfo)
                                 return
                             end
                             if not rootPart or not orePart then return end
+                            local character = rootPart.Parent
+                            local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+                            if humanoid and humanoid.SeatPart then
+                                if activeTween then
+                                    pcall(function() activeTween:Cancel() end)
+                                    activeTween = nil
+                                end
+                                return
+                            end
                             local toOre = orePart.Position - rootPart.Position
                             local dist = toOre.Magnitude
                             if dist < 8 then return end
@@ -1431,6 +1440,16 @@ return function(Window, scriptInfo)
                             end
                             local root = Character and Character:FindFirstChild("HumanoidRootPart")
                             if root then
+                                local humanoid = Character:FindFirstChildOfClass("Humanoid")
+                                if humanoid and humanoid.SeatPart then
+                                    if activeTween then
+                                        pcall(function() activeTween:Cancel() end)
+                                        activeTween = nil
+                                    end
+                                    OreLabel:Set("Auto Mine Status: paused (in vehicle)")
+                                    task.wait(0.15)
+                                    continue
+                                end
                                 local closestBlock, closestDist = nil, math.huge
 
                                 local oreContainers = {
