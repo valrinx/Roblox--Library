@@ -1,6 +1,20 @@
 return function(Window, scriptInfo)
 
     local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+    local scriptRunning = true
+    local cleanupConnections = {}
+    local infiniteJumpConnection = nil
+
+    local function trackConnection(connection)
+        if connection then
+            table.insert(cleanupConnections, connection)
+        end
+        return connection
+    end
+
+    if _G.UH_UMT_Destroy then
+        pcall(_G.UH_UMT_Destroy)
+    end
     
     task.spawn(function()
         pcall(function()
@@ -24,7 +38,7 @@ return function(Window, scriptInfo)
                     checkDesc(desc)
                 end
                 
-                gui.DescendantAdded:Connect(checkDesc)
+                trackConnection(gui.DescendantAdded:Connect(checkDesc))
             end
         end)
     end)
@@ -149,19 +163,19 @@ return function(Window, scriptInfo)
         })
     
         task.spawn(function()
-            while true do
+            while scriptRunning do
                 task.wait(5)
                 RefreshPlayerList()
             end
         end)
-        game.Players.PlayerAdded:Connect(function(player)
+        trackConnection(game.Players.PlayerAdded:Connect(function(player)
             task.wait(1)
             RefreshPlayerList()
-        end)
-        game.Players.PlayerRemoving:Connect(function(player)
+        end))
+        trackConnection(game.Players.PlayerRemoving:Connect(function(player)
             task.wait(1)
             RefreshPlayerList()
-        end)
+        end))
         
         local PlayerDivider = Teleport:CreateDivider()
         
@@ -922,7 +936,7 @@ return function(Window, scriptInfo)
             return types
         end
     
-        game:GetService("RunService").RenderStepped:Connect(function()
+        trackConnection(game:GetService("RunService").RenderStepped:Connect(function()
             if not ESP.enabled then return end
             local char = game.Players.LocalPlayer.Character
             local hrp  = char and char:FindFirstChild("HumanoidRootPart")
@@ -945,16 +959,17 @@ return function(Window, scriptInfo)
                     end
                 end
             end
-        end)
+        end))
     
         local function watchFolder(folder)
             if not folder then return end
-            folder.ChildAdded:Connect(function(child)
+            local childAddedConn = folder.ChildAdded:Connect(function(child)
                 if child:IsA("BasePart") or child:IsA("Model") then
                     task.wait(0.1)
                     espApply(child)
                 end
             end)
+            trackConnection(childAddedConn)
         end
     
         task.spawn(function()
@@ -964,13 +979,13 @@ return function(Window, scriptInfo)
             watchFolder(spawnedBlocks)
         end)
     
-        game.Players.LocalPlayer.CharacterAdded:Connect(function()
+        trackConnection(game.Players.LocalPlayer.CharacterAdded:Connect(function()
             espClearAll()
             if ESP.enabled then
                 task.wait(1)
                 espScanAll()
             end
-        end)
+        end))
     
         -- Auto Mine Section
         local AutoMineSection = Farm:CreateSection("⛏️ Auto Mining")
@@ -1541,17 +1556,63 @@ return function(Window, scriptInfo)
                 end
             end,
         })
+
+        local function destroyScript()
+            scriptRunning = false
+
+            autoMineEnabled = false
+            autoSellEnabled = false
+            ESP.enabled = false
+            espClearAll()
+
+            if infiniteJumpConnection then
+                infiniteJumpConnection:Disconnect()
+                infiniteJumpConnection = nil
+            end
+
+            local globalConnections = {
+                "sellOreKeyConnection",
+                "setWaypointKeyConnection",
+                "teleportToWaypointKeyConnection",
+            }
+            for _, key in ipairs(globalConnections) do
+                local conn = rawget(_G, key)
+                if conn then
+                    pcall(function() conn:Disconnect() end)
+                    _G[key] = nil
+                end
+            end
+
+            for _, conn in ipairs(cleanupConnections) do
+                pcall(function() conn:Disconnect() end)
+            end
+            cleanupConnections = {}
+
+            pcall(function() Window:Destroy() end)
+            pcall(function() Rayfield:Destroy() end)
+            _G.UH_UMT_Destroy = nil
+        end
+
+        _G.UH_UMT_Destroy = destroyScript
+
+        Misc:CreateButton({
+            Name = "Destroy Menu (Reload Script)",
+            Callback = function()
+                destroyScript()
+            end,
+        })
     
         -- Notification timer
         task.spawn(function()
             task.wait(10)
+            if not scriptRunning then return end
             Rayfield:Notify({
                 Title = "Thanks for Using UtilityHub!",
                 Content = "Join our Discord server for updates and support!",
                 Duration = 5,
                 Image = "shield-alert",
             })
-            while true do
+            while scriptRunning do
                 task.wait(500)
                 local messages = {
                     { Title = "Thanks for Using UtilityHub!", Content = "Join our Discord server for updates and support!" },
