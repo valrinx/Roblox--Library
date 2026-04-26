@@ -30,6 +30,8 @@
 - เพิ่มปุ่ม `Destroy Menu (Reload Script)` ใน `modules/Ultimate Mining Tycoon` เพื่อปิดสคริปต์และรันใหม่ได้ทันที
 - แก้ `modules/My_knife_farm` ไม่ให้ fallback ไป `Plots.Plot_1` แบบตายตัว
 - ปรับ `RAVENHUB` ระบบคัดโหลดโมดูลให้รองรับ `placeIds/gameIds` และเพิ่มตัวตรวจจับแมพสำรองของ UMT
+- แก้ `modules/Ultimate Mining Tycoon` ไม่ให้เรียก destroy อัตโนมัติตอนเริ่มโหลด (แก้ปัญหาเมนูปิดเองทันที)
+- แก้ `RAVENHUB` ให้ retry โหลดโมดูลที่ใช้ detector นานสูงสุด 30 วินาที และกันโหลดซ้ำด้วย `loadedScripts`
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
