@@ -1781,7 +1781,30 @@ return function(Window, scriptInfo)
             if not isInstance(target) then return nil end
             if target:IsA("BasePart") then return target end
             if target:IsA("Model") then
-                if target.PrimaryPart then return target.PrimaryPart end
+                if target.PrimaryPart and target.PrimaryPart:IsA("BasePart") then
+                    return target.PrimaryPart
+                end
+                -- Prefer visible MeshPart if present (color/appearance matches what player sees).
+                local mesh = target:FindFirstChildWhichIsA("MeshPart", true)
+                if mesh then
+                    return mesh
+                end
+                -- Fallback: pick largest BasePart (often the visible shell).
+                local bestPart = nil
+                local bestSize = -1
+                for _, desc in ipairs(target:GetDescendants()) do
+                    if desc:IsA("BasePart") then
+                        local s = desc.Size
+                        local score = (s.X * s.Y * s.Z)
+                        if score > bestSize then
+                            bestSize = score
+                            bestPart = desc
+                        end
+                    end
+                end
+                if bestPart then
+                    return bestPart
+                end
                 return target:FindFirstChildWhichIsA("BasePart", true)
             end
             if target.FindFirstChildWhichIsA then
