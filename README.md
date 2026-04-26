@@ -35,6 +35,7 @@
 - ปรับระบบ cleanup: ใช้ `Destroy Hub` ใน `RAVENHUB` เป็นตัวกลางเรียก cleanup ของโมดูล (รวม `Ultimate Mining Tycoon`) แทนการ destroy UI เองในโมดูล
 - บันทึกเหตุการณ์: อาการเมนูปิดเองยังเกิดซ้ำ เพราะ `modules/Ultimate Mining Tycoon` โหลด Rayfield ใหม่ซ้อนกับ Hub
 - แก้ล่าสุด: ส่ง `hubRayfield` จาก `RAVENHUB` เข้าโมดูล และให้ UMT ใช้ instance เดิมแทนการ `loadstring` Rayfield ใหม่
+- ปรับระบบอ่านชื่อแร่ใน `modules/Ultimate Mining Tycoon`: อ่านจาก attributes/descendants + normalize ชื่อ (ตัด `Block/Mesh`, แยก CamelCase) และ cache ชื่อเพื่อลดชื่อผิดแบบ `Unknown/GemBlockMesh`
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
