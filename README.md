@@ -88,6 +88,7 @@
 - แก้ `Ore Ignore List` ให้แสดงรายการแร่ครบทั้งระบบ (จาก `knownOreNames` + mapping ที่เรียนรู้) ไม่ยึดเฉพาะแร่ที่กำลังสปอนใน `PlacedOre` เพื่อเลือก ignore ได้ครบตั้งแต่เริ่ม
 - เพิ่มโหมด `Safe Profile` ใน `modules/Ultimate Mining Tycoon`: ปรับ Auto Mine/Auto Sell ให้สุ่มจังหวะมากขึ้น, ใส่ cooldown, ชะลอ tween, และ pause อัตโนมัติเมื่อมีผู้เล่นอยู่ใกล้ เพื่อลดพฤติกรรมที่ดูผิดธรรมชาติ
 - เพิ่มตัวปรับในแท็บ `Teleport` สำหรับความเร็ววาร์ป: `Teleport Tween Speed` และ `Teleport Max Duration` พร้อมบันทึกค่าใน settings เพื่อให้ชะลอการวาร์ปหลักได้ตามต้องการ
+- รวมระบบการเคลื่อนที่ทั้งหมดให้ใช้ tween helper เดียว (`tweenHumanoidRootPart`) ครอบคลุมทั้ง Teleport/Waypoint/Sell/Shop/Vehicle และ Auto Mine tween เพื่อให้พฤติกรรมการเคลื่อนที่สม่ำเสมอทั้งไฟล์
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
