@@ -1069,6 +1069,8 @@ return function(Window, scriptInfo)
         local autoMineThread
         local autoMineRange = 10
         local autoMineDelay = 1.2
+        local autoMineUseTween = false
+        local autoMineTweenSpeed = 45
         local OreIgnoreList = {}
     
         local AutoMineToggle = Farm:CreateToggle({
@@ -1081,7 +1083,10 @@ return function(Window, scriptInfo)
                     autoMineThread = task.spawn(function()
                         local ReplicatedStorage = game:GetService("ReplicatedStorage")
                         local Players = game:GetService("Players")
+                        local TweenService = game:GetService("TweenService")
                         local LocalPlayer = Players.LocalPlayer
+                        local lockedTarget = nil
+                        local activeTween = nil
                         local function resolveActivateRemote(tool)
                             local madCommEvents = ReplicatedStorage:FindFirstChild("MadCommEvents")
                             -- Fallback for Ultimate Mining Tycoon (captured remote id)
@@ -1140,6 +1145,54 @@ return function(Window, scriptInfo)
                             end
                             return nil
                         end
+
+                        local function isIgnoredOre(oreName)
+                            if type(OreIgnoreList) ~= "table" then return false end
+                            if OreIgnoreList[oreName] == true then return true end
+                            return table.find(OreIgnoreList, oreName) ~= nil
+                        end
+
+                        local function isTargetValid(target, rootPart)
+                            if not target or not target.Parent or not rootPart then
+                                return false
+                            end
+                            local renderPart = getOreRenderPart(target)
+                            if not renderPart or not renderPart.Parent then
+                                return false
+                            end
+                            local oreName = getOreName(target)
+                            if isIgnoredOre(oreName) then
+                                return false
+                            end
+                            local dist = (rootPart.Position - renderPart.Position).Magnitude
+                            return dist <= (autoMineRange + 8)
+                        end
+
+                        local function tweenToOre(rootPart, orePart)
+                            if not autoMineUseTween then
+                                if activeTween then
+                                    pcall(function() activeTween:Cancel() end)
+                                    activeTween = nil
+                                end
+                                return
+                            end
+                            if not rootPart or not orePart then return end
+                            local toOre = orePart.Position - rootPart.Position
+                            local dist = toOre.Magnitude
+                            if dist < 8 then return end
+                            local targetPos = orePart.Position - toOre.Unit * 5 + Vector3.new(0, 2.5, 0)
+                            local duration = math.clamp(dist / math.max(autoMineTweenSpeed, 1), 0.08, 0.35)
+                            if activeTween then
+                                pcall(function() activeTween:Cancel() end)
+                            end
+                            activeTween = TweenService:Create(
+                                rootPart,
+                                TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out),
+                                { CFrame = CFrame.new(targetPos) }
+                            )
+                            activeTween:Play()
+                        end
+
                         while autoMineEnabled do
                             if not LocalPlayer then task.wait(0.1) continue end
                             local Character = LocalPlayer.Character
@@ -1156,38 +1209,41 @@ return function(Window, scriptInfo)
                             local root = Character and Character:FindFirstChild("HumanoidRootPart")
                             if root then
                                 local closestBlock, closestDist = nil, math.huge
-                                local function isIgnoredOre(oreName)
-                                    if type(OreIgnoreList) ~= "table" then return false end
-                                    if OreIgnoreList[oreName] == true then return true end
-                                    return table.find(OreIgnoreList, oreName) ~= nil
-                                end
 
                                 local oreContainers = {
                                     workspace:FindFirstChild("PlacedOre"),
                                     workspace:FindFirstChild("SpawnedBlocks"),
                                 }
 
-                                for _, container in ipairs(oreContainers) do
-                                    if container then
-                                        for _,v in pairs(container:GetChildren()) do
-                                            local renderPart = getOreRenderPart(v)
-                                            if renderPart then
-                                                local oreName = getOreName(v)
-                                                if isIgnoredOre(oreName) then
-                                                    continue
-                                                end
-                                                local dist = (root.Position - renderPart.Position).Magnitude
-                                                if dist <= autoMineRange and dist < closestDist then
-                                                    closestBlock = v
-                                                    closestDist = dist
+                                if isTargetValid(lockedTarget, root) then
+                                    closestBlock = lockedTarget
+                                else
+                                    lockedTarget = nil
+                                    for _, container in ipairs(oreContainers) do
+                                        if container then
+                                            for _,v in pairs(container:GetChildren()) do
+                                                local renderPart = getOreRenderPart(v)
+                                                if renderPart then
+                                                    local oreName = getOreName(v)
+                                                    if isIgnoredOre(oreName) then
+                                                        continue
+                                                    end
+                                                    local dist = (root.Position - renderPart.Position).Magnitude
+                                                    if dist <= autoMineRange and dist < closestDist then
+                                                        closestBlock = v
+                                                        closestDist = dist
+                                                    end
                                                 end
                                             end
                                         end
                                     end
+                                    lockedTarget = closestBlock
                                 end
+
                                 if closestBlock then
                                     local renderPart = getOreRenderPart(closestBlock)
                                     local oreName = getOreName(closestBlock)
+                                    tweenToOre(root, renderPart)
                                     local gridPos = getTargetGridPositionDeep(closestBlock, renderPart)
                                     if not gridPos then
                                         local worldPos = renderPart and renderPart.Position
@@ -1206,17 +1262,25 @@ return function(Window, scriptInfo)
                                     local activateRemote = resolveActivateRemote(Tool)
                                     if activateRemote then
                                         activateRemote:FireServer(table.unpack(args))
-                                        OreLabel:Set("Auto Mine Status: mining " .. tostring(oreName))
+                                        OreLabel:Set("Auto Mine Status: mining " .. tostring(oreName) .. " (locked)")
                                     else
                                         OreLabel:Set("Auto Mine Status: Activate remote missing")
                                     end
                                     task.wait(autoMineDelay)
                                     continue
                                 else
+                                    if activeTween then
+                                        pcall(function() activeTween:Cancel() end)
+                                        activeTween = nil
+                                    end
                                     OreLabel:Set("Auto Mine Status: no target in range")
                                 end
                             end
                             task.wait(0.03)
+                        end
+                        if activeTween then
+                            pcall(function() activeTween:Cancel() end)
+                            activeTween = nil
                         end
                     end)
                 else
@@ -1247,6 +1311,27 @@ return function(Window, scriptInfo)
             Flag = "MiningDelay",
             Callback = function(Value)
                 autoMineDelay = Value
+            end,
+        })
+
+        Farm:CreateToggle({
+            Name = "Tween to Ore (Experimental)",
+            CurrentValue = false,
+            Flag = "AutoMineTween",
+            Callback = function(Value)
+                autoMineUseTween = Value
+            end,
+        })
+
+        Farm:CreateSlider({
+            Name = "Tween Speed",
+            Range = {10, 120},
+            Increment = 1,
+            Suffix = " studs/s",
+            CurrentValue = 45,
+            Flag = "AutoMineTweenSpeed",
+            Callback = function(Value)
+                autoMineTweenSpeed = Value
             end,
         })
     
