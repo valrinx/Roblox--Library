@@ -115,8 +115,11 @@ local function containsId(idList, value)
 end
 
 local function shouldLoadScript(scriptInfo)
-    if scriptInfo.detector and scriptInfo.detector() then
-        return true
+    if scriptInfo.detector then
+        local ok, matched = pcall(scriptInfo.detector)
+        if ok and matched then
+            return true
+        end
     end
 
     if scriptInfo.universal == true then
@@ -153,25 +156,45 @@ for _, scriptInfo in ipairs(SCRIPTS) do
     end
 end
 
+local loadedScripts = {}
+
+local function loadScriptModule(scriptInfo)
+    if loadedScripts[scriptInfo.name] then return end
+    loadedScripts[scriptInfo.name] = true
+
+    task.spawn(function()
+        local ok, result = pcall(function()
+            local raw = game:HttpGet(scriptInfo.moduleUrl)
+            assert(type(raw) == "string" and #raw > 10,
+                "HttpGet empty — URL: " .. scriptInfo.moduleUrl)
+
+            local fn, compileErr = loadstring(raw)
+            assert(fn, "loadstring error: " .. tostring(compileErr))
+
+            local moduleFunc = fn()
+            assert(type(moduleFunc) == "function",
+                "module must return function, got: " .. type(moduleFunc))
+
+            moduleFunc(Window, scriptInfo)
+        end)
+        if not ok then
+            loadedScripts[scriptInfo.name] = nil
+            warn("[RAVEN HUB] Failed to load '" .. scriptInfo.name .. "': " .. tostring(result))
+        end
+    end)
+end
+
 for _, scriptInfo in ipairs(SCRIPTS) do
     if shouldLoadScript(scriptInfo) then
+        loadScriptModule(scriptInfo)
+    elseif scriptInfo.detector then
         task.spawn(function()
-            local ok, result = pcall(function()
-                local raw = game:HttpGet(scriptInfo.moduleUrl)
-                assert(type(raw) == "string" and #raw > 10,
-                    "HttpGet empty — URL: " .. scriptInfo.moduleUrl)
-
-                local fn, compileErr = loadstring(raw)
-                assert(fn, "loadstring error: " .. tostring(compileErr))
-
-                local moduleFunc = fn()
-                assert(type(moduleFunc) == "function",
-                    "module must return function, got: " .. type(moduleFunc))
-
-                moduleFunc(Window, scriptInfo)
-            end)
-            if not ok then
-                warn("[RAVEN HUB] Failed to load '" .. scriptInfo.name .. "': " .. tostring(result))
+            for _ = 1, 30 do
+                task.wait(1)
+                if shouldLoadScript(scriptInfo) then
+                    loadScriptModule(scriptInfo)
+                    return
+                end
             end
         end)
     end
