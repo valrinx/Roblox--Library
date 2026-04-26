@@ -58,6 +58,7 @@
 - แก้ความเสถียรของแท็บ `Farm`: sanitize ค่า `Ore Ignore List` ที่โหลดจากไฟล์ก่อนผูกเข้ากับ Rayfield dropdown และ fallback options แบบปลอดภัย เพื่อลดโอกาส UI พังกลางโหลดจนเห็นแค่บางส่วน
 - แก้บัคลำดับ scope ของฟังก์ชัน (`makeOreSignature` เรียก `isInstance` ก่อนประกาศ): ย้าย `isInstance` ให้ประกาศก่อนใช้งาน เพื่อลด error `attempt to call a nil value` ตอนโหลดโมดูล
 - harden เพิ่มที่ `makeOreSignature`: ครอบการคำนวณด้วย `pcall` + safe resolve ของ `getOreRenderPart` เพื่อตัดกรณี `attempt to call a nil value` ที่เกิดซ้ำระหว่างโหลดแท็บ Farm
+- ปรับความแม่นชื่อแร่ ESP เพิ่มเติม: รองรับชื่อ `Sliver` (ตามข้อมูลในเกม), ปรับ matcher ให้เช็คแบบคำเต็ม (word boundary) และจำกัด descendant hint เฉพาะ `StringValue` ที่เกี่ยวกับ ore/resource เพื่อลดการเดาผิดเป็น `Tin/Iron` จากชื่อย่อยที่ไม่เกี่ยวข้อง
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
