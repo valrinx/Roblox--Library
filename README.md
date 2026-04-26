@@ -43,6 +43,7 @@
 - แก้เพิ่มจากผลทดสอบ: map สีให้ชื่อ runtime ในเกม (`OreMesh`, `CubicBlockMetal`, `ShaleMetalBlock`, `GemBlockMesh`) และปรับ `Unknown` ให้เป็นสีส้มเพื่อแยกชัด
 - แก้เพิ่ม `Auto Mine` ให้สแกนทั้ง `PlacedOre` และ `SpawnedBlocks` พร้อมคัดเฉพาะก้อนที่มีข้อมูลขุดได้จริง (`MineId/OreId/ChunkPosition/GridPosition`)
 - แก้บัค `Auto Mine` ยังเงียบ: ปรับเงื่อนไข equip pickaxe จาก backpack ให้ถูกต้อง และแก้การหา `Activate` remote ให้รองรับ `MadCommId` ทุกชนิด (ค้นผ่าน `FindFirstChild(tostring(MadCommId))`)
+- อ้างอิง packet ที่จับได้: เพิ่ม fallback `MadCommEvents["1726"].Activate` ใน `Auto Mine` และเพิ่มการหา `GridPosition/ChunkPosition` จาก descendants เพื่อให้ยิงขุดตรงกับ remote ของแมพ
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
