@@ -883,7 +883,7 @@ return function(Window, scriptInfo)
 
         local oreCategoryByName = {
             ["Tin"] = "Common Metal", ["Iron"] = "Common Metal", ["Lead"] = "Common Metal", ["Aluminium"] = "Common Metal",
-            ["Silver"] = "Rare Metal", ["Cobalt"] = "Rare Metal", ["Tungsten"] = "Rare Metal", ["Titanium"] = "Rare Metal",
+            ["Silver"] = "Rare Metal", ["Sliver"] = "Rare Metal", ["Cobalt"] = "Rare Metal", ["Tungsten"] = "Rare Metal", ["Titanium"] = "Rare Metal",
             ["Vanadium"] = "Rare Metal", ["Rhodium"] = "Rare Metal", ["Iridium"] = "Rare Metal", ["Palladium"] = "Rare Metal",
             ["Uranium"] = "Radioactive", ["Plutonium"] = "Radioactive", ["Thorium"] = "Radioactive",
             ["Gold"] = "Precious",
@@ -902,7 +902,7 @@ return function(Window, scriptInfo)
         local oreNameBySignature = autoSettingsLoaded.oreNameBySignature
         local getOreRenderPart
         local knownOreNames = {
-            "Tin", "Iron", "Lead", "Cobalt", "Aluminium", "Silver", "Uranium", "Vanadium",
+            "Tin", "Iron", "Lead", "Cobalt", "Aluminium", "Silver", "Sliver", "Uranium", "Vanadium",
             "Tungsten", "Gold", "Titanium", "Palladium", "Plutonium", "Mithril", "Thorium",
             "Iridium", "Adamantium", "Rhodium", "Unobtanium", "Topaz", "Emerald", "Sapphire",
             "Ruby", "Diamond", "Poudretteite", "Zultanite", "Grandidierite", "Musgravite", "Painite",
@@ -947,6 +947,7 @@ return function(Window, scriptInfo)
             if not text then return nil end
             text = text:gsub("([a-z])([A-Z])", "%1 %2")
             text = text:gsub("[_%-%./]", " ")
+            text = text:gsub("%d+", " ")
             text = text:gsub("%s+", " ")
             return string.lower(text)
         end
@@ -955,7 +956,8 @@ return function(Window, scriptInfo)
             local normalized = normalizeNameForMatch(name)
             if not normalized then return nil end
             for _, ore in ipairs(knownOreNames) do
-                if normalized:find(string.lower(ore), 1, true) then
+                local token = string.lower(ore)
+                if normalized == token or normalized:find("%f[%a]" .. token .. "%f[^%a]") then
                     return ore
                 end
             end
@@ -1103,12 +1105,15 @@ return function(Window, scriptInfo)
             end
 
             for _, desc in ipairs(instance:GetDescendants()) do
-                local fromNodeName = pickKnownOreFromText(desc.Name)
-                if fromNodeName then
-                    return fromNodeName
-                end
-
                 if desc:IsA("StringValue") then
+                    local n = string.lower(desc.Name or "")
+                    local nameLooksRelevant = n:find("ore", 1, true) or n:find("mine", 1, true) or n:find("resource", 1, true) or n:find("id", 1, true)
+                    if nameLooksRelevant then
+                        local fromValueName = pickKnownOreFromText(desc.Name)
+                        if fromValueName then
+                            return fromValueName
+                        end
+                    end
                     local fromStringValue = pickKnownOreFromText(desc.Value)
                     if fromStringValue then
                         return fromStringValue
