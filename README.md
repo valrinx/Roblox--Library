@@ -53,6 +53,8 @@
 - harden ระบบชื่อแร่/ดีบักเพิ่ม: ตรวจชนิดข้อมูลให้เป็น `Instance` ก่อนเรียกเมธอด (`IsA`, `FindFirstChildWhichIsA`) และเปลี่ยน icon แจ้งเตือนใน Ore Debug เป็น asset id ที่ Rayfield รองรับ เพื่อลด error ระหว่างโหลด UI
 - เพิ่ม guard ให้ `Auto Mine/Tween` หยุดชั่วคราวตอนผู้เล่นนั่งยานพาหนะ (`Humanoid.SeatPart`) และแสดงสถานะ `paused (in vehicle)` เพื่อลดการชนกับระบบรถของเกม (`InnoVehicles`)
 - เพิ่มการเดาชื่อแร่เชิงลึกใน Ore ESP: สแกน descendant hints/ชื่อ node แบบ normalize + keyword match กับรายชื่อแร่ที่รู้จัก และเพิ่ม fallback mapping `runtime name -> ชื่อจริง` (ใช้ได้แม้ `MineId/OreId` เป็น `N/A`)
+- เพิ่มระบบบันทึกการตั้งค่าอัตโนมัติของ `modules/Ultimate Mining Tycoon` ลงไฟล์ `RavenHub_UMT_AutoSettings.json` (Auto Mine/Auto Sell/Tween/Range/Delay/Ore Ignore/Ore Mapping) พร้อมโหลดคืนอัตโนมัติเมื่อรันครั้งถัดไป
+- ปรับระบบ mapping ชื่อแร่ให้แม่นขึ้น: เพิ่ม `ore signature` (ClassName/Name/Material/Color/Size/MeshId/TextureID) เพื่อ map `signature -> ชื่อจริง` แทนการเหมารวมด้วย runtime name (`OreMesh`) เพียงอย่างเดียว
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
