@@ -12,6 +12,560 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local camera = workspace.CurrentCamera
 
+local SCRIPTS = {
+    {
+        name = "My Knife Farm",
+        description = "Auto Roll | Auto Buy | Auto Sell | Anti AFK",
+        gameIds = {125003919504672},
+        version = "v0.4",
+        moduleUrl = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/My_knife_farm",
+    },
+    {
+        name = "Slime Seas Anime RPG",
+        description = "Teleport | Auto Farm | Kill Aura | Infinite Stamina",
+        gameIds = {99046552174353},
+        version = "v0.1",
+        moduleUrl = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/Slime%20Seas%20%E2%9A%94%EF%B8%8F%20Anime%20RPG",
+    },
+    {
+        name = "Ultimate Mining Tycoon",
+        description = "Auto Mine | Auto Sell | Ore ESP | Teleport",
+        placeIds = {18680867089},
+        gameIds = {18680867089},
+        version = "v1.0",
+        moduleUrl = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/Ultimate%20Mining%20Tycoon",
+    },
+}
+
+player.Idled:Connect(function()
+    VirtualUser:Button2Down(Vector2.zero, camera.CFrame)
+    task.wait(1)
+    VirtualUser:Button2Up(Vector2.zero, camera.CFrame)
+end)
+
+local function containsId(idList, value)
+    if not idList then
+        return false
+    end
+    local v = tostring(value)
+    for _, id in ipairs(idList) do
+        if tostring(id) == v then
+            return true
+        end
+    end
+    return false
+end
+
+local currentPlaceId = game.PlaceId
+local currentGameId = game.GameId
+local loadedScripts = {}
+local scriptCleanupHandlers = {}
+local scriptStatusLabels = {}
+
+local function shouldLoadScript(scriptInfo)
+    if scriptInfo.detector then
+        local ok, matched = pcall(scriptInfo.detector)
+        if ok and matched then
+            return true
+        end
+    end
+    if scriptInfo.universal == true then
+        return true
+    end
+    if scriptInfo.placeIds and containsId(scriptInfo.placeIds, currentPlaceId) then
+        return true
+    end
+    if scriptInfo.gameIds and containsId(scriptInfo.gameIds, currentGameId) then
+        return true
+    end
+    if scriptInfo.gameId == 0 then
+        return true
+    end
+    if scriptInfo.gameId == currentPlaceId or scriptInfo.gameId == currentGameId then
+        return true
+    end
+    return false
+end
+
+for _, scriptInfo in ipairs(SCRIPTS) do
+    if scriptInfo.name == "Ultimate Mining Tycoon" then
+        scriptInfo.detector = function()
+            return workspace:FindFirstChild("PlacedOre") and workspace:FindFirstChild("SpawnedBlocks")
+        end
+    end
+end
+
+local old = playerGui:FindFirstChild("RavenMacHub")
+if old then
+    old:Destroy()
+end
+
+local theme = {
+    window = Color3.fromRGB(244, 244, 246),
+    panel = Color3.fromRGB(240, 240, 242),
+    sidebar = Color3.fromRGB(234, 234, 236),
+    card = Color3.fromRGB(248, 248, 250),
+    border = Color3.fromRGB(210, 210, 214),
+    text = Color3.fromRGB(40, 41, 46),
+    sub = Color3.fromRGB(110, 112, 118),
+    accent = Color3.fromRGB(255, 0, 102),
+    red = Color3.fromRGB(255, 95, 86),
+    yellow = Color3.fromRGB(255, 189, 46),
+    green = Color3.fromRGB(39, 201, 63),
+}
+
+local function round(inst, px)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, px)
+    c.Parent = inst
+end
+
+local function stroke(inst, col, thick, trans)
+    local s = Instance.new("UIStroke")
+    s.Color = col
+    s.Thickness = thick or 1
+    s.Transparency = trans or 0
+    s.Parent = inst
+end
+
+local function keyName(code)
+    return tostring(code):gsub("Enum.KeyCode.", "")
+end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "RavenMacHub"
+gui.ResetOnSpawn = false
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.Parent = playerGui
+
+local toggleKey = Enum.KeyCode.RightControl
+local waitingKey = false
+
+local launcher = Instance.new("TextButton")
+launcher.Size = UDim2.fromOffset(150, 36)
+launcher.Position = UDim2.new(0, 14, 1, -52)
+launcher.BackgroundColor3 = theme.accent
+launcher.TextColor3 = Color3.new(1, 1, 1)
+launcher.Font = Enum.Font.GothamSemibold
+launcher.TextSize = 13
+launcher.BorderSizePixel = 0
+launcher.Visible = false
+launcher.Parent = gui
+round(launcher, 10)
+
+local shadow = Instance.new("Frame")
+shadow.Size = UDim2.fromOffset(860, 520)
+shadow.Position = UDim2.fromScale(0.5, 0.5) - UDim2.fromOffset(430, 260) + UDim2.fromOffset(0, 10)
+shadow.BackgroundColor3 = Color3.new(0, 0, 0)
+shadow.BackgroundTransparency = 0.84
+shadow.BorderSizePixel = 0
+shadow.Parent = gui
+round(shadow, 16)
+
+local main = Instance.new("Frame")
+main.Size = UDim2.fromOffset(860, 520)
+main.Position = UDim2.fromScale(0.5, 0.5) - UDim2.fromOffset(430, 260)
+main.BackgroundColor3 = theme.window
+main.BorderSizePixel = 0
+main.Parent = gui
+round(main, 16)
+stroke(main, theme.border, 1, 0)
+
+local top = Instance.new("Frame")
+top.Size = UDim2.new(1, 0, 0, 44)
+top.BackgroundColor3 = theme.panel
+top.BorderSizePixel = 0
+top.Parent = main
+round(top, 16)
+
+local lights = Instance.new("Frame")
+lights.BackgroundTransparency = 1
+lights.Size = UDim2.fromOffset(72, 20)
+lights.Position = UDim2.fromOffset(14, 12)
+lights.Parent = top
+
+local list = Instance.new("UIListLayout")
+list.FillDirection = Enum.FillDirection.Horizontal
+list.Padding = UDim.new(0, 8)
+list.Parent = lights
+
+local function mkLight(color)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.fromOffset(12, 12)
+    b.BackgroundColor3 = color
+    b.BorderSizePixel = 0
+    b.Text = ""
+    b.Parent = lights
+    round(b, 999)
+    return b
+end
+
+local red = mkLight(theme.red)
+local yellow = mkLight(theme.yellow)
+local green = mkLight(theme.green)
+
+local title = Instance.new("TextLabel")
+title.BackgroundTransparency = 1
+title.Position = UDim2.fromOffset(110, 0)
+title.Size = UDim2.new(1, -280, 1, 0)
+title.Text = "Fish It [Premium]"
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Font = Enum.Font.GothamSemibold
+title.TextSize = 14
+title.TextColor3 = theme.text
+title.Parent = top
+
+local sub = Instance.new("TextLabel")
+sub.BackgroundTransparency = 1
+sub.Position = UDim2.fromOffset(110, 14)
+sub.Size = UDim2.new(1, -280, 1, 0)
+sub.Text = "Made by Raven Hub"
+sub.TextXAlignment = Enum.TextXAlignment.Left
+sub.Font = Enum.Font.Gotham
+sub.TextSize = 11
+sub.TextColor3 = theme.sub
+sub.Parent = top
+
+local sidebar = Instance.new("Frame")
+sidebar.Size = UDim2.fromOffset(200, 476)
+sidebar.Position = UDim2.fromOffset(0, 44)
+sidebar.BackgroundColor3 = theme.sidebar
+sidebar.BorderSizePixel = 0
+sidebar.Parent = main
+
+local content = Instance.new("Frame")
+content.Size = UDim2.new(1, -216, 1, -60)
+content.Position = UDim2.fromOffset(208, 52)
+content.BackgroundTransparency = 1
+content.Parent = main
+
+local pages, nav = {}, {}
+local y = 12
+local function section(name)
+    local h = Instance.new("TextLabel")
+    h.BackgroundTransparency = 1
+    h.Position = UDim2.fromOffset(12, y)
+    h.Size = UDim2.new(1, -24, 0, 22)
+    h.Text = name
+    h.TextXAlignment = Enum.TextXAlignment.Left
+    h.Font = Enum.Font.GothamSemibold
+    h.TextSize = 12
+    h.TextColor3 = theme.sub
+    h.Parent = sidebar
+    y = y + 30
+end
+
+local function page(name)
+    local p = Instance.new("ScrollingFrame")
+    p.Name = name
+    p.Size = UDim2.new(1, -8, 1, -8)
+    p.Position = UDim2.fromOffset(4, 4)
+    p.BackgroundTransparency = 1
+    p.BorderSizePixel = 0
+    p.CanvasSize = UDim2.new()
+    p.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    p.ScrollBarThickness = 5
+    p.Visible = false
+    p.Parent = content
+
+    local layout = Instance.new("UIListLayout")
+    layout.Padding = UDim.new(0, 10)
+    layout.Parent = p
+    pages[name] = p
+    return p
+end
+
+local function navBtn(text, pageName)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, -20, 0, 34)
+    b.Position = UDim2.fromOffset(10, y)
+    b.BackgroundColor3 = theme.sidebar
+    b.BorderSizePixel = 0
+    b.Text = text
+    b.TextXAlignment = Enum.TextXAlignment.Left
+    b.Font = Enum.Font.Gotham
+    b.TextSize = 14
+    b.TextColor3 = theme.text
+    b.Parent = sidebar
+    round(b, 8)
+    y = y + 40
+    nav[b] = pageName
+    b.MouseButton1Click:Connect(function()
+        for btn, pg in pairs(nav) do
+            local active = pg == pageName
+            btn.BackgroundColor3 = active and theme.accent or theme.sidebar
+            btn.TextColor3 = active and Color3.new(1, 1, 1) or theme.text
+        end
+        for name, pg in pairs(pages) do
+            pg.Visible = name == pageName
+        end
+    end)
+end
+
+local function card(parent, t, b)
+    local f = Instance.new("Frame")
+    f.Size = UDim2.new(1, -6, 0, b and 72 or 48)
+    f.BackgroundColor3 = theme.card
+    f.BorderSizePixel = 0
+    f.Parent = parent
+    round(f, 10)
+    stroke(f, theme.border, 1, 0.2)
+
+    local tl = Instance.new("TextLabel")
+    tl.BackgroundTransparency = 1
+    tl.Position = UDim2.fromOffset(12, 0)
+    tl.Size = UDim2.new(1, -16, 0, b and 28 or 48)
+    tl.Text = t
+    tl.TextXAlignment = Enum.TextXAlignment.Left
+    tl.Font = Enum.Font.GothamMedium
+    tl.TextSize = 14
+    tl.TextColor3 = theme.text
+    tl.Parent = f
+
+    local bl
+    if b then
+        bl = Instance.new("TextLabel")
+        bl.BackgroundTransparency = 1
+        bl.Position = UDim2.fromOffset(12, 30)
+        bl.Size = UDim2.new(1, -16, 0, 20)
+        bl.Text = b
+        bl.TextXAlignment = Enum.TextXAlignment.Left
+        bl.Font = Enum.Font.Gotham
+        bl.TextSize = 12
+        bl.TextColor3 = theme.sub
+        bl.Parent = f
+    end
+    return bl
+end
+
+section("Main")
+navBtn("Auto Farm", "Auto Farm")
+navBtn("Scripts", "Scripts")
+section("Configuration")
+navBtn("Settings", "Settings")
+
+local pAuto = page("Auto Farm")
+local pScripts = page("Scripts")
+local pSettings = page("Settings")
+
+card(pAuto, "Instant farming", "Custom macOS style layout ready")
+card(pAuto, "Current Place", tostring(currentPlaceId))
+card(pAuto, "Current Game", tostring(currentGameId))
+
+for _, s in ipairs(SCRIPTS) do
+    scriptStatusLabels[s.name] = card(pScripts, s.name .. " [" .. s.version .. "]", "Status: pending")
+end
+
+local keyInfo = card(pSettings, "Toggle key", "Current: " .. keyName(toggleKey))
+
+local keyBtn = Instance.new("TextButton")
+keyBtn.Size = UDim2.new(1, -6, 0, 42)
+keyBtn.BackgroundColor3 = theme.card
+keyBtn.BorderSizePixel = 0
+keyBtn.Text = "Set Toggle Key"
+keyBtn.TextColor3 = theme.text
+keyBtn.Font = Enum.Font.GothamSemibold
+keyBtn.TextSize = 14
+keyBtn.Parent = pSettings
+round(keyBtn, 10)
+stroke(keyBtn, theme.border, 1, 0.2)
+
+local destroyBtn = Instance.new("TextButton")
+destroyBtn.Size = UDim2.new(1, -6, 0, 42)
+destroyBtn.BackgroundColor3 = theme.card
+destroyBtn.BorderSizePixel = 0
+destroyBtn.Text = "Destroy Hub (cleanup)"
+destroyBtn.TextColor3 = theme.text
+destroyBtn.Font = Enum.Font.GothamSemibold
+destroyBtn.TextSize = 14
+destroyBtn.Parent = pSettings
+round(destroyBtn, 10)
+stroke(destroyBtn, theme.border, 1, 0.2)
+
+local function setVisible(v)
+    main.Visible = v
+    shadow.Visible = v
+    launcher.Visible = not v
+end
+
+local function refreshKeyText()
+    local k = keyName(toggleKey)
+    launcher.Text = "Open Hub [" .. k .. "]"
+    if keyInfo then
+        keyInfo.Text = "Current: " .. k
+    end
+end
+
+local function setStatus(name, txt)
+    local lbl = scriptStatusLabels[name]
+    if lbl then
+        lbl.Text = "Status: " .. txt
+    end
+end
+
+local function destroyHub()
+    for scriptName, cleanupFn in pairs(scriptCleanupHandlers) do
+        local ok, err = pcall(cleanupFn)
+        if not ok then
+            warn("[RAVEN HUB] Cleanup failed for '" .. tostring(scriptName) .. "': " .. tostring(err))
+        end
+    end
+    gui:Destroy()
+end
+
+red.MouseButton1Click:Connect(function() setVisible(false) end)
+yellow.MouseButton1Click:Connect(function() setVisible(false) end)
+green.MouseButton1Click:Connect(function()
+    local z = main.Size.X.Offset > 860
+    local size = z and UDim2.fromOffset(860, 520) or UDim2.fromOffset(1020, 620)
+    local pos = z and (UDim2.fromScale(0.5, 0.5) - UDim2.fromOffset(430, 260)) or (UDim2.fromScale(0.5, 0.5) - UDim2.fromOffset(510, 310))
+    TweenService:Create(main, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = size, Position = pos}):Play()
+    shadow.Size = size
+    shadow.Position = pos + UDim2.fromOffset(0, 10)
+end)
+launcher.MouseButton1Click:Connect(function() setVisible(true) end)
+keyBtn.MouseButton1Click:Connect(function() waitingKey = true keyBtn.Text = "Press any key..." end)
+destroyBtn.MouseButton1Click:Connect(destroyHub)
+
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed or input.UserInputType ~= Enum.UserInputType.Keyboard then
+        return
+    end
+    if waitingKey then
+        if input.KeyCode ~= Enum.KeyCode.Unknown then
+            toggleKey = input.KeyCode
+            waitingKey = false
+            keyBtn.Text = "Set Toggle Key"
+            refreshKeyText()
+        end
+        return
+    end
+    if UserInputService:GetFocusedTextBox() then
+        return
+    end
+    if input.KeyCode == toggleKey then
+        setVisible(not main.Visible)
+    end
+end)
+
+do
+    local dragging, startMouse, startPos = false, nil, nil
+    top.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            startMouse = input.Position
+            startPos = main.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local d = input.Position - startMouse
+            main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+            shadow.Position = main.Position + UDim2.fromOffset(0, 10)
+        end
+    end)
+end
+
+local customHubApi = {
+    CreateTab = function()
+        return {
+            CreateLabel = function() end,
+            CreateParagraph = function() end,
+            CreateButton = function() end,
+            CreateToggle = function() end,
+            CreateDropdown = function() end,
+            CreateSlider = function() end,
+            CreateInput = function() end,
+        }
+    end,
+}
+
+local function loadScriptModule(scriptInfo)
+    if loadedScripts[scriptInfo.name] then
+        return
+    end
+    loadedScripts[scriptInfo.name] = true
+    scriptCleanupHandlers[scriptInfo.name] = nil
+    setStatus(scriptInfo.name, "loading...")
+
+    task.spawn(function()
+        local ok, result = pcall(function()
+            local raw = game:HttpGet(scriptInfo.moduleUrl)
+            assert(type(raw) == "string" and #raw > 10, "HttpGet empty: " .. tostring(scriptInfo.moduleUrl))
+            local chunk, compileErr = loadstring(raw)
+            assert(chunk, "loadstring error: " .. tostring(compileErr))
+            local moduleFunc = chunk()
+            assert(type(moduleFunc) == "function", "module must return function, got: " .. type(moduleFunc))
+
+            local runtimeInfo = table.clone(scriptInfo)
+            runtimeInfo.hubWindow = customHubApi
+            runtimeInfo.hubRayfield = nil
+            runtimeInfo.registerCleanup = function(cleanupFn)
+                if type(cleanupFn) == "function" then
+                    scriptCleanupHandlers[scriptInfo.name] = cleanupFn
+                end
+            end
+            moduleFunc(customHubApi, runtimeInfo)
+        end)
+        if ok then
+            setStatus(scriptInfo.name, "loaded")
+        else
+            loadedScripts[scriptInfo.name] = nil
+            scriptCleanupHandlers[scriptInfo.name] = nil
+            setStatus(scriptInfo.name, "failed (legacy UI mismatch)")
+            warn("[RAVEN HUB] Failed to load '" .. scriptInfo.name .. "': " .. tostring(result))
+        end
+    end)
+end
+
+for _, scriptInfo in ipairs(SCRIPTS) do
+    if shouldLoadScript(scriptInfo) then
+        loadScriptModule(scriptInfo)
+    elseif scriptInfo.detector then
+        task.spawn(function()
+            for _ = 1, 30 do
+                task.wait(1)
+                if shouldLoadScript(scriptInfo) then
+                    loadScriptModule(scriptInfo)
+                    return
+                end
+            end
+            setStatus(scriptInfo.name, "not matched")
+        end)
+    else
+        setStatus(scriptInfo.name, "not matched")
+    end
+end
+
+-- default page
+for btn, pageName in pairs(nav) do
+    if pageName == "Auto Farm" then
+        btn.BackgroundColor3 = theme.accent
+        btn.TextColor3 = Color3.new(1, 1, 1)
+    end
+end
+pages["Auto Farm"].Visible = true
+refreshKeyText()
+
+-- ============================================================
+--   RAVEN HUB (CUSTOM macOS STYLE)
+--   No Rayfield UI | Keep anti-afk + moduleUrl lazy load
+-- ============================================================
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local VirtualUser = game:GetService("VirtualUser")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+local camera = workspace.CurrentCamera
+
 -- ============================================================
 --   SCRIPT REGISTRY
 -- ============================================================
