@@ -2,6 +2,18 @@ return function(Window, scriptInfo)
 
     -- Use Hub's Rayfield instance to avoid reinitializing UI library
     local Rayfield = (scriptInfo and scriptInfo.hubRayfield) or loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+    local rawRayfieldNotify = Rayfield and Rayfield.Notify
+    local function safeNotify(payload)
+        if type(rawRayfieldNotify) ~= "function" then return end
+        pcall(function()
+            rawRayfieldNotify(Rayfield, payload)
+        end)
+    end
+    if Rayfield and type(rawRayfieldNotify) == "function" then
+        Rayfield.Notify = function(_, payload)
+            safeNotify(payload)
+        end
+    end
     local scriptRunning = true
     local cleanupConnections = {}
     local infiniteJumpConnection = nil
@@ -118,6 +130,33 @@ return function(Window, scriptInfo)
         end
         return connection
     end
+
+    local drainedRegisterRemotes = setmetatable({}, { __mode = "k" })
+    local function attachRemoteDrain(remote)
+        if not remote or not remote:IsA("RemoteEvent") then return end
+        if drainedRegisterRemotes[remote] then return end
+        drainedRegisterRemotes[remote] = true
+        local conn = remote.OnClientEvent:Connect(function()
+            -- Intentionally drain noisy server->client event queue.
+        end)
+        trackConnection(conn)
+    end
+
+    task.spawn(function()
+        pcall(function()
+            local replicatedStorage = game:GetService("ReplicatedStorage")
+            for _, desc in ipairs(replicatedStorage:GetDescendants()) do
+                if desc:IsA("RemoteEvent") and string.find(string.lower(desc.Name), "registerinstancechanges", 1, true) then
+                    attachRemoteDrain(desc)
+                end
+            end
+            trackConnection(replicatedStorage.DescendantAdded:Connect(function(desc)
+                if desc:IsA("RemoteEvent") and string.find(string.lower(desc.Name), "registerinstancechanges", 1, true) then
+                    attachRemoteDrain(desc)
+                end
+            end))
+        end)
+    end)
 
     task.spawn(function()
         pcall(function()
