@@ -625,6 +625,9 @@ return function(Window, scriptInfo)
             activeRenderParts = {},
             connections   = {},
             useAdornment  = true, -- use Box ESP per user preference
+            updateInterval = 1 / 24, -- throttle visual updates to reduce frame cost
+            metaRefreshInterval = 0.22, -- expensive name/color resolve cadence
+            lastUpdateAt = 0,
         }
     
         local oreColors = {
@@ -1690,7 +1693,16 @@ return function(Window, scriptInfo)
             lbl.Text                   = oreName
             lbl.Parent                 = bb
     
-            ESP.activeVisuals[target] = { visual = visual, billboard = bb, label = lbl, renderPart = renderPart }
+            ESP.activeVisuals[target] = {
+                visual = visual,
+                billboard = bb,
+                label = lbl,
+                renderPart = renderPart,
+                oreName = oreName,
+                color = color,
+                lastDistanceInt = -1,
+                nextMetaRefreshAt = 0,
+            }
             ESP.activeRenderParts[renderPart] = target
     
             local conn = target.AncestryChanged:Connect(function()
@@ -1821,13 +1833,26 @@ return function(Window, scriptInfo)
         trackConnection(game:GetService("RunService").RenderStepped:Connect(function()
             local ok = pcall(function()
                 if not ESP.enabled then return end
+                local now = os.clock()
+                if (now - ESP.lastUpdateAt) < ESP.updateInterval then
+                    return
+                end
+                ESP.lastUpdateAt = now
                 local char = game.Players.LocalPlayer.Character
                 local hrp  = char and char:FindFirstChild("HumanoidRootPart")
                 if not hrp then return end
         
                 for target, v in pairs(ESP.activeVisuals) do
                     if target and target.Parent then
-                        local pos = getTargetPosition(target)
+                        local renderPart = v.renderPart
+                        if not (renderPart and renderPart.Parent) then
+                            renderPart = getOreRenderPart(target)
+                            v.renderPart = renderPart
+                            if renderPart and ESP.activeRenderParts[renderPart] == nil then
+                                ESP.activeRenderParts[renderPart] = target
+                            end
+                        end
+                        local pos = renderPart and renderPart.Position or getTargetPosition(target)
                         if not pos then
                             if v.visual and v.visual:IsA("Highlight") then
                                 v.visual.Enabled = false
@@ -1844,9 +1869,16 @@ return function(Window, scriptInfo)
                         end
                         v.billboard.Enabled = visible
                         if visible then
-                            local renderPart = getOreRenderPart(target)
-                            local oreName = getOreNameForEsp(target, renderPart)
-                            local color = getOreColor(target, oreName, renderPart)
+                            local oreName = v.oreName
+                            local color = v.color
+                            local shouldRefreshMeta = (now >= (v.nextMetaRefreshAt or 0))
+                            if shouldRefreshMeta then
+                                oreName = getOreNameForEsp(target, renderPart)
+                                color = getOreColor(target, oreName, renderPart)
+                                v.oreName = oreName
+                                v.color = color
+                                v.nextMetaRefreshAt = now + ESP.metaRefreshInterval
+                            end
 
                             -- Keep ESP color/adornee in sync (no manual refresh needed).
                             if v.renderPart ~= renderPart then
@@ -1875,7 +1907,11 @@ return function(Window, scriptInfo)
                             if v.label then
                                 v.label.TextColor3 = color
                             end
-                            v.label.Text = string.format("%s\n[%d studs]", oreName, math.floor(dist))
+                            local distInt = math.floor(dist)
+                            if distInt ~= v.lastDistanceInt then
+                                v.lastDistanceInt = distInt
+                                v.label.Text = string.format("%s\n[%d studs]", oreName, distInt)
+                            end
                         end
                     end
                 end
@@ -2007,6 +2043,11 @@ return function(Window, scriptInfo)
                         local remoteMinInterval = 0.12
                         local remoteBackoffInterval = 0.35
                         local remoteClientDrainConnections = {}
+                        local oreContainers = {
+                            workspace:FindFirstChild("PlacedOre"),
+                            workspace:FindFirstChild("SpawnedBlocks"),
+                        }
+                        local nextContainersRefreshAt = 0
                         local lastProgressTargetKey = nil
                         local lastProgressDurability = nil
                         local staleProgressHits = 0
@@ -2290,10 +2331,12 @@ return function(Window, scriptInfo)
                                 end
                                 local closestBlock, closestDist = nil, math.huge
 
-                                local oreContainers = {
-                                    workspace:FindFirstChild("PlacedOre"),
-                                    workspace:FindFirstChild("SpawnedBlocks"),
-                                }
+                                local now = os.clock()
+                                if now >= nextContainersRefreshAt then
+                                    oreContainers[1] = workspace:FindFirstChild("PlacedOre")
+                                    oreContainers[2] = workspace:FindFirstChild("SpawnedBlocks")
+                                    nextContainersRefreshAt = now + 1.5
+                                end
 
                                 if isTargetValid(lockedTarget, root) then
                                     closestBlock = lockedTarget
