@@ -2814,7 +2814,7 @@ return function(Window, scriptInfo)
             oreIgnoreOptions = resultOreOptions
         else
             oreIgnoreOptions = {
-                "Tin", "Iron", "Lead", "Cobalt", "Aluminium", "Silver", "Uranium", "Vanadium",
+                "Unknown", "Tin", "Iron", "Lead", "Cobalt", "Aluminium", "Silver", "Uranium", "Vanadium",
                 "Tungsten", "Gold", "Titanium", "Palladium", "Plutonium", "Mithril", "Thorium",
                 "Iridium", "Adamantium", "Rhodium", "Unobtanium", "Topaz", "Emerald", "Sapphire",
                 "Ruby", "Diamond", "Poudretteite", "Zultanite", "Grandidierite", "Musgravite", "Painite", "OreMesh",
