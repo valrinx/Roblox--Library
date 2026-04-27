@@ -2512,16 +2512,21 @@ return function(Window, scriptInfo)
                                     local targetDurability = getTargetDurability(closestBlock, renderPart)
                                     local adaptiveMinInterval = math.clamp(0.9 / math.max(1, pickaxeDamage), 0.08, 0.55)
                                     local elapsedOnTarget = (targetLockedAt > 0) and (os.clock() - targetLockedAt) or 0
-                                    if lastProgressTargetKey == targetKey and lastProgressDurability and targetDurability then
+                                    -- Only treat "no progress" when we are actually allowed to fire; otherwise rate-limit waits
+                                    -- look identical to stuck HP and falsely ramp staleProgressHits.
+                                    local nowMine = os.clock()
+                                    local readyToFireAt = math.max(nextMineAllowedAt, lastMineFiredAt + adaptiveMinInterval)
+                                    local canCountStale = nowMine >= readyToFireAt - 0.02
+                                    if lastProgressTargetKey ~= targetKey or not lastProgressDurability or not targetDurability then
+                                        staleProgressHits = 0
+                                        firedHitsOnTarget = 0
+                                    elseif canCountStale then
                                         if targetDurability >= (lastProgressDurability - 0.001) then
                                             staleProgressHits = staleProgressHits + 1
                                         else
                                             staleProgressHits = 0
                                             firedHitsOnTarget = 0
                                         end
-                                    else
-                                        staleProgressHits = 0
-                                        firedHitsOnTarget = 0
                                     end
                                     if staleProgressHits > 0 then
                                         adaptiveMinInterval = math.min(0.95, adaptiveMinInterval + (staleProgressHits * 0.06))
