@@ -94,6 +94,7 @@
 - ปรับระบบขายแร่ให้ขายได้จากทุกที่ (ไม่ต้อง tween/tp): รวม logic เป็น helper เดียวและให้ `Sell Ore`, `Auto Sell`, และ `Sell Ore Key` ยิง `ProximityPrompt` ระยะไกลโดยตรง
 - เพิ่มตัวเลือกวิธีขายแร่ 2 โหมด (`Remote (No TP)` / `Tween to Unloader (Legacy)`) และให้ทั้งปุ่มขาย, Auto Sell, และคีย์ลัดใช้โหมดเดียวกัน พร้อมบันทึกค่าลง settings
 - แก้ `Auto Mine` ลดโอกาสขึ้น `Remote event invocation queue exhausted`: เพิ่ม hard rate-limit ตอนยิง `Activate`, ครอบ `FireServer` ด้วย `pcall`, และใส่ backoff อัตโนมัติเมื่อ remote ตอบสนองไม่ทัน
+- แก้ซ้ำเคส `Remote event invocation queue exhausted` ของ `MadCommEvents.*.Activate`: ผูกตัวรับ `OnClientEvent` แบบ drain เงียบให้ remote ขุดที่ใช้งาน เพื่อไม่ให้คิว event ฝั่ง client สะสมจนล้น
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
