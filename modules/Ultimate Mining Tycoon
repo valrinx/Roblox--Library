@@ -73,6 +73,15 @@ return function(Window, scriptInfo)
         return out
     end
 
+    local function mergeStringMap(dst, src)
+        if type(dst) ~= "table" or type(src) ~= "table" then return end
+        for k, v in pairs(src) do
+            if type(k) == "string" and type(v) == "string" and k ~= "" and v ~= "" then
+                dst[k] = v
+            end
+        end
+    end
+
     pcall(function()
         if not canReadSettingsFile or not isfile(SETTINGS_FILE) then return end
         local decoded = HttpService:JSONDecode(readfile(SETTINGS_FILE))
@@ -104,22 +113,22 @@ return function(Window, scriptInfo)
             autoSettingsLoaded.oreEspFilter = decoded.oreEspFilter
         end
         if isStringMap(decoded.oreNameById) then
-            autoSettingsLoaded.oreNameById = decoded.oreNameById
+            mergeStringMap(autoSettingsLoaded.oreNameById, decoded.oreNameById)
         end
         if isStringMap(decoded.oreNameByRuntime) then
-            autoSettingsLoaded.oreNameByRuntime = decoded.oreNameByRuntime
+            mergeStringMap(autoSettingsLoaded.oreNameByRuntime, decoded.oreNameByRuntime)
         end
         if isStringMap(decoded.oreNameBySignature) then
-            autoSettingsLoaded.oreNameBySignature = decoded.oreNameBySignature
+            mergeStringMap(autoSettingsLoaded.oreNameBySignature, decoded.oreNameBySignature)
         end
         if isStringMap(decoded.oreNameBySignatureCoarse) then
-            autoSettingsLoaded.oreNameBySignatureCoarse = decoded.oreNameBySignatureCoarse
+            mergeStringMap(autoSettingsLoaded.oreNameBySignatureCoarse, decoded.oreNameBySignatureCoarse)
         end
         if isStringMap(decoded.oreNameByColorSignature) then
-            autoSettingsLoaded.oreNameByColorSignature = decoded.oreNameByColorSignature
+            mergeStringMap(autoSettingsLoaded.oreNameByColorSignature, decoded.oreNameByColorSignature)
         end
         if isStringMap(decoded.sharedOreNameByColorSignature) then
-            autoSettingsLoaded.sharedOreNameByColorSignature = decoded.sharedOreNameByColorSignature
+            mergeStringMap(autoSettingsLoaded.sharedOreNameByColorSignature, decoded.sharedOreNameByColorSignature)
         end
         settingsLoadOk = true
     end)
@@ -999,15 +1008,6 @@ return function(Window, scriptInfo)
         -- Static table intentionally starts empty to avoid hardcoded wrong names.
         -- Populate only with verified mappings.
         local oreNameByStaticColorSignature = {}
-
-        local function mergeStringMap(dst, src)
-            if type(dst) ~= "table" or type(src) ~= "table" then return end
-            for k, v in pairs(src) do
-                if type(k) == "string" and type(v) == "string" and k ~= "" and v ~= "" then
-                    dst[k] = v
-                end
-            end
-        end
 
         -- Allow hub to pass preloaded mappings into this module.
         if scriptInfo and type(scriptInfo.preloadedOreColorMap) == "table" then
