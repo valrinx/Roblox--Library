@@ -11,10 +11,6 @@ return function(Window, scriptInfo)
         autoMineEnabled = false,
         autoMineRange = 10,
         autoMineDelay = 1.2,
-        autoMineUseTween = false,
-        autoMineTweenSpeed = 45,
-        teleportTweenSpeed = 120,
-        teleportTweenMaxDuration = 2.2,
         safeProfileEnabled = true,
         safeNearbyPauseEnabled = true,
         safeNearbyRadius = 70,
@@ -67,10 +63,6 @@ return function(Window, scriptInfo)
         autoSettingsLoaded.autoMineEnabled = decoded.autoMineEnabled == true
         autoSettingsLoaded.autoMineRange = tonumber(decoded.autoMineRange) or autoSettingsLoaded.autoMineRange
         autoSettingsLoaded.autoMineDelay = tonumber(decoded.autoMineDelay) or autoSettingsLoaded.autoMineDelay
-        autoSettingsLoaded.autoMineUseTween = decoded.autoMineUseTween == true
-        autoSettingsLoaded.autoMineTweenSpeed = tonumber(decoded.autoMineTweenSpeed) or autoSettingsLoaded.autoMineTweenSpeed
-        autoSettingsLoaded.teleportTweenSpeed = tonumber(decoded.teleportTweenSpeed) or autoSettingsLoaded.teleportTweenSpeed
-        autoSettingsLoaded.teleportTweenMaxDuration = tonumber(decoded.teleportTweenMaxDuration) or autoSettingsLoaded.teleportTweenMaxDuration
         if decoded.safeProfileEnabled ~= nil then
             autoSettingsLoaded.safeProfileEnabled = decoded.safeProfileEnabled == true
         end
@@ -138,124 +130,8 @@ return function(Window, scriptInfo)
         end)
     end)
     
-        local initialLoad = false
-        
-        local TweenService = game:GetService("TweenService")
-        local TELEPORT_TWEEN_SPEED = math.clamp(tonumber(autoSettingsLoaded.teleportTweenSpeed) or 120, 30, 260)
-        local TELEPORT_TWEEN_MAX_DURATION = math.clamp(tonumber(autoSettingsLoaded.teleportTweenMaxDuration) or 2.2, 0.6, 5)
-
-        local activeRootTweens = setmetatable({}, { __mode = "k" })
-
-        local function tweenHumanoidRootPart(hrp, targetCFrame, durationOverride, waitForCompletion)
-            if not hrp or not targetCFrame then
-                return false
-            end
-            local previousTween = activeRootTweens[hrp]
-            if previousTween then
-                pcall(function()
-                    previousTween:Cancel()
-                end)
-                activeRootTweens[hrp] = nil
-            end
-            local distance = (hrp.Position - targetCFrame.Position).Magnitude
-            local duration = durationOverride
-            if type(duration) ~= "number" then
-                duration = math.clamp(distance / TELEPORT_TWEEN_SPEED, 0.08, TELEPORT_TWEEN_MAX_DURATION)
-            end
-            local tween = TweenService:Create(
-                hrp,
-                TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                { CFrame = targetCFrame }
-            )
-            activeRootTweens[hrp] = tween
-            local shouldWait = waitForCompletion ~= false
-            if not shouldWait then
-                tween:Play()
-                return true
-            end
-            local finished = false
-            local connection
-            connection = tween.Completed:Connect(function()
-                finished = true
-            end)
-            tween:Play()
-            local startedAt = os.clock()
-            while not finished and (os.clock() - startedAt) < (duration + 0.3) do
-                task.wait()
-            end
-            if connection then
-                connection:Disconnect()
-            end
-            if activeRootTweens[hrp] == tween then
-                activeRootTweens[hrp] = nil
-            end
-            return true
-        end
-
-        -- Teleport helper function and tables (must be before any tab creation)
-        local function TeleportPlayer(position, locationName)
-            local player = game.Players.LocalPlayer
-            local character = player.Character or player.CharacterAdded:Wait()
-            local hrp = character:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                tweenHumanoidRootPart(hrp, CFrame.new(position))
-                Rayfield:Notify({
-                    Title = "Teleported",
-                    Content = "Successfully teleported to " .. locationName,
-                    Duration = 3,
-                    Image = "map-pin",
-                })
-            else
-                Rayfield:Notify({
-                    Title = "Error",
-                    Content = "Could not teleport. Try again.",
-                    Duration = 3,
-                    Image = "circle-x",
-                })
-            end
-        end
-    
-        local staticLocations = {
-            ["⛏️ Mine Entrance"] = Vector3.new(-1854.75, 2.04, -194.96),
-            ["🛒 Shop"] = Vector3.new(-1551.34, 7.16, 20.68),
-            ["💣 C4 Shop"] = Vector3.new(385.718, 78.8767, -745.346),
-            ["💰 Upgrade Shop"] = Vector3.new(-1450.19763, 10.6423292, 227.80098),
-        }
-        local staticLocationNames = {"⛏️ Mine Entrance", "🛒 Shop", "💣 C4 Shop", "💰 Upgrade Shop"}
-        
         local Farm = Window:CreateTab("Farm", "pickaxe") 
         local OreESP = Window:CreateTab("Ore ESP", "eye")
-    
-        local Teleport = Window:CreateTab("Teleport", "map")
-        local TeleportTweenSection = Teleport:CreateSection("⚙️ Teleport Tween")
-        Teleport:CreateSlider({
-            Name = "Teleport Tween Speed",
-            Range = {30, 260},
-            Increment = 5,
-            Suffix = " studs/s",
-            CurrentValue = TELEPORT_TWEEN_SPEED,
-            Flag = "TeleportTweenSpeed",
-            Callback = function(Value)
-                TELEPORT_TWEEN_SPEED = Value
-                if saveAutoSettings then
-                    saveAutoSettings()
-                end
-            end,
-        })
-        Teleport:CreateSlider({
-            Name = "Teleport Max Duration",
-            Range = {1, 50},
-            Increment = 1,
-            Suffix = " x0.1s",
-            CurrentValue = math.floor(TELEPORT_TWEEN_MAX_DURATION * 10 + 0.5),
-            Flag = "TeleportTweenMaxDuration",
-            Callback = function(Value)
-                TELEPORT_TWEEN_MAX_DURATION = Value / 10
-                if saveAutoSettings then
-                    saveAutoSettings()
-                end
-            end,
-        })
     
         -- Mobile tab
         local MobileSupport = Window:CreateTab("Mobile", "smartphone")
@@ -266,252 +142,9 @@ return function(Window, scriptInfo)
         })
         local MobileDivider = MobileSupport:CreateDivider()
         
-        local PlayerSection = Teleport:CreateSection("👽 Player Teleports")
-        local function RefreshPlayerList()
-            local playerNames = {"Refresh player list"}
-            for _, player in pairs(game.Players:GetPlayers()) do
-                if player ~= game.Players.LocalPlayer then
-                    table.insert(playerNames, player.Name)
-                end
-            end
-            if PlayerDropdown then
-                PlayerDropdown:Refresh(playerNames)
-                PlayerDropdown:Set({selectedPlayer or "Refresh player list"})
-            end
-            return playerNames
-        end
-    
-        local selectedPlayer = nil
-        local PlayerDropdown
-        PlayerDropdown = Teleport:CreateDropdown({
-            Name = "Select Player",
-            Options = RefreshPlayerList(),
-            CurrentOption = {"Refresh player list"},
-            MultipleOptions = false,
-            Flag = nil, 
-            Callback = function(Option)
-                selectedPlayer = Option[1]
-            end,
-        })
-        Teleport:CreateButton({
-            Name = "Teleport to Selected Player",
-            Callback = function()
-                if not selectedPlayer or selectedPlayer == "Refresh player list" then
-                    Rayfield:Notify({
-                        Title = "Error",
-                        Content = "Please select a player to teleport to.",
-                        Duration = 3,
-                        Image = "circle-x",
-                    })
-                    return
-                end
-                local targetPlayer = game.Players:FindFirstChild(selectedPlayer)
-                if targetPlayer and targetPlayer.Character then
-                    local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
-                    local localPlayer = game.Players.LocalPlayer
-                    local character = localPlayer.Character or localPlayer.CharacterAdded:Wait()
-                    local hrp = character:FindFirstChild("HumanoidRootPart")
-                    if targetHRP and hrp then
-                        local offset = targetHRP.CFrame.LookVector * -5 + Vector3.new(0, 3, 0)
-                        tweenHumanoidRootPart(hrp, targetHRP.CFrame + offset)
-                        Rayfield:Notify({
-                            Title = "Teleported",
-                            Content = "Successfully teleported to " .. targetPlayer.Name,
-                            Duration = 3,
-                            Image = "map-pin",
-                        })
-                    else
-                        Rayfield:Notify({
-                            Title = "Error",
-                            Content = "Could not teleport to player. Try again.",
-                            Duration = 3,
-                            Image = "circle-x",
-                        })
-                    end
-                else
-                    Rayfield:Notify({
-                        Title = "Error",
-                        Content = "Player not found or not loaded in game.",
-                        Duration = 3,
-                        Image = "circle-x",
-                    })
-                end
-            end,
-        })
-    
-        task.spawn(function()
-            while scriptRunning do
-                task.wait(5)
-                RefreshPlayerList()
-            end
-        end)
-        trackConnection(game.Players.PlayerAdded:Connect(function(player)
-            task.wait(1)
-            RefreshPlayerList()
-        end))
-        trackConnection(game.Players.PlayerRemoving:Connect(function(player)
-            task.wait(1)
-            RefreshPlayerList()
-        end))
-        
-        local PlayerDivider = Teleport:CreateDivider()
-        
-        local StaticTeleportSection = Teleport:CreateSection("💰 Static Teleports")
-        local selectedStaticLocation = staticLocationNames[1]
-        Teleport:CreateDropdown({
-            Name = "Select Static Location",
-            Options = staticLocationNames,
-            CurrentOption = {selectedStaticLocation},
-            MultipleOptions = false,
-            Flag = "StaticLocationDropdown",
-            Callback = function(Option)
-                selectedStaticLocation = Option[1]
-            end,
-        })
-        Teleport:CreateButton({
-            Name = "Teleport to Selected Location",
-            Callback = function()
-                local pos = staticLocations[selectedStaticLocation]
-                if pos then
-                    TeleportPlayer(pos, selectedStaticLocation)
-                else
-                    Rayfield:Notify({
-                        Title = "Error",
-                        Content = "No location selected.",
-                        Duration = 3,
-                        Image = "circle-x",
-                    })
-                end
-            end,
-        })
-        
-        local LocationDivider = Teleport:CreateDivider()
-        
-        local PlotSection = Teleport:CreateSection("🏸 Plot Teleports")
-        local plotOptions = {}
-        for i = 1, 8 do
-            table.insert(plotOptions, "🏠 Plot " .. i)
-        end
-        local selectedPlot = plotOptions[1]
-        Teleport:CreateDropdown({
-            Name = "Select Plot",
-            Options = plotOptions,
-            CurrentOption = {selectedPlot},
-            MultipleOptions = false,
-            Flag = "PlotTeleportDropdown",
-            Callback = function(Option)
-                selectedPlot = Option[1]
-            end,
-        })
-        Teleport:CreateButton({
-            Name = "Teleport to Selected Plot",
-            Callback = function()
-                local plotNumber = tonumber(string.match(selectedPlot, "Plot (%d+)"))
-                if plotNumber then
-                    local plotsFolder = game:GetService("Workspace"):WaitForChild("Plots")
-                    local plot = plotsFolder:FindFirstChild(tostring(plotNumber))
-                    if plot then
-                        local centrePart = plot:FindFirstChild("Centre")
-                        if centrePart then
-                            local player = game.Players.LocalPlayer
-                            local character = player.Character or player.CharacterAdded:Wait()
-                            local hrp = character:FindFirstChild("HumanoidRootPart")
-                            if hrp then
-                                tweenHumanoidRootPart(hrp, CFrame.new(centrePart.Position + Vector3.new(0, 2, 0)))
-                                Rayfield:Notify({
-                                    Title = "Teleported",
-                                    Content = "Successfully teleported to " .. selectedPlot,
-                                    Duration = 3,
-                                    Image = "map-pin",
-                                })
-                            else
-                                Rayfield:Notify({
-                                    Title = "Error",
-                                    Content = "Character not found. Try again.",
-                                    Duration = 3,
-                                    Image = "circle-x",
-                                })
-                            end
-                        else
-                            Rayfield:Notify({
-                                Title = "Error",
-                                Content = "Centre part not found in " .. selectedPlot,
-                                Duration = 3,
-                                Image = "circle-x",
-                            })
-                        end
-                    else
-                        Rayfield:Notify({
-                            Title = "Error",
-                            Content = selectedPlot .. " not found in workspace",
-                            Duration = 3,
-                            Image = "circle-x",
-                        })
-                    end
-                end
-            end,
-        })
-        
-        local TeleportSection = Teleport:CreateSection("🏠 Tycoon Teleport")
-        local TycoonButton = Teleport:CreateButton({
-            Name = "Teleport to Your Slot",
-            Flag = nil,
-            Callback = function()
-                local function teleportToMyPlot()
-                    local player = game.Players.LocalPlayer
-                    local plotsFolder = workspace:WaitForChild("Plots")
-                    local teleportPartName = "Centre"
-                    local function isOwned(buildPlot)
-                        return #buildPlot:GetChildren() > 0
-                    end
-                    local function findMyPlot()
-                        for _, plotModel in ipairs(plotsFolder:GetChildren()) do
-                            if plotModel:IsA("Model") then
-                                local buildPlot = plotModel:FindFirstChild("BuildPlot")
-                                if buildPlot and isOwned(buildPlot) then
-                                    return plotModel
-                                end
-                            end
-                        end
-                        return nil
-                    end
-                    local myPlot = findMyPlot()
-                    if myPlot then
-                        local centrePart = myPlot:FindFirstChild(teleportPartName)
-                        if centrePart and centrePart:IsA("BasePart") then
-                            local character = player.Character or player.CharacterAdded:Wait()
-                            local hrp = character:FindFirstChild("HumanoidRootPart")
-                            if hrp then
-                                tweenHumanoidRootPart(hrp, CFrame.new(centrePart.Position + Vector3.new(0, 2, 0)))
-                                Rayfield:Notify({
-                                    Title = "Teleported",
-                                    Content = "Successfully teleported to your tycoon slot.",
-                                    Duration = 3,
-                                    Image = "map-pin",
-                                })
-                            end
-                        else
-                            Rayfield:Notify({
-                                Title = "Error",
-                                Content = "Centre part not found in your plot!",
-                                Duration = 3,
-                                Image = "circle-x",
-                            })
-                        end
-                    else
-                        Rayfield:Notify({
-                            Title = "Error",
-                            Content = "Your plot was not found! Make sure you have a tycoon slot.",
-                            Duration = 3,
-                            Image = "circle-x",
-                        })
-                    end
-                end
-                if initialLoad then
-                    return
-                end
-                teleportToMyPlot()
-            end,
+        MobileSupport:CreateParagraph({
+            Title = "Teleport Removed",
+            Content = "TP/Tween features were removed from this module."
         })
         
         local Misc = Window:CreateTab("Misc", "boxes") 
@@ -661,60 +294,9 @@ return function(Window, scriptInfo)
             end,
         })
         
-        -- Waypoint System for Mobile
-        local MobileWaypointSection = MobileSupport:CreateSection("📍 Waypoint System")
-        local MobileWaypointLabel = MobileSupport:CreateLabel("Set a waypoint and teleport back to it")
-        
-        local SetWaypointButton = MobileSupport:CreateButton({
-            Name = "Set Waypoint",
-            Callback = function()
-                local player = game.Players.LocalPlayer
-                local character = player.Character or player.CharacterAdded:Wait()
-                local hrp = character:FindFirstChild("HumanoidRootPart")
-                
-                if hrp then
-                    _G.savedWaypoint = hrp.CFrame
-                    Rayfield:Notify({
-                        Title = "Waypoint Set",
-                        Content = "Successfully saved current position as waypoint.",
-                        Duration = 3,
-                        Image = "map-pin",
-                    })
-                else
-                    Rayfield:Notify({
-                        Title = "Error",
-                        Content = "Character not found. Try again.",
-                        Duration = 3,
-                        Image = "circle-x",
-                    })
-                end
-            end,
-        })
-        
-        local TeleportToWaypointButton = MobileSupport:CreateButton({
-            Name = "Teleport to Waypoint",
-            Callback = function()
-                local player = game.Players.LocalPlayer
-                local character = player.Character or player.CharacterAdded:Wait()
-                local hrp = character:FindFirstChild("HumanoidRootPart")
-                
-                if hrp and _G.savedWaypoint then
-                    tweenHumanoidRootPart(hrp, _G.savedWaypoint)
-                    Rayfield:Notify({
-                        Title = "Teleported to Waypoint",
-                        Content = "Successfully teleported to saved waypoint.",
-                        Duration = 3,
-                        Image = "map-pin",
-                    })
-                else
-                    Rayfield:Notify({
-                        Title = "Error",
-                        Content = _G.savedWaypoint and "Character not found. Try again." or "No waypoint set. Set a waypoint first.",
-                        Duration = 3,
-                        Image = "circle-x",
-                    })
-                end
-            end,
+        MobileSupport:CreateParagraph({
+            Title = "Waypoint Removed",
+            Content = "Waypoint teleport was removed with TP/Tween features."
         })
         
         local Credits = Window:CreateTab("Credits", "info")
@@ -752,7 +334,6 @@ return function(Window, scriptInfo)
                     local factoryGridItemsClient = game:GetService("Workspace"):FindFirstChild("FactoryGridItemsClient")
                     if factoryGridItemsClient then
                         local vehicleSpawner = nil
-                        local vehicleSpawnerPos = nil
                         local proximityPrompt = nil
                         
                         for _, folder in pairs(factoryGridItemsClient:GetChildren()) do
@@ -766,7 +347,6 @@ return function(Window, scriptInfo)
                                             local prompt = screenPart:FindFirstChild("ProximityPrompt")
                                             if prompt then
                                                 vehicleSpawner = spawner
-                                                vehicleSpawnerPos = screenPart.Position
                                                 proximityPrompt = prompt
                                                 break
                                             end
@@ -787,13 +367,23 @@ return function(Window, scriptInfo)
                                 })
                                 return
                             end
-                            tweenHumanoidRootPart(playerRoot, CFrame.new(vehicleSpawnerPos))
-                            task.wait(0.3)
-                            proximityPrompt.HoldDuration = 0
+                            local oldHold = proximityPrompt.HoldDuration
+                            local oldDistance = proximityPrompt.MaxActivationDistance
+                            local oldLos = proximityPrompt.RequiresLineOfSight
+                            pcall(function()
+                                proximityPrompt.HoldDuration = 0
+                                proximityPrompt.MaxActivationDistance = math.max(1024, tonumber(oldDistance) or 0)
+                                proximityPrompt.RequiresLineOfSight = false
+                            end)
                             fireproximityprompt(proximityPrompt)
+                            pcall(function()
+                                proximityPrompt.HoldDuration = oldHold
+                                proximityPrompt.MaxActivationDistance = oldDistance
+                                proximityPrompt.RequiresLineOfSight = oldLos
+                            end)
                             Rayfield:Notify({
                                 Title = "Vehicle Purchase",
-                                Content = "Teleported to vehicle spawner.",
+                                Content = "Triggered vehicle spawner remotely.",
                                 Duration = 3,
                                 Image = 4483362458,
                             })
@@ -847,7 +437,6 @@ return function(Window, scriptInfo)
                         })
                         return
                     end
-                    local originalPosition = hrp.CFrame
                     local shopObject, shopName
                     if selectedOption == "⛏️ Pickaxe Shop" then
                         shopObject = game:GetService("Workspace"):FindFirstChild("Pickaxe Store")
@@ -907,42 +496,26 @@ return function(Window, scriptInfo)
                         })
                         return
                     end
-                    local shopPos = activationPoint.Position
-                    tweenHumanoidRootPart(hrp, CFrame.new(shopPos + Vector3.new(0, 2, 0)))
-                    task.wait(0.5)
-                    proximityPrompt.HoldDuration = 0
+                    local oldHold = proximityPrompt.HoldDuration
+                    local oldDistance = proximityPrompt.MaxActivationDistance
+                    local oldLos = proximityPrompt.RequiresLineOfSight
+                    pcall(function()
+                        proximityPrompt.HoldDuration = 0
+                        proximityPrompt.MaxActivationDistance = math.max(1024, tonumber(oldDistance) or 0)
+                        proximityPrompt.RequiresLineOfSight = false
+                    end)
                     fireproximityprompt(proximityPrompt)
+                    pcall(function()
+                        proximityPrompt.HoldDuration = oldHold
+                        proximityPrompt.MaxActivationDistance = oldDistance
+                        proximityPrompt.RequiresLineOfSight = oldLos
+                    end)
                     Rayfield:Notify({
                         Title = shopName,
-                        Content = "Teleported to " .. shopName .. ". Will return in 6 seconds.",
+                        Content = "Opened " .. shopName .. " prompt remotely.",
                         Duration = 3,
                         Image = 4483362458,
                     })
-                    task.wait(1)
-                    for i = 5, 1, -1 do
-                        task.wait(1)
-                        if i % 3 == 0 or i <= 3 then
-                            Rayfield:Notify({
-                                Title = "Returning Soon",
-                                Content = "Teleporting back in " .. i .. " seconds...",
-                                Duration = 1,
-                                Image = 4483362458,
-                            })
-                        end
-                    end
-                    if player and player.Parent and player.Character then
-                        local currentCharacter = player.Character
-                        local currentHrp = currentCharacter:FindFirstChild("HumanoidRootPart")
-                        if currentHrp then
-                            tweenHumanoidRootPart(currentHrp, originalPosition)
-                            Rayfield:Notify({
-                                Title = shopName,
-                                Content = "Returned to original position",
-                                Duration = 3,
-                                Image = 4483362458,
-                            })
-                        end
-                    end
                 end
                 local selectedOption = Option[1]
                 handleShopTeleport(selectedOption)
@@ -2273,8 +1846,6 @@ return function(Window, scriptInfo)
         local autoMineThread
         local autoMineRange = math.clamp(autoSettingsLoaded.autoMineRange, 5, 50)
         local autoMineDelay = math.clamp(autoSettingsLoaded.autoMineDelay, 0, 5)
-        local autoMineUseTween = autoSettingsLoaded.autoMineUseTween
-        local autoMineTweenSpeed = TELEPORT_TWEEN_SPEED
         local safeProfileEnabled = autoSettingsLoaded.safeProfileEnabled ~= false
         local safeNearbyPauseEnabled = autoSettingsLoaded.safeNearbyPauseEnabled ~= false
         local safeNearbyRadius = math.clamp(tonumber(autoSettingsLoaded.safeNearbyRadius) or 70, 20, 200)
@@ -2301,10 +1872,6 @@ return function(Window, scriptInfo)
                     autoMineEnabled = autoMineEnabled,
                     autoMineRange = autoMineRange,
                     autoMineDelay = autoMineDelay,
-                    autoMineUseTween = autoMineUseTween,
-                    autoMineTweenSpeed = TELEPORT_TWEEN_SPEED,
-                    teleportTweenSpeed = TELEPORT_TWEEN_SPEED,
-                    teleportTweenMaxDuration = TELEPORT_TWEEN_MAX_DURATION,
                     safeProfileEnabled = safeProfileEnabled,
                     safeNearbyPauseEnabled = safeNearbyPauseEnabled,
                     safeNearbyRadius = safeNearbyRadius,
@@ -2500,23 +2067,6 @@ return function(Window, scriptInfo)
                             blockedTargetUntil[key] = os.clock() + (seconds or 2.0)
                         end
 
-                        local function tweenToOre(rootPart, orePart)
-                            if not autoMineUseTween then
-                                return
-                            end
-                            if not rootPart or not orePart then return end
-                            local character = rootPart.Parent
-                            local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-                            if humanoid and humanoid.SeatPart then
-                                return
-                            end
-                            local toOre = orePart.Position - rootPart.Position
-                            local dist = toOre.Magnitude
-                            if dist < 8 then return end
-                            local targetPos = orePart.Position - toOre.Unit * 5 + Vector3.new(0, 2.5, 0)
-                            tweenHumanoidRootPart(rootPart, CFrame.new(targetPos), nil, false)
-                        end
-
                         while autoMineEnabled do
                             if not LocalPlayer then task.wait(0.1) continue end
                             local Character = LocalPlayer.Character
@@ -2589,7 +2139,6 @@ return function(Window, scriptInfo)
                                 if closestBlock then
                                     local renderPart = getOreRenderPart(closestBlock)
                                     local oreName = getOreName(closestBlock)
-                                    tweenToOre(root, renderPart)
                                     local gridPos = getTargetGridPositionDeep(closestBlock, renderPart)
                                     if not gridPos then
                                         local worldPos = renderPart and renderPart.Position
@@ -2697,36 +2246,9 @@ return function(Window, scriptInfo)
             end,
         })
 
-        Farm:CreateToggle({
-            Name = "Tween to Ore (Experimental)",
-            CurrentValue = false,
-            Flag = "AutoMineTween",
-            Callback = function(Value)
-                autoMineUseTween = false
-                if Value then
-                    Rayfield:Notify({
-                        Title = "Auto Mine Tween Disabled",
-                        Content = "Tween mining is disabled to reduce shadowban risk.",
-                        Duration = 3,
-                        Image = "shield-alert",
-                    })
-                end
-                saveAutoSettings()
-            end,
-        })
-
-        Farm:CreateSlider({
-            Name = "Global Tween Speed (All Movement)",
-            Range = {30, 260},
-            Increment = 5,
-            Suffix = " studs/s",
-            CurrentValue = TELEPORT_TWEEN_SPEED,
-            Flag = "AutoMineTweenSpeed",
-            Callback = function(Value)
-                autoMineTweenSpeed = Value
-                TELEPORT_TWEEN_SPEED = Value
-                saveAutoSettings()
-            end,
+        Farm:CreateParagraph({
+            Title = "Movement System",
+            Content = "TP/Tween has been removed in this build."
         })
 
         local SafeProfileSection = Farm:CreateSection("🛡️ Safe Profile")
@@ -3442,102 +2964,9 @@ return function(Window, scriptInfo)
             end,
         })
     
-        local WaypointSection = Farm:CreateSection("📍 Waypoint System")
-        local WaypointLabel = Farm:CreateLabel("Set a waypoint and teleport back to it with keybinds")
-        _G.savedWaypoint = nil
-    
-        local SetWaypointInput = Farm:CreateInput({
-            Name = "Set Waypoint Key",
-            CurrentValue = "",
-            PlaceholderText = "Press key to save position (e.g. 'Z')",
-            RemoveTextAfterFocusLost = false,
-            Flag = "SetWaypointKey",
-            Callback = function(Text)
-                task.spawn(function() task.wait(0.1) end)
-                if Text and Text ~= "" then
-                    if _G.setWaypointKeyConnection then
-                        _G.setWaypointKeyConnection:Disconnect()
-                        _G.setWaypointKeyConnection = nil
-                    end
-                    local specialKeys = {
-                        ["space"] = Enum.KeyCode.Space, ["shift"] = Enum.KeyCode.LeftShift,
-                        ["ctrl"] = Enum.KeyCode.LeftControl, ["alt"] = Enum.KeyCode.LeftAlt,
-                        ["tab"] = Enum.KeyCode.Tab, ["capslock"] = Enum.KeyCode.CapsLock,
-                        ["backspace"] = Enum.KeyCode.Backspace, ["enter"] = Enum.KeyCode.Return,
-                        ["delete"] = Enum.KeyCode.Delete, ["insert"] = Enum.KeyCode.Insert,
-                        ["home"] = Enum.KeyCode.Home, ["end"] = Enum.KeyCode.End,
-                        ["pageup"] = Enum.KeyCode.PageUp, ["pagedown"] = Enum.KeyCode.PageDown,
-                        ["up"] = Enum.KeyCode.Up, ["down"] = Enum.KeyCode.Down,
-                        ["left"] = Enum.KeyCode.Left, ["right"] = Enum.KeyCode.Right,
-                    }
-                    _G.setWaypointKeyConnection = game:GetService("UserInputService").InputBegan:Connect(function(input, gameProcessed)
-                        if gameProcessed then return end
-                        local keyMatches = (input.KeyCode.Name:lower() == Text:lower())
-                        if specialKeys[string.lower(Text)] and input.KeyCode == specialKeys[string.lower(Text)] then
-                            keyMatches = true
-                        end
-                        if keyMatches then
-                            local player = game.Players.LocalPlayer
-                            local character = player.Character or player.CharacterAdded:Wait()
-                            local hrp = character:FindFirstChild("HumanoidRootPart")
-                            if hrp then
-                                _G.savedWaypoint = hrp.CFrame
-                                Rayfield:Notify({ Title = "Waypoint Set", Content = "Successfully saved current position as waypoint.", Duration = 3, Image = "navigation" })
-                            else
-                                Rayfield:Notify({ Title = "Error", Content = "Could not save waypoint. Try again.", Duration = 3, Image = "circle-x" })
-                            end
-                        end
-                    end)
-                    Rayfield:Notify({ Title = "Key Bound", Content = "Set Waypoint key bound to: " .. Text, Duration = 3, Image = "navigation" })
-                end
-            end,
-        })
-    
-        local TeleportWaypointInput = Farm:CreateInput({
-            Name = "Teleport to Waypoint Key",
-            CurrentValue = "",
-            PlaceholderText = "Press key to teleport to waypoint (e.g. 'X')",
-            RemoveTextAfterFocusLost = false,
-            Flag = "TeleportWaypointKey",
-            Callback = function(Text)
-                task.spawn(function() task.wait(0.1) end)
-                if Text and Text ~= "" then
-                    if _G.teleportToWaypointKeyConnection then
-                        _G.teleportToWaypointKeyConnection:Disconnect()
-                        _G.teleportToWaypointKeyConnection = nil
-                    end
-                    local specialKeys = {
-                        ["space"] = Enum.KeyCode.Space, ["shift"] = Enum.KeyCode.LeftShift,
-                        ["ctrl"] = Enum.KeyCode.LeftControl, ["alt"] = Enum.KeyCode.LeftAlt,
-                        ["tab"] = Enum.KeyCode.Tab, ["capslock"] = Enum.KeyCode.CapsLock,
-                        ["backspace"] = Enum.KeyCode.Backspace, ["enter"] = Enum.KeyCode.Return,
-                        ["delete"] = Enum.KeyCode.Delete, ["insert"] = Enum.KeyCode.Insert,
-                        ["home"] = Enum.KeyCode.Home, ["end"] = Enum.KeyCode.End,
-                        ["pageup"] = Enum.KeyCode.PageUp, ["pagedown"] = Enum.KeyCode.PageDown,
-                        ["up"] = Enum.KeyCode.Up, ["down"] = Enum.KeyCode.Down,
-                        ["left"] = Enum.KeyCode.Left, ["right"] = Enum.KeyCode.Right,
-                    }
-                    _G.teleportToWaypointKeyConnection = game:GetService("UserInputService").InputBegan:Connect(function(input, gameProcessed)
-                        if gameProcessed then return end
-                        local keyMatches = (input.KeyCode.Name:lower() == Text:lower())
-                        if specialKeys[string.lower(Text)] and input.KeyCode == specialKeys[string.lower(Text)] then
-                            keyMatches = true
-                        end
-                        if keyMatches then
-                            local player = game.Players.LocalPlayer
-                            local character = player.Character or player.CharacterAdded:Wait()
-                            local hrp = character:FindFirstChild("HumanoidRootPart")
-                            if hrp and _G.savedWaypoint then
-                                tweenHumanoidRootPart(hrp, _G.savedWaypoint)
-                                Rayfield:Notify({ Title = "Teleported to Waypoint", Content = "Successfully teleported to saved waypoint.", Duration = 3, Image = "map" })
-                            else
-                                Rayfield:Notify({ Title = "Error", Content = "No waypoint set or character not found.", Duration = 3, Image = "circle-x" })
-                            end
-                        end
-                    end)
-                    Rayfield:Notify({ Title = "Key Bound", Content = "Teleport to Waypoint key bound to: " .. Text, Duration = 3, Image = "navigation" })
-                end
-            end,
+        Farm:CreateParagraph({
+            Title = "Waypoint System",
+            Content = "Waypoint teleport keybinds were removed with TP/Tween features."
         })
 
         local function destroyScript()
@@ -3555,8 +2984,6 @@ return function(Window, scriptInfo)
 
             local globalConnections = {
                 "sellOreKeyConnection",
-                "setWaypointKeyConnection",
-                "teleportToWaypointKeyConnection",
             }
             for _, key in ipairs(globalConnections) do
                 local conn = rawget(_G, key)
