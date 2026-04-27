@@ -2208,19 +2208,42 @@ return function(Window, scriptInfo)
                                     workspace:FindFirstChild("SpawnedBlocks"),
                                 }
 
+                                local function pickClosestFromOreEsp()
+                                    if not ESP or not ESP.activeVisuals then return nil, math.huge end
+                                    local bestTarget, bestDist = nil, math.huge
+                                    for target, info in pairs(ESP.activeVisuals) do
+                                        if target and target.Parent then
+                                            local renderPart = (info and info.renderPart) or getOreRenderPart(target)
+                                            if renderPart and renderPart.Parent then
+                                                local oreName = getOreNameForEsp(target, renderPart)
+                                                if not isIgnoredOre(oreName) then
+                                                    local dist = (root.Position - renderPart.Position).Magnitude
+                                                    if dist <= autoMineRange and dist < bestDist then
+                                                        bestTarget = target
+                                                        bestDist = dist
+                                                    end
+                                                end
+                                            end
+                                        end
+                                    end
+                                    return bestTarget, bestDist
+                                end
+
                                 if isTargetValid(lockedTarget, root) then
                                     closestBlock = lockedTarget
                                 else
                                     resetTargetLock()
+                                    local espTarget, espDist = pickClosestFromOreEsp()
+                                    if espTarget then
+                                        closestBlock = espTarget
+                                        closestDist = espDist
+                                    else
                                     for _, container in ipairs(oreContainers) do
                                         if container then
                                             for _,v in pairs(container:GetChildren()) do
                                                 local renderPart = getOreRenderPart(v)
                                                 if not renderPart then continue end
                                                 if isTargetTemporarilyBlocked(v, renderPart) then continue end
-                                                if not isMineableTarget(v, renderPart) and not getTargetGridPositionDeep(v, renderPart) then
-                                                    continue
-                                                end
                                                 local oreName = getOreNameForEsp(v, renderPart)
                                                 if isIgnoredOre(oreName) then continue end
                                                 local dist = (root.Position - renderPart.Position).Magnitude
@@ -2231,6 +2254,7 @@ return function(Window, scriptInfo)
                                             end
                                         end
                                     end
+                                    end
                                     lockedTarget = closestBlock
                                     if lockedTarget then
                                         targetLockedAt = os.clock()
@@ -2240,9 +2264,8 @@ return function(Window, scriptInfo)
 
                                 if closestBlock then
                                     local renderPart = getOreRenderPart(closestBlock)
-                                    if not isMineableTarget(closestBlock, renderPart) and not getTargetGridPositionDeep(closestBlock, renderPart) then
-                                        OreLabel:Set("Auto Mine Status: switching ore (not mineable)")
-                                        blockTargetTemporarily(closestBlock, renderPart, 3.2)
+                                    if not renderPart or not renderPart.Parent then
+                                        OreLabel:Set("Auto Mine Status: switching ore (no render part)")
                                         resetTargetLock()
                                         task.wait(0.08)
                                         continue
