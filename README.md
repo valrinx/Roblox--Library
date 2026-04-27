@@ -113,6 +113,8 @@
 - แก้ `Auto Mine` แร่ HP สูงขุดไม่รู้จบ: ค่า `hardHitLimit` / `hitSwitchLimit` / `targetTimeLimit` เดิมต่ำเกิน (เช่น 8 ครั้ง / 6 วินาที / สูงสุด 15 รอบ) ทำให้สลับเป้าก่อนแร่แตก — ปรับให้สเกลตาม `expectedHits` และ delay จริง
 - `modules/Ultimate Mining Tycoon` ไม่ `loadstring` Rayfield ซ้ำแล้ว — บังคับใช้ `scriptInfo.hubRayfield` จาก `RAVENHUB` เท่านั้น (โหลดนอก Hub จะ warn แล้ว return)
 - แก้ `Auto Mine` อาการขุดสะดุด/บางทีไม่ขุด: ไม่นับ `staleProgressHits` ตอนยังรอ `minReadyAt` (เรทลิมิต) เพราะ HP ไม่ขยับเหมือน “ค้าง” ทำให้โดนสลับเป้า `no progress` ผิดๆ
+- แก้เคสแร่ “วนเต็ม/ไม่ได้ของ” ที่เซิร์ฟไม่รับดาเมจ: ตรวจ HP กระโดดขึ้นหลังยิงแล้ว → สถานะ `ore HP reset (server) — skip block` + บล็อกเป้าชั่วคราว
+- `Auto Mine` แสดงสัญญาณบนก้อนแร่ที่กำลังขุด: `Highlight` + ป้าย `⛏ AUTO MINE` (ล้างเมื่อปิด Auto / เปลี่ยนเป้า / pause / Destroy Hub)
 - harden runtime error/log spam: ครอบ `Rayfield.Notify` ด้วย `pcall` (safe notify) กันเคส UI template เปลี่ยนแล้วเด้ง `Template is not a valid member of Frame "Notifications"` และเพิ่มตัว drain ให้ remote ชื่อ `RegisterInstanceChanges` เพื่อลด `Remote event invocation queue exhausted`
 - เพิ่มระบบแชร์คอนฟิกทั้งก้อนใน `modules/Ultimate Mining Tycoon`: รองรับ `Export/Import Full Settings` (JSON copy/paste) รวมค่าฟาร์ม/ESP/mapping ชื่อแร่ทั้งหมด เพื่อย้ายโปรไฟล์ไปอัปเดตชื่อแร่ในสคริปต์หรือแชร์ให้เครื่องอื่นได้ทันที
 
