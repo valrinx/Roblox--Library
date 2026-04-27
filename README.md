@@ -99,6 +99,7 @@
 - ปรับโหมด anti-shadowban: ปิดการขายแบบ `Tween` ในระบบฟาร์ม (บังคับ `Remote (No TP / No Tween)`), เอา fallback tween ออก และล็อก `Tween to Ore` ให้ไม่ทำงานพร้อมแจ้งเตือนเมื่อเปิด
 - ลบระบบเคลื่อนที่ `TP/Tween` ออกจาก `modules/Ultimate Mining Tycoon` ทั้งแท็บ Teleport/Waypoint และปรับ Vehicle/Shop ให้ยิง `ProximityPrompt` ระยะไกลแทน
 - ปรับ `Ore ESP` เป็นโหมด `Highlight` (ลด fill/คง outline) เพื่อลดการบังข้อความป้าย และทำให้สีมองชัดขึ้น
+- แก้ `Ore Ignore List` ใน `Auto Mine`: เปลี่ยนให้คัดแร่จากชื่อเส้นทางเดียวกับ ESP (`getOreNameForEsp`) และ normalize รายชื่อ ignore ใน callback เพื่อกันชื่อไม่ตรงแล้วยังถูกขุด
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
