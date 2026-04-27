@@ -1,7 +1,10 @@
 return function(Window, scriptInfo)
 
-    -- Use Hub's Rayfield instance to avoid reinitializing UI library
-    local Rayfield = (scriptInfo and scriptInfo.hubRayfield) or loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+    if not scriptInfo or scriptInfo.hubRayfield == nil then
+        warn("[Ultimate Mining Tycoon] Missing scriptInfo.hubRayfield — load this module from RAVEN HUB only.")
+        return
+    end
+    local Rayfield = scriptInfo.hubRayfield
     local rawRayfieldNotify = Rayfield and Rayfield.Notify
     local function safeNotify(payload)
         if type(rawRayfieldNotify) ~= "function" then return end
