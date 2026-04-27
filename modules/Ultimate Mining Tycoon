@@ -222,6 +222,7 @@ return function(Window, scriptInfo)
         local staticLocationNames = {"⛏️ Mine Entrance", "🛒 Shop", "💣 C4 Shop", "💰 Upgrade Shop"}
         
         local Farm = Window:CreateTab("Farm", "pickaxe") 
+        local OreESP = Window:CreateTab("Ore ESP", "eye")
     
         local Teleport = Window:CreateTab("Teleport", "map")
         local TeleportTweenSection = Teleport:CreateSection("⚙️ Teleport Tween")
@@ -3025,11 +3026,11 @@ return function(Window, scriptInfo)
         })
     
         -- ORE ESP UI
-        local OreSection = Farm:CreateSection("⚙️ Ore ESP Selection")
-        Farm:CreateLabel("Reveals every type of ore found throughout mining.")
-        local OreDebugSection = Farm:CreateSection("🧪 Ore Name Debug / Mapping")
-        local OreDebugLabel = Farm:CreateLabel("Look at ore and press capture button")
-        local OreLearningStatusLabel = Farm:CreateLabel("Ore Memory: checking...")
+        local OreSection = OreESP:CreateSection("⚙️ Ore ESP Selection")
+        OreESP:CreateLabel("Reveals every type of ore found throughout mining.")
+        local OreDebugSection = OreESP:CreateSection("🧪 Ore Name Debug / Mapping")
+        local OreDebugLabel = OreESP:CreateLabel("Look at ore and press capture button")
+        local OreLearningStatusLabel = OreESP:CreateLabel("Ore Memory: checking...")
         local OreManualName = ""
 
         local function safeSetUiText(element, text)
@@ -3082,7 +3083,7 @@ return function(Window, scriptInfo)
             end
         end)
 
-        Farm:CreateInput({
+        OreESP:CreateInput({
             Name = "Manual Ore Name (optional)",
             CurrentValue = "",
             PlaceholderText = "Example: Titanium",
@@ -3093,7 +3094,7 @@ return function(Window, scriptInfo)
             end,
         })
 
-        Farm:CreateButton({
+        OreESP:CreateButton({
             Name = "Capture Looked Ore (show id/name)",
             Callback = function()
                 local target = getLookedOreTarget()
@@ -3125,7 +3126,7 @@ return function(Window, scriptInfo)
             end,
         })
 
-        Farm:CreateButton({
+        OreESP:CreateButton({
             Name = "Map Looked Ore Id -> Name",
             Callback = function()
                 local target = getLookedOreTarget()
@@ -3186,7 +3187,7 @@ return function(Window, scriptInfo)
             return nil, "Expected { data: { signature: name } }"
         end
 
-        Farm:CreateButton({
+        OreESP:CreateButton({
             Name = "Export Shared Color Map (Copy)",
             Callback = function()
                 local text = encodeSharedColorMap()
@@ -3203,7 +3204,7 @@ return function(Window, scriptInfo)
         })
 
         local importBuffer = ""
-        Farm:CreateInput({
+        OreESP:CreateInput({
             Name = "Import Shared Color Map (JSON)",
             CurrentValue = "",
             PlaceholderText = "Paste JSON here",
@@ -3214,7 +3215,7 @@ return function(Window, scriptInfo)
             end,
         })
 
-        Farm:CreateButton({
+        OreESP:CreateButton({
             Name = "Apply Imported Shared Map",
             Callback = function()
                 local decoded, err = decodeSharedColorMap(importBuffer)
@@ -3385,16 +3386,16 @@ return function(Window, scriptInfo)
             end))
         end
 
-        Farm:CreateButton({
+        OreESP:CreateButton({
             Name = "Reset Learned Ore Maps",
             Callback = function()
                 showResetConfirmPopup(performOreMappingReset)
             end,
         })
 
-        Farm:CreateLabel("Tip: if id is N/A, mapping uses ore signature (strict+coarse), not runtime name only.")
+        OreESP:CreateLabel("Tip: if id is N/A, mapping uses ore signature (strict+coarse), not runtime name only.")
     
-        Farm:CreateToggle({
+        OreESP:CreateToggle({
             Name = "Ore ESP",
             CurrentValue = false,
             Flag = nil,
@@ -3414,7 +3415,7 @@ return function(Window, scriptInfo)
             end,
         })
     
-        Farm:CreateSlider({
+        OreESP:CreateSlider({
             Name = "Ore ESP Distance",
             Range = {0, 500},
             Increment = 5,
@@ -3426,7 +3427,7 @@ return function(Window, scriptInfo)
             end,
         })
     
-        Farm:CreateDropdown({
+        OreESP:CreateDropdown({
             Name = "ESP Filter Ore Type",
             Options = getOreTypes(),
             CurrentOption = {"All"},
@@ -3442,7 +3443,7 @@ return function(Window, scriptInfo)
             end,
         })
     
-        Farm:CreateButton({
+        OreESP:CreateButton({
             Name = "Refresh ESP Scan",
             Callback = function()
                 if ESP.enabled then
