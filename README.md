@@ -108,6 +108,7 @@
 - Rollback เพิ่ม: กลับไปใช้วิธีหาเป้าแบบแรก (สแกน `PlacedOre/SpawnedBlocks:GetChildren()` แล้วเลือกก้อนที่ใกล้สุดในระยะ) ไม่พึ่ง `Ore ESP` ในการเลือกเป้า
 - ปรับ `Ore ESP` ให้ติดครบขึ้นในแมพที่แร่ถูกซ้อนในโฟลเดอร์: สแกน descendants ของ `PlacedOre/SpawnedBlocks` สำหรับการสร้างไฮไลท์ และขยายระบบบันทึก settings ให้ครอบคลุมเพิ่ม (`WalkSpeed`, `Infinite Jump`, `Sell Ore Key`, `Ore ESP` เปิด/ระยะ/ฟิลเตอร์)
 - แก้ `Ore ESP` ซ้อนทับหนาแน่น: บังคับ `1 ESP ต่อ 1 renderPart` (กัน label/box ซ้อนหลายชั้นบนก้อนเดียว) และยกตำแหน่งป้ายชื่อขึ้นเพื่อลดการบัง
+- Optimization ประสิทธิภาพ: throttle อัปเดต ESP (`RenderStepped`) เป็นช่วง, cache metadata ชื่อ/สีแร่พร้อม refresh เป็นรอบ, อัปเดตข้อความระยะเฉพาะเมื่อค่าเปลี่ยน, และ cache reference โฟลเดอร์แร่ใน Auto Mine เพื่อลด `FindFirstChild` ซ้ำ
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
