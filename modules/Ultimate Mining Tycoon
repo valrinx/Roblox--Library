@@ -751,19 +751,48 @@ return function(Window, scriptInfo)
         local getOreIdentifierDeep
         local knownOreNames = {
             "Tin", "Iron", "Lead", "Cobalt", "Aluminium", "Silver", "Unknown", "Uranium", "Vanadium",
-            "Tungsten", "Gold", "Titanium", "Palladium", "Plutonium", "Mithril", "Thorium",
-            "Iridium", "Adamantium", "Rhodium", "Unobtanium", "Topaz", "Emerald", "Sapphire",
+            "Tungsten", "Gold", "Titanium", "Molybdenum", "Palladium", "Plutonium", "Mithril", "Thorium",
+            "Iridium", "Adamantium", "Rhodium", "Unobtanium", "Blue Chalk", "Green Chalk", "Red Chalk",
+            "Topaz", "Emerald", "Sapphire",
             "Ruby", "Diamond", "Poudretteite", "Zultanite", "Grandidierite", "Musgravite", "Painite",
         }
         local knownOreCanonical = {
             ["tin"] = "Tin", ["iron"] = "Iron", ["lead"] = "Lead", ["cobalt"] = "Cobalt", ["aluminium"] = "Aluminium",
             ["silver"] = "Silver", ["unknown"] = "Unknown", ["uranium"] = "Uranium", ["vanadium"] = "Vanadium",
-            ["tungsten"] = "Tungsten", ["gold"] = "Gold", ["titanium"] = "Titanium", ["palladium"] = "Palladium",
-            ["plutonium"] = "Plutonium", ["mithril"] = "Mithril", ["thorium"] = "Thorium", ["iridium"] = "Iridium",
+            ["tungsten"] = "Tungsten", ["gold"] = "Gold", ["titanium"] = "Titanium", ["molybdenum"] = "Molybdenum",
+            ["palladium"] = "Palladium", ["plutonium"] = "Plutonium", ["mithril"] = "Mithril", ["thorium"] = "Thorium",
+            ["iridium"] = "Iridium",
             ["adamantium"] = "Adamantium", ["rhodium"] = "Rhodium", ["unobtanium"] = "Unobtanium",
+            ["blue chalk"] = "Blue Chalk", ["green chalk"] = "Green Chalk", ["red chalk"] = "Red Chalk",
             ["topaz"] = "Topaz", ["emerald"] = "Emerald", ["sapphire"] = "Sapphire", ["ruby"] = "Ruby", ["diamond"] = "Diamond",
             ["poudretteite"] = "Poudretteite", ["zultanite"] = "Zultanite", ["grandidierite"] = "Grandidierite",
             ["musgravite"] = "Musgravite", ["painite"] = "Painite",
+        }
+        -- Sell price & RequiredStrength per repo `Ore list`; Auto Mine skips ores below pickaxe strength and prefers higher sell price.
+        local oreAutoMineStats = {
+            Tin = { price = 10, required = 6 },
+            Iron = { price = 20, required = 6 },
+            Lead = { price = 30, required = 7 },
+            Cobalt = { price = 50, required = 12 },
+            Aluminium = { price = 65, required = 18 },
+            Silver = { price = 150, required = 18 },
+            Uranium = { price = 180, required = 18 },
+            Vanadium = { price = 240, required = 22 },
+            Tungsten = { price = 300, required = 45 },
+            Gold = { price = 350, required = 22 },
+            Titanium = { price = 400, required = 24 },
+            Molybdenum = { price = 600, required = 75 },
+            Plutonium = { price = 1000, required = 99 },
+            Palladium = { price = 1200, required = 120 },
+            Mithril = { price = 200, required = nil },
+            Thorium = { price = 3200, required = 270 },
+            Iridium = { price = 3700, required = 180 },
+            Adamantium = { price = 4500, required = 300 },
+            Rhodium = { price = 15000, required = 300 },
+            Unobtanium = { price = 30000, required = 340 },
+            ["Blue Chalk"] = { price = 20, required = 6 },
+            ["Green Chalk"] = { price = 30, required = 6 },
+            ["Red Chalk"] = { price = 40, required = 6 },
         }
         local genericOreNames = {
             ["Part"] = true,
@@ -2210,13 +2239,52 @@ return function(Window, scriptInfo)
                                     local n = nil
                                     if child:IsA("NumberValue") or child:IsA("IntValue") then
                                         n = child.Value
-                                    elseif child:IsA("StringValue") then
+                                    end
+                                    if child:IsA("StringValue") then
                                         n = tonumber(child.Value)
                                     end
                                     if n then return n end
                                 end
                             end
                             return nil
+                        end
+
+                        local function getOreEconomyForAutoMine(oreName, target, renderPart)
+                            local canonical = canonicalizeOreName(oreName) or pickKnownOreFromText(oreName)
+                            local row = canonical and oreAutoMineStats[canonical]
+                            local required = row and row.required
+                            local price = row and row.price
+                            if required == nil and target then
+                                required = getNumericByKeys(target, {
+                                    "RequiredStrength", "OreStrength", "MinPickaxeStrength", "StrengthRequirement", "MineRequirement",
+                                })
+                            end
+                            if required == nil and renderPart then
+                                required = getNumericByKeys(renderPart, {
+                                    "RequiredStrength", "OreStrength", "MinPickaxeStrength", "StrengthRequirement", "MineRequirement",
+                                })
+                            end
+                            if price == nil and target then
+                                price = getNumericByKeys(target, {
+                                    "SellPrice", "OrePrice", "Price", "Value", "Worth",
+                                })
+                            end
+                            if price == nil and renderPart then
+                                price = getNumericByKeys(renderPart, {
+                                    "SellPrice", "OrePrice", "Price", "Value", "Worth",
+                                })
+                            end
+                            return {
+                                price = tonumber(price),
+                                required = required ~= nil and tonumber(required) or nil,
+                                canonical = canonical,
+                            }
+                        end
+
+                        local function pickaxeCanMineOre(pickaxeDamage, economy)
+                            if type(economy) ~= "table" then return true end
+                            if economy.required == nil then return true end
+                            return (tonumber(pickaxeDamage) or 0) >= economy.required
                         end
 
                         local function resolvePickaxeDamage(tool)
@@ -2284,7 +2352,7 @@ return function(Window, scriptInfo)
                             return table.find(OreIgnoreList, canonical) ~= nil or table.find(OreIgnoreList, oreName) ~= nil
                         end
 
-                        local function isTargetValid(target, rootPart)
+                        local function isTargetValid(target, rootPart, pickaxeDamage)
                             if not target or not target.Parent or not rootPart then
                                 return false
                             end
@@ -2294,6 +2362,10 @@ return function(Window, scriptInfo)
                             end
                             local oreName = getOreNameForEsp(target, renderPart)
                             if isIgnoredOre(oreName) then
+                                return false
+                            end
+                            local economy = getOreEconomyForAutoMine(oreName, target, renderPart)
+                            if not pickaxeCanMineOre(pickaxeDamage, economy) then
                                 return false
                             end
                             local dist = (rootPart.Position - renderPart.Position).Magnitude
@@ -2372,7 +2444,9 @@ return function(Window, scriptInfo)
                                     task.wait(0.15)
                                     continue
                                 end
+                                local pickaxeDamage = resolvePickaxeDamage(Tool)
                                 local closestBlock, closestDist = nil, math.huge
+                                local weakPickaxeNoTargets = false
 
                                 local now = os.clock()
                                 if now >= nextContainersRefreshAt then
@@ -2381,25 +2455,45 @@ return function(Window, scriptInfo)
                                     nextContainersRefreshAt = now + 1.5
                                 end
 
-                                if isTargetValid(lockedTarget, root) then
+                                if isTargetValid(lockedTarget, root, pickaxeDamage) then
                                     closestBlock = lockedTarget
                                 else
                                     resetTargetLock()
+                                    closestBlock = nil
+                                    closestDist = math.huge
+                                    local bestPrice = -math.huge
+                                    local anyInRange = false
+                                    local anyMineable = false
                                     for _, container in ipairs(oreContainers) do
                                         if container then
-                                            for _,v in pairs(container:GetChildren()) do
+                                            for _, v in pairs(container:GetChildren()) do
                                                 local renderPart = getOreRenderPart(v)
                                                 if not renderPart then continue end
                                                 if isTargetTemporarilyBlocked(v, renderPart) then continue end
                                                 local oreName = getOreNameForEsp(v, renderPart)
                                                 if isIgnoredOre(oreName) then continue end
                                                 local dist = (root.Position - renderPart.Position).Magnitude
-                                                if dist <= autoMineRange and dist < closestDist then
-                                                    closestBlock = v
-                                                    closestDist = dist
+                                                if dist <= autoMineRange then
+                                                    anyInRange = true
+                                                    local economy = getOreEconomyForAutoMine(oreName, v, renderPart)
+                                                    if pickaxeCanMineOre(pickaxeDamage, economy) then
+                                                        anyMineable = true
+                                                        local p = economy.price
+                                                        if p == nil then
+                                                            p = -1
+                                                        end
+                                                        if p > bestPrice or (p == bestPrice and dist < closestDist) then
+                                                            bestPrice = p
+                                                            closestDist = dist
+                                                            closestBlock = v
+                                                        end
+                                                    end
                                                 end
                                             end
                                         end
+                                    end
+                                    if not closestBlock and anyInRange and not anyMineable then
+                                        weakPickaxeNoTargets = true
                                     end
                                     lockedTarget = closestBlock
                                     if lockedTarget then
@@ -2418,7 +2512,6 @@ return function(Window, scriptInfo)
                                     end
                                     local oreName = getOreNameForEsp(closestBlock, renderPart)
                                     local targetKey = getTargetKey(closestBlock, renderPart)
-                                    local pickaxeDamage = resolvePickaxeDamage(Tool)
                                     local targetDurability = getTargetDurability(closestBlock, renderPart)
                                     local adaptiveMinInterval = math.clamp(0.9 / math.max(1, pickaxeDamage), 0.08, 0.55)
                                     local elapsedOnTarget = (targetLockedAt > 0) and (os.clock() - targetLockedAt) or 0
@@ -2513,7 +2606,15 @@ return function(Window, scriptInfo)
                                             continue
                                         end
                                         local hpText = targetDurability and (" | hp~" .. tostring(math.floor(targetDurability + 0.5))) or ""
-                                        OreLabel:Set("Auto Mine Status: mining " .. tostring(oreName) .. " (dmg " .. tostring(math.floor(pickaxeDamage + 0.5)) .. hpText .. ")")
+                                        local mineEcon = getOreEconomyForAutoMine(oreName, closestBlock, renderPart)
+                                        local econText = ""
+                                        if mineEcon.price then
+                                            econText = econText .. " | $" .. tostring(mineEcon.price)
+                                        end
+                                        if mineEcon.required then
+                                            econText = econText .. " need≥" .. tostring(mineEcon.required)
+                                        end
+                                        OreLabel:Set("Auto Mine Status: mining " .. tostring(oreName) .. " (dmg " .. tostring(math.floor(pickaxeDamage + 0.5)) .. hpText .. econText .. ")")
                                     else
                                         OreLabel:Set("Auto Mine Status: Activate remote missing")
                                         resetTargetLock()
@@ -2528,7 +2629,11 @@ return function(Window, scriptInfo)
                                     continue
                                 else
                                     resetTargetLock()
-                                    OreLabel:Set("Auto Mine Status: no target in range")
+                                    if weakPickaxeNoTargets then
+                                        OreLabel:Set("Auto Mine Status: pickaxe too weak for nearby ores")
+                                    else
+                                        OreLabel:Set("Auto Mine Status: no target in range")
+                                    end
                                 end
                             end
                             if safeProfileEnabled then
