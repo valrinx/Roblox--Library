@@ -192,6 +192,9 @@ gui.ResetOnSpawn = false
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.Parent = playerGui
 
+local menuToggleKey = Enum.KeyCode.RightControl
+local waitingForToggleKey = false
+
 local launcher = Instance.new("TextButton")
 launcher.Name = "Launcher"
 launcher.Size = UDim2.fromOffset(120, 34)
@@ -233,6 +236,14 @@ top.Parent = main
 round(top, 16)
 local topStroke = addStroke(top, theme.border, 1, 0.2)
 
+local topDivider = Instance.new("Frame")
+topDivider.Size = UDim2.new(1, 0, 0, 1)
+topDivider.Position = UDim2.new(0, 0, 1, -1)
+topDivider.BackgroundColor3 = theme.border
+topDivider.BorderSizePixel = 0
+topDivider.BackgroundTransparency = 0.35
+topDivider.Parent = top
+
 local title = Instance.new("TextLabel")
 title.BackgroundTransparency = 1
 title.Size = UDim2.new(1, 0, 1, 0)
@@ -269,6 +280,19 @@ local red = createLight(theme.red)
 local yellow = createLight(theme.yellow)
 local green = createLight(theme.green)
 
+local function applyTrafficHover(button, baseColor)
+    button.MouseEnter:Connect(function()
+        tween(button, 0.1, {Size = UDim2.fromOffset(14, 14), BackgroundColor3 = baseColor:Lerp(Color3.new(1, 1, 1), 0.12)})
+    end)
+    button.MouseLeave:Connect(function()
+        tween(button, 0.1, {Size = UDim2.fromOffset(12, 12), BackgroundColor3 = baseColor})
+    end)
+end
+
+applyTrafficHover(red, theme.red)
+applyTrafficHover(yellow, theme.yellow)
+applyTrafficHover(green, theme.green)
+
 local side = Instance.new("Frame")
 side.Size = UDim2.fromOffset(190, 394)
 side.Position = UDim2.fromOffset(0, 44)
@@ -276,6 +300,14 @@ side.BackgroundColor3 = theme.panel
 side.BorderSizePixel = 0
 side.Parent = main
 local sideStroke = addStroke(side, theme.border, 1, 0.3)
+
+local sideDivider = Instance.new("Frame")
+sideDivider.Size = UDim2.new(0, 1, 1, 0)
+sideDivider.Position = UDim2.new(1, -1, 0, 0)
+sideDivider.BackgroundColor3 = theme.border
+sideDivider.BorderSizePixel = 0
+sideDivider.BackgroundTransparency = 0.4
+sideDivider.Parent = side
 
 local navPadding = Instance.new("UIPadding")
 navPadding.PaddingTop = UDim.new(0, 14)
@@ -430,6 +462,13 @@ local function setHubVisible(isVisible)
     launcher.Visible = not isVisible
 end
 
+local function keyNameFromCode(keyCode)
+    if not keyCode then
+        return "Unknown"
+    end
+    return tostring(keyCode):gsub("Enum.KeyCode.", "")
+end
+
 local function applyTheme(presetName)
     local preset = themePresets[presetName]
     if not preset then
@@ -445,9 +484,11 @@ local function applyTheme(presetName)
     mainStroke.Color = theme.border
     top.BackgroundColor3 = theme.panel
     topStroke.Color = theme.border
+    topDivider.BackgroundColor3 = theme.border
     title.TextColor3 = theme.sub
     side.BackgroundColor3 = theme.panel
     sideStroke.Color = theme.border
+    sideDivider.BackgroundColor3 = theme.border
     content.BackgroundColor3 = theme.card
     contentStroke.Color = theme.border
 
@@ -573,9 +614,28 @@ local function addThemeButton(parent, titleText, presetName)
 end
 
 addCard(settingsPage, "Theme presets")
-addThemeButton(settingsPage, "Light", "Light")
-addThemeButton(settingsPage, "Dark", "Dark")
-addThemeButton(settingsPage, "Blue", "Blue")
+addThemeButton(settingsPage, "macOS Light", "Light")
+addThemeButton(settingsPage, "macOS Dark", "Dark")
+addThemeButton(settingsPage, "macOS Blue", "Blue")
+
+local _, keybindLabel = addCard(settingsPage, "Toggle key: " .. keyNameFromCode(menuToggleKey))
+
+local keybindButton = Instance.new("TextButton")
+keybindButton.Size = UDim2.new(1, 0, 0, 38)
+keybindButton.BackgroundColor3 = theme.accent
+keybindButton.BorderSizePixel = 0
+keybindButton.Text = "Set Toggle Key"
+keybindButton.Font = Enum.Font.GothamSemibold
+keybindButton.TextSize = 13
+keybindButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+keybindButton.Parent = settingsPage
+round(keybindButton, 10)
+table.insert(accentButtons, keybindButton)
+
+keybindButton.MouseButton1Click:Connect(function()
+    waitingForToggleKey = true
+    keybindButton.Text = "Press any key..."
+end)
 
 -- ============================================================
 --   MODULE LOADER (kept from original flow)
@@ -628,6 +688,34 @@ local function loadScriptModule(scriptInfo)
             -- Compatibility call shape from old hub: moduleFunc(Window, runtimeInfo)
             moduleFunc(customHubApi, runtimeInfo)
         end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then
+        return
+    end
+
+    if input.UserInputType ~= Enum.UserInputType.Keyboard then
+        return
+    end
+
+    if waitingForToggleKey then
+        if input.KeyCode ~= Enum.KeyCode.Unknown then
+            menuToggleKey = input.KeyCode
+            waitingForToggleKey = false
+            keybindButton.Text = "Set Toggle Key"
+            keybindLabel.Text = "Toggle key: " .. keyNameFromCode(menuToggleKey)
+        end
+        return
+    end
+
+    if UserInputService:GetFocusedTextBox() then
+        return
+    end
+
+    if input.KeyCode == menuToggleKey then
+        setHubVisible(not main.Visible)
+    end
+end)
 
         if ok then
             setScriptStatus(scriptInfo.name, "loaded")
