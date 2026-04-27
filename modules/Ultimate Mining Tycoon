@@ -22,6 +22,7 @@ return function(Window, scriptInfo)
         oreIgnoreList = {},
         autoSellEnabled = false,
         autoSellOreCount = 8,
+        autoSellMethod = "Remote",
         oreNameById = {},
         oreNameByRuntime = {},
         oreNameBySignature = {},
@@ -81,6 +82,11 @@ return function(Window, scriptInfo)
         autoSettingsLoaded.oreIgnoreList = sanitizeStringArray(decoded.oreIgnoreList)
         autoSettingsLoaded.autoSellEnabled = decoded.autoSellEnabled == true
         autoSettingsLoaded.autoSellOreCount = tonumber(decoded.autoSellOreCount) or autoSettingsLoaded.autoSellOreCount
+        if decoded.autoSellMethod == "Tween" then
+            autoSettingsLoaded.autoSellMethod = "Tween"
+        else
+            autoSettingsLoaded.autoSellMethod = "Remote"
+        end
         if isStringMap(decoded.oreNameById) then
             autoSettingsLoaded.oreNameById = decoded.oreNameById
         end
@@ -518,100 +524,165 @@ return function(Window, scriptInfo)
         
         -- Sell Ore Button for Mobile
         local SellOreSection = MobileSupport:CreateSection("⚙️ Sell Ore")
+        local autoSellMethod = autoSettingsLoaded.autoSellMethod == "Tween" and "Tween" or "Remote"
+        local function countCarriedOres(player)
+            local count = 0
+            local playerWorkspace = workspace:FindFirstChild(player.Name)
+            if playerWorkspace then
+                local orePackCargo = playerWorkspace:FindFirstChild("OrePackCargo")
+                if orePackCargo then
+                    for _, child in pairs(orePackCargo:GetChildren()) do
+                        if not child:IsA("Weld") and not child:IsA("Motor6D") and not child:IsA("Attachment") then
+                            count = count + 1
+                        end
+                    end
+                end
+            end
+            return count
+        end
+
+        local function findSellTargets()
+            local factoryGridItemsServer = workspace:FindFirstChild("FactoryGridItemsServer")
+            if not factoryGridItemsServer then
+                return nil, nil, "FactoryGridItemsServer not found!"
+            end
+            local factoryGridItemsClient = workspace:FindFirstChild("FactoryGridItemsClient")
+
+            for _, folder in pairs(factoryGridItemsServer:GetChildren()) do
+                if folder:IsA("Folder") then
+                    local cargoVolume = folder:FindFirstChild("CargoVolume") or folder:FindFirstChild("Unloader")
+                    if not cargoVolume then
+                        cargoVolume = folder:FindFirstChild("CargoVolume", true)
+                    end
+
+                    if cargoVolume then
+                        local foundPrompt = cargoVolume:FindFirstChild("CargoPrompt") or cargoVolume:FindFirstChildOfClass("ProximityPrompt") or cargoVolume:FindFirstChild("CargoPrompt", true)
+                        if not foundPrompt then
+                            for _, desc in pairs(cargoVolume:GetDescendants()) do
+                                if desc:IsA("ProximityPrompt") then
+                                    foundPrompt = desc
+                                    break
+                                end
+                            end
+                        end
+                        if foundPrompt then
+                            local positionCargoVolume = nil
+                            if factoryGridItemsClient then
+                                local clientFolder = factoryGridItemsClient:FindFirstChild(folder.Name)
+                                if clientFolder then
+                                    local clientSubFolder = clientFolder:FindFirstChild(folder.Name)
+                                    if clientSubFolder then
+                                        positionCargoVolume = clientSubFolder:FindFirstChild("Unloader1") and clientSubFolder.Unloader1:FindFirstChild("CargoVolume") or clientSubFolder:FindFirstChild("CargoVolume", true)
+                                    end
+                                end
+                            end
+                            return foundPrompt, positionCargoVolume, nil
+                        end
+                    end
+                end
+            end
+
+            return nil, nil, "No working CargoVolume with ProximityPrompt found! Make sure someone has built an unloader."
+        end
+
+        local function sellOreFromAnywhere()
+            local player = game.Players.LocalPlayer
+            local cargoPrompt, _, err = findSellTargets()
+            if not cargoPrompt then
+                return false, err or "No working CargoVolume found!", 0
+            end
+
+            local oreCount = countCarriedOres(player)
+            local oldHold = cargoPrompt.HoldDuration
+            local oldDistance = cargoPrompt.MaxActivationDistance
+            local oldLos = cargoPrompt.RequiresLineOfSight
+
+            pcall(function()
+                cargoPrompt.HoldDuration = 0
+                cargoPrompt.MaxActivationDistance = math.max(1024, tonumber(oldDistance) or 0)
+                cargoPrompt.RequiresLineOfSight = false
+            end)
+
+            local okFire, fireErr = pcall(function()
+                fireproximityprompt(cargoPrompt)
+            end)
+
+            pcall(function()
+                cargoPrompt.HoldDuration = oldHold
+                cargoPrompt.MaxActivationDistance = oldDistance
+                cargoPrompt.RequiresLineOfSight = oldLos
+            end)
+
+            if not okFire then
+                return false, tostring(fireErr), oreCount
+            end
+            return true, nil, oreCount
+        end
+
+        local function sellOreWithTween()
+            local player = game.Players.LocalPlayer
+            local character = player.Character or player.CharacterAdded:Wait()
+            local hrp = character and character:FindFirstChild("HumanoidRootPart")
+            if not hrp then
+                return false, "HumanoidRootPart not found!", 0
+            end
+
+            local cargoPrompt, positionCargoVolume, err = findSellTargets()
+            if not cargoPrompt then
+                return false, err or "No working CargoVolume found!", 0
+            end
+            if not positionCargoVolume then
+                return false, "CargoVolume position not found for tween mode!", 0
+            end
+
+            local oreCount = countCarriedOres(player)
+            local savedCFrame = hrp.CFrame
+            tweenHumanoidRootPart(hrp, positionCargoVolume.CFrame * CFrame.new(0, 3, 0))
+            task.wait(0.3)
+            cargoPrompt.HoldDuration = 0
+            fireproximityprompt(cargoPrompt)
+            task.wait(0.3)
+            tweenHumanoidRootPart(hrp, savedCFrame)
+            return true, nil, oreCount
+        end
+
+        local function sellOreBySelectedMethod()
+            if autoSellMethod == "Tween" then
+                return sellOreWithTween()
+            end
+            return sellOreFromAnywhere()
+        end
+
+        MobileSupport:CreateDropdown({
+            Name = "Sell Method",
+            Options = {"Remote (No TP)", "Tween to Unloader (Legacy)"},
+            CurrentOption = {autoSellMethod == "Tween" and "Tween to Unloader (Legacy)" or "Remote (No TP)"},
+            MultipleOptions = false,
+            Flag = "SellMethodMobile",
+            Callback = function(Option)
+                local selected = type(Option) == "table" and Option[1] or Option
+                autoSellMethod = (selected == "Tween to Unloader (Legacy)") and "Tween" or "Remote"
+                if saveAutoSettings then
+                    saveAutoSettings()
+                end
+            end,
+        })
+
         local SellOreButton = MobileSupport:CreateButton({
             Name = "Sell Ore",
             Callback = function()
-                local player = game.Players.LocalPlayer
-                local character = player.Character or player.CharacterAdded:Wait()
-                local hrp = character:WaitForChild("HumanoidRootPart")
-                local savedCFrame = hrp.CFrame
-                
-                local cargoPrompt = nil
-                local positionCargoVolume = nil
-                
-                local factoryGridItemsServer = game:GetService("Workspace"):FindFirstChild("FactoryGridItemsServer")
-                local factoryGridItemsClient = game:GetService("Workspace"):FindFirstChild("FactoryGridItemsClient")
-                
-                if factoryGridItemsServer then
-                    for _, folder in pairs(factoryGridItemsServer:GetChildren()) do
-                        if folder:IsA("Folder") then
-                            local cargoVolume = folder:FindFirstChild("CargoVolume") or folder:FindFirstChild("Unloader")
-                            if not cargoVolume then
-                                cargoVolume = folder:FindFirstChild("CargoVolume", true)
-                            end
-                            
-                            if cargoVolume then
-                                local foundPrompt = cargoVolume:FindFirstChild("CargoPrompt") or cargoVolume:FindFirstChildOfClass("ProximityPrompt") or cargoVolume:FindFirstChild("CargoPrompt", true)
-                                if not foundPrompt then
-                                    for _, desc in pairs(cargoVolume:GetDescendants()) do
-                                        if desc:IsA("ProximityPrompt") then
-                                            foundPrompt = desc
-                                            break
-                                        end
-                                    end
-                                end
-                                
-                                if foundPrompt then
-                                    cargoPrompt = foundPrompt
-                                    if factoryGridItemsClient then
-                                        local clientFolder = factoryGridItemsClient:FindFirstChild(folder.Name)
-                                        if clientFolder then
-                                            local clientSubFolder = clientFolder:FindFirstChild(folder.Name)
-                                            if clientSubFolder then
-                                                positionCargoVolume = clientSubFolder:FindFirstChild("Unloader1") and clientSubFolder.Unloader1:FindFirstChild("CargoVolume") or clientSubFolder:FindFirstChild("CargoVolume", true)
-                                            end
-                                        end
-                                    end
-                                    if cargoPrompt and positionCargoVolume then break end
-                                end
-                            end
-                        end
-                    end
-                    
-                    if cargoPrompt and positionCargoVolume then
-                        local function countOres()
-                            local count = 0
-                            local playerWorkspace = game:GetService("Workspace"):FindFirstChild(player.Name)
-                            if playerWorkspace then
-                                local orePackCargo = playerWorkspace:FindFirstChild("OrePackCargo")
-                                if orePackCargo then
-                                    for _, child in pairs(orePackCargo:GetChildren()) do
-                                        if not child:IsA("Weld") and not child:IsA("Motor6D") and not child:IsA("Attachment") then
-                                            count = count + 1
-                                        end
-                                    end
-                                end
-                            end
-                            return count
-                        end
-                        
-                        local oreCount = countOres()
-                        
-                        tweenHumanoidRootPart(hrp, positionCargoVolume.CFrame * CFrame.new(0, 3, 0))
-                        task.wait(0.3)
-                        cargoPrompt.HoldDuration = 0
-                        fireproximityprompt(cargoPrompt)
-                        task.wait(0.3)
-                        tweenHumanoidRootPart(hrp, savedCFrame)
-                        
-                        Rayfield:Notify({
-                            Title = "Ore Sold",
-                            Content = "Successfully sold " .. oreCount .. " ores.",
-                            Duration = 3,
-                            Image = "check-circle",
-                        })
-                    else
-                        Rayfield:Notify({
-                            Title = "Error",
-                            Content = "No working CargoVolume with ProximityPrompt found! Make sure someone has built an unloader.",
-                            Duration = 3,
-                            Image = "circle-x",
-                        })
-                    end
+                local okSell, sellErr, oreCount = sellOreBySelectedMethod()
+                if okSell then
+                    Rayfield:Notify({
+                        Title = "Ore Sold",
+                        Content = "Successfully sold " .. tostring(oreCount) .. " ores.",
+                        Duration = 3,
+                        Image = "check-circle",
+                    })
                 else
                     Rayfield:Notify({
                         Title = "Error",
-                        Content = "FactoryGridItemsServer not found! Make sure you have built an unloader.",
+                        Content = tostring(sellErr),
                         Duration = 3,
                         Image = "circle-x",
                     })
@@ -2270,6 +2341,7 @@ return function(Window, scriptInfo)
                     oreIgnoreList = OreIgnoreList,
                     autoSellEnabled = autoSellEnabled,
                     autoSellOreCount = autoSellOreCount,
+                    autoSellMethod = autoSellMethod,
                     oreNameById = oreNameById,
                     oreNameByRuntime = oreNameByRuntime,
                     oreNameBySignature = oreNameBySignature,
@@ -2738,6 +2810,18 @@ return function(Window, scriptInfo)
     
         -- Auto Sell Section
         local AutoSellSection = Farm:CreateSection("💰 Auto Sell")
+        Farm:CreateDropdown({
+            Name = "Auto Sell Method",
+            Options = {"Remote (No TP)", "Tween to Unloader (Legacy)"},
+            CurrentOption = {autoSellMethod == "Tween" and "Tween to Unloader (Legacy)" or "Remote (No TP)"},
+            MultipleOptions = false,
+            Flag = "AutoSellMethod",
+            Callback = function(Option)
+                local selected = type(Option) == "table" and Option[1] or Option
+                autoSellMethod = (selected == "Tween to Unloader (Legacy)") and "Tween" or "Remote"
+                saveAutoSettings()
+            end,
+        })
         
     
         local AutoSellToggle = Farm:CreateToggle({
@@ -2790,71 +2874,20 @@ return function(Window, scriptInfo)
                                             task.wait(0.25)
                                             continue
                                         end
-                                        local oldCFrame = hrp.CFrame
-                                        local cargoPrompt = nil
-                                        local positionCargoVolume = nil
-                                        local factoryGridItemsServer = game:GetService("Workspace"):FindFirstChild("FactoryGridItemsServer")
-                                        local factoryGridItemsClient = game:GetService("Workspace"):FindFirstChild("FactoryGridItemsClient")
-                                        
-                                        if factoryGridItemsServer then
-                                            for _, folder in pairs(factoryGridItemsServer:GetChildren()) do
-                                                if folder:IsA("Folder") then
-                                                    local cargoVolume = folder:FindFirstChild("CargoVolume") or folder:FindFirstChild("Unloader")
-                                                    if not cargoVolume then cargoVolume = folder:FindFirstChild("CargoVolume", true) end
-                                                    if cargoVolume then
-                                                        local foundPrompt = cargoVolume:FindFirstChild("CargoPrompt") or cargoVolume:FindFirstChildOfClass("ProximityPrompt") or cargoVolume:FindFirstChild("CargoPrompt", true)
-                                                        if not foundPrompt then
-                                                            for _, desc in pairs(cargoVolume:GetDescendants()) do
-                                                                if desc:IsA("ProximityPrompt") then
-                                                                    foundPrompt = desc
-                                                                    break
-                                                                end
-                                                            end
-                                                        end
-                                                        if foundPrompt then
-                                                            cargoPrompt = foundPrompt
-                                                            if factoryGridItemsClient then
-                                                                local clientFolder = factoryGridItemsClient:FindFirstChild(folder.Name)
-                                                                if clientFolder then
-                                                                    local clientSubFolder = clientFolder:FindFirstChild(folder.Name)
-                                                                    if clientSubFolder then
-                                                                        positionCargoVolume = clientSubFolder:FindFirstChild("Unloader1") and clientSubFolder.Unloader1:FindFirstChild("CargoVolume") or clientSubFolder:FindFirstChild("CargoVolume", true)
-                                                                    end
-                                                                end
-                                                            end
-                                                            if cargoPrompt and positionCargoVolume then break end
-                                                        end
-                                                    end
-                                                end
-                                            end
-                                            
-                                            if cargoPrompt and positionCargoVolume then
-                                                tweenHumanoidRootPart(hrp, positionCargoVolume.CFrame * CFrame.new(0, 3, 0))
-                                                task.wait(safeProfileEnabled and 0.38 or 0.3)
-                                                cargoPrompt.HoldDuration = 0
-                                                fireproximityprompt(cargoPrompt)
-                                                task.wait(safeProfileEnabled and 0.42 or 0.3)
-                                                tweenHumanoidRootPart(hrp, oldCFrame)
-                                                lastAutoSellAt = os.clock()
-                                                Rayfield:Notify({
-                                                    Title = "Auto Sell",
-                                                    Content = "Sold " .. currentOres .. " ores successfully!",
-                                                    Duration = 3,
-                                                    Image = "box",
-                                                })
-                                                task.wait(2)
-                                            else
-                                                Rayfield:Notify({
-                                                    Title = "Auto Sell Error",
-                                                    Content = "No working CargoVolume found!",
-                                                    Duration = 3,
-                                                    Image = "circle-x",
-                                                })
-                                            end
+                                        local okSell, sellErr, soldCount = sellOreBySelectedMethod()
+                                        if okSell then
+                                            lastAutoSellAt = os.clock()
+                                            Rayfield:Notify({
+                                                Title = "Auto Sell",
+                                                Content = "Sold " .. tostring(soldCount) .. " ores successfully!",
+                                                Duration = 3,
+                                                Image = "box",
+                                            })
+                                            task.wait(2)
                                         else
                                             Rayfield:Notify({
                                                 Title = "Auto Sell Error",
-                                                Content = "FactoryGridItemsServer not found!",
+                                                Content = tostring(sellErr),
                                                 Duration = 3,
                                                 Image = "circle-x",
                                             })
@@ -2930,85 +2963,18 @@ return function(Window, scriptInfo)
                     _G.sellOreKeyConnection = game:GetService("UserInputService").InputBegan:Connect(function(input, gameProcessed)
                         if gameProcessed then return end
                         if input.KeyCode.Name:lower() == Text:lower() then
-                            local player = game.Players.LocalPlayer
-                            local character = player.Character or player.CharacterAdded:Wait()
-                            local hrp = character:WaitForChild("HumanoidRootPart")
-                            local savedCFrame = hrp.CFrame
-                            local cargoPrompt = nil
-                            local positionCargoVolume = nil
-                            local factoryGridItemsServer = game:GetService("Workspace"):FindFirstChild("FactoryGridItemsServer")
-                            local factoryGridItemsClient = game:GetService("Workspace"):FindFirstChild("FactoryGridItemsClient")
-                            
-                            if factoryGridItemsServer then
-                                for _, folder in pairs(factoryGridItemsServer:GetChildren()) do
-                                    if folder:IsA("Folder") then
-                                        local cargoVolume = folder:FindFirstChild("CargoVolume") or folder:FindFirstChild("Unloader")
-                                        if not cargoVolume then cargoVolume = folder:FindFirstChild("CargoVolume", true) end
-                                        if cargoVolume then
-                                            local foundPrompt = cargoVolume:FindFirstChild("CargoPrompt") or cargoVolume:FindFirstChildOfClass("ProximityPrompt") or cargoVolume:FindFirstChild("CargoPrompt", true)
-                                            if not foundPrompt then
-                                                for _, desc in pairs(cargoVolume:GetDescendants()) do
-                                                    if desc:IsA("ProximityPrompt") then foundPrompt = desc break end
-                                                end
-                                            end
-                                            if foundPrompt then
-                                                cargoPrompt = foundPrompt
-                                                if factoryGridItemsClient then
-                                                    local clientFolder = factoryGridItemsClient:FindFirstChild(folder.Name)
-                                                    if clientFolder then
-                                                        local clientSubFolder = clientFolder:FindFirstChild(folder.Name)
-                                                        if clientSubFolder then
-                                                            positionCargoVolume = clientSubFolder:FindFirstChild("Unloader1") and clientSubFolder.Unloader1:FindFirstChild("CargoVolume") or clientSubFolder:FindFirstChild("CargoVolume", true)
-                                                        end
-                                                    end
-                                                end
-                                                if cargoPrompt and positionCargoVolume then break end
-                                            end
-                                        end
-                                    end
-                                end
-                                
-                                if cargoPrompt and positionCargoVolume then
-                                    local function countOres()
-                                        local count = 0
-                                        local playerWorkspace = game:GetService("Workspace"):FindFirstChild(player.Name)
-                                        if playerWorkspace then
-                                            local orePackCargo = playerWorkspace:FindFirstChild("OrePackCargo")
-                                            if orePackCargo then
-                                                for _, child in pairs(orePackCargo:GetChildren()) do
-                                                    if not child:IsA("Weld") and not child:IsA("Motor6D") and not child:IsA("Attachment") then
-                                                        count = count + 1
-                                                    end
-                                                end
-                                            end
-                                        end
-                                        return count
-                                    end
-                                    local oreCount = countOres()
-                                    tweenHumanoidRootPart(hrp, positionCargoVolume.CFrame * CFrame.new(0, 3, 0))
-                                    task.wait(0.3)
-                                    cargoPrompt.HoldDuration = 0
-                                    fireproximityprompt(cargoPrompt)
-                                    task.wait(0.3)
-                                    tweenHumanoidRootPart(hrp, savedCFrame)
-                                    Rayfield:Notify({
-                                        Title = "Ore Sold",
-                                        Content = "Successfully sold " .. oreCount .. " ores.",
-                                        Duration = 3,
-                                        Image = "check",
-                                    })
-                                else
-                                    Rayfield:Notify({
-                                        Title = "Error",
-                                        Content = "No working CargoVolume found!",
-                                        Duration = 3,
-                                        Image = "circle-x",
-                                    })
-                                end
+                            local okSell, sellErr, oreCount = sellOreBySelectedMethod()
+                            if okSell then
+                                Rayfield:Notify({
+                                    Title = "Ore Sold",
+                                    Content = "Successfully sold " .. tostring(oreCount) .. " ores.",
+                                    Duration = 3,
+                                    Image = "check",
+                                })
                             else
                                 Rayfield:Notify({
                                     Title = "Error",
-                                    Content = "FactoryGridItemsServer not found!",
+                                    Content = tostring(sellErr),
                                     Duration = 3,
                                     Image = "circle-x",
                                 })
