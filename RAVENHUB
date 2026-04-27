@@ -586,7 +586,7 @@ end
 
 local destroyCard = Instance.new("TextButton")
 destroyCard.Size = UDim2.new(1, 0, 0, 42)
-destroyCard.BackgroundColor3 = Color3.fromRGB(255, 95, 86)
+destroyCard.BackgroundColor3 = theme.accent
 destroyCard.BorderSizePixel = 0
 destroyCard.Text = "Destroy Hub (run cleanup)"
 destroyCard.Font = Enum.Font.GothamSemibold
@@ -595,6 +595,7 @@ destroyCard.TextColor3 = Color3.fromRGB(255, 255, 255)
 destroyCard.Parent = settingsPage
 round(destroyCard, 10)
 destroyCard.MouseButton1Click:Connect(destroyHub)
+table.insert(accentButtons, destroyCard)
 
 local function addThemeButton(parent, titleText, presetName)
     local button = Instance.new("TextButton")
@@ -635,6 +636,42 @@ table.insert(accentButtons, keybindButton)
 keybindButton.MouseButton1Click:Connect(function()
     waitingForToggleKey = true
     keybindButton.Text = "Press any key..."
+end)
+
+local function refreshKeybindLabels()
+    local keyName = keyNameFromCode(menuToggleKey)
+    keybindLabel.Text = "Toggle key: " .. keyName
+    launcher.Text = "Open Hub [" .. keyName .. "]"
+end
+
+refreshKeybindLabels()
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then
+        return
+    end
+
+    if input.UserInputType ~= Enum.UserInputType.Keyboard then
+        return
+    end
+
+    if waitingForToggleKey then
+        if input.KeyCode ~= Enum.KeyCode.Unknown then
+            menuToggleKey = input.KeyCode
+            waitingForToggleKey = false
+            keybindButton.Text = "Set Toggle Key"
+            refreshKeybindLabels()
+        end
+        return
+    end
+
+    if UserInputService:GetFocusedTextBox() then
+        return
+    end
+
+    if input.KeyCode == menuToggleKey then
+        setHubVisible(not main.Visible)
+    end
 end)
 
 -- ============================================================
@@ -688,34 +725,6 @@ local function loadScriptModule(scriptInfo)
             -- Compatibility call shape from old hub: moduleFunc(Window, runtimeInfo)
             moduleFunc(customHubApi, runtimeInfo)
         end)
-
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then
-        return
-    end
-
-    if input.UserInputType ~= Enum.UserInputType.Keyboard then
-        return
-    end
-
-    if waitingForToggleKey then
-        if input.KeyCode ~= Enum.KeyCode.Unknown then
-            menuToggleKey = input.KeyCode
-            waitingForToggleKey = false
-            keybindButton.Text = "Set Toggle Key"
-            keybindLabel.Text = "Toggle key: " .. keyNameFromCode(menuToggleKey)
-        end
-        return
-    end
-
-    if UserInputService:GetFocusedTextBox() then
-        return
-    end
-
-    if input.KeyCode == menuToggleKey then
-        setHubVisible(not main.Visible)
-    end
-end)
 
         if ok then
             setScriptStatus(scriptInfo.name, "loaded")
