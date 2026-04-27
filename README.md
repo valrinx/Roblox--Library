@@ -27,6 +27,7 @@
 
 ### Change Log (Roblox--Library/Ultimate Mining Tycoon)
 - เพิ่ม `RavenHub_UMT_AutoSettings.json` (export แบบ flat สำหรับ `readfile`) รวม `oreNameByColorSignature` / signature maps / ignore list ตามโปรไฟล์ UMT; เพิ่มชื่อแร่ `EXPLOSIVES` ใน `knownOreNames` + สี/หมวด ESP
+- `Ultimate Mining Tycoon`: รวม `espRescanIfEnabled` / `espSyncAfterMappingUpdate` ลดโค้ดซ้ำระหว่าง Import Full / Reset mapping / ฟิลเตอร์ ESP / Refresh
 - เริ่มเพิ่มเอกสารภาพรวมของโปรเจกต์ใน `README.md`
 - แก้ `modules/Ultimate Mining Tycoon` ให้ Ore ESP ติดกับแร่ที่เป็นทั้ง `BasePart` และ `Model`
 - เพิ่มปุ่ม `Destroy Menu (Reload Script)` ใน `modules/Ultimate Mining Tycoon` เพื่อปิดสคริปต์และรันใหม่ได้ทันที
@@ -85,7 +86,7 @@
 - ปรับสีไฮไลท์ `Ore ESP` ให้ตรง `part.Color` มากขึ้น: ตัดการผสมสีโดยตั้ง `OutlineColor = FillColor` และตั้ง `FillTransparency = 0` เพื่อไม่ให้ blend กับฉากหลัง/แสง
 - แก้สีไฮไลท์ยังเพี้ยน (โดยเฉพาะ `Neon`): เปลี่ยน visual ของ ESP จาก `Highlight` เป็น `BoxHandleAdornment` (ใช้ `Color3` ตรง + คุม transparency เอง) เพื่อให้สีตรงกับ `part.Color` มากที่สุด
 - แก้ `Ore ESP` สีเขียว/ผิดสีทั้งที่ Properties เป็นสีอื่น: ปรับ `getOreRenderPart()` ให้เลือก `MeshPart`/ชิ้นที่เห็นจริงก่อน (และ fallback เป็น `BasePart` ที่ใหญ่สุด) เพื่ออ่าน `part.Color` จากชิ้นที่ถูกต้อง ไม่หลุดไปอ่านจาก part ลูกที่สีคนละตัว
-- เพิ่มระบบแชร์ mapping ชื่อแร่ให้คนอื่นไม่ต้องตั้งเอง: รองรับ `sharedOreNameByColorSignature` (นำเข้า/ส่งออก JSON ผ่านปุ่ม Export/Import) และให้ ESP ใช้ shared map ก่อน map ส่วนตัวในโหมด strict
+- แชร์ mapping ชื่อแร่: ใช้ **Export / Import Full Settings** (รวม `sharedOreNameByColorSignature` + map อื่นๆ); ลบปุ่ม Export/Import Shared Color Map แยกเพื่อลดซ้ำ
 - เปลี่ยนระบบวาร์ปหลักทั้งหมดใน `modules/Ultimate Mining Tycoon` ให้ใช้ Tween (`tweenHumanoidRootPart`) แทนการเซ็ต `CFrame` ตรง เพื่อให้การย้ายตำแหน่งลื่นและสม่ำเสมอทั้ง Teleport/Waypoint/Shop/Sell/Vehicle
 - แก้ `Ore Ignore List` ให้แสดงรายการแร่ครบทั้งระบบ (จาก `knownOreNames` + mapping ที่เรียนรู้) ไม่ยึดเฉพาะแร่ที่กำลังสปอนใน `PlacedOre` เพื่อเลือก ignore ได้ครบตั้งแต่เริ่ม
 - เพิ่มโหมด `Safe Profile` ใน `modules/Ultimate Mining Tycoon`: ปรับ Auto Mine/Auto Sell ให้สุ่มจังหวะมากขึ้น, ใส่ cooldown, ชะลอ tween, และ pause อัตโนมัติเมื่อมีผู้เล่นอยู่ใกล้ เพื่อลดพฤติกรรมที่ดูผิดธรรมชาติ
