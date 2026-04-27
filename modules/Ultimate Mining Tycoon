@@ -19,6 +19,12 @@ return function(Window, scriptInfo)
         autoSellEnabled = false,
         autoSellOreCount = 8,
         autoSellMethod = "Remote",
+        walkSpeed = 16,
+        infiniteJumpEnabled = false,
+        sellOreKey = "",
+        oreEspEnabled = false,
+        oreEspDistance = 100,
+        oreEspFilter = "All",
         oreNameById = {},
         oreNameByRuntime = {},
         oreNameBySignature = {},
@@ -75,6 +81,16 @@ return function(Window, scriptInfo)
         autoSettingsLoaded.autoSellEnabled = decoded.autoSellEnabled == true
         autoSettingsLoaded.autoSellOreCount = tonumber(decoded.autoSellOreCount) or autoSettingsLoaded.autoSellOreCount
         autoSettingsLoaded.autoSellMethod = "Remote"
+        autoSettingsLoaded.walkSpeed = tonumber(decoded.walkSpeed) or autoSettingsLoaded.walkSpeed
+        autoSettingsLoaded.infiniteJumpEnabled = decoded.infiniteJumpEnabled == true
+        if type(decoded.sellOreKey) == "string" then
+            autoSettingsLoaded.sellOreKey = decoded.sellOreKey
+        end
+        autoSettingsLoaded.oreEspEnabled = decoded.oreEspEnabled == true
+        autoSettingsLoaded.oreEspDistance = tonumber(decoded.oreEspDistance) or autoSettingsLoaded.oreEspDistance
+        if type(decoded.oreEspFilter) == "string" and decoded.oreEspFilter ~= "" then
+            autoSettingsLoaded.oreEspFilter = decoded.oreEspFilter
+        end
         if isStringMap(decoded.oreNameById) then
             autoSettingsLoaded.oreNameById = decoded.oreNameById
         end
@@ -528,29 +544,49 @@ return function(Window, scriptInfo)
             end,
         })
         
+        local walkSpeedValue = math.clamp(tonumber(autoSettingsLoaded.walkSpeed) or 16, 16, 500)
+        local infiniteJumpEnabled = autoSettingsLoaded.infiniteJumpEnabled == true
+
         local Slider = Misc:CreateSlider({
             Name = "⚡ WalkSpeed Input",
             Range = {16, 500},
             Increment = 10,
             Suffix = "Speed",
-            CurrentValue = 16,
+            CurrentValue = walkSpeedValue,
             Flag = "Slider1", 
             Callback = function(Value)
+                walkSpeedValue = Value
                 local player = game.Players.LocalPlayer
                 local character = player.Character or player.CharacterAdded:Wait()
                 local humanoid = character:FindFirstChildOfClass("Humanoid")
                 if humanoid then
                     humanoid.WalkSpeed = Value
                 end
+                if saveAutoSettings then
+                    saveAutoSettings()
+                end
             end,   
         })
+        task.defer(function()
+            local player = game.Players.LocalPlayer
+            local character = player and (player.Character or player.CharacterAdded:Wait())
+            local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+            if humanoid then
+                humanoid.WalkSpeed = walkSpeedValue
+            end
+        end)
         
         local Toggle = Misc:CreateToggle({
             Name = "💥 Infinite Jump",
-            CurrentValue = false,
+            CurrentValue = infiniteJumpEnabled,
             Flag = "Toggle1",
             Callback = function(Value)
+               infiniteJumpEnabled = Value
                if Value then
+                  if infiniteJumpConnection then
+                     infiniteJumpConnection:Disconnect()
+                     infiniteJumpConnection = nil
+                  end
                   infiniteJumpConnection = game:GetService("UserInputService").JumpRequest:Connect(function()
                      local player = game.Players.LocalPlayer
                      local character = player.Character or player.CharacterAdded:Wait()
@@ -565,16 +601,26 @@ return function(Window, scriptInfo)
                      infiniteJumpConnection = nil
                   end
                end
+               if saveAutoSettings then
+                  saveAutoSettings()
+               end
             end,
         })
+        if infiniteJumpEnabled then
+            task.defer(function()
+                pcall(function()
+                    Toggle:Set(true)
+                end)
+            end)
+        end
         
         -- ============================================================
         -- ESP SYSTEM
         -- ============================================================
         local ESP = {
-            enabled       = false,
-            maxDistance   = 100,
-            filterOre     = "All",
+            enabled       = autoSettingsLoaded.oreEspEnabled == true,
+            maxDistance   = math.clamp(tonumber(autoSettingsLoaded.oreEspDistance) or 100, 0, 500),
+            filterOre     = autoSettingsLoaded.oreEspFilter or "All",
             activeVisuals = {},
             connections   = {},
             useAdornment  = false, -- use Highlight to avoid blocking label text
@@ -1670,11 +1716,28 @@ return function(Window, scriptInfo)
                 workspace:FindFirstChild("PlacedOre"),
                 workspace:FindFirstChild("SpawnedBlocks"),
             }
+            local seen = {}
+            local function tryApplyTarget(target)
+                if not target or seen[target] then return end
+                if target:IsA("BasePart") or target:IsA("Model") then
+                    seen[target] = true
+                    espApply(target)
+                end
+            end
             for _, folder in ipairs(folders) do
                 if folder then
                     for _, child in ipairs(folder:GetChildren()) do
                         if child:IsA("BasePart") or child:IsA("Model") then
-                            espApply(child)
+                            tryApplyTarget(child)
+                        elseif child:IsA("Folder") then
+                            for _, desc in ipairs(child:GetDescendants()) do
+                                if desc:IsA("BasePart") then
+                                    local candidate = findOreTargetFromInstance(desc) or desc
+                                    tryApplyTarget(candidate)
+                                elseif desc:IsA("Model") then
+                                    tryApplyTarget(desc)
+                                end
+                            end
                         end
                     end
                 end
@@ -1820,6 +1883,16 @@ return function(Window, scriptInfo)
                 if child:IsA("BasePart") or child:IsA("Model") then
                     task.wait(0.1)
                     espApply(child)
+                elseif child:IsA("Folder") then
+                    task.wait(0.1)
+                    for _, desc in ipairs(child:GetDescendants()) do
+                        if desc:IsA("BasePart") then
+                            local candidate = findOreTargetFromInstance(desc) or desc
+                            espApply(candidate)
+                        elseif desc:IsA("Model") then
+                            espApply(desc)
+                        end
+                    end
                 end
             end)
             trackConnection(childAddedConn)
@@ -1882,6 +1955,12 @@ return function(Window, scriptInfo)
                     autoSellEnabled = autoSellEnabled,
                     autoSellOreCount = autoSellOreCount,
                     autoSellMethod = autoSellMethod,
+                    walkSpeed = walkSpeedValue,
+                    infiniteJumpEnabled = infiniteJumpEnabled,
+                    sellOreKey = sellOreKeyValue,
+                    oreEspEnabled = ESP.enabled,
+                    oreEspDistance = ESP.maxDistance,
+                    oreEspFilter = ESP.filterOre,
                     oreNameById = oreNameById,
                     oreNameByRuntime = oreNameByRuntime,
                     oreNameBySignature = oreNameBySignature,
@@ -2660,19 +2739,24 @@ return function(Window, scriptInfo)
         
         Farm:CreateLabel("💡 Sells when ore capacity reaches max (depends on backpack capacity)")
     
+        local sellOreKeyValue = autoSettingsLoaded.sellOreKey or ""
         local Input = Farm:CreateInput({
             Name = "Sell Ore Key (Optional)",
-            CurrentValue = "",
+            CurrentValue = sellOreKeyValue,
             PlaceholderText = "Press key to sell ore (e.g. 'F')",
             RemoveTextAfterFocusLost = false,
             Flag = "SellOreKey",
             Callback = function(Text)
                 task.spawn(function() task.wait(0.1) end)
+                sellOreKeyValue = tostring(Text or "")
+                if saveAutoSettings then
+                    saveAutoSettings()
+                end
+                if _G.sellOreKeyConnection then
+                    _G.sellOreKeyConnection:Disconnect()
+                    _G.sellOreKeyConnection = nil
+                end
                 if Text and Text ~= "" then
-                    if _G.sellOreKeyConnection then
-                        _G.sellOreKeyConnection:Disconnect()
-                        _G.sellOreKeyConnection = nil
-                    end
                     _G.sellOreKeyConnection = game:GetService("UserInputService").InputBegan:Connect(function(input, gameProcessed)
                         if gameProcessed then return end
                         if input.KeyCode.Name:lower() == Text:lower() then
@@ -2703,6 +2787,13 @@ return function(Window, scriptInfo)
                 end
             end,
         })
+        if sellOreKeyValue ~= "" then
+            task.defer(function()
+                pcall(function()
+                    Input:Set(sellOreKeyValue)
+                end)
+            end)
+        end
     
         -- ORE ESP UI
         local OreSection = OreESP:CreateSection("⚙️ Ore ESP Selection")
@@ -3076,8 +3167,8 @@ return function(Window, scriptInfo)
     
         OreESP:CreateToggle({
             Name = "Ore ESP",
-            CurrentValue = false,
-            Flag = nil,
+            CurrentValue = ESP.enabled,
+            Flag = "OreEspEnabled",
             Callback = function(Value)
                 ESP.enabled = Value
                 if Value then
@@ -3091,6 +3182,9 @@ return function(Window, scriptInfo)
                 else
                     espClearAll()
                 end
+                if saveAutoSettings then
+                    saveAutoSettings()
+                end
             end,
         })
     
@@ -3099,19 +3193,34 @@ return function(Window, scriptInfo)
             Range = {0, 500},
             Increment = 5,
             Suffix = "studs",
-            CurrentValue = 100,
-            Flag = nil,
+            CurrentValue = ESP.maxDistance,
+            Flag = "OreEspDistance",
             Callback = function(Value)
                 ESP.maxDistance = Value
+                if saveAutoSettings then
+                    saveAutoSettings()
+                end
             end,
         })
-    
+
+        local oreTypeOptions = getOreTypes()
+        local hasSavedFilter = false
+        for _, option in ipairs(oreTypeOptions) do
+            if option == ESP.filterOre then
+                hasSavedFilter = true
+                break
+            end
+        end
+        if not hasSavedFilter then
+            ESP.filterOre = "All"
+        end
+
         OreESP:CreateDropdown({
             Name = "ESP Filter Ore Type",
-            Options = getOreTypes(),
-            CurrentOption = {"All"},
+            Options = oreTypeOptions,
+            CurrentOption = {ESP.filterOre},
             MultipleOptions = false,
-            Flag = nil,
+            Flag = "OreEspFilter",
             Callback = function(Option)
                 local selected = type(Option) == "table" and Option[1] or Option
                 ESP.filterOre = selected or "All"
@@ -3119,8 +3228,19 @@ return function(Window, scriptInfo)
                     espClearAll()
                     espScanAll()
                 end
+                if saveAutoSettings then
+                    saveAutoSettings()
+                end
             end,
         })
+        if ESP.enabled then
+            task.defer(function()
+                pcall(function()
+                    espClearAll()
+                    espScanAll()
+                end)
+            end)
+        end
     
         OreESP:CreateButton({
             Name = "Refresh ESP Scan",
