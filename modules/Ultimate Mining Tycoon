@@ -2208,36 +2208,10 @@ return function(Window, scriptInfo)
                                     workspace:FindFirstChild("SpawnedBlocks"),
                                 }
 
-                                local function pickClosestFromOreEsp()
-                                    if not ESP or not ESP.activeVisuals then return nil, math.huge end
-                                    local bestTarget, bestDist = nil, math.huge
-                                    for target, info in pairs(ESP.activeVisuals) do
-                                        if target and target.Parent then
-                                            local renderPart = (info and info.renderPart) or getOreRenderPart(target)
-                                            if renderPart and renderPart.Parent then
-                                                local oreName = getOreNameForEsp(target, renderPart)
-                                                if not isIgnoredOre(oreName) then
-                                                    local dist = (root.Position - renderPart.Position).Magnitude
-                                                    if dist <= autoMineRange and dist < bestDist then
-                                                        bestTarget = target
-                                                        bestDist = dist
-                                                    end
-                                                end
-                                            end
-                                        end
-                                    end
-                                    return bestTarget, bestDist
-                                end
-
                                 if isTargetValid(lockedTarget, root) then
                                     closestBlock = lockedTarget
                                 else
                                     resetTargetLock()
-                                    local espTarget, espDist = pickClosestFromOreEsp()
-                                    if espTarget then
-                                        closestBlock = espTarget
-                                        closestDist = espDist
-                                    else
                                     for _, container in ipairs(oreContainers) do
                                         if container then
                                             for _,v in pairs(container:GetChildren()) do
@@ -2253,7 +2227,6 @@ return function(Window, scriptInfo)
                                                 end
                                             end
                                         end
-                                    end
                                     end
                                     lockedTarget = closestBlock
                                     if lockedTarget then
