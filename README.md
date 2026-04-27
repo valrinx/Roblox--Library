@@ -106,6 +106,7 @@
 - แก้ซ้ำ `Auto Mine` ยังไม่เจอ ore หลัง rollback: ผ่อนเงื่อนไข `mineable` ให้เช็ค `GridPosition/ChunkPosition` แบบ deep (descendants) ก่อนคัดทิ้ง เพราะบางก้อนเก็บ attribute ไว้ที่ชิ้นย่อยไม่ใช่ node บนสุด
 - ปรับ `Auto Mine` ให้หาเป้าแบบ `Ore ESP` เป็นหลัก: เลือก target จาก `ESP.activeVisuals` (ก้อนที่ ESP เห็นอยู่แล้ว) แล้วค่อย fallback ไปสแกน `PlacedOre/SpawnedBlocks` และเลิกบังคับ `mineable` เพื่อกันกรองทิ้งผิด
 - Rollback เพิ่ม: กลับไปใช้วิธีหาเป้าแบบแรก (สแกน `PlacedOre/SpawnedBlocks:GetChildren()` แล้วเลือกก้อนที่ใกล้สุดในระยะ) ไม่พึ่ง `Ore ESP` ในการเลือกเป้า
+- ปรับ `Ore ESP` ให้ติดครบขึ้นในแมพที่แร่ถูกซ้อนในโฟลเดอร์: สแกน descendants ของ `PlacedOre/SpawnedBlocks` สำหรับการสร้างไฮไลท์ และขยายระบบบันทึก settings ให้ครอบคลุมเพิ่ม (`WalkSpeed`, `Infinite Jump`, `Sell Ore Key`, `Ore ESP` เปิด/ระยะ/ฟิลเตอร์)
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
