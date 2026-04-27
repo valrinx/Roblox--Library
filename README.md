@@ -100,6 +100,7 @@
 - ลบระบบเคลื่อนที่ `TP/Tween` ออกจาก `modules/Ultimate Mining Tycoon` ทั้งแท็บ Teleport/Waypoint และปรับ Vehicle/Shop ให้ยิง `ProximityPrompt` ระยะไกลแทน
 - ปรับ `Ore ESP` เป็นโหมด `Highlight` (ลด fill/คง outline) เพื่อลดการบังข้อความป้าย และทำให้สีมองชัดขึ้น
 - แก้ `Ore Ignore List` ใน `Auto Mine`: เปลี่ยนให้คัดแร่จากชื่อเส้นทางเดียวกับ ESP (`getOreNameForEsp`) และ normalize รายชื่อ ignore ใน callback เพื่อกันชื่อไม่ตรงแล้วยังถูกขุด
+- ปรับ `Auto Mine` ให้ลดการสแปมขุด: ใช้ค่าแรงขุดตาม Pickaxe (`Damage/MiningPower` ฯลฯ) แทนค่าคงที่, หน่วงจังหวะแบบ adaptive ตามดาเมจ, และเพิ่ม backoff เมื่อ durability/HP ของก้อนไม่ขยับ
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
