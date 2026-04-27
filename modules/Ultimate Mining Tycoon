@@ -1009,7 +1009,7 @@ return function(Window, scriptInfo)
 
         local oreCategoryByName = {
             ["Tin"] = "Common Metal", ["Iron"] = "Common Metal", ["Lead"] = "Common Metal", ["Aluminium"] = "Common Metal",
-            ["Silver"] = "Rare Metal", ["Sliver"] = "Rare Metal", ["Cobalt"] = "Rare Metal", ["Tungsten"] = "Rare Metal", ["Titanium"] = "Rare Metal",
+            ["Silver"] = "Rare Metal", ["Unknow"] = "Rare Metal", ["Cobalt"] = "Rare Metal", ["Tungsten"] = "Rare Metal", ["Titanium"] = "Rare Metal",
             ["Vanadium"] = "Rare Metal", ["Rhodium"] = "Rare Metal", ["Iridium"] = "Rare Metal", ["Palladium"] = "Rare Metal",
             ["Uranium"] = "Radioactive", ["Plutonium"] = "Radioactive", ["Thorium"] = "Radioactive",
             ["Gold"] = "Precious",
@@ -1037,14 +1037,14 @@ return function(Window, scriptInfo)
         local getOreRenderPart
         local getOreIdentifierDeep
         local knownOreNames = {
-            "Tin", "Iron", "Lead", "Cobalt", "Aluminium", "Silver", "Sliver", "Uranium", "Vanadium",
+            "Tin", "Iron", "Lead", "Cobalt", "Aluminium", "Silver", "Unknow", "Uranium", "Vanadium",
             "Tungsten", "Gold", "Titanium", "Palladium", "Plutonium", "Mithril", "Thorium",
             "Iridium", "Adamantium", "Rhodium", "Unobtanium", "Topaz", "Emerald", "Sapphire",
             "Ruby", "Diamond", "Poudretteite", "Zultanite", "Grandidierite", "Musgravite", "Painite",
         }
         local knownOreCanonical = {
             ["tin"] = "Tin", ["iron"] = "Iron", ["lead"] = "Lead", ["cobalt"] = "Cobalt", ["aluminium"] = "Aluminium",
-            ["silver"] = "Silver", ["sliver"] = "Sliver", ["uranium"] = "Uranium", ["vanadium"] = "Vanadium",
+            ["silver"] = "Silver", ["unknow"] = "Unknow", ["uranium"] = "Uranium", ["vanadium"] = "Vanadium",
             ["tungsten"] = "Tungsten", ["gold"] = "Gold", ["titanium"] = "Titanium", ["palladium"] = "Palladium",
             ["plutonium"] = "Plutonium", ["mithril"] = "Mithril", ["thorium"] = "Thorium", ["iridium"] = "Iridium",
             ["adamantium"] = "Adamantium", ["rhodium"] = "Rhodium", ["unobtanium"] = "Unobtanium",
@@ -2126,7 +2126,7 @@ return function(Window, scriptInfo)
                 options = {
                     "Adamantium", "Aluminium", "Cobalt", "Diamond", "Emerald", "Gold", "Grandidierite",
                     "Iron", "Iridium", "Lead", "Mithril", "Musgravite", "OreMesh", "Palladium", "Painite",
-                    "Plutonium", "Poudretteite", "Rhodium", "Ruby", "Sapphire", "Silver", "Sliver", "Thorium",
+                    "Plutonium", "Poudretteite", "Rhodium", "Ruby", "Sapphire", "Silver", "Unknow", "Thorium",
                     "Tin", "Titanium", "Topaz", "Tungsten", "Unobtanium", "Uranium", "Vanadium", "Zultanite",
                 }
             end
