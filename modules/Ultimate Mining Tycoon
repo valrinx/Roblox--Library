@@ -768,32 +768,6 @@ return function(Window, scriptInfo)
             ["poudretteite"] = "Poudretteite", ["zultanite"] = "Zultanite", ["grandidierite"] = "Grandidierite",
             ["musgravite"] = "Musgravite", ["painite"] = "Painite",
         }
-        -- Sell price & RequiredStrength per repo `Ore list`; Auto Mine skips ores below pickaxe strength and prefers higher sell price.
-        local oreAutoMineStats = {
-            Tin = { price = 10, required = 6 },
-            Iron = { price = 20, required = 6 },
-            Lead = { price = 30, required = 7 },
-            Cobalt = { price = 50, required = 12 },
-            Aluminium = { price = 65, required = 18 },
-            Silver = { price = 150, required = 18 },
-            Uranium = { price = 180, required = 18 },
-            Vanadium = { price = 240, required = 22 },
-            Tungsten = { price = 300, required = 45 },
-            Gold = { price = 350, required = 22 },
-            Titanium = { price = 400, required = 24 },
-            Molybdenum = { price = 600, required = 75 },
-            Plutonium = { price = 1000, required = 99 },
-            Palladium = { price = 1200, required = 120 },
-            Mithril = { price = 200, required = nil },
-            Thorium = { price = 3200, required = 270 },
-            Iridium = { price = 3700, required = 180 },
-            Adamantium = { price = 4500, required = 300 },
-            Rhodium = { price = 15000, required = 300 },
-            Unobtanium = { price = 30000, required = 340 },
-            ["Blue Chalk"] = { price = 20, required = 6 },
-            ["Green Chalk"] = { price = 30, required = 6 },
-            ["Red Chalk"] = { price = 40, required = 6 },
-        }
         local genericOreNames = {
             ["Part"] = true,
             ["MeshPart"] = true,
@@ -2237,10 +2211,9 @@ return function(Window, scriptInfo)
                                 local child = instance:FindFirstChild(key, true)
                                 if child then
                                     local n = nil
-                                    if child:IsA("NumberValue") or child:IsA("IntValue") then
+                                    if child:IsA("NumberValue") or child:IsA("IntValue") or child:IsA("DoubleValue") then
                                         n = child.Value
-                                    end
-                                    if child:IsA("StringValue") then
+                                    elseif child:IsA("StringValue") then
                                         n = tonumber(child.Value)
                                     end
                                     if n then return n end
@@ -2249,36 +2222,231 @@ return function(Window, scriptInfo)
                             return nil
                         end
 
-                        local function getOreEconomyForAutoMine(oreName, target, renderPart)
-                            local canonical = canonicalizeOreName(oreName) or pickKnownOreFromText(oreName)
-                            local row = canonical and oreAutoMineStats[canonical]
-                            local required = row and row.required
-                            local price = row and row.price
-                            if required == nil and target then
-                                required = getNumericByKeys(target, {
-                                    "RequiredStrength", "OreStrength", "MinPickaxeStrength", "StrengthRequirement", "MineRequirement",
-                                })
+                        local economyHintCache = setmetatable({}, { __mode = "k" })
+                        local ECON_HINT_CACHE_TTL = 1.2
+
+                        local function parseStrengthHintFromText(text)
+                            if type(text) ~= "string" or text == "" then return nil end
+                            local lower = string.lower(text)
+                            local n = lower:match("needs%s+(%d+)%s+strength")
+                            if n then return tonumber(n) end
+                            n = lower:match("need%s+(%d+)%s+strength")
+                            if n then return tonumber(n) end
+                            n = lower:match("strength%s+required%s*:?%s*(%d+)")
+                            if n then return tonumber(n) end
+                            n = lower:match("required%s+strength%s*:?%s*(%d+)")
+                            if n then return tonumber(n) end
+                            n = lower:match("(%d+)%s+strength%s+required")
+                            if n then return tonumber(n) end
+                            n = lower:match("min%s*(%d+)%s+strength")
+                            if n then return tonumber(n) end
+                            n = lower:match("(%d+)%s+pickaxe%s+strength")
+                            if n then return tonumber(n) end
+                            n = lower:match("(%d+)%s+mining%s+power")
+                            if n then return tonumber(n) end
+                            n = lower:match("(%d+)%s+strength")
+                            if n then return tonumber(n) end
+                            return nil
+                        end
+
+                        local function parsePriceHintFromText(text)
+                            if type(text) ~= "string" or text == "" then return nil end
+                            local n = text:match("%$([%d,]+)")
+                            if n then
+                                n = n:gsub(",", "")
+                                local v = tonumber(n)
+                                if v then return v end
                             end
-                            if required == nil and renderPart then
-                                required = getNumericByKeys(renderPart, {
-                                    "RequiredStrength", "OreStrength", "MinPickaxeStrength", "StrengthRequirement", "MineRequirement",
-                                })
+                            local lower = string.lower(text)
+                            n = lower:match("sell%s*:?%s*%$?([%d,]+)")
+                            if n then
+                                n = n:gsub(",", "")
+                                local v = tonumber(n)
+                                if v then return v end
                             end
-                            if price == nil and target then
-                                price = getNumericByKeys(target, {
-                                    "SellPrice", "OrePrice", "Price", "Value", "Worth",
-                                })
+                            n = lower:match("worth%s*:?%s*%$?([%d,]+)")
+                            if n then
+                                n = n:gsub(",", "")
+                                local v = tonumber(n)
+                                if v then return v end
                             end
-                            if price == nil and renderPart then
-                                price = getNumericByKeys(renderPart, {
-                                    "SellPrice", "OrePrice", "Price", "Value", "Worth",
-                                })
+                            n = lower:match("price%s*:?%s*%$?([%d,]+)")
+                            if n then
+                                n = n:gsub(",", "")
+                                local v = tonumber(n)
+                                if v then return v end
+                            end
+                            n = lower:match("(%d+)%s+coins?")
+                            if n then return tonumber(n) end
+                            n = lower:match("(%d+)%s+credits?")
+                            if n then return tonumber(n) end
+                            return nil
+                        end
+
+                        local function considerTextForOreEconomy(text, state)
+                            if type(state) ~= "table" then return end
+                            if state.required == nil then
+                                local s = parseStrengthHintFromText(text)
+                                if s then state.required = s end
+                            end
+                            if state.price == nil then
+                                local p = parsePriceHintFromText(text)
+                                if p then state.price = p end
+                            end
+                        end
+
+                        local function scanInstanceTreeForEconomyHints(root, state)
+                            if not root or not root.GetDescendants then return end
+                            for _, d in ipairs(root:GetDescendants()) do
+                                if d:IsA("TextLabel") or d:IsA("TextButton") or d:IsA("TextBox") then
+                                    local ok, txt = pcall(function()
+                                        return d.Text
+                                    end)
+                                    if ok and type(txt) == "string" then
+                                        considerTextForOreEconomy(txt, state)
+                                    end
+                                elseif d:IsA("StringValue") then
+                                    considerTextForOreEconomy(d.Value, state)
+                                elseif d:IsA("ProximityPrompt") then
+                                    considerTextForOreEconomy(d.ObjectText, state)
+                                    considerTextForOreEconomy(d.ActionText, state)
+                                end
+                            end
+                        end
+
+                        local function readLiveOreEconomyFromGame(target, renderPart)
+                            local state = { required = nil, price = nil }
+                            local strengthAttrKeys = {
+                                "RequiredStrength", "RequiredMiningPower", "MinPickaxeStrength", "MinPickaxeDamage",
+                                "MinMiningPower", "StrengthRequirement", "MineRequirement", "MineStrengthRequirement",
+                                "PickaxeStrengthRequired", "OreStrengthRequired", "MiningRequirement", "RequiredPickaxeStrength",
+                            }
+                            local priceAttrKeys = {
+                                "SellPrice", "OrePrice", "Price", "Value", "Worth", "OreValue", "SellValue", "CreditValue",
+                                "MoneyValue", "CashValue", "ShopPrice", "VendorPrice",
+                            }
+                            local attrRoots = {}
+                            local seenAttr = {}
+                            local function addAttrRoot(r)
+                                if r and not seenAttr[r] then
+                                    seenAttr[r] = true
+                                    table.insert(attrRoots, r)
+                                end
+                            end
+                            addAttrRoot(target)
+                            addAttrRoot(renderPart)
+                            for _, root in ipairs(attrRoots) do
+                                if state.required == nil then
+                                    state.required = getNumericByKeys(root, strengthAttrKeys)
+                                end
+                                if state.price == nil then
+                                    state.price = getNumericByKeys(root, priceAttrKeys)
+                                end
+                            end
+                            if (state.required == nil or state.price == nil) and target and target.Parent then
+                                if state.required == nil then
+                                    state.required = getNumericByKeys(target.Parent, strengthAttrKeys)
+                                end
+                                if state.price == nil then
+                                    state.price = getNumericByKeys(target.Parent, priceAttrKeys)
+                                end
+                            end
+                            local hintRoots = {}
+                            local seenHint = {}
+                            local function addHintRoot(r)
+                                if r and not seenHint[r] then
+                                    seenHint[r] = true
+                                    table.insert(hintRoots, r)
+                                end
+                            end
+                            if target then
+                                addHintRoot(target)
+                            end
+                            if renderPart and renderPart ~= target then
+                                if not target or not renderPart:IsDescendantOf(target) then
+                                    addHintRoot(renderPart)
+                                end
+                            end
+                            for _, root in ipairs(hintRoots) do
+                                if state.required == nil or state.price == nil then
+                                    scanInstanceTreeForEconomyHints(root, state)
+                                end
+                            end
+                            if (state.required == nil or state.price == nil) and target and target.Parent then
+                                scanInstanceTreeForEconomyHints(target.Parent, state)
+                            end
+                            local valueNameHintsStrength = {
+                                "requiredstrength", "reqstrength", "minpickaxe", "pickaxereq", "strengthreq",
+                                "miningrequirement", "minmining", "orestrengthreq",
+                            }
+                            local valueNameHintsPrice = {
+                                "sellprice", "oreprice", "orevalue", "sellvalue", "worth", "vendorprice", "shopprice",
+                            }
+                            local function scanValuesByNameHints(root, hints, assignRequired)
+                                if not root or not root.GetDescendants then return end
+                                for _, d in ipairs(root:GetDescendants()) do
+                                    if d:IsA("IntValue") or d:IsA("NumberValue") or d:IsA("DoubleValue") then
+                                        local nn = string.lower(d.Name)
+                                        for _, h in ipairs(hints) do
+                                            if string.find(nn, h, 1, true) then
+                                                local v = tonumber(d.Value)
+                                                if v then
+                                                    if assignRequired then
+                                                        state.required = state.required or v
+                                                    else
+                                                        state.price = state.price or v
+                                                    end
+                                                    break
+                                                end
+                                            end
+                                        end
+                                    elseif d:IsA("StringValue") then
+                                        local nn = string.lower(d.Name)
+                                        for _, h in ipairs(hints) do
+                                            if string.find(nn, h, 1, true) then
+                                                considerTextForOreEconomy(d.Value, state)
+                                                break
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                            for _, root in ipairs(hintRoots) do
+                                if state.required == nil then
+                                    scanValuesByNameHints(root, valueNameHintsStrength, true)
+                                end
+                                if state.price == nil then
+                                    scanValuesByNameHints(root, valueNameHintsPrice, false)
+                                end
                             end
                             return {
-                                price = tonumber(price),
-                                required = required ~= nil and tonumber(required) or nil,
-                                canonical = canonical,
+                                required = state.required ~= nil and tonumber(state.required) or nil,
+                                price = state.price ~= nil and tonumber(state.price) or nil,
                             }
+                        end
+
+                        local function getOreEconomyForAutoMine(oreName, target, renderPart)
+                            local canonical = canonicalizeOreName(oreName) or pickKnownOreFromText(oreName)
+                            if target then
+                                local cached = economyHintCache[target]
+                                if cached and (os.clock() - cached.at) <= ECON_HINT_CACHE_TTL then
+                                    return {
+                                        price = cached.price,
+                                        required = cached.required,
+                                        canonical = canonical,
+                                    }
+                                end
+                            end
+                            local live = readLiveOreEconomyFromGame(target, renderPart)
+                            if target then
+                                economyHintCache[target] = {
+                                    at = os.clock(),
+                                    price = live.price,
+                                    required = live.required,
+                                }
+                            end
+                            live.canonical = canonical
+                            return live
                         end
 
                         local function pickaxeCanMineOre(pickaxeDamage, economy)
