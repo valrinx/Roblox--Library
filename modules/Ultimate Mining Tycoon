@@ -1920,6 +1920,9 @@ return function(Window, scriptInfo)
                         local remoteMinInterval = 0.12
                         local remoteBackoffInterval = 0.35
                         local remoteClientDrainConnections = {}
+                        local lastProgressTargetKey = nil
+                        local lastProgressDurability = nil
+                        local staleProgressHits = 0
 
                         local function randomRange(minValue, maxValue)
                             return minValue + (maxValue - minValue) * math.random()
@@ -2009,6 +2012,76 @@ return function(Window, scriptInfo)
                                 end
                             end
                             return nil
+                        end
+
+                        local function getNumberLike(value)
+                            if type(value) == "number" then return value end
+                            if typeof(value) == "number" then return value end
+                            if type(value) == "string" then
+                                local n = tonumber(value)
+                                if n then return n end
+                            end
+                            return nil
+                        end
+
+                        local function getNumericByKeys(instance, keys)
+                            if not instance or type(keys) ~= "table" then return nil end
+                            for _, key in ipairs(keys) do
+                                local attr = instance:GetAttribute(key)
+                                local n = getNumberLike(attr)
+                                if n then return n end
+                            end
+                            for _, key in ipairs(keys) do
+                                local child = instance:FindFirstChild(key, true)
+                                if child then
+                                    local n = nil
+                                    if child:IsA("NumberValue") or child:IsA("IntValue") then
+                                        n = child.Value
+                                    elseif child:IsA("StringValue") then
+                                        n = tonumber(child.Value)
+                                    end
+                                    if n then return n end
+                                end
+                            end
+                            return nil
+                        end
+
+                        local function resolvePickaxeDamage(tool)
+                            if not tool then return 10 end
+                            local damageKeys = {
+                                "Damage", "MineDamage", "MiningDamage", "Power", "MiningPower", "Strength", "HitPower",
+                            }
+                            local damage = getNumericByKeys(tool, damageKeys)
+                            if not damage and tool.Parent then
+                                damage = getNumericByKeys(tool.Parent, damageKeys)
+                            end
+                            damage = tonumber(damage) or 10
+                            return math.clamp(damage, 1, 9999)
+                        end
+
+                        local function getTargetDurability(target, renderPart)
+                            local hpKeys = {
+                                "Health", "HP", "HitPoints", "Hitpoints", "Durability", "MineHealth", "OreHealth", "Integrity",
+                            }
+                            local durability = getNumericByKeys(target, hpKeys)
+                            if durability == nil and renderPart then
+                                durability = getNumericByKeys(renderPart, hpKeys)
+                            end
+                            if durability == nil and target and target.GetDescendants then
+                                for _, desc in ipairs(target:GetDescendants()) do
+                                    if desc:IsA("NumberValue") or desc:IsA("IntValue") then
+                                        local n = string.lower(desc.Name)
+                                        if string.find(n, "health", 1, true)
+                                            or string.find(n, "durability", 1, true)
+                                            or string.find(n, "hp", 1, true)
+                                        then
+                                            durability = desc.Value
+                                            break
+                                        end
+                                    end
+                                end
+                            end
+                            return tonumber(durability)
                         end
 
                         local function isIgnoredOre(oreName)
@@ -2145,6 +2218,22 @@ return function(Window, scriptInfo)
                                 if closestBlock then
                                     local renderPart = getOreRenderPart(closestBlock)
                                     local oreName = getOreName(closestBlock)
+                                    local targetKey = getTargetKey(closestBlock, renderPart)
+                                    local pickaxeDamage = resolvePickaxeDamage(Tool)
+                                    local targetDurability = getTargetDurability(closestBlock, renderPart)
+                                    local adaptiveMinInterval = math.clamp(0.9 / math.max(1, pickaxeDamage), 0.08, 0.55)
+                                    if lastProgressTargetKey == targetKey and lastProgressDurability and targetDurability then
+                                        if targetDurability >= (lastProgressDurability - 0.001) then
+                                            staleProgressHits = staleProgressHits + 1
+                                        else
+                                            staleProgressHits = 0
+                                        end
+                                    else
+                                        staleProgressHits = 0
+                                    end
+                                    if staleProgressHits > 0 then
+                                        adaptiveMinInterval = math.min(0.95, adaptiveMinInterval + (staleProgressHits * 0.06))
+                                    end
                                     local gridPos = getTargetGridPositionDeep(closestBlock, renderPart)
                                     if not gridPos then
                                         local worldPos = renderPart and renderPart.Position
@@ -2159,12 +2248,12 @@ return function(Window, scriptInfo)
                                             math.floor(worldPos.Z / 4)
                                         )
                                     end
-                                    local args = {10, gridPos}
+                                    local args = {pickaxeDamage, gridPos}
                                     local activateRemote = resolveActivateRemote(Tool)
                                     if activateRemote then
                                         ensureRemoteClientDrain(activateRemote)
                                         local now = os.clock()
-                                        local minReadyAt = math.max(nextMineAllowedAt, lastMineFiredAt + remoteMinInterval)
+                                        local minReadyAt = math.max(nextMineAllowedAt, lastMineFiredAt + adaptiveMinInterval)
                                         if now < minReadyAt then
                                             task.wait(math.max(0.03, minReadyAt - now))
                                             continue
@@ -2179,6 +2268,8 @@ return function(Window, scriptInfo)
                                             continue
                                         end
                                         lastMineFiredAt = os.clock()
+                                        lastProgressTargetKey = targetKey
+                                        lastProgressDurability = targetDurability
                                         markTargetLoop(closestBlock, renderPart)
                                         if sameTargetLoops >= oreSwitchHitLimit then
                                             OreLabel:Set("Auto Mine Status: switching ore (hit limit 15)")
@@ -2187,7 +2278,8 @@ return function(Window, scriptInfo)
                                             task.wait(0.08)
                                             continue
                                         end
-                                        OreLabel:Set("Auto Mine Status: mining " .. tostring(oreName) .. " (locked x" .. tostring(sameTargetLoops) .. ")")
+                                        local hpText = targetDurability and (" | hp~" .. tostring(math.floor(targetDurability + 0.5))) or ""
+                                        OreLabel:Set("Auto Mine Status: mining " .. tostring(oreName) .. " (dmg " .. tostring(math.floor(pickaxeDamage + 0.5)) .. hpText .. ")")
                                     else
                                         OreLabel:Set("Auto Mine Status: Activate remote missing")
                                         resetTargetLock()
@@ -2196,7 +2288,7 @@ return function(Window, scriptInfo)
                                     if safeProfileEnabled then
                                         waitDelay = math.max(waitDelay, 0.45) + randomRange(0.06, 0.38)
                                     end
-                                    waitDelay = math.max(waitDelay, remoteMinInterval)
+                                    waitDelay = math.max(waitDelay, adaptiveMinInterval)
                                     nextMineAllowedAt = os.clock() + waitDelay
                                     task.wait(waitDelay)
                                     continue
