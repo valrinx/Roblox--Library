@@ -592,7 +592,7 @@ return function(Window, scriptInfo)
                 return false, err or "No working CargoVolume found!", 0
             end
 
-            local oreCount = countCarriedOres(player)
+            local oreCountBefore = countCarriedOres(player)
             local oldHold = cargoPrompt.HoldDuration
             local oldDistance = cargoPrompt.MaxActivationDistance
             local oldLos = cargoPrompt.RequiresLineOfSight
@@ -614,9 +614,15 @@ return function(Window, scriptInfo)
             end)
 
             if not okFire then
-                return false, tostring(fireErr), oreCount
+                return false, tostring(fireErr), oreCountBefore
             end
-            return true, nil, oreCount
+            task.wait(0.35)
+            local oreCountAfter = countCarriedOres(player)
+            local soldCount = math.max(0, oreCountBefore - oreCountAfter)
+            if oreCountBefore > 0 and soldCount <= 0 then
+                return false, "Remote sell blocked by server distance check.", oreCountBefore
+            end
+            return true, nil, soldCount > 0 and soldCount or oreCountBefore
         end
 
         local function sellOreWithTween()
@@ -650,7 +656,15 @@ return function(Window, scriptInfo)
             if autoSellMethod == "Tween" then
                 return sellOreWithTween()
             end
-            return sellOreFromAnywhere()
+            local okSell, sellErr, soldCount = sellOreFromAnywhere()
+            if okSell then
+                return okSell, sellErr, soldCount
+            end
+            local okTween, tweenErr, tweenSold = sellOreWithTween()
+            if okTween then
+                return true, nil, tweenSold
+            end
+            return false, string.format("%s | fallback tween failed: %s", tostring(sellErr), tostring(tweenErr)), soldCount
         end
 
         MobileSupport:CreateDropdown({
@@ -2197,7 +2211,7 @@ return function(Window, scriptInfo)
                 options = {
                     "Adamantium", "Aluminium", "Cobalt", "Diamond", "Emerald", "Gold", "Grandidierite",
                     "Iron", "Iridium", "Lead", "Mithril", "Musgravite", "OreMesh", "Palladium", "Painite",
-                    "Plutonium", "Poudretteite", "Rhodium", "Ruby", "Sapphire", "Silver", "Unknow", "Thorium",
+                    "Plutonium", "Poudretteite", "Rhodium", "Ruby", "Sapphire", "Silver", "Unknown", "Thorium",
                     "Tin", "Titanium", "Topaz", "Tungsten", "Unobtanium", "Uranium", "Vanadium", "Zultanite",
                 }
             end
