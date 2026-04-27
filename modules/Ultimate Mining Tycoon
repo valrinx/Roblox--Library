@@ -21,6 +21,8 @@ return function(Window, scriptInfo)
     local cleanupConnections = {}
     local infiniteJumpConnection = nil
     local HttpService = game:GetService("HttpService")
+    local Players = game:GetService("Players")
+    local RunService = game:GetService("RunService")
     local SETTINGS_FILE = "RavenHub_UMT_AutoSettings.json"
     local autoSettingsLoaded = {
         autoMineEnabled = false,
@@ -1846,6 +1848,22 @@ return function(Window, scriptInfo)
                 end
             end
         end
+
+        local function espRescanIfEnabled()
+            if ESP.enabled then
+                espClearAll()
+                espScanAll()
+            end
+        end
+
+        local function espSyncAfterMappingUpdate()
+            if ESP.enabled then
+                espClearAll()
+                espScanAll()
+            else
+                espClearAll()
+            end
+        end
     
         local function getOreTypes()
             local types = {"All"}
@@ -1914,7 +1932,7 @@ return function(Window, scriptInfo)
             return options
         end
     
-        trackConnection(game:GetService("RunService").RenderStepped:Connect(function()
+        trackConnection(RunService.RenderStepped:Connect(function()
             local ok = pcall(function()
                 if not ESP.enabled then return end
                 local now = os.clock()
@@ -1922,7 +1940,7 @@ return function(Window, scriptInfo)
                     return
                 end
                 ESP.lastUpdateAt = now
-                local char = game.Players.LocalPlayer.Character
+                local char = Players.LocalPlayer.Character
                 local hrp  = char and char:FindFirstChild("HumanoidRootPart")
                 if not hrp then return end
         
@@ -2033,7 +2051,7 @@ return function(Window, scriptInfo)
             watchFolder(spawnedBlocks)
         end)
     
-        trackConnection(game.Players.LocalPlayer.CharacterAdded:Connect(function()
+        trackConnection(Players.LocalPlayer.CharacterAdded:Connect(function()
             espClearAll()
             if ESP.enabled then
                 task.wait(1)
@@ -2258,24 +2276,69 @@ return function(Window, scriptInfo)
                         end
                         local function resolveActivateRemote(tool)
                             local madCommEvents = ReplicatedStorage:FindFirstChild("MadCommEvents")
-                            -- Fallback for Ultimate Mining Tycoon (captured remote id)
+                            -- Must match equipped pickaxe: wrong MadComm folder => server ignores hits (HP never drops).
+                            if tool then
+                                local madCommId = tool:GetAttribute("MadCommId")
+                                if madCommId and madCommEvents then
+                                    local commFolder = madCommEvents:FindFirstChild(tostring(madCommId))
+                                    local remote = commFolder and commFolder:FindFirstChild("Activate")
+                                    if remote then
+                                        return remote
+                                    end
+                                end
+                                local nested = tool:FindFirstChild("Activate", true)
+                                if nested then
+                                    return nested
+                                end
+                            end
                             if madCommEvents then
-                                local fallbackFolder = madCommEvents:FindFirstChild("1726")
-                                local fallbackRemote = fallbackFolder and fallbackFolder:FindFirstChild("Activate")
-                                if fallbackRemote then
-                                    return fallbackRemote
+                                -- Game builds vary by folder id (e.g. 261/260 vs 1726); pickaxe MadCommId is authoritative when set.
+                                for _, folderId in ipairs({ "261", "260", "1726" }) do
+                                    local fallbackFolder = madCommEvents:FindFirstChild(folderId)
+                                    local fallbackRemote = fallbackFolder and fallbackFolder:FindFirstChild("Activate")
+                                    if fallbackRemote then
+                                        return fallbackRemote
+                                    end
                                 end
                             end
-                            if not tool then return nil end
-                            local madCommId = tool:GetAttribute("MadCommId")
-                            if madCommId and madCommEvents then
-                                local commFolder = madCommEvents:FindFirstChild(tostring(madCommId))
-                                local remote = commFolder and commFolder:FindFirstChild("Activate")
-                                if remote then
-                                    return remote
+                            return nil
+                        end
+
+                        -- Captures for MadComm folder <261 use Vector3int16 only; 261+ often uses vector.create + NormalId.
+                        local function mineGridForActivateRemote(gridPos, useVectorCreate)
+                            local x = math.floor(tonumber(gridPos.X or gridPos.x) or 0)
+                            local y = math.floor(tonumber(gridPos.Y or gridPos.y) or 0)
+                            local z = math.floor(tonumber(gridPos.Z or gridPos.z) or 0)
+                            if useVectorCreate and vector and typeof(vector.create) == "function" then
+                                local okVec, vec = pcall(vector.create, x, y, z)
+                                if okVec and vec then
+                                    return vec
                                 end
                             end
-                            return tool:FindFirstChild("Activate", true)
+                            return Vector3int16.new(x, y, z)
+                        end
+
+                        local function mineFaceNormalId(rootPart, orePart)
+                            if not rootPart or not orePart then
+                                return Enum.NormalId.Front
+                            end
+                            local d = rootPart.Position - orePart.Position
+                            local ax, ay, az = math.abs(d.X), math.abs(d.Y), math.abs(d.Z)
+                            if ax >= ay and ax >= az then
+                                return d.X >= 0 and Enum.NormalId.Right or Enum.NormalId.Left
+                            elseif ay >= az then
+                                return d.Y >= 0 and Enum.NormalId.Top or Enum.NormalId.Bottom
+                            end
+                            return d.Z >= 0 and Enum.NormalId.Back or Enum.NormalId.Front
+                        end
+
+                        local function shouldUseMineNormalArg(activateRemote)
+                            local parent = activateRemote and activateRemote.Parent
+                            local fid = parent and tonumber(parent.Name)
+                            if fid == nil then
+                                return true
+                            end
+                            return fid >= 261
                         end
 
                         local function ensureRemoteClientDrain(remote)
@@ -2726,8 +2789,21 @@ return function(Window, scriptInfo)
                                             math.floor(worldPos.Z / 4)
                                         )
                                     end
-                                    local args = {pickaxeDamage, gridPos}
                                     local activateRemote = resolveActivateRemote(Tool)
+                                    local gridForRemote = mineGridForActivateRemote(
+                                        gridPos,
+                                        activateRemote ~= nil and shouldUseMineNormalArg(activateRemote)
+                                    )
+                                    local args
+                                    if activateRemote and shouldUseMineNormalArg(activateRemote) then
+                                        args = {
+                                            pickaxeDamage,
+                                            gridForRemote,
+                                            mineFaceNormalId(root, renderPart),
+                                        }
+                                    else
+                                        args = { pickaxeDamage, gridForRemote }
+                                    end
                                     if activateRemote then
                                         ensureRemoteClientDrain(activateRemote)
                                         local now = os.clock()
@@ -3277,41 +3353,11 @@ return function(Window, scriptInfo)
                     Image = ok and "check-circle" or "circle-x",
                 })
 
-                if ok and ESP.enabled then
-                    espClearAll()
-                    espScanAll()
+                if ok then
+                    espSyncAfterMappingUpdate()
                 end
             end,
         })
-
-        local function encodeSharedColorMap()
-            -- Encode as an object to avoid empty-table ambiguity ({} sometimes encodes as []).
-            return HttpService:JSONEncode({
-                version = 1,
-                kind = "OreColorSignatureMap",
-                data = sharedOreNameByColorSignature,
-            })
-        end
-
-        local function decodeSharedColorMap(text)
-            if type(text) ~= "string" or text == "" then
-                return nil, "Empty input"
-            end
-            local ok, decoded = pcall(function()
-                return HttpService:JSONDecode(text)
-            end)
-            if not ok or type(decoded) ~= "table" then
-                return nil, "Invalid JSON"
-            end
-            -- Backwards compatible: accept either raw map or wrapped object.
-            if isStringMap(decoded) then
-                return decoded, nil
-            end
-            if type(decoded.data) == "table" and isStringMap(decoded.data) then
-                return decoded.data, nil
-            end
-            return nil, "Expected { data: { signature: name } }"
-        end
 
         local function encodeFullSettings()
             return HttpService:JSONEncode({
@@ -3336,22 +3382,6 @@ return function(Window, scriptInfo)
             end
             return nil, "Expected { data: { ...settings } }"
         end
-
-        OreESP:CreateButton({
-            Name = "Export Shared Color Map (Copy)",
-            Callback = function()
-                local text = encodeSharedColorMap()
-                if type(setclipboard) == "function" then
-                    pcall(function() setclipboard(text) end)
-                end
-                Rayfield:Notify({
-                    Title = "Exported",
-                    Content = "Shared color map copied (or ready). Size: " .. tostring(#text) .. " chars.",
-                    Duration = 4,
-                    Image = "clipboard",
-                })
-            end,
-        })
 
         OreESP:CreateButton({
             Name = "Export Full Settings (Copy)",
@@ -3433,63 +3463,11 @@ return function(Window, scriptInfo)
                     saveAutoSettings()
                 end
                 updateOreLearningStatus()
-                if ESP.enabled then
-                    espClearAll()
-                    espScanAll()
-                else
-                    espClearAll()
-                end
+                espSyncAfterMappingUpdate()
 
                 Rayfield:Notify({
                     Title = "Imported",
                     Content = "Applied full settings. Re-toggle features if needed.",
-                    Duration = 4,
-                    Image = "check-circle",
-                })
-            end,
-        })
-
-        local importBuffer = ""
-        OreESP:CreateInput({
-            Name = "Import Shared Color Map (JSON)",
-            CurrentValue = "",
-            PlaceholderText = "Paste JSON here",
-            RemoveTextAfterFocusLost = false,
-            Flag = "ImportSharedColorMap",
-            Callback = function(Text)
-                importBuffer = Text or ""
-            end,
-        })
-
-        OreESP:CreateButton({
-            Name = "Apply Imported Shared Map",
-            Callback = function()
-                local decoded, err = decodeSharedColorMap(importBuffer)
-                if not decoded then
-                    Rayfield:Notify({
-                        Title = "Import Failed",
-                        Content = err,
-                        Duration = 4,
-                        Image = "circle-x",
-                    })
-                    return
-                end
-                mergeStringMap(sharedOreNameByColorSignature, decoded)
-                if saveAutoSettings then
-                    saveAutoSettings()
-                end
-                updateOreLearningStatus()
-                if ESP.enabled then
-                    espClearAll()
-                    espScanAll()
-                end
-                Rayfield:Notify({
-                    Title = "Imported",
-                    Content = "Applied shared color map entries: " .. tostring((function()
-                        local n = 0
-                        for _ in pairs(decoded) do n = n + 1 end
-                        return n
-                    end)()),
                     Duration = 4,
                     Image = "check-circle",
                 })
@@ -3508,10 +3486,7 @@ return function(Window, scriptInfo)
                 saveAutoSettings()
             end
             updateOreLearningStatus()
-            if ESP.enabled then
-                espClearAll()
-                espScanAll()
-            end
+            espSyncAfterMappingUpdate()
             Rayfield:Notify({
                 Title = "Ore Mapping Reset",
                 Content = "Cleared learned ore mappings. Static rules remain unchanged.",
@@ -3700,10 +3675,7 @@ return function(Window, scriptInfo)
             Callback = function(Option)
                 local selected = type(Option) == "table" and Option[1] or Option
                 ESP.filterOre = selected or "All"
-                if ESP.enabled then
-                    espClearAll()
-                    espScanAll()
-                end
+                espRescanIfEnabled()
                 if saveAutoSettings then
                     saveAutoSettings()
                 end
@@ -3711,10 +3683,7 @@ return function(Window, scriptInfo)
         })
         if ESP.enabled then
             task.defer(function()
-                pcall(function()
-                    espClearAll()
-                    espScanAll()
-                end)
+                pcall(espRescanIfEnabled)
             end)
         end
     
@@ -3722,8 +3691,7 @@ return function(Window, scriptInfo)
             Name = "Refresh ESP Scan",
             Callback = function()
                 if ESP.enabled then
-                    espClearAll()
-                    espScanAll()
+                    espRescanIfEnabled()
                     Rayfield:Notify({
                         Title = "ESP Refreshed",
                         Content = "Re-scanned ore in workspace.",
