@@ -2014,6 +2014,34 @@ return function(Window, scriptInfo)
         local autoSellThreshold = 90
         local autoSellOreCount = math.clamp(autoSettingsLoaded.autoSellOreCount, 1, 64)
     
+        local function buildSettingsPayload()
+            return {
+                autoMineEnabled = autoMineEnabled,
+                autoMineRange = autoMineRange,
+                autoMineDelay = autoMineDelay,
+                safeProfileEnabled = safeProfileEnabled,
+                safeNearbyPauseEnabled = safeNearbyPauseEnabled,
+                safeNearbyRadius = safeNearbyRadius,
+                safeSellCooldown = safeSellCooldown,
+                oreIgnoreList = OreIgnoreList,
+                autoSellEnabled = autoSellEnabled,
+                autoSellOreCount = autoSellOreCount,
+                autoSellMethod = autoSellMethod,
+                walkSpeed = walkSpeedValue,
+                infiniteJumpEnabled = infiniteJumpEnabled,
+                sellOreKey = sellOreKeyValue,
+                oreEspEnabled = ESP.enabled,
+                oreEspDistance = ESP.maxDistance,
+                oreEspFilter = ESP.filterOre,
+                oreNameById = oreNameById,
+                oreNameByRuntime = oreNameByRuntime,
+                oreNameBySignature = oreNameBySignature,
+                oreNameBySignatureCoarse = oreNameBySignatureCoarse,
+                oreNameByColorSignature = oreNameByColorSignature,
+                sharedOreNameByColorSignature = sharedOreNameByColorSignature,
+            }
+        end
+
         saveAutoSettings = function()
             if not canWriteSettingsFile then
                 settingsSaveOk = false
@@ -2026,31 +2054,7 @@ return function(Window, scriptInfo)
                 if currentTaskId ~= saveSettingsTaskId then
                     return
                 end
-                local payload = {
-                    autoMineEnabled = autoMineEnabled,
-                    autoMineRange = autoMineRange,
-                    autoMineDelay = autoMineDelay,
-                    safeProfileEnabled = safeProfileEnabled,
-                    safeNearbyPauseEnabled = safeNearbyPauseEnabled,
-                    safeNearbyRadius = safeNearbyRadius,
-                    safeSellCooldown = safeSellCooldown,
-                    oreIgnoreList = OreIgnoreList,
-                    autoSellEnabled = autoSellEnabled,
-                    autoSellOreCount = autoSellOreCount,
-                    autoSellMethod = autoSellMethod,
-                    walkSpeed = walkSpeedValue,
-                    infiniteJumpEnabled = infiniteJumpEnabled,
-                    sellOreKey = sellOreKeyValue,
-                    oreEspEnabled = ESP.enabled,
-                    oreEspDistance = ESP.maxDistance,
-                    oreEspFilter = ESP.filterOre,
-                    oreNameById = oreNameById,
-                    oreNameByRuntime = oreNameByRuntime,
-                    oreNameBySignature = oreNameBySignature,
-                    oreNameBySignatureCoarse = oreNameBySignatureCoarse,
-                    oreNameByColorSignature = oreNameByColorSignature,
-                    sharedOreNameByColorSignature = sharedOreNameByColorSignature,
-                }
+                local payload = buildSettingsPayload()
                 local okWrite, errWrite = pcall(function()
                     writefile(SETTINGS_FILE, HttpService:JSONEncode(payload))
                 end)
@@ -3047,6 +3051,30 @@ return function(Window, scriptInfo)
             return nil, "Expected { data: { signature: name } }"
         end
 
+        local function encodeFullSettings()
+            return HttpService:JSONEncode({
+                version = 1,
+                kind = "UMTFullSettings",
+                data = buildSettingsPayload(),
+            })
+        end
+
+        local function decodeFullSettings(text)
+            if type(text) ~= "string" or text == "" then
+                return nil, "Empty input"
+            end
+            local ok, decoded = pcall(function()
+                return HttpService:JSONDecode(text)
+            end)
+            if not ok or type(decoded) ~= "table" then
+                return nil, "Invalid JSON"
+            end
+            if type(decoded.data) == "table" then
+                return decoded.data, nil
+            end
+            return nil, "Expected { data: { ...settings } }"
+        end
+
         OreESP:CreateButton({
             Name = "Export Shared Color Map (Copy)",
             Callback = function()
@@ -3059,6 +3087,102 @@ return function(Window, scriptInfo)
                     Content = "Shared color map copied (or ready). Size: " .. tostring(#text) .. " chars.",
                     Duration = 4,
                     Image = "clipboard",
+                })
+            end,
+        })
+
+        OreESP:CreateButton({
+            Name = "Export Full Settings (Copy)",
+            Callback = function()
+                local text = encodeFullSettings()
+                if type(setclipboard) == "function" then
+                    pcall(function() setclipboard(text) end)
+                end
+                Rayfield:Notify({
+                    Title = "Exported",
+                    Content = "Full settings copied (or ready). Size: " .. tostring(#text) .. " chars.",
+                    Duration = 4,
+                    Image = "clipboard",
+                })
+            end,
+        })
+
+        local fullSettingsImportBuffer = ""
+        OreESP:CreateInput({
+            Name = "Import Full Settings (JSON)",
+            CurrentValue = "",
+            PlaceholderText = "Paste full settings JSON here",
+            RemoveTextAfterFocusLost = false,
+            Flag = "ImportFullSettings",
+            Callback = function(Text)
+                fullSettingsImportBuffer = Text or ""
+            end,
+        })
+
+        OreESP:CreateButton({
+            Name = "Apply Imported Full Settings",
+            Callback = function()
+                local decoded, err = decodeFullSettings(fullSettingsImportBuffer)
+                if not decoded then
+                    Rayfield:Notify({
+                        Title = "Import Failed",
+                        Content = err,
+                        Duration = 4,
+                        Image = "circle-x",
+                    })
+                    return
+                end
+
+                autoMineEnabled = decoded.autoMineEnabled == true
+                autoMineRange = math.clamp(tonumber(decoded.autoMineRange) or autoMineRange, 5, 50)
+                autoMineDelay = math.clamp(tonumber(decoded.autoMineDelay) or autoMineDelay, 0, 5)
+                safeProfileEnabled = decoded.safeProfileEnabled ~= false
+                safeNearbyPauseEnabled = decoded.safeNearbyPauseEnabled ~= false
+                safeNearbyRadius = math.clamp(tonumber(decoded.safeNearbyRadius) or safeNearbyRadius, 20, 200)
+                safeSellCooldown = math.clamp(tonumber(decoded.safeSellCooldown) or safeSellCooldown, 2, 20)
+                OreIgnoreList = sanitizeStringArray(decoded.oreIgnoreList)
+                autoSellEnabled = decoded.autoSellEnabled == true
+                autoSellOreCount = math.clamp(tonumber(decoded.autoSellOreCount) or autoSellOreCount, 1, 64)
+                autoSellMethod = "Remote"
+                walkSpeedValue = math.clamp(tonumber(decoded.walkSpeed) or walkSpeedValue, 16, 500)
+                infiniteJumpEnabled = decoded.infiniteJumpEnabled == true
+                sellOreKeyValue = type(decoded.sellOreKey) == "string" and decoded.sellOreKey or sellOreKeyValue
+                ESP.enabled = decoded.oreEspEnabled == true
+                ESP.maxDistance = math.clamp(tonumber(decoded.oreEspDistance) or ESP.maxDistance, 0, 500)
+                if type(decoded.oreEspFilter) == "string" and decoded.oreEspFilter ~= "" then
+                    ESP.filterOre = decoded.oreEspFilter
+                end
+
+                oreNameById = {}
+                oreNameByRuntime = {}
+                oreNameBySignature = {}
+                oreNameBySignatureCoarse = {}
+                oreNameByColorSignature = {}
+                sharedOreNameByColorSignature = {}
+                mergeStringMap(oreNameById, decoded.oreNameById)
+                mergeStringMap(oreNameByRuntime, decoded.oreNameByRuntime)
+                mergeStringMap(oreNameBySignature, decoded.oreNameBySignature)
+                mergeStringMap(oreNameBySignatureCoarse, decoded.oreNameBySignatureCoarse)
+                mergeStringMap(oreNameByColorSignature, decoded.oreNameByColorSignature)
+                mergeStringMap(sharedOreNameByColorSignature, decoded.sharedOreNameByColorSignature)
+                oreNameCache = setmetatable({}, { __mode = "k" })
+
+                if saveAutoSettings then
+                    saveAutoSettings()
+                end
+                updateOreLearningStatus()
+                if ESP.enabled then
+                    espClearAll()
+                    espScanAll()
+                else
+                    espClearAll()
+                end
+
+                Rayfield:Notify({
+                    Title = "Imported",
+                    Content = "Applied full settings. Re-toggle features if needed.",
+                    Duration = 4,
+                    Image = "check-circle",
                 })
             end,
         })
