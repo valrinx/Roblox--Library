@@ -711,6 +711,7 @@ return function(Window, scriptInfo)
             ["Grandidierite"]= Color3.fromRGB(0,   200, 150),
             ["Musgravite"]   = Color3.fromRGB(100, 150, 200),
             ["Painite"]      = Color3.fromRGB(255, 50,  100),
+            ["EXPLOSIVES"]   = Color3.fromRGB(200, 45,  45),
         }
 
         local oreCategoryColors = {
@@ -732,6 +733,7 @@ return function(Window, scriptInfo)
             ["Topaz"] = "Gemstone", ["Emerald"] = "Gemstone", ["Sapphire"] = "Gemstone", ["Ruby"] = "Gemstone", ["Diamond"] = "Gemstone",
             ["Mithril"] = "Mythic", ["Adamantium"] = "Mythic", ["Unobtanium"] = "Mythic", ["Poudretteite"] = "Mythic",
             ["Zultanite"] = "Mythic", ["Grandidierite"] = "Mythic", ["Musgravite"] = "Mythic", ["Painite"] = "Mythic",
+            ["EXPLOSIVES"] = "Unknown",
             -- Runtime mesh names seen in this game
             ["OreMesh"] = "Rare Metal",
             ["CubicBlockMetal"] = "Common Metal",
@@ -755,7 +757,7 @@ return function(Window, scriptInfo)
         local knownOreNames = {
             "Tin", "Iron", "Lead", "Cobalt", "Aluminium", "Silver", "Unknown", "Uranium", "Vanadium",
             "Tungsten", "Gold", "Titanium", "Molybdenum", "Palladium", "Plutonium", "Mithril", "Thorium",
-            "Iridium", "Adamantium", "Rhodium", "Unobtanium", "Blue Chalk", "Green Chalk", "Red Chalk",
+            "Iridium", "Adamantium", "Rhodium", "Unobtanium", "EXPLOSIVES", "Blue Chalk", "Green Chalk", "Red Chalk",
             "Topaz", "Emerald", "Sapphire",
             "Ruby", "Diamond", "Poudretteite", "Zultanite", "Grandidierite", "Musgravite", "Painite",
         }
@@ -766,6 +768,7 @@ return function(Window, scriptInfo)
             ["palladium"] = "Palladium", ["plutonium"] = "Plutonium", ["mithril"] = "Mithril", ["thorium"] = "Thorium",
             ["iridium"] = "Iridium",
             ["adamantium"] = "Adamantium", ["rhodium"] = "Rhodium", ["unobtanium"] = "Unobtanium",
+            ["explosives"] = "EXPLOSIVES",
             ["blue chalk"] = "Blue Chalk", ["green chalk"] = "Green Chalk", ["red chalk"] = "Red Chalk",
             ["topaz"] = "Topaz", ["emerald"] = "Emerald", ["sapphire"] = "Sapphire", ["ruby"] = "Ruby", ["diamond"] = "Diamond",
             ["poudretteite"] = "Poudretteite", ["zultanite"] = "Zultanite", ["grandidierite"] = "Grandidierite",
