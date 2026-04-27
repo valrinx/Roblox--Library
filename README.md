@@ -110,6 +110,7 @@
 - แก้ `Ore ESP` ซ้อนทับหนาแน่น: บังคับ `1 ESP ต่อ 1 renderPart` (กัน label/box ซ้อนหลายชั้นบนก้อนเดียว) และยกตำแหน่งป้ายชื่อขึ้นเพื่อลดการบัง
 - Optimization ประสิทธิภาพ: throttle อัปเดต ESP (`RenderStepped`) เป็นช่วง, cache metadata ชื่อ/สีแร่พร้อม refresh เป็นรอบ, อัปเดตข้อความระยะเฉพาะเมื่อค่าเปลี่ยน, และ cache reference โฟลเดอร์แร่ใน Auto Mine เพื่อลด `FindFirstChild` ซ้ำ
 - ปรับ `Auto Mine` ให้ใช้ทั้งราคาและ `RequiredStrength` จากตาราง `oreReferenceFromList` ในโค้ด (sync กับ repo `Ore list`) เท่านั้น — ไม่อ่าน economy จากอินสแตนซ์แร่ในเกม
+- แก้ `Auto Mine` แร่ HP สูงขุดไม่รู้จบ: ค่า `hardHitLimit` / `hitSwitchLimit` / `targetTimeLimit` เดิมต่ำเกิน (เช่น 8 ครั้ง / 6 วินาที / สูงสุด 15 รอบ) ทำให้สลับเป้าก่อนแร่แตก — ปรับให้สเกลตาม `expectedHits` และ delay จริง
 - harden runtime error/log spam: ครอบ `Rayfield.Notify` ด้วย `pcall` (safe notify) กันเคส UI template เปลี่ยนแล้วเด้ง `Template is not a valid member of Frame "Notifications"` และเพิ่มตัว drain ให้ remote ชื่อ `RegisterInstanceChanges` เพื่อลด `Remote event invocation queue exhausted`
 - เพิ่มระบบแชร์คอนฟิกทั้งก้อนใน `modules/Ultimate Mining Tycoon`: รองรับ `Export/Import Full Settings` (JSON copy/paste) รวมค่าฟาร์ม/ESP/mapping ชื่อแร่ทั้งหมด เพื่อย้ายโปรไฟล์ไปอัปเดตชื่อแร่ในสคริปต์หรือแชร์ให้เครื่องอื่นได้ทันที
 
