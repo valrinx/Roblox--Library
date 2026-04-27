@@ -102,6 +102,7 @@
 - แก้ `Ore Ignore List` ใน `Auto Mine`: เปลี่ยนให้คัดแร่จากชื่อเส้นทางเดียวกับ ESP (`getOreNameForEsp`) และ normalize รายชื่อ ignore ใน callback เพื่อกันชื่อไม่ตรงแล้วยังถูกขุด
 - ปรับ `Auto Mine` ให้ลดการสแปมขุด: ใช้ค่าแรงขุดตาม Pickaxe (`Damage/MiningPower` ฯลฯ) แทนค่าคงที่, หน่วงจังหวะแบบ adaptive ตามดาเมจ, และเพิ่ม backoff เมื่อ durability/HP ของก้อนไม่ขยับ
 - ปรับ `Auto Mine` ให้หลุดจากก้อนที่ขุดนานผิดปกติเร็วขึ้น: เพิ่มเงื่อนไขสลับเป้าเมื่อ `no progress` หลายรอบ, จำกัดเวลา lock ต่อก้อนตาม `HP/Damage`, และลด hit-limit แบบ dynamic ต่อก้อน
+- แก้ `Auto Mine` หาเป้าไม่เจอในบางแมพ: ปรับ resolver ให้รองรับ ore ที่ถูกจัดเป็น nested folder ใต้ `PlacedOre/SpawnedBlocks` (`IsDescendantOf`) และปรับสแกนเป้าให้ไล่ลึกแบบ dedupe
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
