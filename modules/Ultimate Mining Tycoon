@@ -1924,6 +1924,7 @@ return function(Window, scriptInfo)
                         local lastProgressDurability = nil
                         local staleProgressHits = 0
                         local targetLockedAt = 0
+                        local firedHitsOnTarget = 0
 
                         local function randomRange(minValue, maxValue)
                             return minValue + (maxValue - minValue) * math.random()
@@ -2143,6 +2144,7 @@ return function(Window, scriptInfo)
                             lastTargetSignature = nil
                             sameTargetLoops = 0
                             targetLockedAt = 0
+                            firedHitsOnTarget = 0
                         end
 
                         local function getTargetKey(target, renderPart)
@@ -2218,6 +2220,9 @@ return function(Window, scriptInfo)
                                                     if isTargetTemporarilyBlocked(v, renderPart) then
                                                         continue
                                                     end
+                                                    if not isMineableTarget(v, renderPart) then
+                                                        continue
+                                                    end
                                                     local oreName = getOreNameForEsp(v, renderPart)
                                                     if isIgnoredOre(oreName) then
                                                         continue
@@ -2234,11 +2239,19 @@ return function(Window, scriptInfo)
                                     lockedTarget = closestBlock
                                     if lockedTarget then
                                         targetLockedAt = os.clock()
+                                        firedHitsOnTarget = 0
                                     end
                                 end
 
                                 if closestBlock then
                                     local renderPart = getOreRenderPart(closestBlock)
+                                    if not isMineableTarget(closestBlock, renderPart) then
+                                        OreLabel:Set("Auto Mine Status: switching ore (not mineable)")
+                                        blockTargetTemporarily(closestBlock, renderPart, 3.2)
+                                        resetTargetLock()
+                                        task.wait(0.08)
+                                        continue
+                                    end
                                     local oreName = getOreNameForEsp(closestBlock, renderPart)
                                     local targetKey = getTargetKey(closestBlock, renderPart)
                                     local pickaxeDamage = resolvePickaxeDamage(Tool)
@@ -2250,9 +2263,11 @@ return function(Window, scriptInfo)
                                             staleProgressHits = staleProgressHits + 1
                                         else
                                             staleProgressHits = 0
+                                            firedHitsOnTarget = 0
                                         end
                                     else
                                         staleProgressHits = 0
+                                        firedHitsOnTarget = 0
                                     end
                                     if staleProgressHits > 0 then
                                         adaptiveMinInterval = math.min(0.95, adaptiveMinInterval + (staleProgressHits * 0.06))
@@ -2265,6 +2280,7 @@ return function(Window, scriptInfo)
                                     if expectedHits then
                                         hitSwitchLimit = math.clamp(expectedHits + 3, 5, oreSwitchHitLimit)
                                     end
+                                    local hardHitLimit = math.clamp(math.ceil(240 / math.max(1, pickaxeDamage)), 8, 35)
                                     local targetTimeLimit = math.clamp((expectedHits or 6) * adaptiveMinInterval * 1.9, 1.2, 6.0)
                                     if staleProgressHits >= 4 then
                                         OreLabel:Set("Auto Mine Status: switching ore (no progress)")
@@ -2276,6 +2292,13 @@ return function(Window, scriptInfo)
                                     if elapsedOnTarget > targetTimeLimit then
                                         OreLabel:Set("Auto Mine Status: switching ore (too long)")
                                         blockTargetTemporarily(closestBlock, renderPart, 2.8)
+                                        resetTargetLock()
+                                        task.wait(0.08)
+                                        continue
+                                    end
+                                    if firedHitsOnTarget >= hardHitLimit then
+                                        OreLabel:Set("Auto Mine Status: switching ore (no effect)")
+                                        blockTargetTemporarily(closestBlock, renderPart, 3.0)
                                         resetTargetLock()
                                         task.wait(0.08)
                                         continue
@@ -2314,6 +2337,7 @@ return function(Window, scriptInfo)
                                             continue
                                         end
                                         lastMineFiredAt = os.clock()
+                                        firedHitsOnTarget = firedHitsOnTarget + 1
                                         lastProgressTargetKey = targetKey
                                         lastProgressDurability = targetDurability
                                         markTargetLoop(closestBlock, renderPart)
