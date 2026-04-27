@@ -2527,13 +2527,33 @@ return function(Window, scriptInfo)
                                     if targetDurability and targetDurability > 0 and pickaxeDamage > 0 then
                                         expectedHits = math.max(1, math.ceil(targetDurability / pickaxeDamage))
                                     end
+                                    -- High-HP ores need many hits; old caps (15 hits / 6s) forced re-target before the block could break.
                                     local hitSwitchLimit = oreSwitchHitLimit
                                     if expectedHits then
-                                        hitSwitchLimit = math.clamp(expectedHits + 3, 5, oreSwitchHitLimit)
+                                        hitSwitchLimit = math.ceil(expectedHits * 1.35 + 12)
+                                        hitSwitchLimit = math.clamp(hitSwitchLimit, oreSwitchHitLimit, 500)
                                     end
-                                    local hardHitLimit = math.clamp(math.ceil(240 / math.max(1, pickaxeDamage)), 8, 35)
-                                    local targetTimeLimit = math.clamp((expectedHits or 6) * adaptiveMinInterval * 1.9, 1.2, 6.0)
-                                    if staleProgressHits >= 4 then
+                                    local hardHitLimit
+                                    if expectedHits then
+                                        hardHitLimit = math.ceil(expectedHits * 1.45 + 24)
+                                        hardHitLimit = math.clamp(hardHitLimit, 24, 500)
+                                    else
+                                        hardHitLimit = math.clamp(math.ceil(480 / math.max(1, pickaxeDamage)), 24, 160)
+                                    end
+                                    local perHitDelayEst = math.max(autoMineDelay, adaptiveMinInterval, 0.1)
+                                    local targetTimeLimit
+                                    if expectedHits then
+                                        targetTimeLimit = math.clamp(expectedHits * perHitDelayEst * 2.75 + 10, 15, 300)
+                                    else
+                                        targetTimeLimit = math.clamp(14 * perHitDelayEst * 2.2, 10, 120)
+                                    end
+                                    local staleProgressCap = 4
+                                    if expectedHits and expectedHits > 45 then
+                                        staleProgressCap = 12
+                                    elseif expectedHits and expectedHits > 18 then
+                                        staleProgressCap = 8
+                                    end
+                                    if staleProgressHits >= staleProgressCap then
                                         OreLabel:Set("Auto Mine Status: switching ore (no progress)")
                                         blockTargetTemporarily(closestBlock, renderPart, 3.0)
                                         resetTargetLock()
