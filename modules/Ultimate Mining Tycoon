@@ -2041,6 +2041,104 @@ return function(Window, scriptInfo)
         -- Auto Mine Section
         local AutoMineSection = Farm:CreateSection("⛏️ Auto Mining")
         local OreLabel = Farm:CreateLabel("Auto Mine Status: Idle")
+
+        local autoMineTargetAdornee = nil
+        local autoMineHighlightInst = nil
+        local autoMineBillboardInst = nil
+
+        local function clearAutoMineTargetVisual()
+            autoMineTargetAdornee = nil
+            if autoMineHighlightInst then
+                pcall(function()
+                    autoMineHighlightInst:Destroy()
+                end)
+                autoMineHighlightInst = nil
+            end
+            if autoMineBillboardInst then
+                pcall(function()
+                    autoMineBillboardInst:Destroy()
+                end)
+                autoMineBillboardInst = nil
+            end
+        end
+
+        local function setAutoMineTargetVisual(targetModel, renderPart)
+            if not targetModel or not targetModel.Parent then
+                clearAutoMineTargetVisual()
+                return
+            end
+            local adornee = nil
+            if targetModel:IsA("Model") then
+                adornee = targetModel
+            elseif targetModel:IsA("BasePart") then
+                adornee = targetModel
+            elseif renderPart and renderPart:IsA("BasePart") and renderPart.Parent then
+                adornee = renderPart
+            else
+                adornee = renderPart or targetModel
+            end
+            if not adornee or not adornee.Parent then
+                clearAutoMineTargetVisual()
+                return
+            end
+            if autoMineTargetAdornee == adornee and autoMineHighlightInst and autoMineHighlightInst.Parent then
+                return
+            end
+            clearAutoMineTargetVisual()
+            autoMineTargetAdornee = adornee
+            local hl = Instance.new("Highlight")
+            hl.Name = "RavenHub_AutoMineMarker"
+            hl.Adornee = adornee
+            hl.FillColor = Color3.fromRGB(55, 255, 130)
+            hl.OutlineColor = Color3.fromRGB(255, 220, 50)
+            hl.FillTransparency = 0.74
+            hl.OutlineTransparency = 0.12
+            hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+            hl.Parent = workspace
+            autoMineHighlightInst = hl
+
+            local partForBillboard = renderPart
+            if not partForBillboard or not partForBillboard.Parent or not partForBillboard:IsA("BasePart") then
+                if adornee:IsA("BasePart") then
+                    partForBillboard = adornee
+                elseif adornee:IsA("Model") then
+                    partForBillboard = adornee:FindFirstChildWhichIsA("BasePart", true)
+                end
+            end
+            if partForBillboard and partForBillboard.Parent then
+                local bb = Instance.new("BillboardGui")
+                bb.Name = "RavenHub_AutoMineTag"
+                bb.AlwaysOnTop = true
+                bb.Size = UDim2.new(0, 132, 0, 34)
+                bb.StudsOffsetWorldSpace = Vector3.new(0, 2.9, 0)
+                bb.MaxDistance = 420
+                bb.LightInfluence = 0
+                bb.Parent = partForBillboard
+                autoMineBillboardInst = bb
+                local frame = Instance.new("Frame")
+                frame.Size = UDim2.new(1, 0, 1, 0)
+                frame.BackgroundColor3 = Color3.fromRGB(22, 95, 58)
+                frame.BackgroundTransparency = 0.12
+                frame.BorderSizePixel = 0
+                frame.Parent = bb
+                local corner = Instance.new("UICorner")
+                corner.CornerRadius = UDim.new(0, 7)
+                corner.Parent = frame
+                local stroke = Instance.new("UIStroke")
+                stroke.Color = Color3.fromRGB(255, 230, 80)
+                stroke.Thickness = 1.5
+                stroke.Parent = frame
+                local tl = Instance.new("TextLabel")
+                tl.Size = UDim2.new(1, -8, 1, -6)
+                tl.Position = UDim2.new(0, 4, 0, 3)
+                tl.BackgroundTransparency = 1
+                tl.Font = Enum.Font.GothamBold
+                tl.TextSize = 15
+                tl.TextColor3 = Color3.new(1, 1, 1)
+                tl.Text = "⛏ AUTO MINE"
+                tl.Parent = frame
+            end
+        end
     
         local autoMineEnabled = autoSettingsLoaded.autoMineEnabled
         local autoMineThread
@@ -2431,12 +2529,14 @@ return function(Window, scriptInfo)
                             if root then
                                 if safeProfileEnabled and safeNearbyPauseEnabled and hasNearbyPlayers(root, safeNearbyRadius) then
                                     resetTargetLock()
+                                    clearAutoMineTargetVisual()
                                     OreLabel:Set("Auto Mine Status: paused (players nearby)")
                                     task.wait(randomRange(0.3, 0.7))
                                     continue
                                 end
                                 local humanoid = Character:FindFirstChildOfClass("Humanoid")
                                 if humanoid and humanoid.SeatPart then
+                                    clearAutoMineTargetVisual()
                                     OreLabel:Set("Auto Mine Status: paused (in vehicle)")
                                     task.wait(0.15)
                                     continue
@@ -2456,6 +2556,7 @@ return function(Window, scriptInfo)
                                     closestBlock = lockedTarget
                                 else
                                     resetTargetLock()
+                                    clearAutoMineTargetVisual()
                                     closestBlock = nil
                                     closestDist = math.huge
                                     local bestPrice = -math.huge
@@ -2502,14 +2603,36 @@ return function(Window, scriptInfo)
                                 if closestBlock then
                                     local renderPart = getOreRenderPart(closestBlock)
                                     if not renderPart or not renderPart.Parent then
+                                        clearAutoMineTargetVisual()
                                         OreLabel:Set("Auto Mine Status: switching ore (no render part)")
                                         resetTargetLock()
                                         task.wait(0.08)
                                         continue
                                     end
+                                    setAutoMineTargetVisual(closestBlock, renderPart)
                                     local oreName = getOreNameForEsp(closestBlock, renderPart)
                                     local targetKey = getTargetKey(closestBlock, renderPart)
                                     local targetDurability = getTargetDurability(closestBlock, renderPart)
+                                    -- Server may reject hits (wrong plot, desync, anti-cheat): HP jumps up after we already damaged once.
+                                    if lastProgressTargetKey == targetKey
+                                        and lastProgressDurability ~= nil
+                                        and targetDurability ~= nil
+                                        and firedHitsOnTarget >= 1
+                                    then
+                                        local prevD = lastProgressDurability
+                                        local jumpEps = math.max(2, prevD * 0.035)
+                                        if targetDurability > prevD + jumpEps then
+                                            OreLabel:Set("Auto Mine Status: ore HP reset (server) — skip block")
+                                            lastProgressTargetKey = nil
+                                            lastProgressDurability = nil
+                                            staleProgressHits = 0
+                                            blockTargetTemporarily(closestBlock, renderPart, 12.0)
+                                            clearAutoMineTargetVisual()
+                                            resetTargetLock()
+                                            task.wait(0.12)
+                                            continue
+                                        end
+                                    end
                                     local adaptiveMinInterval = math.clamp(0.9 / math.max(1, pickaxeDamage), 0.08, 0.55)
                                     local elapsedOnTarget = (targetLockedAt > 0) and (os.clock() - targetLockedAt) or 0
                                     -- Only treat "no progress" when we are actually allowed to fire; otherwise rate-limit waits
@@ -2564,6 +2687,7 @@ return function(Window, scriptInfo)
                                     if staleProgressHits >= staleProgressCap then
                                         OreLabel:Set("Auto Mine Status: switching ore (no progress)")
                                         blockTargetTemporarily(closestBlock, renderPart, 3.0)
+                                        clearAutoMineTargetVisual()
                                         resetTargetLock()
                                         task.wait(0.08)
                                         continue
@@ -2571,6 +2695,7 @@ return function(Window, scriptInfo)
                                     if elapsedOnTarget > targetTimeLimit then
                                         OreLabel:Set("Auto Mine Status: switching ore (too long)")
                                         blockTargetTemporarily(closestBlock, renderPart, 2.8)
+                                        clearAutoMineTargetVisual()
                                         resetTargetLock()
                                         task.wait(0.08)
                                         continue
@@ -2578,6 +2703,7 @@ return function(Window, scriptInfo)
                                     if firedHitsOnTarget >= hardHitLimit then
                                         OreLabel:Set("Auto Mine Status: switching ore (no effect)")
                                         blockTargetTemporarily(closestBlock, renderPart, 3.0)
+                                        clearAutoMineTargetVisual()
                                         resetTargetLock()
                                         task.wait(0.08)
                                         continue
@@ -2586,6 +2712,7 @@ return function(Window, scriptInfo)
                                     if not gridPos then
                                         local worldPos = renderPart and renderPart.Position
                                         if not worldPos then
+                                            clearAutoMineTargetVisual()
                                             OreLabel:Set("Auto Mine Status: target no position")
                                             task.wait(0.03)
                                             continue
@@ -2623,6 +2750,7 @@ return function(Window, scriptInfo)
                                         if sameTargetLoops >= hitSwitchLimit then
                                             OreLabel:Set("Auto Mine Status: switching ore (hit limit)")
                                             blockTargetTemporarily(closestBlock, renderPart, 2.5)
+                                            clearAutoMineTargetVisual()
                                             resetTargetLock()
                                             task.wait(0.08)
                                             continue
@@ -2639,6 +2767,7 @@ return function(Window, scriptInfo)
                                         OreLabel:Set("Auto Mine Status: mining " .. tostring(oreName) .. " (dmg " .. tostring(math.floor(pickaxeDamage + 0.5)) .. hpText .. econText .. ")")
                                     else
                                         OreLabel:Set("Auto Mine Status: Activate remote missing")
+                                        clearAutoMineTargetVisual()
                                         resetTargetLock()
                                     end
                                     local waitDelay = autoMineDelay
@@ -2650,6 +2779,7 @@ return function(Window, scriptInfo)
                                     task.wait(waitDelay)
                                     continue
                                 else
+                                    clearAutoMineTargetVisual()
                                     resetTargetLock()
                                     if weakPickaxeNoTargets then
                                         OreLabel:Set("Auto Mine Status: pickaxe too weak for nearby ores")
@@ -2664,9 +2794,11 @@ return function(Window, scriptInfo)
                                 task.wait(0.03)
                             end
                         end
+                        clearAutoMineTargetVisual()
                     end)
                 else
                     autoMineEnabled = false
+                    clearAutoMineTargetVisual()
                     OreLabel:Set("Auto Mine Status: Idle")
                 end
             end,
@@ -3616,6 +3748,7 @@ return function(Window, scriptInfo)
 
             autoMineEnabled = false
             autoSellEnabled = false
+            clearAutoMineTargetVisual()
             ESP.enabled = false
             espClearAll()
 
