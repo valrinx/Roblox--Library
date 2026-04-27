@@ -8,6 +8,7 @@
 ### โครงสร้างโปรเจกต์
 - `modules/` : เก็บโมดูลแยกตามชื่อเกมหรือระบบ
 - `RAVENHUB` : สคริปต์หลัก/ตัวรวมโค้ดที่ใช้ในโปรเจกต์
+- `RavenHub_UMT_AutoSettings.json` : ตัวอย่าง/สำรองการตั้งค่า UMT (Ore ESP mappings, Auto Mine, ฯลฯ) — วางใน workspace ของ executor ใช้ชื่อนี้ให้ตรงกับ `writefile`/`readfile` ของโมดูล หรือวาง JSON แบบ `{ "kind":"UMTFullSettings", "data":{...} }` ในแท็บ Ore ESP → Import Full Settings
 - `README.md` : เอกสารภาพรวมและแนวทางใช้งาน
 - `SKILL.md` : แนวทางการทำงาน/มาตรฐานการเขียนร่วมกับ AI
 
@@ -25,6 +26,7 @@
 - ตรวจสอบ input และสถานะเกมก่อน execute logic สำคัญ
 
 ### Change Log (Roblox--Library/Ultimate Mining Tycoon)
+- เพิ่ม `RavenHub_UMT_AutoSettings.json` (export แบบ flat สำหรับ `readfile`) รวม `oreNameByColorSignature` / signature maps / ignore list ตามโปรไฟล์ UMT; เพิ่มชื่อแร่ `EXPLOSIVES` ใน `knownOreNames` + สี/หมวด ESP
 - เริ่มเพิ่มเอกสารภาพรวมของโปรเจกต์ใน `README.md`
 - แก้ `modules/Ultimate Mining Tycoon` ให้ Ore ESP ติดกับแร่ที่เป็นทั้ง `BasePart` และ `Model`
 - เพิ่มปุ่ม `Destroy Menu (Reload Script)` ใน `modules/Ultimate Mining Tycoon` เพื่อปิดสคริปต์และรันใหม่ได้ทันที
