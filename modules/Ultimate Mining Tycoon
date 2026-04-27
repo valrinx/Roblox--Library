@@ -784,7 +784,7 @@ return function(Window, scriptInfo)
             Molybdenum = { price = 600, required = 75 },
             Plutonium = { price = 1000, required = 99 },
             Palladium = { price = 1200, required = 120 },
-            Mithril = { price = 200, required = nil },
+            Mithril = { price = 2000, required = 200 },
             Thorium = { price = 3200, required = 270 },
             Iridium = { price = 3700, required = 180 },
             Adamantium = { price = 4500, required = 300 },
