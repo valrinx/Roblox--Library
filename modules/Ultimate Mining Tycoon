@@ -1923,6 +1923,7 @@ return function(Window, scriptInfo)
                         local lastProgressTargetKey = nil
                         local lastProgressDurability = nil
                         local staleProgressHits = 0
+                        local targetLockedAt = 0
 
                         local function randomRange(minValue, maxValue)
                             return minValue + (maxValue - minValue) * math.random()
@@ -2048,12 +2049,29 @@ return function(Window, scriptInfo)
 
                         local function resolvePickaxeDamage(tool)
                             if not tool then return 10 end
+                            local pickaxeStrengthByName = {
+                                ["rusty pickaxe"] = 7,
+                                ["copper pickaxe"] = 12,
+                                ["iron pickaxe"] = 20,
+                                ["steel pickaxe"] = 35,
+                                ["platinum pickaxe"] = 60,
+                                ["titanium pickaxe"] = 100,
+                                ["infernum pickaxe"] = 200,
+                                ["diamond pickaxe"] = 400,
+                                ["mithril pickaxe"] = 600,
+                                ["adamantium pickaxe"] = 800,
+                                ["unobtainium pickaxe"] = 1000,
+                            }
                             local damageKeys = {
                                 "Damage", "MineDamage", "MiningDamage", "Power", "MiningPower", "Strength", "HitPower",
                             }
                             local damage = getNumericByKeys(tool, damageKeys)
                             if not damage and tool.Parent then
                                 damage = getNumericByKeys(tool.Parent, damageKeys)
+                            end
+                            if not damage then
+                                local key = string.lower(tostring(tool.Name))
+                                damage = pickaxeStrengthByName[key]
                             end
                             damage = tonumber(damage) or 10
                             return math.clamp(damage, 1, 9999)
@@ -2124,6 +2142,7 @@ return function(Window, scriptInfo)
                             lockedTarget = nil
                             lastTargetSignature = nil
                             sameTargetLoops = 0
+                            targetLockedAt = 0
                         end
 
                         local function getTargetKey(target, renderPart)
@@ -2213,15 +2232,19 @@ return function(Window, scriptInfo)
                                         end
                                     end
                                     lockedTarget = closestBlock
+                                    if lockedTarget then
+                                        targetLockedAt = os.clock()
+                                    end
                                 end
 
                                 if closestBlock then
                                     local renderPart = getOreRenderPart(closestBlock)
-                                    local oreName = getOreName(closestBlock)
+                                    local oreName = getOreNameForEsp(closestBlock, renderPart)
                                     local targetKey = getTargetKey(closestBlock, renderPart)
                                     local pickaxeDamage = resolvePickaxeDamage(Tool)
                                     local targetDurability = getTargetDurability(closestBlock, renderPart)
                                     local adaptiveMinInterval = math.clamp(0.9 / math.max(1, pickaxeDamage), 0.08, 0.55)
+                                    local elapsedOnTarget = (targetLockedAt > 0) and (os.clock() - targetLockedAt) or 0
                                     if lastProgressTargetKey == targetKey and lastProgressDurability and targetDurability then
                                         if targetDurability >= (lastProgressDurability - 0.001) then
                                             staleProgressHits = staleProgressHits + 1
@@ -2233,6 +2256,29 @@ return function(Window, scriptInfo)
                                     end
                                     if staleProgressHits > 0 then
                                         adaptiveMinInterval = math.min(0.95, adaptiveMinInterval + (staleProgressHits * 0.06))
+                                    end
+                                    local expectedHits = nil
+                                    if targetDurability and targetDurability > 0 and pickaxeDamage > 0 then
+                                        expectedHits = math.max(1, math.ceil(targetDurability / pickaxeDamage))
+                                    end
+                                    local hitSwitchLimit = oreSwitchHitLimit
+                                    if expectedHits then
+                                        hitSwitchLimit = math.clamp(expectedHits + 3, 5, oreSwitchHitLimit)
+                                    end
+                                    local targetTimeLimit = math.clamp((expectedHits or 6) * adaptiveMinInterval * 1.9, 1.2, 6.0)
+                                    if staleProgressHits >= 4 then
+                                        OreLabel:Set("Auto Mine Status: switching ore (no progress)")
+                                        blockTargetTemporarily(closestBlock, renderPart, 3.0)
+                                        resetTargetLock()
+                                        task.wait(0.08)
+                                        continue
+                                    end
+                                    if elapsedOnTarget > targetTimeLimit then
+                                        OreLabel:Set("Auto Mine Status: switching ore (too long)")
+                                        blockTargetTemporarily(closestBlock, renderPart, 2.8)
+                                        resetTargetLock()
+                                        task.wait(0.08)
+                                        continue
                                     end
                                     local gridPos = getTargetGridPositionDeep(closestBlock, renderPart)
                                     if not gridPos then
@@ -2271,8 +2317,8 @@ return function(Window, scriptInfo)
                                         lastProgressTargetKey = targetKey
                                         lastProgressDurability = targetDurability
                                         markTargetLoop(closestBlock, renderPart)
-                                        if sameTargetLoops >= oreSwitchHitLimit then
-                                            OreLabel:Set("Auto Mine Status: switching ore (hit limit 15)")
+                                        if sameTargetLoops >= hitSwitchLimit then
+                                            OreLabel:Set("Auto Mine Status: switching ore (hit limit)")
                                             blockTargetTemporarily(closestBlock, renderPart, 2.5)
                                             resetTargetLock()
                                             task.wait(0.08)
