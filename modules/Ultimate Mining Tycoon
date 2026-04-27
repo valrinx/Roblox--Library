@@ -1449,18 +1449,28 @@ return function(Window, scriptInfo)
             local placedOre = workspace:FindFirstChild("PlacedOre")
             local spawnedBlocks = workspace:FindFirstChild("SpawnedBlocks")
 
-            local function getTopChildUnder(rootFolder)
+            local function getTopMineNodeUnder(rootFolder)
                 if not rootFolder or not instance:IsDescendantOf(rootFolder) then
                     return nil
                 end
                 local node = instance
-                while node and node.Parent and node.Parent ~= rootFolder do
+                local best = nil
+                while node and node.Parent do
+                    if node:IsA("BasePart") or node:IsA("Model") then
+                        best = node
+                    end
+                    if node.Parent == rootFolder then
+                        break
+                    end
                     node = node.Parent
                 end
-                return node
+                if best and (best:IsA("BasePart") or best:IsA("Model")) then
+                    return best
+                end
+                return nil
             end
 
-            return getTopChildUnder(placedOre) or getTopChildUnder(spawnedBlocks)
+            return getTopMineNodeUnder(placedOre) or getTopMineNodeUnder(spawnedBlocks)
         end
 
         local function getLookedOreTarget()
@@ -2217,19 +2227,22 @@ return function(Window, scriptInfo)
                                 local function forEachOreCandidate(container, callback)
                                     if not container or type(callback) ~= "function" then return end
                                     local seen = {}
+                                    local function pushTarget(target)
+                                        if not isInstance(target) then return end
+                                        if seen[target] then return end
+                                        if target:IsA("Folder") then return end
+                                        seen[target] = true
+                                        callback(target)
+                                    end
                                     for _, child in ipairs(container:GetChildren()) do
                                         if child:IsA("BasePart") or child:IsA("Model") then
-                                            if not seen[child] then
-                                                seen[child] = true
-                                                callback(child)
-                                            end
-                                        elseif child:IsA("Folder") then
-                                            for _, desc in ipairs(child:GetDescendants()) do
-                                                if desc:IsA("BasePart") then
-                                                    local target = findOreTargetFromInstance(desc) or desc
-                                                    if isInstance(target) and not seen[target] then
-                                                        seen[target] = true
-                                                        callback(target)
+                                            pushTarget(child)
+                                        else
+                                            -- Some maps nest ore inside folders/models; scan one level deep for BaseParts.
+                                            if child:IsA("Folder") or child:IsA("Model") then
+                                                for _, desc in ipairs(child:GetDescendants()) do
+                                                    if desc:IsA("BasePart") then
+                                                        pushTarget(findOreTargetFromInstance(desc) or desc)
                                                     end
                                                 end
                                             end
@@ -2241,9 +2254,12 @@ return function(Window, scriptInfo)
                                     closestBlock = lockedTarget
                                 else
                                     resetTargetLock()
+                                    local scanned = 0
+                                    local considered = 0
                                     for _, container in ipairs(oreContainers) do
                                         if container then
                                             forEachOreCandidate(container, function(v)
+                                                scanned = scanned + 1
                                                 local renderPart = getOreRenderPart(v)
                                                 if not renderPart then return end
                                                 if isTargetTemporarilyBlocked(v, renderPart) then return end
@@ -2252,6 +2268,7 @@ return function(Window, scriptInfo)
                                                 end
                                                 local oreName = getOreNameForEsp(v, renderPart)
                                                 if isIgnoredOre(oreName) then return end
+                                                considered = considered + 1
                                                 local dist = (root.Position - renderPart.Position).Magnitude
                                                 if dist <= autoMineRange and dist < closestDist then
                                                     closestBlock = v
@@ -2259,6 +2276,9 @@ return function(Window, scriptInfo)
                                                 end
                                             end)
                                         end
+                                    end
+                                    if not closestBlock then
+                                        OreLabel:Set("Auto Mine Status: no target in range (scanned " .. tostring(scanned) .. ", ok " .. tostring(considered) .. ")")
                                     end
                                     lockedTarget = closestBlock
                                     if lockedTarget then
