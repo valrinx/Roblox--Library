@@ -2304,41 +2304,13 @@ return function(Window, scriptInfo)
                             return nil
                         end
 
-                        -- Captures for MadComm folder <261 use Vector3int16 only; 261+ often uses vector.create + NormalId.
-                        local function mineGridForActivateRemote(gridPos, useVectorCreate)
+                        -- Packet captures use (damage, Vector3int16 grid). A three-arg path (NormalId) was dropped:
+                        -- some MadComm folders (e.g. 261) stopped awarding ore with auto-picked faces.
+                        local function mineGridForActivateRemote(gridPos)
                             local x = math.floor(tonumber(gridPos.X or gridPos.x) or 0)
                             local y = math.floor(tonumber(gridPos.Y or gridPos.y) or 0)
                             local z = math.floor(tonumber(gridPos.Z or gridPos.z) or 0)
-                            if useVectorCreate and vector and typeof(vector.create) == "function" then
-                                local okVec, vec = pcall(vector.create, x, y, z)
-                                if okVec and vec then
-                                    return vec
-                                end
-                            end
                             return Vector3int16.new(x, y, z)
-                        end
-
-                        local function mineFaceNormalId(rootPart, orePart)
-                            if not rootPart or not orePart then
-                                return Enum.NormalId.Front
-                            end
-                            local d = rootPart.Position - orePart.Position
-                            local ax, ay, az = math.abs(d.X), math.abs(d.Y), math.abs(d.Z)
-                            if ax >= ay and ax >= az then
-                                return d.X >= 0 and Enum.NormalId.Right or Enum.NormalId.Left
-                            elseif ay >= az then
-                                return d.Y >= 0 and Enum.NormalId.Top or Enum.NormalId.Bottom
-                            end
-                            return d.Z >= 0 and Enum.NormalId.Back or Enum.NormalId.Front
-                        end
-
-                        local function shouldUseMineNormalArg(activateRemote)
-                            local parent = activateRemote and activateRemote.Parent
-                            local fid = parent and tonumber(parent.Name)
-                            if fid == nil then
-                                return true
-                            end
-                            return fid >= 261
                         end
 
                         local function ensureRemoteClientDrain(remote)
@@ -2790,20 +2762,8 @@ return function(Window, scriptInfo)
                                         )
                                     end
                                     local activateRemote = resolveActivateRemote(Tool)
-                                    local gridForRemote = mineGridForActivateRemote(
-                                        gridPos,
-                                        activateRemote ~= nil and shouldUseMineNormalArg(activateRemote)
-                                    )
-                                    local args
-                                    if activateRemote and shouldUseMineNormalArg(activateRemote) then
-                                        args = {
-                                            pickaxeDamage,
-                                            gridForRemote,
-                                            mineFaceNormalId(root, renderPart),
-                                        }
-                                    else
-                                        args = { pickaxeDamage, gridForRemote }
-                                    end
+                                    local gridForRemote = mineGridForActivateRemote(gridPos)
+                                    local args = { pickaxeDamage, gridForRemote }
                                     if activateRemote then
                                         ensureRemoteClientDrain(activateRemote)
                                         local now = os.clock()
