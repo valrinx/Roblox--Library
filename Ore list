@@ -1,0 +1,38 @@
+Name Price RequiredStrength
+
+Tin 10 6
+Iron 20 6
+lead 30 7
+Cobalt 50 12
+Aluminium 65 18
+Silver 150 18
+Uranium 180 18
+Vanadium 240 22 
+Tungsten 300 45
+Gold 350 22
+Titanium 400 24
+Molybdenum 600 75
+Plutonium 1000 99
+Palladium 1200 120
+Mithril  200
+Thorium 3200 270
+Iridium 3700 180
+Adamantium 4500 300
+Rhodium 15000 300
+Unobtanium 30000 340
+
+Topaz 75 6
+Emerald 200 14
+Sapphire 250 14
+Ruby 300 18
+diamond 1500 22
+Poudretteite 1700 75
+Zultanite 2300 110
+Grandidierite 4500 120
+Musgravite 5800 150
+Painite 12000 200
+
+Event Ore:
+Blue Chalk 20
+Green Chalk 30
+Red Chalk 40
