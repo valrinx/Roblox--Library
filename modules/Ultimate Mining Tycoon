@@ -2013,8 +2013,12 @@ return function(Window, scriptInfo)
 
                         local function isIgnoredOre(oreName)
                             if type(OreIgnoreList) ~= "table" then return false end
-                            if OreIgnoreList[oreName] == true then return true end
-                            return table.find(OreIgnoreList, oreName) ~= nil
+                            if type(oreName) ~= "string" or oreName == "" then return false end
+                            local canonical = canonicalizeOreName(oreName) or normalizeOreToken(oreName) or oreName
+                            if OreIgnoreList[canonical] == true or OreIgnoreList[oreName] == true then
+                                return true
+                            end
+                            return table.find(OreIgnoreList, canonical) ~= nil or table.find(OreIgnoreList, oreName) ~= nil
                         end
 
                         local function isTargetValid(target, rootPart)
@@ -2025,7 +2029,7 @@ return function(Window, scriptInfo)
                             if not renderPart or not renderPart.Parent then
                                 return false
                             end
-                            local oreName = getOreName(target)
+                            local oreName = getOreNameForEsp(target, renderPart)
                             if isIgnoredOre(oreName) then
                                 return false
                             end
@@ -2122,7 +2126,7 @@ return function(Window, scriptInfo)
                                                     if isTargetTemporarilyBlocked(v, renderPart) then
                                                         continue
                                                     end
-                                                    local oreName = getOreName(v)
+                                                    local oreName = getOreNameForEsp(v, renderPart)
                                                     if isIgnoredOre(oreName) then
                                                         continue
                                                     end
@@ -2331,7 +2335,29 @@ return function(Window, scriptInfo)
             MultipleOptions = true,
             Flag = "OreIgnoreList",
             Callback = function(Options)
-                OreIgnoreList = Options
+                local normalized = {}
+                local normalizedSet = {}
+                if type(Options) == "table" then
+                    for name, enabled in pairs(Options) do
+                        if enabled == true and type(name) == "string" then
+                            local canonical = canonicalizeOreName(name) or normalizeOreToken(name) or name
+                            if not normalizedSet[canonical] then
+                                normalizedSet[canonical] = true
+                                table.insert(normalized, canonical)
+                            end
+                        end
+                    end
+                    for _, value in ipairs(Options) do
+                        if type(value) == "string" then
+                            local canonical = canonicalizeOreName(value) or normalizeOreToken(value) or value
+                            if not normalizedSet[canonical] then
+                                normalizedSet[canonical] = true
+                                table.insert(normalized, canonical)
+                            end
+                        end
+                    end
+                end
+                OreIgnoreList = normalized
                 saveAutoSettings()
             end,
         })
