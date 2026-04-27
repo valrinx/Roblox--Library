@@ -622,6 +622,7 @@ return function(Window, scriptInfo)
             maxDistance   = math.clamp(tonumber(autoSettingsLoaded.oreEspDistance) or 100, 0, 500),
             filterOre     = autoSettingsLoaded.oreEspFilter or "All",
             activeVisuals = {},
+            activeRenderParts = {},
             connections   = {},
             useAdornment  = true, -- use Box ESP per user preference
         }
@@ -1637,6 +1638,7 @@ return function(Window, scriptInfo)
             if ESP.activeVisuals[target] then return end
             local renderPart = getOreRenderPart(target)
             if not renderPart then return end
+            if ESP.activeRenderParts[renderPart] then return end
 
             local oreName = getOreNameForEsp(target, renderPart)
             if ESP.filterOre ~= "All" and oreName ~= ESP.filterOre then return end
@@ -1671,7 +1673,7 @@ return function(Window, scriptInfo)
             local bb = Instance.new("BillboardGui")
             bb.Name        = "UH_ESP_Billboard"
             bb.Size        = UDim2.new(0, 120, 0, 36)
-            bb.StudsOffset = Vector3.new(0, 3.15, 0)
+            bb.StudsOffset = Vector3.new(0, 3.8, 0)
             bb.AlwaysOnTop = true
             bb.Adornee     = renderPart
             bb.Parent      = target
@@ -1689,12 +1691,16 @@ return function(Window, scriptInfo)
             lbl.Parent                 = bb
     
             ESP.activeVisuals[target] = { visual = visual, billboard = bb, label = lbl, renderPart = renderPart }
+            ESP.activeRenderParts[renderPart] = target
     
             local conn = target.AncestryChanged:Connect(function()
                 if not target.Parent then
                     if visual and visual.Parent then visual:Destroy() end
                     if bb and bb.Parent then bb:Destroy() end
                     ESP.activeVisuals[target] = nil
+                    if ESP.activeRenderParts[renderPart] == target then
+                        ESP.activeRenderParts[renderPart] = nil
+                    end
                     oreNameCache[target] = nil
                 end
             end)
@@ -1707,6 +1713,7 @@ return function(Window, scriptInfo)
                 if v.billboard and v.billboard.Parent then v.billboard:Destroy() end
             end
             ESP.activeVisuals = {}
+            ESP.activeRenderParts = {}
             for _, c in ipairs(ESP.connections) do c:Disconnect() end
             ESP.connections = {}
         end
