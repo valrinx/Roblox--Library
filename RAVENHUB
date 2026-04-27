@@ -55,18 +55,44 @@ end)
 --   THEME + HELPERS
 -- ============================================================
 
+local themePresets = {
+    Light = {
+        glass = Color3.fromRGB(250, 250, 252),
+        panel = Color3.fromRGB(245, 246, 248),
+        card = Color3.fromRGB(255, 255, 255),
+        text = Color3.fromRGB(35, 38, 45),
+        sub = Color3.fromRGB(110, 114, 124),
+        border = Color3.fromRGB(210, 214, 221),
+        accent = Color3.fromRGB(72, 133, 255),
+    },
+    Dark = {
+        glass = Color3.fromRGB(30, 32, 38),
+        panel = Color3.fromRGB(24, 26, 32),
+        card = Color3.fromRGB(36, 38, 45),
+        text = Color3.fromRGB(234, 236, 240),
+        sub = Color3.fromRGB(170, 174, 184),
+        border = Color3.fromRGB(67, 71, 84),
+        accent = Color3.fromRGB(118, 138, 255),
+    },
+    Blue = {
+        glass = Color3.fromRGB(238, 246, 255),
+        panel = Color3.fromRGB(224, 237, 255),
+        card = Color3.fromRGB(245, 250, 255),
+        text = Color3.fromRGB(28, 45, 73),
+        sub = Color3.fromRGB(78, 106, 145),
+        border = Color3.fromRGB(179, 204, 235),
+        accent = Color3.fromRGB(61, 120, 255),
+    },
+}
+
 local theme = {
-    glass = Color3.fromRGB(250, 250, 252),
-    panel = Color3.fromRGB(245, 246, 248),
-    card = Color3.fromRGB(255, 255, 255),
-    text = Color3.fromRGB(35, 38, 45),
-    sub = Color3.fromRGB(110, 114, 124),
-    border = Color3.fromRGB(210, 214, 221),
-    accent = Color3.fromRGB(72, 133, 255),
     red = Color3.fromRGB(255, 95, 86),
     yellow = Color3.fromRGB(255, 189, 46),
     green = Color3.fromRGB(39, 201, 63),
 }
+for key, value in pairs(themePresets.Light) do
+    theme[key] = value
+end
 
 local function round(object, radius)
     local corner = Instance.new("UICorner")
@@ -80,6 +106,7 @@ local function addStroke(object, color, thickness, transparency)
     stroke.Thickness = thickness or 1
     stroke.Transparency = transparency or 0
     stroke.Parent = object
+    return stroke
 end
 
 local function tween(object, seconds, properties)
@@ -165,6 +192,20 @@ gui.ResetOnSpawn = false
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.Parent = playerGui
 
+local launcher = Instance.new("TextButton")
+launcher.Name = "Launcher"
+launcher.Size = UDim2.fromOffset(120, 34)
+launcher.Position = UDim2.new(0, 16, 1, -50)
+launcher.BackgroundColor3 = theme.accent
+launcher.BorderSizePixel = 0
+launcher.Text = "Open Hub"
+launcher.Font = Enum.Font.GothamSemibold
+launcher.TextSize = 13
+launcher.TextColor3 = Color3.fromRGB(255, 255, 255)
+launcher.Visible = false
+launcher.Parent = gui
+round(launcher, 9)
+
 local shadow = Instance.new("Frame")
 shadow.Size = UDim2.fromOffset(760, 450)
 shadow.Position = UDim2.fromScale(0.5, 0.5) - UDim2.fromOffset(380, 225) + UDim2.fromOffset(0, 10)
@@ -182,7 +223,7 @@ main.BackgroundTransparency = 0.08
 main.BorderSizePixel = 0
 main.Parent = gui
 round(main, 16)
-addStroke(main, theme.border, 1, 0)
+local mainStroke = addStroke(main, theme.border, 1, 0)
 
 local top = Instance.new("Frame")
 top.Size = UDim2.new(1, 0, 0, 44)
@@ -190,7 +231,7 @@ top.BackgroundColor3 = theme.panel
 top.BorderSizePixel = 0
 top.Parent = main
 round(top, 16)
-addStroke(top, theme.border, 1, 0.2)
+local topStroke = addStroke(top, theme.border, 1, 0.2)
 
 local title = Instance.new("TextLabel")
 title.BackgroundTransparency = 1
@@ -234,7 +275,7 @@ side.Position = UDim2.fromOffset(0, 44)
 side.BackgroundColor3 = theme.panel
 side.BorderSizePixel = 0
 side.Parent = main
-addStroke(side, theme.border, 1, 0.3)
+local sideStroke = addStroke(side, theme.border, 1, 0.3)
 
 local navPadding = Instance.new("UIPadding")
 navPadding.PaddingTop = UDim.new(0, 14)
@@ -252,10 +293,14 @@ content.BackgroundColor3 = theme.card
 content.BorderSizePixel = 0
 content.Parent = main
 round(content, 12)
-addStroke(content, theme.border, 1, 0)
+local contentStroke = addStroke(content, theme.border, 1, 0)
 
 local pages = {}
 local navButtons = {}
+local cardFrames = {}
+local cardLabels = {}
+local cardStrokes = {}
+local accentButtons = {}
 
 local function createPage(name)
     local page = Instance.new("ScrollingFrame")
@@ -284,7 +329,7 @@ local function addCard(parent, text)
     card.BorderSizePixel = 0
     card.Parent = parent
     round(card, 10)
-    addStroke(card, theme.border, 1, 0.15)
+    local stroke = addStroke(card, theme.border, 1, 0.15)
 
     local label = Instance.new("TextLabel")
     label.BackgroundTransparency = 1
@@ -296,6 +341,9 @@ local function addCard(parent, text)
     label.TextColor3 = theme.text
     label.Text = text
     label.Parent = card
+    table.insert(cardFrames, card)
+    table.insert(cardLabels, label)
+    table.insert(cardStrokes, stroke)
     return card, label
 end
 
@@ -358,7 +406,7 @@ for _, scriptInfo in ipairs(SCRIPTS) do
     statusLabels[scriptInfo.name] = label
 end
 
-addCard(settingsPage, "Traffic lights: red close | yellow hide | green zoom")
+addCard(settingsPage, "Traffic lights: red/yellow hide | green zoom")
 addCard(settingsPage, "Backup file: RAVENHUB.backup-rayfield")
 
 homePage.Visible = true
@@ -376,6 +424,54 @@ local function setScriptStatus(scriptName, text)
     end
 end
 
+local function setHubVisible(isVisible)
+    main.Visible = isVisible
+    shadow.Visible = isVisible
+    launcher.Visible = not isVisible
+end
+
+local function applyTheme(presetName)
+    local preset = themePresets[presetName]
+    if not preset then
+        return
+    end
+
+    for key, value in pairs(preset) do
+        theme[key] = value
+    end
+
+    launcher.BackgroundColor3 = theme.accent
+    main.BackgroundColor3 = theme.glass
+    mainStroke.Color = theme.border
+    top.BackgroundColor3 = theme.panel
+    topStroke.Color = theme.border
+    title.TextColor3 = theme.sub
+    side.BackgroundColor3 = theme.panel
+    sideStroke.Color = theme.border
+    content.BackgroundColor3 = theme.card
+    contentStroke.Color = theme.border
+
+    for _, card in ipairs(cardFrames) do
+        card.BackgroundColor3 = theme.panel
+    end
+    for _, label in ipairs(cardLabels) do
+        label.TextColor3 = theme.text
+    end
+    for _, stroke in ipairs(cardStrokes) do
+        stroke.Color = theme.border
+    end
+
+    for _, navButton in ipairs(navButtons) do
+        if navButton.TextColor3 ~= Color3.fromRGB(255, 255, 255) then
+            navButton.TextColor3 = theme.text
+        end
+    end
+
+    for _, button in ipairs(accentButtons) do
+        button.BackgroundColor3 = theme.accent
+    end
+end
+
 local function destroyHub()
     for scriptName, cleanupFn in pairs(scriptCleanupHandlers) do
         local ok, err = pcall(cleanupFn)
@@ -386,11 +482,12 @@ local function destroyHub()
     gui:Destroy()
 end
 
-red.MouseButton1Click:Connect(destroyHub)
+red.MouseButton1Click:Connect(function()
+    setHubVisible(false)
+end)
 
 yellow.MouseButton1Click:Connect(function()
-    main.Visible = not main.Visible
-    shadow.Visible = main.Visible
+    setHubVisible(not main.Visible)
 end)
 
 green.MouseButton1Click:Connect(function()
@@ -408,6 +505,10 @@ green.MouseButton1Click:Connect(function()
     end
     shadow.Size = main.Size
     shadow.Position = main.Position + UDim2.fromOffset(0, 10)
+end)
+
+launcher.MouseButton1Click:Connect(function()
+    setHubVisible(true)
 end)
 
 do
@@ -453,6 +554,28 @@ destroyCard.TextColor3 = Color3.fromRGB(255, 255, 255)
 destroyCard.Parent = settingsPage
 round(destroyCard, 10)
 destroyCard.MouseButton1Click:Connect(destroyHub)
+
+local function addThemeButton(parent, titleText, presetName)
+    local button = Instance.new("TextButton")
+    button.Size = UDim2.new(1, 0, 0, 38)
+    button.BackgroundColor3 = theme.accent
+    button.BorderSizePixel = 0
+    button.Text = titleText
+    button.Font = Enum.Font.GothamSemibold
+    button.TextSize = 13
+    button.TextColor3 = Color3.fromRGB(255, 255, 255)
+    button.Parent = parent
+    round(button, 10)
+    table.insert(accentButtons, button)
+    button.MouseButton1Click:Connect(function()
+        applyTheme(presetName)
+    end)
+end
+
+addCard(settingsPage, "Theme presets")
+addThemeButton(settingsPage, "Light", "Light")
+addThemeButton(settingsPage, "Dark", "Dark")
+addThemeButton(settingsPage, "Blue", "Blue")
 
 -- ============================================================
 --   MODULE LOADER (kept from original flow)
