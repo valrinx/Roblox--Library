@@ -2299,7 +2299,7 @@ return function(Window, scriptInfo)
                         local lockedTarget = nil
                         local lastTargetSignature = nil
                         local sameTargetLoops = 0
-                        local stuckResetLoops = 16
+                        local oreSwitchHitLimit = 15
                         local blockedTargetUntil = {}
                         local nextMineAllowedAt = 0
                         local nextEquipAllowedAt = 0
@@ -2550,8 +2550,8 @@ return function(Window, scriptInfo)
                                         end
                                         activateRemote:FireServer(table.unpack(args))
                                         markTargetLoop(closestBlock, renderPart)
-                                        if sameTargetLoops >= stuckResetLoops then
-                                            OreLabel:Set("Auto Mine Status: re-targeting (stuck)")
+                                        if sameTargetLoops >= oreSwitchHitLimit then
+                                            OreLabel:Set("Auto Mine Status: switching ore (hit limit 15)")
                                             blockTargetTemporarily(closestBlock, renderPart, 2.5)
                                             resetTargetLock()
                                             task.wait(0.08)
