@@ -623,7 +623,7 @@ return function(Window, scriptInfo)
             filterOre     = autoSettingsLoaded.oreEspFilter or "All",
             activeVisuals = {},
             connections   = {},
-            useAdornment  = false, -- use Highlight to avoid blocking label text
+            useAdornment  = true, -- use Box ESP per user preference
         }
     
         local oreColors = {
@@ -1651,7 +1651,7 @@ return function(Window, scriptInfo)
                 box.AlwaysOnTop = true
                 box.ZIndex = 10
                 box.Color3 = color
-                box.Transparency = 0.55
+                box.Transparency = 0.72
                 box.Size = renderPart.Size + Vector3.new(0.05, 0.05, 0.05)
                 box.Parent = renderPart
                 visual = box
@@ -1671,7 +1671,7 @@ return function(Window, scriptInfo)
             local bb = Instance.new("BillboardGui")
             bb.Name        = "UH_ESP_Billboard"
             bb.Size        = UDim2.new(0, 120, 0, 36)
-            bb.StudsOffset = Vector3.new(0, 2.5, 0)
+            bb.StudsOffset = Vector3.new(0, 3.15, 0)
             bb.AlwaysOnTop = true
             bb.Adornee     = renderPart
             bb.Parent      = target
@@ -1859,6 +1859,7 @@ return function(Window, scriptInfo)
                                     v.visual.OutlineTransparency = 0.05
                                 elseif v.visual:IsA("BoxHandleAdornment") then
                                     v.visual.Color3 = color
+                                    v.visual.Transparency = 0.72
                                     if renderPart and renderPart:IsA("BasePart") then
                                         v.visual.Size = renderPart.Size + Vector3.new(0.05, 0.05, 0.05)
                                     end
