@@ -2218,7 +2218,9 @@ return function(Window, scriptInfo)
                                                 local renderPart = getOreRenderPart(v)
                                                 if not renderPart then continue end
                                                 if isTargetTemporarilyBlocked(v, renderPart) then continue end
-                                                if not isMineableTarget(v, renderPart) then continue end
+                                                if not isMineableTarget(v, renderPart) and not getTargetGridPositionDeep(v, renderPart) then
+                                                    continue
+                                                end
                                                 local oreName = getOreNameForEsp(v, renderPart)
                                                 if isIgnoredOre(oreName) then continue end
                                                 local dist = (root.Position - renderPart.Position).Magnitude
@@ -2238,7 +2240,7 @@ return function(Window, scriptInfo)
 
                                 if closestBlock then
                                     local renderPart = getOreRenderPart(closestBlock)
-                                    if not isMineableTarget(closestBlock, renderPart) then
+                                    if not isMineableTarget(closestBlock, renderPart) and not getTargetGridPositionDeep(closestBlock, renderPart) then
                                         OreLabel:Set("Auto Mine Status: switching ore (not mineable)")
                                         blockTargetTemporarily(closestBlock, renderPart, 3.2)
                                         resetTargetLock()
