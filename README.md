@@ -95,6 +95,7 @@
 - เพิ่มตัวเลือกวิธีขายแร่ 2 โหมด (`Remote (No TP)` / `Tween to Unloader (Legacy)`) และให้ทั้งปุ่มขาย, Auto Sell, และคีย์ลัดใช้โหมดเดียวกัน พร้อมบันทึกค่าลง settings
 - แก้ `Auto Mine` ลดโอกาสขึ้น `Remote event invocation queue exhausted`: เพิ่ม hard rate-limit ตอนยิง `Activate`, ครอบ `FireServer` ด้วย `pcall`, และใส่ backoff อัตโนมัติเมื่อ remote ตอบสนองไม่ทัน
 - แก้ซ้ำเคส `Remote event invocation queue exhausted` ของ `MadCommEvents.*.Activate`: ผูกตัวรับ `OnClientEvent` แบบ drain เงียบให้ remote ขุดที่ใช้งาน เพื่อไม่ให้คิว event ฝั่ง client สะสมจนล้น
+- ปรับ `Remote Sell` ให้เช็กผลขายจริงจากจำนวนแร่ก่อน/หลังกด prompt; ถ้าโดนเซิร์ฟเวอร์บล็อกระยะจะ fallback ไป `Tween to Unloader (Legacy)` อัตโนมัติ เพื่อให้ขายได้ต่อเนื่อง
 
 > แก้ไขไฟล์นี้ได้โดยตรง หรือบอก Claude ให้เพิ่ม/แก้ไขแทน
 
