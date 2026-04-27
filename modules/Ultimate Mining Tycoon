@@ -82,11 +82,7 @@ return function(Window, scriptInfo)
         autoSettingsLoaded.oreIgnoreList = sanitizeStringArray(decoded.oreIgnoreList)
         autoSettingsLoaded.autoSellEnabled = decoded.autoSellEnabled == true
         autoSettingsLoaded.autoSellOreCount = tonumber(decoded.autoSellOreCount) or autoSettingsLoaded.autoSellOreCount
-        if decoded.autoSellMethod == "Tween" then
-            autoSettingsLoaded.autoSellMethod = "Tween"
-        else
-            autoSettingsLoaded.autoSellMethod = "Remote"
-        end
+        autoSettingsLoaded.autoSellMethod = "Remote"
         if isStringMap(decoded.oreNameById) then
             autoSettingsLoaded.oreNameById = decoded.oreNameById
         end
@@ -524,7 +520,7 @@ return function(Window, scriptInfo)
         
         -- Sell Ore Button for Mobile
         local SellOreSection = MobileSupport:CreateSection("⚙️ Sell Ore")
-        local autoSellMethod = autoSettingsLoaded.autoSellMethod == "Tween" and "Tween" or "Remote"
+        local autoSellMethod = "Remote"
         local function countCarriedOres(player)
             local count = 0
             local playerWorkspace = workspace:FindFirstChild(player.Name)
@@ -625,57 +621,18 @@ return function(Window, scriptInfo)
             return true, nil, soldCount > 0 and soldCount or oreCountBefore
         end
 
-        local function sellOreWithTween()
-            local player = game.Players.LocalPlayer
-            local character = player.Character or player.CharacterAdded:Wait()
-            local hrp = character and character:FindFirstChild("HumanoidRootPart")
-            if not hrp then
-                return false, "HumanoidRootPart not found!", 0
-            end
-
-            local cargoPrompt, positionCargoVolume, err = findSellTargets()
-            if not cargoPrompt then
-                return false, err or "No working CargoVolume found!", 0
-            end
-            if not positionCargoVolume then
-                return false, "CargoVolume position not found for tween mode!", 0
-            end
-
-            local oreCount = countCarriedOres(player)
-            local savedCFrame = hrp.CFrame
-            tweenHumanoidRootPart(hrp, positionCargoVolume.CFrame * CFrame.new(0, 3, 0))
-            task.wait(0.3)
-            cargoPrompt.HoldDuration = 0
-            fireproximityprompt(cargoPrompt)
-            task.wait(0.3)
-            tweenHumanoidRootPart(hrp, savedCFrame)
-            return true, nil, oreCount
-        end
-
         local function sellOreBySelectedMethod()
-            if autoSellMethod == "Tween" then
-                return sellOreWithTween()
-            end
-            local okSell, sellErr, soldCount = sellOreFromAnywhere()
-            if okSell then
-                return okSell, sellErr, soldCount
-            end
-            local okTween, tweenErr, tweenSold = sellOreWithTween()
-            if okTween then
-                return true, nil, tweenSold
-            end
-            return false, string.format("%s | fallback tween failed: %s", tostring(sellErr), tostring(tweenErr)), soldCount
+            return sellOreFromAnywhere()
         end
 
         MobileSupport:CreateDropdown({
             Name = "Sell Method",
-            Options = {"Remote (No TP)", "Tween to Unloader (Legacy)"},
-            CurrentOption = {autoSellMethod == "Tween" and "Tween to Unloader (Legacy)" or "Remote (No TP)"},
+            Options = {"Remote (No TP / No Tween)"},
+            CurrentOption = {"Remote (No TP / No Tween)"},
             MultipleOptions = false,
             Flag = "SellMethodMobile",
-            Callback = function(Option)
-                local selected = type(Option) == "table" and Option[1] or Option
-                autoSellMethod = (selected == "Tween to Unloader (Legacy)") and "Tween" or "Remote"
+            Callback = function()
+                autoSellMethod = "Remote"
                 if saveAutoSettings then
                     saveAutoSettings()
                 end
@@ -2742,10 +2699,18 @@ return function(Window, scriptInfo)
 
         Farm:CreateToggle({
             Name = "Tween to Ore (Experimental)",
-            CurrentValue = autoMineUseTween,
+            CurrentValue = false,
             Flag = "AutoMineTween",
             Callback = function(Value)
-                autoMineUseTween = Value
+                autoMineUseTween = false
+                if Value then
+                    Rayfield:Notify({
+                        Title = "Auto Mine Tween Disabled",
+                        Content = "Tween mining is disabled to reduce shadowban risk.",
+                        Duration = 3,
+                        Image = "shield-alert",
+                    })
+                end
                 saveAutoSettings()
             end,
         })
@@ -2858,13 +2823,12 @@ return function(Window, scriptInfo)
         local AutoSellSection = Farm:CreateSection("💰 Auto Sell")
         Farm:CreateDropdown({
             Name = "Auto Sell Method",
-            Options = {"Remote (No TP)", "Tween to Unloader (Legacy)"},
-            CurrentOption = {autoSellMethod == "Tween" and "Tween to Unloader (Legacy)" or "Remote (No TP)"},
+            Options = {"Remote (No TP / No Tween)"},
+            CurrentOption = {"Remote (No TP / No Tween)"},
             MultipleOptions = false,
             Flag = "AutoSellMethod",
-            Callback = function(Option)
-                local selected = type(Option) == "table" and Option[1] or Option
-                autoSellMethod = (selected == "Tween to Unloader (Legacy)") and "Tween" or "Remote"
+            Callback = function()
+                autoSellMethod = "Remote"
                 saveAutoSettings()
             end,
         })
