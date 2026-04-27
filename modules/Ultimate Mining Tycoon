@@ -2376,6 +2376,9 @@ return function(Window, scriptInfo)
                         local blockedTargetUntil = {}
                         local nextMineAllowedAt = 0
                         local nextEquipAllowedAt = 0
+                        local lastMineFiredAt = 0
+                        local remoteMinInterval = 0.12
+                        local remoteBackoffInterval = 0.35
 
                         local function randomRange(minValue, maxValue)
                             return minValue + (maxValue - minValue) * math.random()
@@ -2617,11 +2620,22 @@ return function(Window, scriptInfo)
                                     local args = {10, gridPos}
                                     local activateRemote = resolveActivateRemote(Tool)
                                     if activateRemote then
-                                        if safeProfileEnabled and os.clock() < nextMineAllowedAt then
-                                            task.wait(math.max(0.03, nextMineAllowedAt - os.clock()))
+                                        local now = os.clock()
+                                        local minReadyAt = math.max(nextMineAllowedAt, lastMineFiredAt + remoteMinInterval)
+                                        if now < minReadyAt then
+                                            task.wait(math.max(0.03, minReadyAt - now))
                                             continue
                                         end
-                                        activateRemote:FireServer(table.unpack(args))
+                                        local okFire = pcall(function()
+                                            activateRemote:FireServer(table.unpack(args))
+                                        end)
+                                        if not okFire then
+                                            nextMineAllowedAt = os.clock() + remoteBackoffInterval
+                                            OreLabel:Set("Auto Mine Status: backoff (remote busy)")
+                                            task.wait(0.08)
+                                            continue
+                                        end
+                                        lastMineFiredAt = os.clock()
                                         markTargetLoop(closestBlock, renderPart)
                                         if sameTargetLoops >= oreSwitchHitLimit then
                                             OreLabel:Set("Auto Mine Status: switching ore (hit limit 15)")
@@ -2638,8 +2652,9 @@ return function(Window, scriptInfo)
                                     local waitDelay = autoMineDelay
                                     if safeProfileEnabled then
                                         waitDelay = math.max(waitDelay, 0.45) + randomRange(0.06, 0.38)
-                                        nextMineAllowedAt = os.clock() + waitDelay
                                     end
+                                    waitDelay = math.max(waitDelay, remoteMinInterval)
+                                    nextMineAllowedAt = os.clock() + waitDelay
                                     task.wait(waitDelay)
                                     continue
                                 else
