@@ -577,7 +577,7 @@ return function(Window, scriptInfo)
             filterOre     = "All",
             activeVisuals = {},
             connections   = {},
-            useAdornment  = true, -- more color-accurate than Highlight
+            useAdornment  = false, -- use Highlight to avoid blocking label text
         }
     
         local oreColors = {
@@ -1605,7 +1605,7 @@ return function(Window, scriptInfo)
                 box.AlwaysOnTop = true
                 box.ZIndex = 10
                 box.Color3 = color
-                box.Transparency = 0.15
+                box.Transparency = 0.55
                 box.Size = renderPart.Size + Vector3.new(0.05, 0.05, 0.05)
                 box.Parent = renderPart
                 visual = box
@@ -1614,8 +1614,8 @@ return function(Window, scriptInfo)
                 hl.Name                = "UH_ESP_Highlight"
                 hl.FillColor           = color
                 hl.OutlineColor        = color
-                hl.FillTransparency    = 0
-                hl.OutlineTransparency = 0
+                hl.FillTransparency    = 0.78
+                hl.OutlineTransparency = 0.05
                 hl.DepthMode           = Enum.HighlightDepthMode.AlwaysOnTop
                 hl.Adornee             = target
                 hl.Parent              = target
@@ -1792,6 +1792,8 @@ return function(Window, scriptInfo)
                                 if v.visual:IsA("Highlight") then
                                     v.visual.FillColor = color
                                     v.visual.OutlineColor = color
+                                    v.visual.FillTransparency = 0.78
+                                    v.visual.OutlineTransparency = 0.05
                                 elseif v.visual:IsA("BoxHandleAdornment") then
                                     v.visual.Color3 = color
                                     if renderPart and renderPart:IsA("BasePart") then
