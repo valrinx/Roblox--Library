@@ -2294,7 +2294,7 @@ return function(Window, scriptInfo)
                             if madCommEvents then
                                 -- If MadCommId is missing on the tool, pick the first existing folder. Order matters: picking
                                 -- the wrong folder still "fires" but ore may not drop. 260 matches common captures; 261 next.
-                                for _, folderId in ipairs({ "260", "261", "1726" }) do
+                                for _, folderId in ipairs({ "260", "332", "1726" }) do
                                     local fallbackFolder = madCommEvents:FindFirstChild(folderId)
                                     local fallbackRemote = fallbackFolder and fallbackFolder:FindFirstChild("Activate")
                                     if fallbackRemote then
