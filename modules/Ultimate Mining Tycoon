@@ -2322,6 +2322,7 @@ return function(Window, scriptInfo)
                         local targetLockedAt = 0
                         local firedHitsOnTarget = 0
                         local mineMadCommAlternateCounter = 0
+                        local invalidMadCommIds = {}
                         local drillPacketNonce = 22000
                         local drillCollectDisabled = false
                         local nextTargetSearchAt = 0
@@ -2362,7 +2363,7 @@ return function(Window, scriptInfo)
                             end
                             for _, child in ipairs(madCommEvents:GetChildren()) do
                                 local idNum = tonumber(child.Name)
-                                if idNum then
+                                if idNum and not invalidMadCommIds[idNum] then
                                     local act = child:FindFirstChild("Activate")
                                     if act and act:IsA("RemoteEvent") then
                                         table.insert(entries, {
@@ -2376,6 +2377,33 @@ return function(Window, scriptInfo)
                                 return a.idNum < b.idNum
                             end)
                             return entries
+                        end
+
+                        local function getMadCommIdFromRemote(remote)
+                            if not remote or not remote.Parent then
+                                return nil
+                            end
+                            local n = tonumber(remote.Parent.Name)
+                            if not n then
+                                return nil
+                            end
+                            return math.floor(n + 0.5)
+                        end
+
+                        local function isMadCommIdAllowed(idNum)
+                            local n = tonumber(idNum)
+                            if not n then
+                                return false
+                            end
+                            n = math.floor(n + 0.5)
+                            return not invalidMadCommIds[n]
+                        end
+
+                        local function markMadCommRemoteInvalid(remote)
+                            local idNum = getMadCommIdFromRemote(remote)
+                            if idNum then
+                                invalidMadCommIds[idNum] = true
+                            end
                         end
 
                         local function resolveToolMadCommId(tool)
@@ -2423,7 +2451,7 @@ return function(Window, scriptInfo)
                             if forceMineMadCommId > 0 and madCommEvents then
                                 local forcedFolder = madCommEvents:FindFirstChild(tostring(forceMineMadCommId))
                                 local forcedRemote = forcedFolder and forcedFolder:FindFirstChild("Activate")
-                                if forcedRemote and forcedRemote:IsA("RemoteEvent") then
+                                if forcedRemote and forcedRemote:IsA("RemoteEvent") and isMadCommIdAllowed(forceMineMadCommId) then
                                     return forcedRemote
                                 end
                             end
@@ -2433,7 +2461,7 @@ return function(Window, scriptInfo)
                                 if madCommId and madCommEvents then
                                     local commFolder = madCommEvents:FindFirstChild(tostring(madCommId))
                                     local remote = commFolder and commFolder:FindFirstChild("Activate")
-                                    if remote then
+                                    if remote and isMadCommIdAllowed(madCommId) then
                                         return remote
                                     end
                                 end
@@ -2458,7 +2486,7 @@ return function(Window, scriptInfo)
                             if forceMineMadCommId > 0 and madCommEvents then
                                 local forcedFolder = madCommEvents:FindFirstChild(tostring(forceMineMadCommId))
                                 local forcedRemote = forcedFolder and forcedFolder:FindFirstChild("Activate")
-                                if forcedRemote and forcedRemote:IsA("RemoteEvent") then
+                                if forcedRemote and forcedRemote:IsA("RemoteEvent") and isMadCommIdAllowed(forceMineMadCommId) then
                                     return forcedRemote
                                 end
                             end
@@ -2467,7 +2495,7 @@ return function(Window, scriptInfo)
                                 if madCommId then
                                     local folder = madCommEvents:FindFirstChild(tostring(madCommId))
                                     local bound = folder and folder:FindFirstChild("Activate")
-                                    if bound and bound:IsA("RemoteEvent") then
+                                    if bound and bound:IsA("RemoteEvent") and isMadCommIdAllowed(madCommId) then
                                         return bound
                                     end
                                 end
@@ -2601,6 +2629,10 @@ return function(Window, scriptInfo)
                             end
                             local drillActivate = folder:FindFirstChild("DrillActivate")
                             local drillMine = folder:FindFirstChild("DrillMine")
+                            local folderIdNum = tonumber(folder.Name)
+                            if folderIdNum and not isMadCommIdAllowed(folderIdNum) then
+                                return nil, nil, drillCollectToggle
+                            end
                             if drillActivate and drillActivate:IsA("RemoteEvent")
                                 and drillMine and drillMine:IsA("RemoteEvent")
                             then
@@ -3109,6 +3141,8 @@ return function(Window, scriptInfo)
                                     local attemptedFire = false
                                     local fireFailed = false
                                     local mineModeText = "pickaxe"
+                                    local firedActivateRemote = nil
+                                    local firedMineRemote = nil
                                     local now = os.clock()
                                     local minReadyAt = math.max(nextMineAllowedAt, lastMineFiredAt + adaptiveMinInterval)
                                     if now < minReadyAt then
@@ -3119,6 +3153,8 @@ return function(Window, scriptInfo)
                                         local drillActivateRemote, drillMineRemote, drillCollectToggleRemote = resolveDrillRemotes()
                                         if drillActivateRemote and drillMineRemote then
                                             attemptedFire = true
+                                            firedActivateRemote = drillActivateRemote
+                                            firedMineRemote = drillMineRemote
                                             ensureRemoteClientDrain(drillActivateRemote)
                                             ensureRemoteClientDrain(drillMineRemote)
                                             if drillCollectToggleRemote then
@@ -3145,6 +3181,7 @@ return function(Window, scriptInfo)
                                         local args = { pickaxeDamage, gridForRemote }
                                         if activateRemote then
                                             attemptedFire = true
+                                            firedActivateRemote = activateRemote
                                             ensureRemoteClientDrain(activateRemote)
                                             local okFire = pcall(function()
                                                 activateRemote:FireServer(table.unpack(args))
@@ -3179,6 +3216,13 @@ return function(Window, scriptInfo)
                                         setAutoMineStatus("Auto Mine Status: mining " .. tostring(oreName) .. " (" .. mineModeText .. " | dmg " .. tostring(math.floor(pickaxeDamage + 0.5)) .. hpText .. econText .. ")")
                                     else
                                         if attemptedFire and fireFailed then
+                                            if inVehicleDrill then
+                                                -- Drill path failed: stop retrying this MadComm folder for this session.
+                                                markMadCommRemoteInvalid(firedActivateRemote)
+                                                markMadCommRemoteInvalid(firedMineRemote)
+                                            else
+                                                markMadCommRemoteInvalid(firedActivateRemote)
+                                            end
                                             nextMineAllowedAt = os.clock() + remoteBackoffInterval
                                             setAutoMineStatus("Auto Mine Status: backoff (remote busy)")
                                             task.wait(0.08)
