@@ -2319,7 +2319,7 @@ return function(Window, scriptInfo)
                             if madCommEvents then
                                 local discovered = collectNumericMadCommActivateEntries(madCommEvents)
                                 if #discovered > 0 then
-                                    -- Smallest numeric id first if multiple (no hardcoded 260/332).
+                                    -- Folder ids can change each session; never hardcode. Prefer tool MadCommId; else first sorted id.
                                     return discovered[1].remote
                                 end
                             end
