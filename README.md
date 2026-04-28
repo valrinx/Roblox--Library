@@ -26,6 +26,8 @@
 - ตรวจสอบ input และสถานะเกมก่อน execute logic สำคัญ
 
 ### Change Log (Roblox--Library/Ultimate Mining Tycoon)
+- เพิ่ม `auto-sync` ฝั่ง `Auto Mine`: อ่าน `MadCommId` แบบ deep จาก tool (attributes/value objects/descendants) และปรับ resolver ดาเมจให้สแกนค่าที่เกี่ยวกับ `damage/mining/power/strength` ก่อน fallback ตามชื่อ pickaxe เพื่อลดเคสแพ็กเก็ตไม่ตรงค่าจริงของอุปกรณ์
+- harden เพิ่ม `Auto Mine` จากผล Remote Spy: เมื่อเปิด `Force Mining Damage` จะ bypass ฟิลเตอร์ `RequiredStrength` ฝั่งสคริปต์ (ให้เซิร์ฟเวอร์ตัดสินจริง) และเพิ่ม `grid candidates` สำรอง (`attribute / world-int / world/4`) พร้อมสลับลองอัตโนมัติเมื่อ HP ไม่ขยับ
 - เพิ่มตัวเลือก `Force Mining Damage` และ `Force MadCommId` ใน `Auto Mine` (0 = auto detect) เพื่อแก้เคสที่แพ็กเก็ตจริงไม่ตรงค่าที่สคริปต์คำนวณ; ใช้ได้ตรงกับข้อมูล Remote Spy เช่น `98` + `1312`
 - แก้ `Auto Mine` เคสยิงขุดไม่เข้าเพราะ pickaxe ยังไม่ equip จริง: บังคับรอให้ pickaxe อยู่ใน `Character` ก่อนยิง `Activate` (เพิ่มสถานะ `equipping pickaxe` / `waiting pickaxe equip`) ลดอาการวนกลับมาขุดก้อนเดิมแล้ว HP ไม่ลง
 - ปรับ `Auto Mine` สำหรับแร่ชั้นลึก/HP สูง: ขยาย `hit/time limits` ตาม `expectedHits`, เพิ่ม `no-progress grace window` (ต้องยิงครบขั้นต่ำ + ใช้เวลาขั้นต่ำก่อนสลับเป้า) เพื่อลดอาการหลุดเป้ากลางทางเมื่อ pickaxe ขุดช้า
