@@ -686,6 +686,8 @@ return function(Window, scriptInfo)
             metaRefreshInterval = 0.22, -- expensive name/color resolve cadence
             lastUpdateAt = 0,
             applyDistancePadding = 70, -- skip creating visuals that are far beyond current render distance
+            discoveryInterval = 1.0, -- periodic auto-discovery so user doesn't need manual refresh
+            lastDiscoveryAt = 0,
         }
         local function countActiveVisuals()
             local n = 0
@@ -1981,6 +1983,11 @@ return function(Window, scriptInfo)
                 local char = Players.LocalPlayer.Character
                 local hrp  = char and char:FindFirstChild("HumanoidRootPart")
                 if not hrp then return end
+                if (now - (ESP.lastDiscoveryAt or 0)) >= ESP.discoveryInterval then
+                    ESP.lastDiscoveryAt = now
+                    -- Re-discover ores as player moves/new ores stream in.
+                    pcall(espScanAll)
+                end
         
                 for target, v in pairs(ESP.activeVisuals) do
                     if target and target.Parent then
@@ -2084,6 +2091,17 @@ return function(Window, scriptInfo)
                 end
             end)
             trackConnection(childAddedConn)
+            local descAddedConn = folder.DescendantAdded:Connect(function(desc)
+                if not ESP.enabled then return end
+                if not (desc:IsA("BasePart") or desc:IsA("Model")) then return end
+                task.defer(function()
+                    if not ESP.enabled then return end
+                    if not desc or not desc.Parent then return end
+                    local candidate = findOreTargetFromInstance(desc) or desc
+                    espApply(candidate)
+                end)
+            end)
+            trackConnection(descAddedConn)
         end
     
         task.spawn(function()
