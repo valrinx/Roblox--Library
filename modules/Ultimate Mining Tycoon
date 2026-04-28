@@ -2323,9 +2323,23 @@ return function(Window, scriptInfo)
                         local firedHitsOnTarget = 0
                         local mineMadCommAlternateCounter = 0
                         local drillPacketNonce = 22000
+                        local drillCollectDisabled = false
+                        local nextTargetSearchAt = 0
+                        local targetSearchActiveInterval = 0.08
+                        local targetSearchIdleInterval = 0.28
+                        local noTargetLoopSleep = 0.14
+                        local lastAutoMineStatusText = nil
 
                         local function randomRange(minValue, maxValue)
                             return minValue + (maxValue - minValue) * math.random()
+                        end
+
+                        local function setAutoMineStatus(text)
+                            if lastAutoMineStatusText == text then
+                                return
+                            end
+                            lastAutoMineStatusText = text
+                            OreLabel:Set(text)
                         end
 
                         local function hasNearbyPlayers(rootPart, radius)
@@ -2534,26 +2548,65 @@ return function(Window, scriptInfo)
                             return drillPacketNonce
                         end
 
+                        local function isKnownDrillVehicle(humanoid)
+                            if not humanoid or not humanoid.SeatPart then
+                                return false
+                            end
+                            local seat = humanoid.SeatPart
+                            local names = {
+                                "minimuncher",
+                                "exadrill",
+                                "speedminer",
+                            }
+                            local function matches(name)
+                                local ln = string.lower(tostring(name or ""))
+                                for _, token in ipairs(names) do
+                                    if string.find(ln, token, 1, true) then
+                                        return true
+                                    end
+                                end
+                                return false
+                            end
+                            if matches(seat.Name) then
+                                return true
+                            end
+                            local node = seat.Parent
+                            local depth = 0
+                            while node and depth < 7 do
+                                if matches(node.Name) then
+                                    return true
+                                end
+                                node = node.Parent
+                                depth = depth + 1
+                            end
+                            return false
+                        end
+
                         local function resolveDrillRemotes()
                             local madCommEvents = ReplicatedStorage:FindFirstChild("MadCommEvents")
                             if not madCommEvents then
-                                return nil, nil
+                                return nil, nil, nil
                             end
                             local folder = madCommEvents:FindFirstChild("1313")
                             if not folder and forceMineMadCommId > 0 then
                                 folder = madCommEvents:FindFirstChild(tostring(forceMineMadCommId))
                             end
+                            local collectFolder = madCommEvents:FindFirstChild("1358")
+                            local drillCollectToggle = collectFolder and collectFolder:FindFirstChild("DrillOreCollectToggle")
+                            if drillCollectToggle and not drillCollectToggle:IsA("RemoteEvent") then
+                                drillCollectToggle = nil
+                            end
                             if not folder then
-                                return nil, nil
+                                return nil, nil, drillCollectToggle
                             end
                             local drillActivate = folder:FindFirstChild("DrillActivate")
                             local drillMine = folder:FindFirstChild("DrillMine")
                             if drillActivate and drillActivate:IsA("RemoteEvent")
                                 and drillMine and drillMine:IsA("RemoteEvent")
                             then
-                                return drillActivate, drillMine
+                                return drillActivate, drillMine, drillCollectToggle
                             end
-                            return nil, nil
+                            return nil, nil, drillCollectToggle
                         end
 
                         local function getDescendantGridPosition(target)
@@ -2811,7 +2864,11 @@ return function(Window, scriptInfo)
                             local Character = LocalPlayer.Character
                             if not Character then task.wait(0.1) continue end
                             local humanoid = Character:FindFirstChildOfClass("Humanoid")
-                            local inVehicleDrill = humanoid and humanoid.SeatPart ~= nil
+                            local inVehicleDrill = isKnownDrillVehicle(humanoid)
+                            if not inVehicleDrill then
+                                drillCollectDisabled = false
+                            end
+                            local noTargetMode = false
                             local Tool = GetTool()
                             local isPickaxe = Tool and string.lower(Tool.Name):find("pickaxe") ~= nil
                             if not inVehicleDrill and Tool and Tool.Parent == LocalPlayer.InnoBackpack and isPickaxe then
@@ -2825,7 +2882,7 @@ return function(Window, scriptInfo)
                                     if safeProfileEnabled then
                                         nextEquipAllowedAt = os.clock() + randomRange(0.8, 1.5)
                                     end
-                                    OreLabel:Set("Auto Mine Status: equipping pickaxe")
+                                    setAutoMineStatus("Auto Mine Status: equipping pickaxe")
                                     task.wait(0.22)
                                 end
                             end
@@ -2833,7 +2890,7 @@ return function(Window, scriptInfo)
                             if not inVehicleDrill and not Tool then
                                 clearAutoMineTargetVisual()
                                 resetTargetLock()
-                                OreLabel:Set("Auto Mine Status: waiting pickaxe equip")
+                                setAutoMineStatus("Auto Mine Status: waiting pickaxe equip")
                                 task.wait(0.1)
                                 continue
                             end
@@ -2842,7 +2899,7 @@ return function(Window, scriptInfo)
                                 if safeProfileEnabled and safeNearbyPauseEnabled and hasNearbyPlayers(root, safeNearbyRadius) then
                                     resetTargetLock()
                                     clearAutoMineTargetVisual()
-                                    OreLabel:Set("Auto Mine Status: paused (players nearby)")
+                                    setAutoMineStatus("Auto Mine Status: paused (players nearby)")
                                     task.wait(randomRange(0.3, 0.7))
                                     continue
                                 end
@@ -2862,49 +2919,55 @@ return function(Window, scriptInfo)
 
                                 if isTargetValid(lockedTarget, root, pickaxeDamage) then
                                     closestBlock = lockedTarget
+                                    nextTargetSearchAt = now + targetSearchActiveInterval
                                 else
                                     resetTargetLock()
                                     clearAutoMineTargetVisual()
-                                    closestBlock = nil
-                                    closestDist = math.huge
-                                    local bestPrice = -math.huge
-                                    local anyInRange = false
-                                    local anyMineable = false
-                                    for _, container in ipairs(oreContainers) do
-                                        if container then
-                                            for _, v in pairs(container:GetChildren()) do
-                                                local renderPart = getOreRenderPart(v)
-                                                if not renderPart then continue end
-                                                if isTargetTemporarilyBlocked(v, renderPart) then continue end
-                                                local oreName = getOreNameForEsp(v, renderPart)
-                                                if isIgnoredOre(oreName) then continue end
-                                                local dist = (root.Position - renderPart.Position).Magnitude
-                                                if dist <= autoMineRange then
-                                                    anyInRange = true
-                                                    local economy = getOreEconomyForAutoMine(oreName, v, renderPart)
-                                                    if pickaxeCanMineOre(pickaxeDamage, economy) then
-                                                        anyMineable = true
-                                                        local p = economy.price
-                                                        if p == nil then
-                                                            p = -1
-                                                        end
-                                                        if p > bestPrice or (p == bestPrice and dist < closestDist) then
-                                                            bestPrice = p
-                                                            closestDist = dist
-                                                            closestBlock = v
+                                    if now >= nextTargetSearchAt then
+                                        closestBlock = nil
+                                        closestDist = math.huge
+                                        local bestPrice = -math.huge
+                                        local anyInRange = false
+                                        local anyMineable = false
+                                        for _, container in ipairs(oreContainers) do
+                                            if container then
+                                                for _, v in pairs(container:GetChildren()) do
+                                                    local renderPart = getOreRenderPart(v)
+                                                    if not renderPart then continue end
+                                                    if isTargetTemporarilyBlocked(v, renderPart) then continue end
+                                                    local oreName = getOreNameForEsp(v, renderPart)
+                                                    if isIgnoredOre(oreName) then continue end
+                                                    local dist = (root.Position - renderPart.Position).Magnitude
+                                                    if dist <= autoMineRange then
+                                                        anyInRange = true
+                                                        local economy = getOreEconomyForAutoMine(oreName, v, renderPart)
+                                                        if pickaxeCanMineOre(pickaxeDamage, economy) then
+                                                            anyMineable = true
+                                                            local p = economy.price
+                                                            if p == nil then
+                                                                p = -1
+                                                            end
+                                                            if p > bestPrice or (p == bestPrice and dist < closestDist) then
+                                                                bestPrice = p
+                                                                closestDist = dist
+                                                                closestBlock = v
+                                                            end
                                                         end
                                                     end
                                                 end
                                             end
                                         end
-                                    end
-                                    if not closestBlock and anyInRange and not anyMineable then
-                                        weakPickaxeNoTargets = true
-                                    end
-                                    lockedTarget = closestBlock
-                                    if lockedTarget then
-                                        targetLockedAt = os.clock()
-                                        firedHitsOnTarget = 0
+                                        if not closestBlock and anyInRange and not anyMineable then
+                                            weakPickaxeNoTargets = true
+                                        end
+                                        lockedTarget = closestBlock
+                                        if lockedTarget then
+                                            targetLockedAt = os.clock()
+                                            firedHitsOnTarget = 0
+                                            nextTargetSearchAt = now + targetSearchActiveInterval
+                                        else
+                                            nextTargetSearchAt = now + targetSearchIdleInterval
+                                        end
                                     end
                                 end
 
@@ -2912,7 +2975,7 @@ return function(Window, scriptInfo)
                                     local renderPart = getOreRenderPart(closestBlock)
                                     if not renderPart or not renderPart.Parent then
                                         clearAutoMineTargetVisual()
-                                        OreLabel:Set("Auto Mine Status: switching ore (no render part)")
+                                        setAutoMineStatus("Auto Mine Status: switching ore (no render part)")
                                         resetTargetLock()
                                         task.wait(0.08)
                                         continue
@@ -2930,7 +2993,7 @@ return function(Window, scriptInfo)
                                         local prevD = lastProgressDurability
                                         local jumpEps = math.max(2, prevD * 0.035)
                                         if targetDurability > prevD + jumpEps then
-                                            OreLabel:Set("Auto Mine Status: ore HP reset (server) — skip block")
+                                            setAutoMineStatus("Auto Mine Status: ore HP reset (server) — skip block")
                                             lastProgressTargetKey = nil
                                             lastProgressDurability = nil
                                             staleProgressHits = 0
@@ -2998,7 +3061,7 @@ return function(Window, scriptInfo)
                                         and firedHitsOnTarget >= staleGraceHits
                                         and elapsedOnTarget >= staleMinElapsed
                                     if canSwitchFromNoProgress then
-                                        OreLabel:Set("Auto Mine Status: switching ore (no progress)")
+                                        setAutoMineStatus("Auto Mine Status: switching ore (no progress)")
                                         blockTargetTemporarily(closestBlock, renderPart, 3.0)
                                         clearAutoMineTargetVisual()
                                         resetTargetLock()
@@ -3006,7 +3069,7 @@ return function(Window, scriptInfo)
                                         continue
                                     end
                                     if elapsedOnTarget > targetTimeLimit then
-                                        OreLabel:Set("Auto Mine Status: switching ore (too long)")
+                                        setAutoMineStatus("Auto Mine Status: switching ore (too long)")
                                         blockTargetTemporarily(closestBlock, renderPart, 2.8)
                                         clearAutoMineTargetVisual()
                                         resetTargetLock()
@@ -3014,7 +3077,7 @@ return function(Window, scriptInfo)
                                         continue
                                     end
                                     if firedHitsOnTarget >= hardHitLimit then
-                                        OreLabel:Set("Auto Mine Status: switching ore (no effect)")
+                                        setAutoMineStatus("Auto Mine Status: switching ore (no effect)")
                                         blockTargetTemporarily(closestBlock, renderPart, 3.0)
                                         clearAutoMineTargetVisual()
                                         resetTargetLock()
@@ -3026,7 +3089,7 @@ return function(Window, scriptInfo)
                                         local worldPos = renderPart and renderPart.Position
                                         if not worldPos then
                                             clearAutoMineTargetVisual()
-                                            OreLabel:Set("Auto Mine Status: target no position")
+                                            setAutoMineStatus("Auto Mine Status: target no position")
                                             task.wait(0.03)
                                             continue
                                         end
@@ -3053,11 +3116,20 @@ return function(Window, scriptInfo)
                                         continue
                                     end
                                     if inVehicleDrill then
-                                        local drillActivateRemote, drillMineRemote = resolveDrillRemotes()
+                                        local drillActivateRemote, drillMineRemote, drillCollectToggleRemote = resolveDrillRemotes()
                                         if drillActivateRemote and drillMineRemote then
                                             attemptedFire = true
                                             ensureRemoteClientDrain(drillActivateRemote)
                                             ensureRemoteClientDrain(drillMineRemote)
+                                            if drillCollectToggleRemote then
+                                                ensureRemoteClientDrain(drillCollectToggleRemote)
+                                                if not drillCollectDisabled then
+                                                    pcall(function()
+                                                        drillCollectToggleRemote:FireServer(false)
+                                                    end)
+                                                    drillCollectDisabled = true
+                                                end
+                                            end
                                             local activateNonce = nextDrillPacketNonce(5)
                                             local mineNonce = nextDrillPacketNonce(5)
                                             local okFire = pcall(function()
@@ -3088,7 +3160,7 @@ return function(Window, scriptInfo)
                                         lastProgressDurability = targetDurability
                                         markTargetLoop(closestBlock, renderPart)
                                         if sameTargetLoops >= hitSwitchLimit then
-                                            OreLabel:Set("Auto Mine Status: switching ore (hit limit)")
+                                            setAutoMineStatus("Auto Mine Status: switching ore (hit limit)")
                                             blockTargetTemporarily(closestBlock, renderPart, 2.5)
                                             clearAutoMineTargetVisual()
                                             resetTargetLock()
@@ -3104,15 +3176,15 @@ return function(Window, scriptInfo)
                                         if mineEcon.required then
                                             econText = econText .. " need≥" .. tostring(mineEcon.required)
                                         end
-                                        OreLabel:Set("Auto Mine Status: mining " .. tostring(oreName) .. " (" .. mineModeText .. " | dmg " .. tostring(math.floor(pickaxeDamage + 0.5)) .. hpText .. econText .. ")")
+                                        setAutoMineStatus("Auto Mine Status: mining " .. tostring(oreName) .. " (" .. mineModeText .. " | dmg " .. tostring(math.floor(pickaxeDamage + 0.5)) .. hpText .. econText .. ")")
                                     else
                                         if attemptedFire and fireFailed then
                                             nextMineAllowedAt = os.clock() + remoteBackoffInterval
-                                            OreLabel:Set("Auto Mine Status: backoff (remote busy)")
+                                            setAutoMineStatus("Auto Mine Status: backoff (remote busy)")
                                             task.wait(0.08)
                                             continue
                                         end
-                                        OreLabel:Set("Auto Mine Status: mine remote missing")
+                                        setAutoMineStatus("Auto Mine Status: mine remote missing")
                                         clearAutoMineTargetVisual()
                                         resetTargetLock()
                                     end
@@ -3127,14 +3199,21 @@ return function(Window, scriptInfo)
                                 else
                                     clearAutoMineTargetVisual()
                                     resetTargetLock()
+                                    noTargetMode = true
                                     if weakPickaxeNoTargets then
-                                        OreLabel:Set("Auto Mine Status: pickaxe too weak for nearby ores")
+                                        setAutoMineStatus("Auto Mine Status: pickaxe too weak for nearby ores")
                                     else
-                                        OreLabel:Set("Auto Mine Status: no target in range")
+                                        setAutoMineStatus("Auto Mine Status: no target in range")
                                     end
                                 end
                             end
-                            if safeProfileEnabled then
+                            if noTargetMode then
+                                if safeProfileEnabled then
+                                    task.wait(math.max(noTargetLoopSleep, randomRange(0.12, 0.22)))
+                                else
+                                    task.wait(noTargetLoopSleep)
+                                end
+                            elseif safeProfileEnabled then
                                 task.wait(randomRange(0.06, 0.14))
                             else
                                 task.wait(0.03)
