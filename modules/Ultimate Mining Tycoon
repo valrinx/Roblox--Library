@@ -2322,6 +2322,7 @@ return function(Window, scriptInfo)
                         local targetLockedAt = 0
                         local firedHitsOnTarget = 0
                         local mineMadCommAlternateCounter = 0
+                        local drillPacketNonce = 22000
 
                         local function randomRange(minValue, maxValue)
                             return minValue + (maxValue - minValue) * math.random()
@@ -2525,6 +2526,34 @@ return function(Window, scriptInfo)
                             end)
                             remoteClientDrainConnections[remote] = conn
                             trackConnection(conn)
+                        end
+
+                        local function nextDrillPacketNonce(step)
+                            local s = tonumber(step) or 1
+                            drillPacketNonce = drillPacketNonce + math.max(1, math.floor(s))
+                            return drillPacketNonce
+                        end
+
+                        local function resolveDrillRemotes()
+                            local madCommEvents = ReplicatedStorage:FindFirstChild("MadCommEvents")
+                            if not madCommEvents then
+                                return nil, nil
+                            end
+                            local folder = madCommEvents:FindFirstChild("1313")
+                            if not folder and forceMineMadCommId > 0 then
+                                folder = madCommEvents:FindFirstChild(tostring(forceMineMadCommId))
+                            end
+                            if not folder then
+                                return nil, nil
+                            end
+                            local drillActivate = folder:FindFirstChild("DrillActivate")
+                            local drillMine = folder:FindFirstChild("DrillMine")
+                            if drillActivate and drillActivate:IsA("RemoteEvent")
+                                and drillMine and drillMine:IsA("RemoteEvent")
+                            then
+                                return drillActivate, drillMine
+                            end
+                            return nil, nil
                         end
 
                         local function getDescendantGridPosition(target)
@@ -2781,9 +2810,11 @@ return function(Window, scriptInfo)
                             if not LocalPlayer then task.wait(0.1) continue end
                             local Character = LocalPlayer.Character
                             if not Character then task.wait(0.1) continue end
+                            local humanoid = Character:FindFirstChildOfClass("Humanoid")
+                            local inVehicleDrill = humanoid and humanoid.SeatPart ~= nil
                             local Tool = GetTool()
                             local isPickaxe = Tool and string.lower(Tool.Name):find("pickaxe") ~= nil
-                            if Tool and Tool.Parent == LocalPlayer.InnoBackpack and isPickaxe then
+                            if not inVehicleDrill and Tool and Tool.Parent == LocalPlayer.InnoBackpack and isPickaxe then
                                 local equipRemote = Tool:FindFirstChild("EquipRemote")
                                 local canEquip = true
                                 if safeProfileEnabled and os.clock() < nextEquipAllowedAt then
@@ -2799,7 +2830,7 @@ return function(Window, scriptInfo)
                                 end
                             end
                             Tool = GetTool(true)
-                            if not Tool then
+                            if not inVehicleDrill and not Tool then
                                 clearAutoMineTargetVisual()
                                 resetTargetLock()
                                 OreLabel:Set("Auto Mine Status: waiting pickaxe equip")
@@ -2815,14 +2846,7 @@ return function(Window, scriptInfo)
                                     task.wait(randomRange(0.3, 0.7))
                                     continue
                                 end
-                                local humanoid = Character:FindFirstChildOfClass("Humanoid")
-                                if humanoid and humanoid.SeatPart then
-                                    clearAutoMineTargetVisual()
-                                    OreLabel:Set("Auto Mine Status: paused (in vehicle)")
-                                    task.wait(0.15)
-                                    continue
-                                end
-                                local pickaxeDamage = resolvePickaxeDamage(Tool)
+                                local pickaxeDamage = inVehicleDrill and 9999 or resolvePickaxeDamage(Tool)
                                 if forceMineDamage > 0 then
                                     pickaxeDamage = forceMineDamage
                                 end
@@ -3012,31 +3036,52 @@ return function(Window, scriptInfo)
                                             math.floor(worldPos.Z / 4)
                                         )
                                     end
-                                    local activateRemote = pickMineActivateRemoteAlternateDiscovered(Tool)
                                     local gridCandidates = buildGridCandidates(gridPos, renderPart)
                                     local gridForRemote = gridCandidates[1] or mineGridForActivateRemote(gridPos)
                                     if #gridCandidates >= 2 and staleProgressHits >= 2 then
                                         local altIdx = (firedHitsOnTarget % #gridCandidates) + 1
                                         gridForRemote = gridCandidates[altIdx]
                                     end
-                                    local args = { pickaxeDamage, gridForRemote }
-                                    if activateRemote then
-                                        ensureRemoteClientDrain(activateRemote)
-                                        local now = os.clock()
-                                        local minReadyAt = math.max(nextMineAllowedAt, lastMineFiredAt + adaptiveMinInterval)
-                                        if now < minReadyAt then
-                                            task.wait(math.max(0.03, minReadyAt - now))
-                                            continue
+                                    local firedOk = false
+                                    local attemptedFire = false
+                                    local fireFailed = false
+                                    local mineModeText = "pickaxe"
+                                    local now = os.clock()
+                                    local minReadyAt = math.max(nextMineAllowedAt, lastMineFiredAt + adaptiveMinInterval)
+                                    if now < minReadyAt then
+                                        task.wait(math.max(0.03, minReadyAt - now))
+                                        continue
+                                    end
+                                    if inVehicleDrill then
+                                        local drillActivateRemote, drillMineRemote = resolveDrillRemotes()
+                                        if drillActivateRemote and drillMineRemote then
+                                            attemptedFire = true
+                                            ensureRemoteClientDrain(drillActivateRemote)
+                                            ensureRemoteClientDrain(drillMineRemote)
+                                            local activateNonce = nextDrillPacketNonce(5)
+                                            local mineNonce = nextDrillPacketNonce(5)
+                                            local okFire = pcall(function()
+                                                drillActivateRemote:FireServer(activateNonce, true)
+                                                drillMineRemote:FireServer(mineNonce, gridForRemote)
+                                            end)
+                                            firedOk = okFire
+                                            fireFailed = not okFire
+                                            mineModeText = "drill"
                                         end
-                                        local okFire = pcall(function()
-                                            activateRemote:FireServer(table.unpack(args))
-                                        end)
-                                        if not okFire then
-                                            nextMineAllowedAt = os.clock() + remoteBackoffInterval
-                                            OreLabel:Set("Auto Mine Status: backoff (remote busy)")
-                                            task.wait(0.08)
-                                            continue
+                                    else
+                                        local activateRemote = pickMineActivateRemoteAlternateDiscovered(Tool)
+                                        local args = { pickaxeDamage, gridForRemote }
+                                        if activateRemote then
+                                            attemptedFire = true
+                                            ensureRemoteClientDrain(activateRemote)
+                                            local okFire = pcall(function()
+                                                activateRemote:FireServer(table.unpack(args))
+                                            end)
+                                            firedOk = okFire
+                                            fireFailed = not okFire
                                         end
+                                    end
+                                    if firedOk then
                                         lastMineFiredAt = os.clock()
                                         firedHitsOnTarget = firedHitsOnTarget + 1
                                         lastProgressTargetKey = targetKey
@@ -3059,9 +3104,15 @@ return function(Window, scriptInfo)
                                         if mineEcon.required then
                                             econText = econText .. " need≥" .. tostring(mineEcon.required)
                                         end
-                                        OreLabel:Set("Auto Mine Status: mining " .. tostring(oreName) .. " (dmg " .. tostring(math.floor(pickaxeDamage + 0.5)) .. hpText .. econText .. ")")
+                                        OreLabel:Set("Auto Mine Status: mining " .. tostring(oreName) .. " (" .. mineModeText .. " | dmg " .. tostring(math.floor(pickaxeDamage + 0.5)) .. hpText .. econText .. ")")
                                     else
-                                        OreLabel:Set("Auto Mine Status: Activate remote missing")
+                                        if attemptedFire and fireFailed then
+                                            nextMineAllowedAt = os.clock() + remoteBackoffInterval
+                                            OreLabel:Set("Auto Mine Status: backoff (remote busy)")
+                                            task.wait(0.08)
+                                            continue
+                                        end
+                                        OreLabel:Set("Auto Mine Status: mine remote missing")
                                         clearAutoMineTargetVisual()
                                         resetTargetLock()
                                     end
