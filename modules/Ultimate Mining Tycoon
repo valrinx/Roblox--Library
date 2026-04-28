@@ -2257,6 +2257,7 @@ return function(Window, scriptInfo)
                         local staleProgressHits = 0
                         local targetLockedAt = 0
                         local firedHitsOnTarget = 0
+                        local mineMadCommAlternateCounter = 0
 
                         local function randomRange(minValue, maxValue)
                             return minValue + (maxValue - minValue) * math.random()
@@ -2305,26 +2306,27 @@ return function(Window, scriptInfo)
                             return nil
                         end
 
-                        -- Fire the pickaxe-resolved remote plus MadComm 260 and 332 when present (deduped). Some builds
-                        -- listen on one folder id for hits and another for rewards; user-requested dual channel.
-                        local function gatherMineActivateRemotes(tool)
+                        -- Alternate MadComm 260 vs 332 each hit (one FireServer per tick) when both exist; reduces double-fire load.
+                        local function pickMineActivateRemoteAlternate260_332(tool)
                             local madCommEvents = ReplicatedStorage:FindFirstChild("MadCommEvents")
-                            local list = {}
-                            local seen = {}
-                            local function add(r)
-                                if r and r:IsA("RemoteEvent") and not seen[r] then
-                                    seen[r] = true
-                                    table.insert(list, r)
-                                end
-                            end
-                            add(resolveActivateRemote(tool))
+                            local r260, r332 = nil, nil
                             if madCommEvents then
-                                for _, folderId in ipairs({ "260", "332" }) do
-                                    local folder = madCommEvents:FindFirstChild(folderId)
-                                    add(folder and folder:FindFirstChild("Activate"))
-                                end
+                                local f260 = madCommEvents:FindFirstChild("260")
+                                local f332 = madCommEvents:FindFirstChild("332")
+                                r260 = f260 and f260:FindFirstChild("Activate")
+                                r332 = f332 and f332:FindFirstChild("Activate")
                             end
-                            return list
+                            if r260 and r332 then
+                                mineMadCommAlternateCounter = mineMadCommAlternateCounter + 1
+                                return (mineMadCommAlternateCounter % 2 == 1) and r260 or r332
+                            end
+                            if r260 then
+                                return r260
+                            end
+                            if r332 then
+                                return r332
+                            end
+                            return resolveActivateRemote(tool)
                         end
 
                         -- Captured mining packets: FireServer(damage, Vector3int16 grid).
@@ -2783,28 +2785,20 @@ return function(Window, scriptInfo)
                                             math.floor(worldPos.Z / 4)
                                         )
                                     end
-                                    local activateRemotes = gatherMineActivateRemotes(Tool)
+                                    local activateRemote = pickMineActivateRemoteAlternate260_332(Tool)
                                     local gridForRemote = mineGridForActivateRemote(gridPos)
                                     local args = { pickaxeDamage, gridForRemote }
-                                    if #activateRemotes > 0 then
-                                        for _, ev in ipairs(activateRemotes) do
-                                            ensureRemoteClientDrain(ev)
-                                        end
+                                    if activateRemote then
+                                        ensureRemoteClientDrain(activateRemote)
                                         local now = os.clock()
                                         local minReadyAt = math.max(nextMineAllowedAt, lastMineFiredAt + adaptiveMinInterval)
                                         if now < minReadyAt then
                                             task.wait(math.max(0.03, minReadyAt - now))
                                             continue
                                         end
-                                        local okFire = true
-                                        for _, ev in ipairs(activateRemotes) do
-                                            local okOne = pcall(function()
-                                                ev:FireServer(table.unpack(args))
-                                            end)
-                                            if not okOne then
-                                                okFire = false
-                                            end
-                                        end
+                                        local okFire = pcall(function()
+                                            activateRemote:FireServer(table.unpack(args))
+                                        end)
                                         if not okFire then
                                             nextMineAllowedAt = os.clock() + remoteBackoffInterval
                                             OreLabel:Set("Auto Mine Status: backoff (remote busy)")
