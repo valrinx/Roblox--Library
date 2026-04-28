@@ -28,6 +28,8 @@ return function(Window, scriptInfo)
         autoMineEnabled = false,
         autoMineRange = 10,
         autoMineDelay = 1.2,
+        forceMineDamage = 0,
+        forceMineMadCommId = 0,
         safeProfileEnabled = true,
         safeNearbyPauseEnabled = true,
         safeNearbyRadius = 70,
@@ -95,6 +97,8 @@ return function(Window, scriptInfo)
         autoSettingsLoaded.autoMineEnabled = decoded.autoMineEnabled == true
         autoSettingsLoaded.autoMineRange = tonumber(decoded.autoMineRange) or autoSettingsLoaded.autoMineRange
         autoSettingsLoaded.autoMineDelay = tonumber(decoded.autoMineDelay) or autoSettingsLoaded.autoMineDelay
+        autoSettingsLoaded.forceMineDamage = tonumber(decoded.forceMineDamage) or autoSettingsLoaded.forceMineDamage
+        autoSettingsLoaded.forceMineMadCommId = tonumber(decoded.forceMineMadCommId) or autoSettingsLoaded.forceMineMadCommId
         if decoded.safeProfileEnabled ~= nil then
             autoSettingsLoaded.safeProfileEnabled = decoded.safeProfileEnabled == true
         end
@@ -2165,6 +2169,8 @@ return function(Window, scriptInfo)
         local autoMineThread
         local autoMineRange = math.clamp(autoSettingsLoaded.autoMineRange, 5, 50)
         local autoMineDelay = math.clamp(autoSettingsLoaded.autoMineDelay, 0, 5)
+        local forceMineDamage = math.clamp(tonumber(autoSettingsLoaded.forceMineDamage) or 0, 0, 5000)
+        local forceMineMadCommId = math.max(0, math.floor(tonumber(autoSettingsLoaded.forceMineMadCommId) or 0))
         local safeProfileEnabled = autoSettingsLoaded.safeProfileEnabled ~= false
         local safeNearbyPauseEnabled = autoSettingsLoaded.safeNearbyPauseEnabled ~= false
         local safeNearbyRadius = math.clamp(tonumber(autoSettingsLoaded.safeNearbyRadius) or 70, 20, 200)
@@ -2180,6 +2186,8 @@ return function(Window, scriptInfo)
                 autoMineEnabled = autoMineEnabled,
                 autoMineRange = autoMineRange,
                 autoMineDelay = autoMineDelay,
+                forceMineDamage = forceMineDamage,
+                forceMineMadCommId = forceMineMadCommId,
                 safeProfileEnabled = safeProfileEnabled,
                 safeNearbyPauseEnabled = safeNearbyPauseEnabled,
                 safeNearbyRadius = safeNearbyRadius,
@@ -2301,6 +2309,13 @@ return function(Window, scriptInfo)
 
                         local function resolveActivateRemote(tool)
                             local madCommEvents = ReplicatedStorage:FindFirstChild("MadCommEvents")
+                            if forceMineMadCommId > 0 and madCommEvents then
+                                local forcedFolder = madCommEvents:FindFirstChild(tostring(forceMineMadCommId))
+                                local forcedRemote = forcedFolder and forcedFolder:FindFirstChild("Activate")
+                                if forcedRemote and forcedRemote:IsA("RemoteEvent") then
+                                    return forcedRemote
+                                end
+                            end
                             -- Must match equipped pickaxe: wrong MadComm folder => server ignores hits (HP never drops).
                             if tool then
                                 local madCommId = tool:GetAttribute("MadCommId")
@@ -2329,6 +2344,13 @@ return function(Window, scriptInfo)
                         -- Round-robin across discovered numeric Activate remotes only when pickaxe MadCommId is absent.
                         local function pickMineActivateRemoteAlternateDiscovered(tool)
                             local madCommEvents = ReplicatedStorage:FindFirstChild("MadCommEvents")
+                            if forceMineMadCommId > 0 and madCommEvents then
+                                local forcedFolder = madCommEvents:FindFirstChild(tostring(forceMineMadCommId))
+                                local forcedRemote = forcedFolder and forcedFolder:FindFirstChild("Activate")
+                                if forcedRemote and forcedRemote:IsA("RemoteEvent") then
+                                    return forcedRemote
+                                end
+                            end
                             if tool and madCommEvents then
                                 local madCommId = tool:GetAttribute("MadCommId")
                                 if madCommId then
@@ -2643,6 +2665,9 @@ return function(Window, scriptInfo)
                                     continue
                                 end
                                 local pickaxeDamage = resolvePickaxeDamage(Tool)
+                                if forceMineDamage > 0 then
+                                    pickaxeDamage = forceMineDamage
+                                end
                                 local closestBlock, closestDist = nil, math.huge
                                 local weakPickaxeNoTargets = false
 
@@ -2940,6 +2965,36 @@ return function(Window, scriptInfo)
             Flag = "MiningDelay",
             Callback = function(Value)
                 autoMineDelay = Value
+                saveAutoSettings()
+            end,
+        })
+        Farm:CreateInput({
+            Name = "Force Mining Damage (0 = Auto)",
+            CurrentValue = tostring(math.floor(forceMineDamage + 0.5)),
+            PlaceholderText = "Example: 98",
+            RemoveTextAfterFocusLost = false,
+            Flag = "ForceMineDamage",
+            Callback = function(Text)
+                local value = tonumber(Text)
+                if value == nil then
+                    return
+                end
+                forceMineDamage = math.clamp(value, 0, 5000)
+                saveAutoSettings()
+            end,
+        })
+        Farm:CreateInput({
+            Name = "Force MadCommId (0 = Auto)",
+            CurrentValue = tostring(forceMineMadCommId),
+            PlaceholderText = "Example: 1312",
+            RemoveTextAfterFocusLost = false,
+            Flag = "ForceMineMadCommId",
+            Callback = function(Text)
+                local value = tonumber(Text)
+                if value == nil then
+                    return
+                end
+                forceMineMadCommId = math.max(0, math.floor(value))
                 saveAutoSettings()
             end,
         })
@@ -3456,6 +3511,8 @@ return function(Window, scriptInfo)
                 autoMineEnabled = decoded.autoMineEnabled == true
                 autoMineRange = math.clamp(tonumber(decoded.autoMineRange) or autoMineRange, 5, 50)
                 autoMineDelay = math.clamp(tonumber(decoded.autoMineDelay) or autoMineDelay, 0, 5)
+                forceMineDamage = math.clamp(tonumber(decoded.forceMineDamage) or forceMineDamage, 0, 5000)
+                forceMineMadCommId = math.max(0, math.floor(tonumber(decoded.forceMineMadCommId) or forceMineMadCommId))
                 safeProfileEnabled = decoded.safeProfileEnabled ~= false
                 safeNearbyPauseEnabled = decoded.safeNearbyPauseEnabled ~= false
                 safeNearbyRadius = math.clamp(tonumber(decoded.safeNearbyRadius) or safeNearbyRadius, 20, 200)
