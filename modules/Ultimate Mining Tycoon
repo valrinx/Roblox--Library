@@ -2292,8 +2292,9 @@ return function(Window, scriptInfo)
                                 end
                             end
                             if madCommEvents then
-                                -- Game builds vary by folder id (e.g. 261/260 vs 1726); pickaxe MadCommId is authoritative when set.
-                                for _, folderId in ipairs({ "261", "260", "1726" }) do
+                                -- If MadCommId is missing on the tool, pick the first existing folder. Order matters: picking
+                                -- the wrong folder still "fires" but ore may not drop. 260 matches common captures; 261 next.
+                                for _, folderId in ipairs({ "260", "261", "1726" }) do
                                     local fallbackFolder = madCommEvents:FindFirstChild(folderId)
                                     local fallbackRemote = fallbackFolder and fallbackFolder:FindFirstChild("Activate")
                                     if fallbackRemote then
@@ -2304,8 +2305,7 @@ return function(Window, scriptInfo)
                             return nil
                         end
 
-                        -- Packet captures use (damage, Vector3int16 grid). A three-arg path (NormalId) was dropped:
-                        -- some MadComm folders (e.g. 261) stopped awarding ore with auto-picked faces.
+                        -- Captured mining packets: FireServer(damage, Vector3int16 grid).
                         local function mineGridForActivateRemote(gridPos)
                             local x = math.floor(tonumber(gridPos.X or gridPos.x) or 0)
                             local y = math.floor(tonumber(gridPos.Y or gridPos.y) or 0)
