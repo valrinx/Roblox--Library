@@ -2275,6 +2275,30 @@ return function(Window, scriptInfo)
                             end
                             return false
                         end
+                        -- Numeric MadComm folders under MadCommEvents with an Activate RemoteEvent (discovered each call).
+                        local function collectNumericMadCommActivateEntries(madCommEvents)
+                            local entries = {}
+                            if not madCommEvents then
+                                return entries
+                            end
+                            for _, child in ipairs(madCommEvents:GetChildren()) do
+                                local idNum = tonumber(child.Name)
+                                if idNum then
+                                    local act = child:FindFirstChild("Activate")
+                                    if act and act:IsA("RemoteEvent") then
+                                        table.insert(entries, {
+                                            idNum = idNum,
+                                            remote = act,
+                                        })
+                                    end
+                                end
+                            end
+                            table.sort(entries, function(a, b)
+                                return a.idNum < b.idNum
+                            end)
+                            return entries
+                        end
+
                         local function resolveActivateRemote(tool)
                             local madCommEvents = ReplicatedStorage:FindFirstChild("MadCommEvents")
                             -- Must match equipped pickaxe: wrong MadComm folder => server ignores hits (HP never drops).
@@ -2293,38 +2317,41 @@ return function(Window, scriptInfo)
                                 end
                             end
                             if madCommEvents then
-                                -- If MadCommId is missing on the tool, pick the first existing folder. Order matters: picking
-                                -- the wrong folder still "fires" but ore may not drop. 260 matches common captures; 261 next.
-                                for _, folderId in ipairs({ "260", "332", "1726" }) do
-                                    local fallbackFolder = madCommEvents:FindFirstChild(folderId)
-                                    local fallbackRemote = fallbackFolder and fallbackFolder:FindFirstChild("Activate")
-                                    if fallbackRemote then
-                                        return fallbackRemote
-                                    end
+                                local discovered = collectNumericMadCommActivateEntries(madCommEvents)
+                                if #discovered > 0 then
+                                    -- Smallest numeric id first if multiple (no hardcoded 260/332).
+                                    return discovered[1].remote
                                 end
                             end
                             return nil
                         end
 
-                        -- Alternate MadComm 260 vs 332 each hit (one FireServer per tick) when both exist; reduces double-fire load.
-                        local function pickMineActivateRemoteAlternate260_332(tool)
+                        -- Round-robin across discovered numeric Activate remotes only when pickaxe MadCommId is absent.
+                        local function pickMineActivateRemoteAlternateDiscovered(tool)
                             local madCommEvents = ReplicatedStorage:FindFirstChild("MadCommEvents")
-                            local r260, r332 = nil, nil
-                            if madCommEvents then
-                                local f260 = madCommEvents:FindFirstChild("260")
-                                local f332 = madCommEvents:FindFirstChild("332")
-                                r260 = f260 and f260:FindFirstChild("Activate")
-                                r332 = f332 and f332:FindFirstChild("Activate")
+                            if tool and madCommEvents then
+                                local madCommId = tool:GetAttribute("MadCommId")
+                                if madCommId then
+                                    local folder = madCommEvents:FindFirstChild(tostring(madCommId))
+                                    local bound = folder and folder:FindFirstChild("Activate")
+                                    if bound and bound:IsA("RemoteEvent") then
+                                        return bound
+                                    end
+                                end
+                                local nested = tool:FindFirstChild("Activate", true)
+                                if nested and nested:IsA("RemoteEvent") then
+                                    return nested
+                                end
                             end
-                            if r260 and r332 then
+                            local discovered = madCommEvents and collectNumericMadCommActivateEntries(madCommEvents)
+                                or {}
+                            if #discovered >= 2 then
                                 mineMadCommAlternateCounter = mineMadCommAlternateCounter + 1
-                                return (mineMadCommAlternateCounter % 2 == 1) and r260 or r332
+                                local idx = ((mineMadCommAlternateCounter - 1) % #discovered) + 1
+                                return discovered[idx].remote
                             end
-                            if r260 then
-                                return r260
-                            end
-                            if r332 then
-                                return r332
+                            if #discovered == 1 then
+                                return discovered[1].remote
                             end
                             return resolveActivateRemote(tool)
                         end
@@ -2785,7 +2812,7 @@ return function(Window, scriptInfo)
                                             math.floor(worldPos.Z / 4)
                                         )
                                     end
-                                    local activateRemote = pickMineActivateRemoteAlternate260_332(Tool)
+                                    local activateRemote = pickMineActivateRemoteAlternateDiscovered(Tool)
                                     local gridForRemote = mineGridForActivateRemote(gridPos)
                                     local args = { pickaxeDamage, gridForRemote }
                                     if activateRemote then
