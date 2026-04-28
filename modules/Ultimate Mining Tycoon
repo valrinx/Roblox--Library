@@ -2402,11 +2402,14 @@ return function(Window, scriptInfo)
                             return nil
                         end
 
-                        local function GetTool()
+                        local function GetTool(characterOnly)
                             for _,v in pairs(LocalPlayer.Character:GetChildren()) do
                                 if v:FindFirstChild("EquipRemote") and string.lower(v.Name):find("pickaxe") then
                                     return v
                                 end
+                            end
+                            if characterOnly then
+                                return nil
                             end
                             for _,v in pairs(LocalPlayer:FindFirstChild("InnoBackpack") and LocalPlayer.InnoBackpack:GetChildren() or {}) do
                                 if v:FindFirstChild("EquipRemote") and string.lower(v.Name):find("pickaxe") then
@@ -2611,8 +2614,17 @@ return function(Window, scriptInfo)
                                     if safeProfileEnabled then
                                         nextEquipAllowedAt = os.clock() + randomRange(0.8, 1.5)
                                     end
-                                    task.wait(0.2)
+                                    OreLabel:Set("Auto Mine Status: equipping pickaxe")
+                                    task.wait(0.22)
                                 end
+                            end
+                            Tool = GetTool(true)
+                            if not Tool then
+                                clearAutoMineTargetVisual()
+                                resetTargetLock()
+                                OreLabel:Set("Auto Mine Status: waiting pickaxe equip")
+                                task.wait(0.1)
+                                continue
                             end
                             local root = Character and Character:FindFirstChild("HumanoidRootPart")
                             if root then
