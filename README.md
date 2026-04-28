@@ -26,6 +26,7 @@
 - ตรวจสอบ input และสถานะเกมก่อน execute logic สำคัญ
 
 ### Change Log (Roblox--Library/Ultimate Mining Tycoon)
+- ปรับ `Auto Mine` สำหรับแร่ชั้นลึก/HP สูง: ขยาย `hit/time limits` ตาม `expectedHits`, เพิ่ม `no-progress grace window` (ต้องยิงครบขั้นต่ำ + ใช้เวลาขั้นต่ำก่อนสลับเป้า) เพื่อลดอาการหลุดเป้ากลางทางเมื่อ pickaxe ขุดช้า
 - เพิ่ม `RavenHub_UMT_AutoSettings.json` (export แบบ flat สำหรับ `readfile`) รวม `oreNameByColorSignature` / signature maps / ignore list ตามโปรไฟล์ UMT; เพิ่มชื่อแร่ `EXPLOSIVES` ใน `knownOreNames` + สี/หมวด ESP
 - `Ultimate Mining Tycoon`: รวม `espRescanIfEnabled` / `espSyncAfterMappingUpdate` ลดโค้ดซ้ำระหว่าง Import Full / Reset mapping / ฟิลเตอร์ ESP / Refresh
 - เริ่มเพิ่มเอกสารภาพรวมของโปรเจกต์ใน `README.md`
