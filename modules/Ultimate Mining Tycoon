@@ -2239,7 +2239,7 @@ return function(Window, scriptInfo)
                         local lockedTarget = nil
                         local lastTargetSignature = nil
                         local sameTargetLoops = 0
-                        local oreSwitchHitLimit = 5
+                        local oreSwitchHitLimit = 2
                         local blockedTargetUntil = {}
                         local nextMineAllowedAt = 0
                         local nextEquipAllowedAt = 0
