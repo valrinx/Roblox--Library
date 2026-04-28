@@ -28,6 +28,7 @@ return function(Window, scriptInfo)
         autoMineEnabled = false,
         autoMineRange = 10,
         autoMineDelay = 1.2,
+        autoMineManualLike = false,
         safeProfileEnabled = true,
         safeNearbyPauseEnabled = true,
         safeNearbyRadius = 70,
@@ -95,6 +96,9 @@ return function(Window, scriptInfo)
         autoSettingsLoaded.autoMineEnabled = decoded.autoMineEnabled == true
         autoSettingsLoaded.autoMineRange = tonumber(decoded.autoMineRange) or autoSettingsLoaded.autoMineRange
         autoSettingsLoaded.autoMineDelay = tonumber(decoded.autoMineDelay) or autoSettingsLoaded.autoMineDelay
+        if decoded.autoMineManualLike ~= nil then
+            autoSettingsLoaded.autoMineManualLike = decoded.autoMineManualLike == true
+        end
         if decoded.safeProfileEnabled ~= nil then
             autoSettingsLoaded.safeProfileEnabled = decoded.safeProfileEnabled == true
         end
@@ -2165,6 +2169,7 @@ return function(Window, scriptInfo)
         local autoMineThread
         local autoMineRange = math.clamp(autoSettingsLoaded.autoMineRange, 5, 50)
         local autoMineDelay = math.clamp(autoSettingsLoaded.autoMineDelay, 0, 5)
+        local autoMineManualLike = autoSettingsLoaded.autoMineManualLike == true
         local safeProfileEnabled = autoSettingsLoaded.safeProfileEnabled ~= false
         local safeNearbyPauseEnabled = autoSettingsLoaded.safeNearbyPauseEnabled ~= false
         local safeNearbyRadius = math.clamp(tonumber(autoSettingsLoaded.safeNearbyRadius) or 70, 20, 200)
@@ -2180,6 +2185,7 @@ return function(Window, scriptInfo)
                 autoMineEnabled = autoMineEnabled,
                 autoMineRange = autoMineRange,
                 autoMineDelay = autoMineDelay,
+                autoMineManualLike = autoMineManualLike,
                 safeProfileEnabled = safeProfileEnabled,
                 safeNearbyPauseEnabled = safeNearbyPauseEnabled,
                 safeNearbyRadius = safeNearbyRadius,
@@ -2813,6 +2819,9 @@ return function(Window, scriptInfo)
                                         )
                                     end
                                     local activateRemote = pickMineActivateRemoteAlternateDiscovered(Tool)
+                                    if autoMineManualLike then
+                                        activateRemote = resolveActivateRemote(Tool)
+                                    end
                                     local gridForRemote = mineGridForActivateRemote(gridPos)
                                     local args = { pickaxeDamage, gridForRemote }
                                     if activateRemote then
@@ -2923,6 +2932,15 @@ return function(Window, scriptInfo)
             Flag = "MiningDelay",
             Callback = function(Value)
                 autoMineDelay = Value
+                saveAutoSettings()
+            end,
+        })
+        Farm:CreateToggle({
+            Name = "Manual-like Mining Mode",
+            CurrentValue = autoMineManualLike,
+            Flag = "AutoMineManualLike",
+            Callback = function(Value)
+                autoMineManualLike = Value
                 saveAutoSettings()
             end,
         })
