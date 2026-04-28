@@ -2305,6 +2305,28 @@ return function(Window, scriptInfo)
                             return nil
                         end
 
+                        -- Fire the pickaxe-resolved remote plus MadComm 260 and 332 when present (deduped). Some builds
+                        -- listen on one folder id for hits and another for rewards; user-requested dual channel.
+                        local function gatherMineActivateRemotes(tool)
+                            local madCommEvents = ReplicatedStorage:FindFirstChild("MadCommEvents")
+                            local list = {}
+                            local seen = {}
+                            local function add(r)
+                                if r and r:IsA("RemoteEvent") and not seen[r] then
+                                    seen[r] = true
+                                    table.insert(list, r)
+                                end
+                            end
+                            add(resolveActivateRemote(tool))
+                            if madCommEvents then
+                                for _, folderId in ipairs({ "260", "332" }) do
+                                    local folder = madCommEvents:FindFirstChild(folderId)
+                                    add(folder and folder:FindFirstChild("Activate"))
+                                end
+                            end
+                            return list
+                        end
+
                         -- Captured mining packets: FireServer(damage, Vector3int16 grid).
                         local function mineGridForActivateRemote(gridPos)
                             local x = math.floor(tonumber(gridPos.X or gridPos.x) or 0)
@@ -2761,20 +2783,28 @@ return function(Window, scriptInfo)
                                             math.floor(worldPos.Z / 4)
                                         )
                                     end
-                                    local activateRemote = resolveActivateRemote(Tool)
+                                    local activateRemotes = gatherMineActivateRemotes(Tool)
                                     local gridForRemote = mineGridForActivateRemote(gridPos)
                                     local args = { pickaxeDamage, gridForRemote }
-                                    if activateRemote then
-                                        ensureRemoteClientDrain(activateRemote)
+                                    if #activateRemotes > 0 then
+                                        for _, ev in ipairs(activateRemotes) do
+                                            ensureRemoteClientDrain(ev)
+                                        end
                                         local now = os.clock()
                                         local minReadyAt = math.max(nextMineAllowedAt, lastMineFiredAt + adaptiveMinInterval)
                                         if now < minReadyAt then
                                             task.wait(math.max(0.03, minReadyAt - now))
                                             continue
                                         end
-                                        local okFire = pcall(function()
-                                            activateRemote:FireServer(table.unpack(args))
-                                        end)
+                                        local okFire = true
+                                        for _, ev in ipairs(activateRemotes) do
+                                            local okOne = pcall(function()
+                                                ev:FireServer(table.unpack(args))
+                                            end)
+                                            if not okOne then
+                                                okFire = false
+                                            end
+                                        end
                                         if not okFire then
                                             nextMineAllowedAt = os.clock() + remoteBackoffInterval
                                             OreLabel:Set("Auto Mine Status: backoff (remote busy)")
