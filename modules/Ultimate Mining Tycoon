@@ -682,10 +682,18 @@ return function(Window, scriptInfo)
             activeRenderParts = {},
             connections   = {},
             useAdornment  = true, -- use Box ESP per user preference
-            updateInterval = 1 / 24, -- throttle visual updates to reduce frame cost
+            updateInterval = 1 / 20, -- throttle visual updates to reduce frame cost
             metaRefreshInterval = 0.22, -- expensive name/color resolve cadence
             lastUpdateAt = 0,
+            applyDistancePadding = 70, -- skip creating visuals that are far beyond current render distance
         }
+        local function countActiveVisuals()
+            local n = 0
+            for _ in pairs(ESP.activeVisuals) do
+                n = n + 1
+            end
+            return n
+        end
     
         local oreColors = {
             ["Tin"]          = Color3.fromRGB(180, 180, 160),
@@ -1732,6 +1740,14 @@ return function(Window, scriptInfo)
             local renderPart = getOreRenderPart(target)
             if not renderPart then return end
             if ESP.activeRenderParts[renderPart] then return end
+            local char = Players.LocalPlayer and Players.LocalPlayer.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local dist = (hrp.Position - renderPart.Position).Magnitude
+                if dist > (ESP.maxDistance + ESP.applyDistancePadding) then
+                    return
+                end
+            end
 
             local oreName = getOreNameForEsp(target, renderPart)
             if ESP.filterOre ~= "All" and oreName ~= ESP.filterOre then return end
@@ -1939,6 +1955,17 @@ return function(Window, scriptInfo)
         trackConnection(RunService.RenderStepped:Connect(function()
             local ok = pcall(function()
                 if not ESP.enabled then return end
+                local visualCount = countActiveVisuals()
+                if visualCount > 220 then
+                    ESP.updateInterval = 1 / 10
+                    ESP.metaRefreshInterval = 0.5
+                elseif visualCount > 120 then
+                    ESP.updateInterval = 1 / 14
+                    ESP.metaRefreshInterval = 0.35
+                else
+                    ESP.updateInterval = 1 / 20
+                    ESP.metaRefreshInterval = 0.22
+                end
                 local now = os.clock()
                 if (now - ESP.lastUpdateAt) < ESP.updateInterval then
                     return
@@ -2030,19 +2057,23 @@ return function(Window, scriptInfo)
         local function watchFolder(folder)
             if not folder then return end
             local childAddedConn = folder.ChildAdded:Connect(function(child)
+                if not ESP.enabled then return end
                 if child:IsA("BasePart") or child:IsA("Model") then
                     task.wait(0.1)
                     espApply(child)
                 elseif child:IsA("Folder") then
-                    task.wait(0.1)
-                    for _, desc in ipairs(child:GetDescendants()) do
-                        if desc:IsA("BasePart") then
-                            local candidate = findOreTargetFromInstance(desc) or desc
-                            espApply(candidate)
-                        elseif desc:IsA("Model") then
-                            espApply(desc)
+                    task.delay(0.12, function()
+                        if not ESP.enabled then return end
+                        if not child or not child.Parent then return end
+                        for _, desc in ipairs(child:GetDescendants()) do
+                            if desc:IsA("BasePart") then
+                                local candidate = findOreTargetFromInstance(desc) or desc
+                                espApply(candidate)
+                            elseif desc:IsA("Model") then
+                                espApply(desc)
+                            end
                         end
-                    end
+                    end)
                 end
             end)
             trackConnection(childAddedConn)
