@@ -1596,8 +1596,15 @@ return function(Window, scriptInfo)
             local node = instance
             local placedOre = workspace:FindFirstChild("PlacedOre")
             local spawnedBlocks = workspace:FindFirstChild("SpawnedBlocks")
+            local lastRenderable = nil
             while node and node.Parent do
+                if node:IsA("BasePart") or node:IsA("Model") then
+                    lastRenderable = node
+                end
                 if (placedOre and node.Parent == placedOre) or (spawnedBlocks and node.Parent == spawnedBlocks) then
+                    if lastRenderable and lastRenderable ~= placedOre and lastRenderable ~= spawnedBlocks then
+                        return lastRenderable
+                    end
                     return node
                 end
                 node = node.Parent
@@ -1854,7 +1861,7 @@ return function(Window, scriptInfo)
                     for _, child in ipairs(folder:GetChildren()) do
                         if child:IsA("BasePart") or child:IsA("Model") then
                             tryApplyTarget(child)
-                        elseif child:IsA("Folder") then
+                        else
                             for _, desc in ipairs(child:GetDescendants()) do
                                 if desc:IsA("BasePart") then
                                     local candidate = findOreTargetFromInstance(desc) or desc
@@ -2061,7 +2068,7 @@ return function(Window, scriptInfo)
                 if child:IsA("BasePart") or child:IsA("Model") then
                     task.wait(0.1)
                     espApply(child)
-                elseif child:IsA("Folder") then
+                else
                     task.delay(0.12, function()
                         if not ESP.enabled then return end
                         if not child or not child.Parent then return end
