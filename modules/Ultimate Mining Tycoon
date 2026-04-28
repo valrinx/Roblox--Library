@@ -709,6 +709,7 @@ return function(Window, scriptInfo)
             ["Tungsten"]     = Color3.fromRGB(70,  90,  100),
             ["Gold"]         = Color3.fromRGB(255, 215, 0),
             ["Titanium"]     = Color3.fromRGB(120, 120, 140),
+            ["Molybdenum"]   = Color3.fromRGB(138, 159, 153),
             ["Palladium"]    = Color3.fromRGB(255, 180, 0),
             ["Plutonium"]    = Color3.fromRGB(0,   255, 255),
             ["Mithril"]      = Color3.fromRGB(50,  200, 150),
@@ -743,7 +744,7 @@ return function(Window, scriptInfo)
         local oreCategoryByName = {
             ["Tin"] = "Common Metal", ["Iron"] = "Common Metal", ["Lead"] = "Common Metal", ["Aluminium"] = "Common Metal",
             ["Silver"] = "Rare Metal", ["Unknown"] = "Rare Metal", ["Cobalt"] = "Rare Metal", ["Tungsten"] = "Rare Metal", ["Titanium"] = "Rare Metal",
-            ["Vanadium"] = "Rare Metal", ["Rhodium"] = "Rare Metal", ["Iridium"] = "Rare Metal", ["Palladium"] = "Rare Metal",
+            ["Vanadium"] = "Rare Metal", ["Rhodium"] = "Rare Metal", ["Iridium"] = "Rare Metal", ["Palladium"] = "Rare Metal", ["Molybdenum"] = "Rare Metal",
             ["Uranium"] = "Radioactive", ["Plutonium"] = "Radioactive", ["Thorium"] = "Radioactive",
             ["Gold"] = "Precious",
             ["Topaz"] = "Gemstone", ["Emerald"] = "Gemstone", ["Sapphire"] = "Gemstone", ["Ruby"] = "Gemstone", ["Diamond"] = "Gemstone",
@@ -1066,9 +1067,38 @@ return function(Window, scriptInfo)
             return bestName
         end
 
-        -- Static table intentionally starts empty to avoid hardcoded wrong names.
-        -- Populate only with verified mappings.
-        local oreNameByStaticColorSignature = {}
+        -- Verified static color signatures (from user-provided UMT profile export).
+        local oreNameByStaticColorSignature = {
+            ["MeshPart|Enum.Material.Plastic|74,77,122|rbxassetid://18890509556"] = "Titanium",
+            ["MeshPart|Enum.Material.SmoothPlastic|92,97,97|rbxassetid://18948235836"] = "Musgravite",
+            ["MeshPart|Enum.Material.Plastic|209,160,34|rbxassetid://107025224910125"] = "Palladium",
+            ["MeshPart|Enum.Material.Plastic|171,221,41|rbxassetid://109851935916635"] = "Iridium",
+            ["MeshPart|Enum.Material.SmoothPlastic|193,11,11|rbxassetid://18948235836"] = "Ruby",
+            ["MeshPart|Enum.Material.Plastic|138,159,153|rbxassetid://109851935916635"] = "Molybdenum",
+            ["MeshPart|Enum.Material.Plastic|97,130,109|rbxassetid://18890509556"] = "Thorium",
+            ["MeshPart|Enum.Material.SmoothPlastic|154,143,56|rbxassetid://18948235836"] = "Topaz",
+            ["MeshPart|Enum.Material.Plastic|123,133,133|rbxassetid://18890509556"] = "Tin",
+            ["MeshPart|Enum.Material.Plastic|107,108,107|rbxassetid://107025224910125"] = "Aluminium",
+            ["MeshPart|Enum.Material.Plastic|241,213,121|rbxassetid://18890509556"] = "Gold",
+            ["MeshPart|Enum.Material.Plastic|189,125,84|rbxassetid://18890509556"] = "Iron",
+            ["MeshPart|Enum.Material.SmoothPlastic|103,182,188|rbxassetid://18948235836"] = "Diamond",
+            ["MeshPart|Enum.Material.Neon|87,175,87|rbxassetid://18890509556"] = "Uranium",
+            ["MeshPart|Enum.Material.Plastic|83,165,134|rbxassetid://107025224910125"] = "Mithril",
+            ["MeshPart|Enum.Material.Neon|41,137,211|rbxassetid://18890509556"] = "Plutonium",
+            ["MeshPart|Enum.Material.SmoothPlastic|0,143,0|rbxassetid://18948235836"] = "Emerald",
+            ["MeshPart|Enum.Material.SmoothPlastic|11,36,179|rbxassetid://18948235836"] = "Sapphire",
+            ["MeshPart|Enum.Material.SmoothPlastic|202,134,117|rbxassetid://18948235836"] = "Zultanite",
+            ["MeshPart|Enum.Material.Plastic|54,56,73|rbxassetid://85019587575686"] = "Lead",
+            ["MeshPart|Enum.Material.Glacier|15,12,20|rbxassetid://93787691661882"] = "EXPLOSIVES",
+            ["MeshPart|Enum.Material.Plastic|64,116,199|rbxassetid://109851935916635"] = "Cobalt",
+            ["MeshPart|Enum.Material.SmoothPlastic|202,67,200|rbxassetid://18948235836"] = "Poudretteite",
+            ["MeshPart|Enum.Material.Plastic|133,171,185|rbxassetid://18890509556"] = "Silver",
+            ["MeshPart|Enum.Material.Brick|170,85,0|rbxassetid://18890509556"] = "Rhodium",
+            ["MeshPart|Enum.Material.SmoothPlastic|67,202,130|rbxassetid://18948235836"] = "Grandidierite",
+            ["MeshPart|Enum.Material.Plastic|166,64,46|rbxassetid://107025224910125"] = "Vanadium",
+            ["MeshPart|Enum.Material.Plastic|65,83,76|rbxassetid://85019587575686"] = "Tungsten",
+            ["MeshPart|Enum.Material.Plastic|80,159,116|rbxassetid://109851935916635"] = "Adamantium",
+        }
 
         -- Allow hub to pass preloaded mappings into this module.
         if scriptInfo and type(scriptInfo.preloadedOreColorMap) == "table" then
