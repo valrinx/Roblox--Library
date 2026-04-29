@@ -2527,6 +2527,9 @@ return function(Window, scriptInfo)
                         end
 
                         local function isMadCommIdAllowed(idNum)
+                            if autoMineHelper and type(autoMineHelper.isMadCommIdAllowed) == "function" then
+                                return autoMineHelper.isMadCommIdAllowed(idNum, invalidMadCommIds)
+                            end
                             local n = tonumber(idNum)
                             if not n then
                                 return false
@@ -2536,6 +2539,10 @@ return function(Window, scriptInfo)
                         end
 
                         local function markMadCommRemoteInvalid(remote)
+                            if autoMineHelper and type(autoMineHelper.markMadCommRemoteInvalid) == "function" then
+                                autoMineHelper.markMadCommRemoteInvalid(remote, invalidMadCommIds)
+                                return
+                            end
                             local idNum = getMadCommIdFromRemote(remote)
                             if idNum then
                                 invalidMadCommIds[idNum] = true
@@ -2587,6 +2594,18 @@ return function(Window, scriptInfo)
 
                         local function resolveActivateRemote(tool)
                             local madCommEvents = ReplicatedStorage:FindFirstChild("MadCommEvents")
+                            if autoMineHelper and type(autoMineHelper.resolveActivateRemote) == "function" then
+                                return autoMineHelper.resolveActivateRemote(
+                                    tool,
+                                    madCommEvents,
+                                    forceMineMadCommId,
+                                    isMadCommIdAllowed,
+                                    resolveToolMadCommId,
+                                    function(events)
+                                        return collectNumericMadCommActivateEntries(events)
+                                    end
+                                )
+                            end
                             if forceMineMadCommId > 0 and madCommEvents then
                                 local forcedFolder = madCommEvents:FindFirstChild(tostring(forceMineMadCommId))
                                 local forcedRemote = forcedFolder and forcedFolder:FindFirstChild("Activate")
@@ -2622,6 +2641,21 @@ return function(Window, scriptInfo)
                         -- Round-robin across discovered numeric Activate remotes only when pickaxe MadCommId is absent.
                         local function pickMineActivateRemoteAlternateDiscovered(tool)
                             local madCommEvents = ReplicatedStorage:FindFirstChild("MadCommEvents")
+                            if autoMineHelper and type(autoMineHelper.pickMineActivateRemoteAlternateDiscovered) == "function" then
+                                local remote, nextCounter = autoMineHelper.pickMineActivateRemoteAlternateDiscovered(
+                                    tool,
+                                    madCommEvents,
+                                    forceMineMadCommId,
+                                    isMadCommIdAllowed,
+                                    resolveToolMadCommId,
+                                    function(events)
+                                        return collectNumericMadCommActivateEntries(events)
+                                    end,
+                                    mineMadCommAlternateCounter
+                                )
+                                mineMadCommAlternateCounter = tonumber(nextCounter) or mineMadCommAlternateCounter
+                                return remote
+                            end
                             if forceMineMadCommId > 0 and madCommEvents then
                                 local forcedFolder = madCommEvents:FindFirstChild(tostring(forceMineMadCommId))
                                 local forcedRemote = forcedFolder and forcedFolder:FindFirstChild("Activate")
@@ -2701,6 +2735,10 @@ return function(Window, scriptInfo)
                         end
 
                         local function ensureRemoteClientDrain(remote)
+                            if autoMineHelper and type(autoMineHelper.ensureRemoteClientDrain) == "function" then
+                                autoMineHelper.ensureRemoteClientDrain(remote, remoteClientDrainConnections, trackConnection)
+                                return
+                            end
                             if not remote or not remote:IsA("RemoteEvent") then
                                 return
                             end
@@ -2716,6 +2754,10 @@ return function(Window, scriptInfo)
                         end
 
                         local function nextDrillPacketNonce(step)
+                            if autoMineHelper and type(autoMineHelper.nextDrillPacketNonce) == "function" then
+                                drillPacketNonce = autoMineHelper.nextDrillPacketNonce(drillPacketNonce, step)
+                                return drillPacketNonce
+                            end
                             local s = tonumber(step) or 1
                             drillPacketNonce = drillPacketNonce + math.max(1, math.floor(s))
                             return drillPacketNonce
