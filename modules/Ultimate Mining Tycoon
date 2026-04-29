@@ -24,7 +24,9 @@ return function(Window, scriptInfo)
     local Players = game:GetService("Players")
     local RunService = game:GetService("RunService")
     local SETTINGS_FILE = "RavenHub_UMT_AutoSettings.json"
+    local CURRENT_SETTINGS_VERSION = 2
     local autoSettingsLoaded = {
+        settingsVersion = CURRENT_SETTINGS_VERSION,
         autoMineEnabled = false,
         autoMineRange = 10,
         autoMineDelay = 1.2,
@@ -89,10 +91,20 @@ return function(Window, scriptInfo)
         end
     end
 
+    local function unwrapSettingsPayload(decoded)
+        if type(decoded) ~= "table" then return nil end
+        if decoded.kind == "UMTFullSettings" and type(decoded.data) == "table" then
+            return decoded.data
+        end
+        return decoded
+    end
+
     pcall(function()
         if not canReadSettingsFile or not isfile(SETTINGS_FILE) then return end
-        local decoded = HttpService:JSONDecode(readfile(SETTINGS_FILE))
+        local decoded = unwrapSettingsPayload(HttpService:JSONDecode(readfile(SETTINGS_FILE)))
         if type(decoded) ~= "table" then return end
+        local version = tonumber(decoded.settingsVersion) or 1
+        autoSettingsLoaded.settingsVersion = version
 
         autoSettingsLoaded.autoMineEnabled = decoded.autoMineEnabled == true
         autoSettingsLoaded.autoMineRange = tonumber(decoded.autoMineRange) or autoSettingsLoaded.autoMineRange
@@ -138,6 +150,9 @@ return function(Window, scriptInfo)
         end
         if isStringMap(decoded.sharedOreNameByColorSignature) then
             mergeStringMap(autoSettingsLoaded.sharedOreNameByColorSignature, decoded.sharedOreNameByColorSignature)
+        end
+        if version < CURRENT_SETTINGS_VERSION then
+            autoSettingsLoaded.settingsVersion = CURRENT_SETTINGS_VERSION
         end
         settingsLoadOk = true
     end)
@@ -2269,6 +2284,7 @@ return function(Window, scriptInfo)
     
         local function buildSettingsPayload()
             return {
+                settingsVersion = CURRENT_SETTINGS_VERSION,
                 autoMineEnabled = autoMineEnabled,
                 autoMineRange = autoMineRange,
                 autoMineDelay = autoMineDelay,
