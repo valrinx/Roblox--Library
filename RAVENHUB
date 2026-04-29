@@ -66,7 +66,7 @@ end)
 
 local Window = Rayfield:CreateWindow({
     Name            = "RAVEN HUB",
-    LoadingTitle    = "RAVEN HUB  |  v3.1c",
+    LoadingTitle    = "RAVEN HUB  |  v3.1b",
     LoadingSubtitle = "by valrinx",
     ConfigurationSaving = {
         Enabled    = true,
