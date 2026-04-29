@@ -5,6 +5,10 @@
 คลังสคริปต์/โมดูล Roblox สำหรับเก็บและแชร์โค้ดที่นำกลับไปใช้ซ้ำได้ในหลายเกม
 โดยเน้นโครงสร้างที่อ่านง่าย, แก้ไขต่อได้ง่าย, และแยกเป็นรายเกม/ระบบอย่างชัดเจน
 
+**Project Status:** CLOSED (Maintenance Mode)  
+ดูรายละเอียดที่ `PROJECT_STATUS.md`
+สถานะปิดรอบนี้ไม่มี deferred ค้าง
+
 ### โครงสร้างโปรเจกต์
 - `modules/` : เก็บโมดูลแยกตามชื่อเกมหรือระบบ
 - `modules/umt/` : entrypoint แบบ modular ของ Ultimate Mining Tycoon (เริ่มใช้แล้ว)
@@ -49,6 +53,9 @@
 - ตรวจสอบ input และสถานะเกมก่อน execute logic สำคัญ
 
 ### Change Log (Roblox--Library/Ultimate Mining Tycoon)
+- ปิดโปรเจกเป็นสถานะ `CLOSED (Maintenance Mode)` และเพิ่มไฟล์ `PROJECT_STATUS.md` เพื่อกำหนดขอบเขตงานปิดรอบนี้อย่างชัดเจน
+- เก็บก้อน `Auto Mine runtime utility` เพิ่ม: helper รองรับ `isMadCommIdAllowed`, `markMadCommRemoteInvalid`, `ensureRemoteClientDrain`, `nextDrillPacketNonce` และไฟล์หลักเรียกผ่าน helper พร้อม fallback ครบ
+- ปิดก้อน `Auto Mine remote resolver` เพิ่ม: helper `modules/umt/systems/auto_mine.lua` รองรับ `resolveActivateRemote` และ `pickMineActivateRemoteAlternateDiscovered` พร้อมผูก counter กลับเข้า runtime เดิม
 - ขยาย `Auto Mine` helper เพิ่ม: ย้าย utility `MadComm/grid packet` ไป `modules/umt/systems/auto_mine.lua` (collect entries, resolve tool id, grid candidates) แล้วให้ไฟล์หลักเรียกผ่าน helper พร้อม fallback
 - ขยับการแยก `Ore ESP runtime` เพิ่ม: ย้าย logic scan/watch โฟลเดอร์แร่ไป helper (`scanAll`, `bindFolder` ใน `modules/umt/systems/esp_runtime.lua`) และให้ไฟล์หลักเรียกผ่าน helper พร้อม fallback เดิม
 - เริ่มแยก `Auto Mine` helper: เพิ่ม `modules/umt/systems/auto_mine.lua` (utility `randomRange` และ `hasNearbyPlayers`) และผูกเรียกจากไฟล์หลักแบบ fallback
