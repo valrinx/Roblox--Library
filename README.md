@@ -49,6 +49,8 @@
 - ตรวจสอบ input และสถานะเกมก่อน execute logic สำคัญ
 
 ### Change Log (Roblox--Library/Ultimate Mining Tycoon)
+- ขยาย `Auto Mine` helper เพิ่ม: ย้าย utility `MadComm/grid packet` ไป `modules/umt/systems/auto_mine.lua` (collect entries, resolve tool id, grid candidates) แล้วให้ไฟล์หลักเรียกผ่าน helper พร้อม fallback
+- ขยับการแยก `Ore ESP runtime` เพิ่ม: ย้าย logic scan/watch โฟลเดอร์แร่ไป helper (`scanAll`, `bindFolder` ใน `modules/umt/systems/esp_runtime.lua`) และให้ไฟล์หลักเรียกผ่าน helper พร้อม fallback เดิม
 - เริ่มแยก `Auto Mine` helper: เพิ่ม `modules/umt/systems/auto_mine.lua` (utility `randomRange` และ `hasNearbyPlayers`) และผูกเรียกจากไฟล์หลักแบบ fallback
 - แยก `Ore ESP runtime helpers` เพิ่ม: สร้าง `modules/umt/systems/esp_runtime.lua` (clearAll / setVisualVisibility / syncVisualStyle) และให้ไฟล์หลักเรียกผ่าน helper เพื่อลดภาระโค้ดใน loop หลัก
 - เพิ่ม utility ฝั่ง `modules/umt/systems/esp.lua`: `countActiveVisuals()` และ `applyAdaptiveCadence()` แล้วผูกให้ไฟล์หลักเรียกผ่าน helper (มี fallback local) เพื่อลดโค้ดซ้ำใน loop อัปเดต ESP
