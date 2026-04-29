@@ -7,6 +7,7 @@
 
 ### โครงสร้างโปรเจกต์
 - `modules/` : เก็บโมดูลแยกตามชื่อเกมหรือระบบ
+- `modules/umt/` : entrypoint แบบ modular ของ Ultimate Mining Tycoon (เริ่มใช้แล้ว)
 - `RAVENHUB` : สคริปต์หลัก/ตัวรวมโค้ดที่ใช้ในโปรเจกต์
 - `RavenHub_UMT_AutoSettings.json` : ตัวอย่าง/สำรองการตั้งค่า UMT (Ore ESP mappings, Auto Mine, ฯลฯ) — วางใน workspace ของ executor ใช้ชื่อนี้ให้ตรงกับ `writefile`/`readfile` ของโมดูล หรือวาง JSON แบบ `{ "kind":"UMTFullSettings", "data":{...} }` ในแท็บ Ore ESP → Import Full Settings
 - `README.md` : เอกสารภาพรวมและแนวทางใช้งาน
@@ -18,6 +19,16 @@
 3. แยกค่าคอนฟิกที่แก้บ่อยไว้ด้านบนไฟล์เพื่อง่ายต่อการปรับแต่ง
 4. ทดสอบการทำงานพื้นฐานก่อนบันทึกเข้า repository
 
+### Ultimate Mining Tycoon (Current)
+- ฟีเจอร์หลักที่ใช้งานจริง: `Auto Mine`, `Auto Sell`, `Ore ESP`, utility แบบ remote prompt
+- ฟีเจอร์ที่ถูกถอดออกจากโมดูลนี้: `Teleport/Waypoint TP/Tween`
+- Hub จะโหลดผ่าน entrypoint `modules/umt/main.lua` แล้ว bridge ไปยัง legacy module เพื่อค่อยๆ ย้ายเป็นหลายไฟล์โดยไม่ทำให้ของเดิมพัง
+
+### Settings Schema
+- ไฟล์ `RavenHub_UMT_AutoSettings.json` ใช้ `settingsVersion` สำหรับ migration
+- โครงสร้างแบบ wrapper `{ "kind":"UMTFullSettings", "data":{...} }` ยังรองรับ
+- เมื่อเจอเวอร์ชันเก่า สคริปต์จะอัปเกรดค่าในหน่วยความจำและบันทึกกลับด้วย schema ล่าสุดอัตโนมัติ
+
 ### มาตรฐานแนะนำสำหรับ Roblox Lua
 - หลีกเลี่ยงการใช้ global variables โดยไม่จำเป็น
 - แยกฟังก์ชันตามหน้าที่ ลดการทำงานซ้ำ
@@ -26,6 +37,9 @@
 - ตรวจสอบ input และสถานะเกมก่อน execute logic สำคัญ
 
 ### Change Log (Roblox--Library/Ultimate Mining Tycoon)
+- เพิ่มโครงสร้างโหลดแบบ modular สำหรับ UMT: `RAVENHUB` ชี้ไป `modules/umt/main.lua` และใช้ `legacy_bridge.lua` เพื่อรักษา behavior เดิมระหว่างย้ายโค้ดเป็นหลายไฟล์
+- เพิ่ม `settingsVersion` ใน `RavenHub_UMT_AutoSettings.json` และรองรับ migration/fallback (รวมการอ่าน payload แบบ wrapper `UMTFullSettings`)
+- อัปเดตคำอธิบาย UMT ใน `RAVENHUB` ให้ตรงฟีเจอร์จริง (ตัด Teleport ออกจากคำบรรยาย)
 - ปรับลดอาการแลคของ `Ore ESP`: เพิ่ม adaptive throttle ตามจำนวนก้อนที่ติด visual (ลดความถี่ update/meta refresh เมื่อก้อนเยอะ), ข้ามการสร้าง ESP ให้ก้อนที่ไกลเกินระยะ + padding, และกันสแกน `GetDescendants` ตอน ESP ปิด
 - เพิ่ม `auto-sync` ฝั่ง `Auto Mine`: อ่าน `MadCommId` แบบ deep จาก tool (attributes/value objects/descendants) และปรับ resolver ดาเมจให้สแกนค่าที่เกี่ยวกับ `damage/mining/power/strength` ก่อน fallback ตามชื่อ pickaxe เพื่อลดเคสแพ็กเก็ตไม่ตรงค่าจริงของอุปกรณ์
 - harden เพิ่ม `Auto Mine` จากผล Remote Spy: เมื่อเปิด `Force Mining Damage` จะ bypass ฟิลเตอร์ `RequiredStrength` ฝั่งสคริปต์ (ให้เซิร์ฟเวอร์ตัดสินจริง) และเพิ่ม `grid candidates` สำรอง (`attribute / world-int / world/4`) พร้อมสลับลองอัตโนมัติเมื่อ HP ไม่ขยับ
