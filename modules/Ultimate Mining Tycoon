@@ -717,7 +717,7 @@ return function(Window, scriptInfo)
             ["Iridium"]      = Color3.fromRGB(200, 230, 255),
             ["Adamantium"]   = Color3.fromRGB(100, 255, 150),
             ["Rhodium"]      = Color3.fromRGB(220, 220, 255),
-            ["Unobtanium"]   = Color3.fromRGB(255, 0,   255),
+            ["Unobtanium"]   = Color3.fromRGB(189,  80, 211),
             ["Topaz"]        = Color3.fromRGB(255, 200, 0),
             ["Emerald"]      = Color3.fromRGB(0,   200, 80),
             ["Sapphire"]     = Color3.fromRGB(0,   100, 255),
