@@ -70,4 +70,88 @@ function EspRuntime.syncVisualStyle(entry, color, renderPart)
     end
 end
 
+function EspRuntime.scanAll(workspaceRef, applyTargetFn, resolveTargetFromInstanceFn)
+    if not workspaceRef or type(applyTargetFn) ~= "function" then
+        return
+    end
+    local folders = {
+        workspaceRef:FindFirstChild("PlacedOre"),
+        workspaceRef:FindFirstChild("SpawnedBlocks"),
+    }
+    local seen = {}
+    local function tryApplyTarget(target)
+        if not target or seen[target] then return end
+        if target:IsA("BasePart") or target:IsA("Model") then
+            seen[target] = true
+            applyTargetFn(target)
+        end
+    end
+    for _, folder in ipairs(folders) do
+        if folder then
+            for _, child in ipairs(folder:GetChildren()) do
+                if child:IsA("BasePart") or child:IsA("Model") then
+                    tryApplyTarget(child)
+                else
+                    for _, desc in ipairs(child:GetDescendants()) do
+                        if desc:IsA("BasePart") then
+                            local candidate = resolveTargetFromInstanceFn and resolveTargetFromInstanceFn(desc) or desc
+                            tryApplyTarget(candidate or desc)
+                        elseif desc:IsA("Model") then
+                            tryApplyTarget(desc)
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+function EspRuntime.bindFolder(folder, isEnabledFn, applyTargetFn, resolveTargetFromInstanceFn)
+    local conns = {}
+    if not folder or type(applyTargetFn) ~= "function" then
+        return conns
+    end
+
+    local function enabled()
+        if type(isEnabledFn) ~= "function" then
+            return true
+        end
+        return isEnabledFn() == true
+    end
+
+    conns[#conns + 1] = folder.ChildAdded:Connect(function(child)
+        if not enabled() then return end
+        if child:IsA("BasePart") or child:IsA("Model") then
+            task.wait(0.1)
+            applyTargetFn(child)
+        else
+            task.delay(0.12, function()
+                if not enabled() then return end
+                if not child or not child.Parent then return end
+                for _, desc in ipairs(child:GetDescendants()) do
+                    if desc:IsA("BasePart") then
+                        local candidate = resolveTargetFromInstanceFn and resolveTargetFromInstanceFn(desc) or desc
+                        applyTargetFn(candidate or desc)
+                    elseif desc:IsA("Model") then
+                        applyTargetFn(desc)
+                    end
+                end
+            end)
+        end
+    end)
+
+    conns[#conns + 1] = folder.DescendantAdded:Connect(function(desc)
+        if not enabled() then return end
+        if not (desc:IsA("BasePart") or desc:IsA("Model")) then return end
+        task.defer(function()
+            if not enabled() then return end
+            if not desc or not desc.Parent then return end
+            local candidate = resolveTargetFromInstanceFn and resolveTargetFromInstanceFn(desc) or desc
+            applyTargetFn(candidate or desc)
+        end)
+    end)
+
+    return conns
+end
+
 return EspRuntime
