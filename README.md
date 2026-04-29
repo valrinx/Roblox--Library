@@ -29,6 +29,18 @@
 - โครงสร้างแบบ wrapper `{ "kind":"UMTFullSettings", "data":{...} }` ยังรองรับ
 - เมื่อเจอเวอร์ชันเก่า สคริปต์จะอัปเกรดค่าในหน่วยความจำและบันทึกกลับด้วย schema ล่าสุดอัตโนมัติ
 
+### Smoke Test Checklist (หลังแก้โค้ดทุกครั้ง)
+- เปิด `RAVENHUB` แล้วให้ UMT โหลดสำเร็จผ่าน `modules/umt/main.lua` โดยไม่มี error notification
+- เปิด/ปิด `Ore ESP`, ปรับระยะ, เปลี่ยนฟิลเตอร์ และกด refresh แล้ว UI/visual ไม่ค้าง
+- เปิด `Auto Mine` 2-3 นาที ตรวจว่า status มีการเปลี่ยนจริงและไม่ขึ้น queue exhausted ถี่ผิดปกติ
+- ทดสอบ `Sell Ore` แบบ remote ว่าขายได้จากระยะไกล และค่าที่เซฟ (toggle/range/filter) โหลดกลับรอบถัดไป
+- กด `Destroy Hub` แล้ว ensure cleanup สำเร็จ ไม่มี ESP/Highlight ค้างในโลกเกม
+
+### Known Issues (Current)
+- เมื่อเกมอัปเดตโครงสร้าง ore ใหม่ อาจต้อง import mapping หรือเรียนรู้ชื่อใหม่เพิ่ม
+- บาง executor ที่บล็อก `writefile/readfile` จะใช้ได้แต่ไม่สามารถ persistent settings ข้ามรัน
+- ถ้า raw GitHub cache หน่วง อาจโหลด helper เวอร์ชันเก่าในช่วงสั้นๆ (มี query version ช่วยลดปัญหา)
+
 ### มาตรฐานแนะนำสำหรับ Roblox Lua
 - หลีกเลี่ยงการใช้ global variables โดยไม่จำเป็น
 - แยกฟังก์ชันตามหน้าที่ ลดการทำงานซ้ำ
@@ -37,6 +49,11 @@
 - ตรวจสอบ input และสถานะเกมก่อน execute logic สำคัญ
 
 ### Change Log (Roblox--Library/Ultimate Mining Tycoon)
+- เริ่มแยก `Auto Mine` helper: เพิ่ม `modules/umt/systems/auto_mine.lua` (utility `randomRange` และ `hasNearbyPlayers`) และผูกเรียกจากไฟล์หลักแบบ fallback
+- แยก `Ore ESP runtime helpers` เพิ่ม: สร้าง `modules/umt/systems/esp_runtime.lua` (clearAll / setVisualVisibility / syncVisualStyle) และให้ไฟล์หลักเรียกผ่าน helper เพื่อลดภาระโค้ดใน loop หลัก
+- เพิ่ม utility ฝั่ง `modules/umt/systems/esp.lua`: `countActiveVisuals()` และ `applyAdaptiveCadence()` แล้วผูกให้ไฟล์หลักเรียกผ่าน helper (มี fallback local) เพื่อลดโค้ดซ้ำใน loop อัปเดต ESP
+- เพิ่มเอกสารปฏิบัติการ: `Smoke Test Checklist` และ `Known Issues` ใน README เพื่อให้ตรวจ regression และดูข้อจำกัดปัจจุบันได้เร็ว
+- เริ่ม Phase 3 ของการแยก `Ore ESP`: เพิ่ม `modules/umt/systems/esp.lua` สำหรับรวม state เริ่มต้น + color/category mapping ของ ESP และให้ไฟล์หลักโหลดผ่าน helper (มี fallback local เดิม)
 - เริ่ม Phase 2 ของการแยกไฟล์: เพิ่มโมดูล `modules/umt/core/settings.lua` และให้ `modules/Ultimate Mining Tycoon` โหลด helper นี้เพื่อจัดการ defaults/unwrap/migration ของ settings แบบแยก concern (มี fallback local เดิมหากโหลด helper ไม่สำเร็จ)
 - เพิ่มโครงสร้างโหลดแบบ modular สำหรับ UMT: `RAVENHUB` ชี้ไป `modules/umt/main.lua` และใช้ `legacy_bridge.lua` เพื่อรักษา behavior เดิมระหว่างย้ายโค้ดเป็นหลายไฟล์
 - เพิ่ม `settingsVersion` ใน `RavenHub_UMT_AutoSettings.json` และรองรับ migration/fallback (รวมการอ่าน payload แบบ wrapper `UMTFullSettings`)
