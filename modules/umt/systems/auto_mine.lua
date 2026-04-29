@@ -27,11 +27,32 @@ function AutoMineSystem.normalizeMadCommId(value)
     return math.floor(n + 0.5)
 end
 
+function AutoMineSystem.isMadCommIdAllowed(idNum, invalidMadCommIds)
+    local n = AutoMineSystem.normalizeMadCommId(idNum)
+    if not n then
+        return false
+    end
+    if type(invalidMadCommIds) ~= "table" then
+        return true
+    end
+    return not invalidMadCommIds[n]
+end
+
 function AutoMineSystem.getMadCommIdFromRemote(remote)
     if not remote or not remote.Parent then
         return nil
     end
     return AutoMineSystem.normalizeMadCommId(remote.Parent.Name)
+end
+
+function AutoMineSystem.markMadCommRemoteInvalid(remote, invalidMadCommIds)
+    if type(invalidMadCommIds) ~= "table" then
+        return
+    end
+    local idNum = AutoMineSystem.getMadCommIdFromRemote(remote)
+    if idNum then
+        invalidMadCommIds[idNum] = true
+    end
 end
 
 function AutoMineSystem.collectNumericMadCommActivateEntries(madCommEvents, invalidMadCommIds)
@@ -136,6 +157,125 @@ function AutoMineSystem.buildGridCandidates(primaryGridPos, renderPart)
         end
     end
     return candidates
+end
+
+function AutoMineSystem.ensureRemoteClientDrain(remote, remoteClientDrainConnections, trackConnectionFn)
+    if not remote or not remote:IsA("RemoteEvent") then
+        return
+    end
+    if type(remoteClientDrainConnections) ~= "table" then
+        return
+    end
+    if remoteClientDrainConnections[remote] then
+        return
+    end
+    local conn = remote.OnClientEvent:Connect(function()
+        -- Intentionally ignored; this drains server->client queue.
+    end)
+    remoteClientDrainConnections[remote] = conn
+    if type(trackConnectionFn) == "function" then
+        trackConnectionFn(conn)
+    end
+end
+
+function AutoMineSystem.nextDrillPacketNonce(currentNonce, step)
+    local s = tonumber(step) or 1
+    local base = tonumber(currentNonce) or 0
+    return base + math.max(1, math.floor(s))
+end
+
+function AutoMineSystem.resolveActivateRemote(tool, madCommEvents, forceMineMadCommId, isMadCommIdAllowedFn, resolveToolMadCommIdFn, collectEntriesFn)
+    local function isAllowed(idNum)
+        if type(isMadCommIdAllowedFn) ~= "function" then
+            return true
+        end
+        return isMadCommIdAllowedFn(idNum) == true
+    end
+
+    if forceMineMadCommId and forceMineMadCommId > 0 and madCommEvents then
+        local forcedFolder = madCommEvents:FindFirstChild(tostring(forceMineMadCommId))
+        local forcedRemote = forcedFolder and forcedFolder:FindFirstChild("Activate")
+        if forcedRemote and forcedRemote:IsA("RemoteEvent") and isAllowed(forceMineMadCommId) then
+            return forcedRemote
+        end
+    end
+
+    if tool then
+        local resolveFn = resolveToolMadCommIdFn or AutoMineSystem.resolveToolMadCommId
+        local madCommId = resolveFn(tool)
+        if madCommId and madCommEvents then
+            local commFolder = madCommEvents:FindFirstChild(tostring(madCommId))
+            local remote = commFolder and commFolder:FindFirstChild("Activate")
+            if remote and isAllowed(madCommId) then
+                return remote
+            end
+        end
+        local nested = tool:FindFirstChild("Activate", true)
+        if nested then
+            return nested
+        end
+    end
+
+    local collectFn = collectEntriesFn or AutoMineSystem.collectNumericMadCommActivateEntries
+    local discovered = madCommEvents and collectFn(madCommEvents, nil) or {}
+    if #discovered > 0 then
+        return discovered[1].remote
+    end
+    return nil
+end
+
+function AutoMineSystem.pickMineActivateRemoteAlternateDiscovered(tool, madCommEvents, forceMineMadCommId, isMadCommIdAllowedFn, resolveToolMadCommIdFn, collectEntriesFn, alternateCounter)
+    local function isAllowed(idNum)
+        if type(isMadCommIdAllowedFn) ~= "function" then
+            return true
+        end
+        return isMadCommIdAllowedFn(idNum) == true
+    end
+
+    if forceMineMadCommId and forceMineMadCommId > 0 and madCommEvents then
+        local forcedFolder = madCommEvents:FindFirstChild(tostring(forceMineMadCommId))
+        local forcedRemote = forcedFolder and forcedFolder:FindFirstChild("Activate")
+        if forcedRemote and forcedRemote:IsA("RemoteEvent") and isAllowed(forceMineMadCommId) then
+            return forcedRemote, alternateCounter
+        end
+    end
+
+    if tool and madCommEvents then
+        local resolveFn = resolveToolMadCommIdFn or AutoMineSystem.resolveToolMadCommId
+        local madCommId = resolveFn(tool)
+        if madCommId then
+            local folder = madCommEvents:FindFirstChild(tostring(madCommId))
+            local bound = folder and folder:FindFirstChild("Activate")
+            if bound and bound:IsA("RemoteEvent") and isAllowed(madCommId) then
+                return bound, alternateCounter
+            end
+        end
+        local nested = tool:FindFirstChild("Activate", true)
+        if nested and nested:IsA("RemoteEvent") then
+            return nested, alternateCounter
+        end
+    end
+
+    local collectFn = collectEntriesFn or AutoMineSystem.collectNumericMadCommActivateEntries
+    local discovered = madCommEvents and collectFn(madCommEvents, nil) or {}
+    local counter = tonumber(alternateCounter) or 0
+    if #discovered >= 2 then
+        counter = counter + 1
+        local idx = ((counter - 1) % #discovered) + 1
+        return discovered[idx].remote, counter
+    end
+    if #discovered == 1 then
+        return discovered[1].remote, counter
+    end
+
+    return AutoMineSystem.resolveActivateRemote(
+        tool,
+        madCommEvents,
+        forceMineMadCommId,
+        isMadCommIdAllowedFn,
+        resolveToolMadCommIdFn,
+        collectEntriesFn
+    ), counter
 end
 
 return AutoMineSystem
