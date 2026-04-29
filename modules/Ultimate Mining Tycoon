@@ -27,15 +27,27 @@ return function(Window, scriptInfo)
     local CURRENT_SETTINGS_VERSION = 2
     local function loadUmtHelper(relativePath)
         local baseUrl = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/umt/"
-        local raw = game:HttpGet(baseUrl .. relativePath .. "?v=umt-settings-1")
+        local raw = game:HttpGet(baseUrl .. relativePath .. "?v=umt-modular-2")
         local chunk, compileErr = loadstring(raw)
         assert(chunk, "compile helper failed (" .. relativePath .. "): " .. tostring(compileErr))
         return chunk()
     end
 
     local settingsHelper = nil
+    local espHelper = nil
+    local espRuntimeHelper = nil
+    local autoMineHelper = nil
     pcall(function()
         settingsHelper = loadUmtHelper("core/settings.lua")
+    end)
+    pcall(function()
+        espHelper = loadUmtHelper("systems/esp.lua")
+    end)
+    pcall(function()
+        espRuntimeHelper = loadUmtHelper("systems/esp_runtime.lua")
+    end)
+    pcall(function()
+        autoMineHelper = loadUmtHelper("systems/auto_mine.lua")
     end)
 
     local function buildDefaultSettings()
@@ -715,7 +727,12 @@ return function(Window, scriptInfo)
         -- ============================================================
         -- ESP SYSTEM
         -- ============================================================
-        local ESP = {
+        local espConfig = nil
+        if espHelper and type(espHelper.createConfig) == "function" then
+            espConfig = espHelper.createConfig(autoSettingsLoaded)
+        end
+
+        local ESP = (espConfig and espConfig.ESP) or {
             enabled       = autoSettingsLoaded.oreEspEnabled == true,
             maxDistance   = math.clamp(tonumber(autoSettingsLoaded.oreEspDistance) or 100, 0, 500),
             filterOre     = autoSettingsLoaded.oreEspFilter or "All",
@@ -731,6 +748,9 @@ return function(Window, scriptInfo)
             lastDiscoveryAt = 0,
         }
         local function countActiveVisuals()
+            if espHelper and type(espHelper.countActiveVisuals) == "function" then
+                return espHelper.countActiveVisuals(ESP)
+            end
             local n = 0
             for _ in pairs(ESP.activeVisuals) do
                 n = n + 1
@@ -738,7 +758,7 @@ return function(Window, scriptInfo)
             return n
         end
     
-        local oreColors = {
+        local oreColors = (espConfig and espConfig.oreColors) or {
             ["Tin"]          = Color3.fromRGB(123, 133, 133),
             ["Iron"]         = Color3.fromRGB(189, 125, 84),
             ["Lead"]         = Color3.fromRGB(54, 56, 73),
@@ -772,7 +792,7 @@ return function(Window, scriptInfo)
             ["EXPLOSIVES"]   = Color3.fromRGB(15, 12, 20),
         }
 
-        local oreCategoryColors = {
+        local oreCategoryColors = (espConfig and espConfig.oreCategoryColors) or {
             ["Common Metal"]     = Color3.fromRGB(200, 200, 200),
             ["Rare Metal"]       = Color3.fromRGB(120, 170, 255),
             ["Radioactive"]      = Color3.fromRGB(80, 255, 120),
@@ -782,7 +802,7 @@ return function(Window, scriptInfo)
             ["Unknown"]          = Color3.fromRGB(255, 145, 70),
         }
 
-        local oreCategoryByName = {
+        local oreCategoryByName = (espConfig and espConfig.oreCategoryByName) or {
             ["Tin"] = "Common Metal", ["Iron"] = "Common Metal", ["Lead"] = "Common Metal", ["Aluminium"] = "Common Metal",
             ["Silver"] = "Rare Metal", ["Unknown"] = "Rare Metal", ["Cobalt"] = "Rare Metal", ["Tungsten"] = "Rare Metal", ["Titanium"] = "Rare Metal",
             ["Vanadium"] = "Rare Metal", ["Rhodium"] = "Rare Metal", ["Iridium"] = "Rare Metal", ["Palladium"] = "Rare Metal", ["Molybdenum"] = "Rare Metal",
@@ -1906,7 +1926,11 @@ return function(Window, scriptInfo)
         end
     
         local function espClearAll()
-            for target, v in pairs(ESP.activeVisuals) do
+            if espRuntimeHelper and type(espRuntimeHelper.clearAll) == "function" then
+                espRuntimeHelper.clearAll(ESP)
+                return
+            end
+            for _, v in pairs(ESP.activeVisuals) do
                 if v.visual and v.visual.Parent then v.visual:Destroy() end
                 if v.billboard and v.billboard.Parent then v.billboard:Destroy() end
             end
@@ -2035,16 +2059,20 @@ return function(Window, scriptInfo)
         trackConnection(RunService.RenderStepped:Connect(function()
             local ok = pcall(function()
                 if not ESP.enabled then return end
-                local visualCount = countActiveVisuals()
-                if visualCount > 220 then
-                    ESP.updateInterval = 1 / 10
-                    ESP.metaRefreshInterval = 0.5
-                elseif visualCount > 120 then
-                    ESP.updateInterval = 1 / 14
-                    ESP.metaRefreshInterval = 0.35
+                if espHelper and type(espHelper.applyAdaptiveCadence) == "function" then
+                    espHelper.applyAdaptiveCadence(ESP)
                 else
-                    ESP.updateInterval = 1 / 20
-                    ESP.metaRefreshInterval = 0.22
+                    local visualCount = countActiveVisuals()
+                    if visualCount > 220 then
+                        ESP.updateInterval = 1 / 10
+                        ESP.metaRefreshInterval = 0.5
+                    elseif visualCount > 120 then
+                        ESP.updateInterval = 1 / 14
+                        ESP.metaRefreshInterval = 0.35
+                    else
+                        ESP.updateInterval = 1 / 20
+                        ESP.metaRefreshInterval = 0.22
+                    end
                 end
                 local now = os.clock()
                 if (now - ESP.lastUpdateAt) < ESP.updateInterval then
@@ -2080,12 +2108,16 @@ return function(Window, scriptInfo)
                         end
                         local dist = (hrp.Position - pos).Magnitude
                         local visible = dist <= ESP.maxDistance
-                        if v.visual and v.visual:IsA("Highlight") then
-                            v.visual.Enabled = visible
-                        elseif v.visual and v.visual:IsA("BoxHandleAdornment") then
-                            v.visual.Visible = visible
+                        if espRuntimeHelper and type(espRuntimeHelper.setVisualVisibility) == "function" then
+                            espRuntimeHelper.setVisualVisibility(v, visible)
+                        else
+                            if v.visual and v.visual:IsA("Highlight") then
+                                v.visual.Enabled = visible
+                            elseif v.visual and v.visual:IsA("BoxHandleAdornment") then
+                                v.visual.Visible = visible
+                            end
+                            v.billboard.Enabled = visible
                         end
-                        v.billboard.Enabled = visible
                         if visible then
                             local oreName = v.oreName
                             local color = v.color
@@ -2108,22 +2140,26 @@ return function(Window, scriptInfo)
                                     v.billboard.Adornee = renderPart
                                 end
                             end
-                            if v.visual then
-                                if v.visual:IsA("Highlight") then
-                                    v.visual.FillColor = color
-                                    v.visual.OutlineColor = color
-                                    v.visual.FillTransparency = 0.78
-                                    v.visual.OutlineTransparency = 0.05
-                                elseif v.visual:IsA("BoxHandleAdornment") then
-                                    v.visual.Color3 = color
-                                    v.visual.Transparency = 0.72
-                                    if renderPart and renderPart:IsA("BasePart") then
-                                        v.visual.Size = renderPart.Size + Vector3.new(0.05, 0.05, 0.05)
+                            if espRuntimeHelper and type(espRuntimeHelper.syncVisualStyle) == "function" then
+                                espRuntimeHelper.syncVisualStyle(v, color, renderPart)
+                            else
+                                if v.visual then
+                                    if v.visual:IsA("Highlight") then
+                                        v.visual.FillColor = color
+                                        v.visual.OutlineColor = color
+                                        v.visual.FillTransparency = 0.78
+                                        v.visual.OutlineTransparency = 0.05
+                                    elseif v.visual:IsA("BoxHandleAdornment") then
+                                        v.visual.Color3 = color
+                                        v.visual.Transparency = 0.72
+                                        if renderPart and renderPart:IsA("BasePart") then
+                                            v.visual.Size = renderPart.Size + Vector3.new(0.05, 0.05, 0.05)
+                                        end
                                     end
                                 end
-                            end
-                            if v.label then
-                                v.label.TextColor3 = color
+                                if v.label then
+                                    v.label.TextColor3 = color
+                                end
                             end
                             local distInt = math.floor(dist)
                             if distInt ~= v.lastDistanceInt then
@@ -2404,6 +2440,9 @@ return function(Window, scriptInfo)
                         local lastAutoMineStatusText = nil
 
                         local function randomRange(minValue, maxValue)
+                            if autoMineHelper and type(autoMineHelper.randomRange) == "function" then
+                                return autoMineHelper.randomRange(minValue, maxValue)
+                            end
                             return minValue + (maxValue - minValue) * math.random()
                         end
 
@@ -2416,6 +2455,9 @@ return function(Window, scriptInfo)
                         end
 
                         local function hasNearbyPlayers(rootPart, radius)
+                            if autoMineHelper and type(autoMineHelper.hasNearbyPlayers) == "function" then
+                                return autoMineHelper.hasNearbyPlayers(LocalPlayer, Players, rootPart, radius)
+                            end
                             if not rootPart then return false end
                             for _, otherPlayer in ipairs(Players:GetPlayers()) do
                                 if otherPlayer ~= LocalPlayer and otherPlayer.Character then
