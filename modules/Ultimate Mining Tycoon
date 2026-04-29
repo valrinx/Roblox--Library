@@ -1159,6 +1159,7 @@ return function(Window, scriptInfo)
             ["MeshPart|Enum.Material.Plastic|166,64,46|rbxassetid://107025224910125"] = "Vanadium",
             ["MeshPart|Enum.Material.Plastic|65,83,76|rbxassetid://85019587575686"] = "Tungsten",
             ["MeshPart|Enum.Material.Plastic|80,159,116|rbxassetid://109851935916635"] = "Adamantium",
+            ["MeshPart|Enum.Material.Neon|189,80,211|rbxassetid://18890509556"] = "Unobtanium",
         }
 
         -- Allow hub to pass preloaded mappings into this module.
