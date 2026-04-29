@@ -37,6 +37,7 @@
 - ตรวจสอบ input และสถานะเกมก่อน execute logic สำคัญ
 
 ### Change Log (Roblox--Library/Ultimate Mining Tycoon)
+- เริ่ม Phase 2 ของการแยกไฟล์: เพิ่มโมดูล `modules/umt/core/settings.lua` และให้ `modules/Ultimate Mining Tycoon` โหลด helper นี้เพื่อจัดการ defaults/unwrap/migration ของ settings แบบแยก concern (มี fallback local เดิมหากโหลด helper ไม่สำเร็จ)
 - เพิ่มโครงสร้างโหลดแบบ modular สำหรับ UMT: `RAVENHUB` ชี้ไป `modules/umt/main.lua` และใช้ `legacy_bridge.lua` เพื่อรักษา behavior เดิมระหว่างย้ายโค้ดเป็นหลายไฟล์
 - เพิ่ม `settingsVersion` ใน `RavenHub_UMT_AutoSettings.json` และรองรับ migration/fallback (รวมการอ่าน payload แบบ wrapper `UMTFullSettings`)
 - อัปเดตคำอธิบาย UMT ใน `RAVENHUB` ให้ตรงฟีเจอร์จริง (ตัด Teleport ออกจากคำบรรยาย)
