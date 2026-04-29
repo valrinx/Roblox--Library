@@ -25,34 +25,54 @@ return function(Window, scriptInfo)
     local RunService = game:GetService("RunService")
     local SETTINGS_FILE = "RavenHub_UMT_AutoSettings.json"
     local CURRENT_SETTINGS_VERSION = 2
-    local autoSettingsLoaded = {
-        settingsVersion = CURRENT_SETTINGS_VERSION,
-        autoMineEnabled = false,
-        autoMineRange = 10,
-        autoMineDelay = 1.2,
-        forceMineDamage = 0,
-        forceMineMadCommId = 0,
-        safeProfileEnabled = true,
-        safeNearbyPauseEnabled = true,
-        safeNearbyRadius = 70,
-        safeSellCooldown = 6,
-        oreIgnoreList = {},
-        autoSellEnabled = false,
-        autoSellOreCount = 8,
-        autoSellMethod = "Remote",
-        walkSpeed = 16,
-        infiniteJumpEnabled = false,
-        sellOreKey = "",
-        oreEspEnabled = false,
-        oreEspDistance = 100,
-        oreEspFilter = "All",
-        oreNameById = {},
-        oreNameByRuntime = {},
-        oreNameBySignature = {},
-        oreNameBySignatureCoarse = {},
-        oreNameByColorSignature = {},
-        sharedOreNameByColorSignature = {},
-    }
+    local function loadUmtHelper(relativePath)
+        local baseUrl = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/umt/"
+        local raw = game:HttpGet(baseUrl .. relativePath .. "?v=umt-settings-1")
+        local chunk, compileErr = loadstring(raw)
+        assert(chunk, "compile helper failed (" .. relativePath .. "): " .. tostring(compileErr))
+        return chunk()
+    end
+
+    local settingsHelper = nil
+    pcall(function()
+        settingsHelper = loadUmtHelper("core/settings.lua")
+    end)
+
+    local function buildDefaultSettings()
+        if settingsHelper and type(settingsHelper.buildDefaults) == "function" then
+            return settingsHelper.buildDefaults(CURRENT_SETTINGS_VERSION)
+        end
+        return {
+            settingsVersion = CURRENT_SETTINGS_VERSION,
+            autoMineEnabled = false,
+            autoMineRange = 10,
+            autoMineDelay = 1.2,
+            forceMineDamage = 0,
+            forceMineMadCommId = 0,
+            safeProfileEnabled = true,
+            safeNearbyPauseEnabled = true,
+            safeNearbyRadius = 70,
+            safeSellCooldown = 6,
+            oreIgnoreList = {},
+            autoSellEnabled = false,
+            autoSellOreCount = 8,
+            autoSellMethod = "Remote",
+            walkSpeed = 16,
+            infiniteJumpEnabled = false,
+            sellOreKey = "",
+            oreEspEnabled = false,
+            oreEspDistance = 100,
+            oreEspFilter = "All",
+            oreNameById = {},
+            oreNameByRuntime = {},
+            oreNameBySignature = {},
+            oreNameBySignatureCoarse = {},
+            oreNameByColorSignature = {},
+            sharedOreNameByColorSignature = {},
+        }
+    end
+
+    local autoSettingsLoaded = buildDefaultSettings()
     local saveSettingsTaskId = 0
     local saveAutoSettings
     local canReadSettingsFile = type(isfile) == "function" and type(readfile) == "function"
@@ -60,6 +80,17 @@ return function(Window, scriptInfo)
     local settingsLoadOk = false
     local settingsSaveOk = false
     local settingsLastSaveError = nil
+
+    local function unwrapSettingsPayload(decoded)
+        if settingsHelper and type(settingsHelper.unwrapPayload) == "function" then
+            return settingsHelper.unwrapPayload(decoded)
+        end
+        if type(decoded) ~= "table" then return nil end
+        if decoded.kind == "UMTFullSettings" and type(decoded.data) == "table" then
+            return decoded.data
+        end
+        return decoded
+    end
 
     local function isStringMap(tbl)
         if type(tbl) ~= "table" then return false end
@@ -91,68 +122,63 @@ return function(Window, scriptInfo)
         end
     end
 
-    local function unwrapSettingsPayload(decoded)
-        if type(decoded) ~= "table" then return nil end
-        if decoded.kind == "UMTFullSettings" and type(decoded.data) == "table" then
-            return decoded.data
-        end
-        return decoded
-    end
-
     pcall(function()
         if not canReadSettingsFile or not isfile(SETTINGS_FILE) then return end
         local decoded = unwrapSettingsPayload(HttpService:JSONDecode(readfile(SETTINGS_FILE)))
         if type(decoded) ~= "table" then return end
-        local version = tonumber(decoded.settingsVersion) or 1
-        autoSettingsLoaded.settingsVersion = version
-
-        autoSettingsLoaded.autoMineEnabled = decoded.autoMineEnabled == true
-        autoSettingsLoaded.autoMineRange = tonumber(decoded.autoMineRange) or autoSettingsLoaded.autoMineRange
-        autoSettingsLoaded.autoMineDelay = tonumber(decoded.autoMineDelay) or autoSettingsLoaded.autoMineDelay
-        autoSettingsLoaded.forceMineDamage = tonumber(decoded.forceMineDamage) or autoSettingsLoaded.forceMineDamage
-        autoSettingsLoaded.forceMineMadCommId = tonumber(decoded.forceMineMadCommId) or autoSettingsLoaded.forceMineMadCommId
-        if decoded.safeProfileEnabled ~= nil then
-            autoSettingsLoaded.safeProfileEnabled = decoded.safeProfileEnabled == true
-        end
-        if decoded.safeNearbyPauseEnabled ~= nil then
-            autoSettingsLoaded.safeNearbyPauseEnabled = decoded.safeNearbyPauseEnabled == true
-        end
-        autoSettingsLoaded.safeNearbyRadius = tonumber(decoded.safeNearbyRadius) or autoSettingsLoaded.safeNearbyRadius
-        autoSettingsLoaded.safeSellCooldown = tonumber(decoded.safeSellCooldown) or autoSettingsLoaded.safeSellCooldown
-        autoSettingsLoaded.oreIgnoreList = sanitizeStringArray(decoded.oreIgnoreList)
-        autoSettingsLoaded.autoSellEnabled = decoded.autoSellEnabled == true
-        autoSettingsLoaded.autoSellOreCount = tonumber(decoded.autoSellOreCount) or autoSettingsLoaded.autoSellOreCount
-        autoSettingsLoaded.autoSellMethod = "Remote"
-        autoSettingsLoaded.walkSpeed = tonumber(decoded.walkSpeed) or autoSettingsLoaded.walkSpeed
-        autoSettingsLoaded.infiniteJumpEnabled = decoded.infiniteJumpEnabled == true
-        if type(decoded.sellOreKey) == "string" then
-            autoSettingsLoaded.sellOreKey = decoded.sellOreKey
-        end
-        autoSettingsLoaded.oreEspEnabled = decoded.oreEspEnabled == true
-        autoSettingsLoaded.oreEspDistance = tonumber(decoded.oreEspDistance) or autoSettingsLoaded.oreEspDistance
-        if type(decoded.oreEspFilter) == "string" and decoded.oreEspFilter ~= "" then
-            autoSettingsLoaded.oreEspFilter = decoded.oreEspFilter
-        end
-        if isStringMap(decoded.oreNameById) then
-            mergeStringMap(autoSettingsLoaded.oreNameById, decoded.oreNameById)
-        end
-        if isStringMap(decoded.oreNameByRuntime) then
-            mergeStringMap(autoSettingsLoaded.oreNameByRuntime, decoded.oreNameByRuntime)
-        end
-        if isStringMap(decoded.oreNameBySignature) then
-            mergeStringMap(autoSettingsLoaded.oreNameBySignature, decoded.oreNameBySignature)
-        end
-        if isStringMap(decoded.oreNameBySignatureCoarse) then
-            mergeStringMap(autoSettingsLoaded.oreNameBySignatureCoarse, decoded.oreNameBySignatureCoarse)
-        end
-        if isStringMap(decoded.oreNameByColorSignature) then
-            mergeStringMap(autoSettingsLoaded.oreNameByColorSignature, decoded.oreNameByColorSignature)
-        end
-        if isStringMap(decoded.sharedOreNameByColorSignature) then
-            mergeStringMap(autoSettingsLoaded.sharedOreNameByColorSignature, decoded.sharedOreNameByColorSignature)
-        end
-        if version < CURRENT_SETTINGS_VERSION then
-            autoSettingsLoaded.settingsVersion = CURRENT_SETTINGS_VERSION
+        if settingsHelper and type(settingsHelper.applyDecoded) == "function" then
+            autoSettingsLoaded = settingsHelper.applyDecoded(autoSettingsLoaded, decoded, CURRENT_SETTINGS_VERSION)
+        else
+            local version = tonumber(decoded.settingsVersion) or 1
+            autoSettingsLoaded.settingsVersion = version
+            autoSettingsLoaded.autoMineEnabled = decoded.autoMineEnabled == true
+            autoSettingsLoaded.autoMineRange = tonumber(decoded.autoMineRange) or autoSettingsLoaded.autoMineRange
+            autoSettingsLoaded.autoMineDelay = tonumber(decoded.autoMineDelay) or autoSettingsLoaded.autoMineDelay
+            autoSettingsLoaded.forceMineDamage = tonumber(decoded.forceMineDamage) or autoSettingsLoaded.forceMineDamage
+            autoSettingsLoaded.forceMineMadCommId = tonumber(decoded.forceMineMadCommId) or autoSettingsLoaded.forceMineMadCommId
+            if decoded.safeProfileEnabled ~= nil then
+                autoSettingsLoaded.safeProfileEnabled = decoded.safeProfileEnabled == true
+            end
+            if decoded.safeNearbyPauseEnabled ~= nil then
+                autoSettingsLoaded.safeNearbyPauseEnabled = decoded.safeNearbyPauseEnabled == true
+            end
+            autoSettingsLoaded.safeNearbyRadius = tonumber(decoded.safeNearbyRadius) or autoSettingsLoaded.safeNearbyRadius
+            autoSettingsLoaded.safeSellCooldown = tonumber(decoded.safeSellCooldown) or autoSettingsLoaded.safeSellCooldown
+            autoSettingsLoaded.oreIgnoreList = sanitizeStringArray(decoded.oreIgnoreList)
+            autoSettingsLoaded.autoSellEnabled = decoded.autoSellEnabled == true
+            autoSettingsLoaded.autoSellOreCount = tonumber(decoded.autoSellOreCount) or autoSettingsLoaded.autoSellOreCount
+            autoSettingsLoaded.autoSellMethod = "Remote"
+            autoSettingsLoaded.walkSpeed = tonumber(decoded.walkSpeed) or autoSettingsLoaded.walkSpeed
+            autoSettingsLoaded.infiniteJumpEnabled = decoded.infiniteJumpEnabled == true
+            if type(decoded.sellOreKey) == "string" then
+                autoSettingsLoaded.sellOreKey = decoded.sellOreKey
+            end
+            autoSettingsLoaded.oreEspEnabled = decoded.oreEspEnabled == true
+            autoSettingsLoaded.oreEspDistance = tonumber(decoded.oreEspDistance) or autoSettingsLoaded.oreEspDistance
+            if type(decoded.oreEspFilter) == "string" and decoded.oreEspFilter ~= "" then
+                autoSettingsLoaded.oreEspFilter = decoded.oreEspFilter
+            end
+            if isStringMap(decoded.oreNameById) then
+                mergeStringMap(autoSettingsLoaded.oreNameById, decoded.oreNameById)
+            end
+            if isStringMap(decoded.oreNameByRuntime) then
+                mergeStringMap(autoSettingsLoaded.oreNameByRuntime, decoded.oreNameByRuntime)
+            end
+            if isStringMap(decoded.oreNameBySignature) then
+                mergeStringMap(autoSettingsLoaded.oreNameBySignature, decoded.oreNameBySignature)
+            end
+            if isStringMap(decoded.oreNameBySignatureCoarse) then
+                mergeStringMap(autoSettingsLoaded.oreNameBySignatureCoarse, decoded.oreNameBySignatureCoarse)
+            end
+            if isStringMap(decoded.oreNameByColorSignature) then
+                mergeStringMap(autoSettingsLoaded.oreNameByColorSignature, decoded.oreNameByColorSignature)
+            end
+            if isStringMap(decoded.sharedOreNameByColorSignature) then
+                mergeStringMap(autoSettingsLoaded.sharedOreNameByColorSignature, decoded.sharedOreNameByColorSignature)
+            end
+            if version < CURRENT_SETTINGS_VERSION then
+                autoSettingsLoaded.settingsVersion = CURRENT_SETTINGS_VERSION
+            end
         end
         settingsLoadOk = true
     end)
