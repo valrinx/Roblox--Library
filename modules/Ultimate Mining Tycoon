@@ -1941,6 +1941,10 @@ return function(Window, scriptInfo)
         end
     
         local function espScanAll()
+            if espRuntimeHelper and type(espRuntimeHelper.scanAll) == "function" then
+                espRuntimeHelper.scanAll(workspace, espApply, findOreTargetFromInstance)
+                return
+            end
             local folders = {
                 workspace:FindFirstChild("PlacedOre"),
                 workspace:FindFirstChild("SpawnedBlocks"),
@@ -2177,6 +2181,18 @@ return function(Window, scriptInfo)
     
         local function watchFolder(folder)
             if not folder then return end
+            if espRuntimeHelper and type(espRuntimeHelper.bindFolder) == "function" then
+                local helperConns = espRuntimeHelper.bindFolder(
+                    folder,
+                    function() return ESP.enabled end,
+                    espApply,
+                    findOreTargetFromInstance
+                )
+                for _, conn in ipairs(helperConns) do
+                    trackConnection(conn)
+                end
+                return
+            end
             local childAddedConn = folder.ChildAdded:Connect(function(child)
                 if not ESP.enabled then return end
                 if child:IsA("BasePart") or child:IsA("Model") then
@@ -2471,6 +2487,9 @@ return function(Window, scriptInfo)
                         end
                         -- Numeric MadComm folders under MadCommEvents with an Activate RemoteEvent (discovered each call).
                         local function collectNumericMadCommActivateEntries(madCommEvents)
+                            if autoMineHelper and type(autoMineHelper.collectNumericMadCommActivateEntries) == "function" then
+                                return autoMineHelper.collectNumericMadCommActivateEntries(madCommEvents, invalidMadCommIds)
+                            end
                             local entries = {}
                             if not madCommEvents then
                                 return entries
@@ -2494,6 +2513,9 @@ return function(Window, scriptInfo)
                         end
 
                         local function getMadCommIdFromRemote(remote)
+                            if autoMineHelper and type(autoMineHelper.getMadCommIdFromRemote) == "function" then
+                                return autoMineHelper.getMadCommIdFromRemote(remote)
+                            end
                             if not remote or not remote.Parent then
                                 return nil
                             end
@@ -2521,6 +2543,9 @@ return function(Window, scriptInfo)
                         end
 
                         local function resolveToolMadCommId(tool)
+                            if autoMineHelper and type(autoMineHelper.resolveToolMadCommId) == "function" then
+                                return autoMineHelper.resolveToolMadCommId(tool)
+                            end
                             if not tool then return nil end
                             local id = tonumber(tool:GetAttribute("MadCommId"))
                             if id then
@@ -2633,12 +2658,18 @@ return function(Window, scriptInfo)
 
                         -- Captured mining packets: FireServer(damage, Vector3int16 grid).
                         local function mineGridForActivateRemote(gridPos)
+                            if autoMineHelper and type(autoMineHelper.mineGridForActivateRemote) == "function" then
+                                return autoMineHelper.mineGridForActivateRemote(gridPos)
+                            end
                             local x = math.floor(tonumber(gridPos.X or gridPos.x) or 0)
                             local y = math.floor(tonumber(gridPos.Y or gridPos.y) or 0)
                             local z = math.floor(tonumber(gridPos.Z or gridPos.z) or 0)
                             return Vector3int16.new(x, y, z)
                         end
                         local function buildGridCandidates(primaryGridPos, renderPart)
+                            if autoMineHelper and type(autoMineHelper.buildGridCandidates) == "function" then
+                                return autoMineHelper.buildGridCandidates(primaryGridPos, renderPart)
+                            end
                             local candidates = {}
                             local seen = {}
                             local function addCandidate(pos)
