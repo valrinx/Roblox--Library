@@ -12,9 +12,11 @@
 - [x] Legacy script wired with fallback for all above helpers
 - [x] `auto_mine_loop.lua` - Auto Mine main loop extracted with `ctx` state-bag pattern and inline fallback
 - [x] ESP Billboard now shows ore price from `oreReferenceFromList` (`esp_runtime.lua` + legacy script updated)
-- [x] Cache-bust bumped to `umt-modular-12`
+- [x] Cache-bust bumped to `umt-modular-13`
 - [x] README changelog updated
-- [x] **NEW**: Auto Mine now checks bag/inventory status and pauses when full (`sell.lua` + `auto_mine_loop.lua` updated)
+- [x] **NEW**: Auto Mine now checks bag/inventory status and pauses when full
+  - Added `sellHelper` to `autoMineCtx` in legacy script
+  - Fixed `isBagFull()` fallback to actually check capacity instead of always returning `false`
 
 ## Next Priority: Main Loop Extraction
 
@@ -35,7 +37,7 @@
 - `modules/umt/ui/misc_tab.lua` - Misc tab creation (WalkSpeed, Infinite Jump, Shop TP, Vehicle)
 
 ## Cache-Bust Strategy
-Current: `umt-modular-12`. Next bump: `umt-modular-13` when ESP loop or Auto Sell loop is extracted.
+Current: `umt-modular-13`
 
 ## Notes
 - All helper modules are pure functions or self-contained
