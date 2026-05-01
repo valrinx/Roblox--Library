@@ -11,6 +11,7 @@
 - [x] `player_util.lua` - Player helpers (setWalkSpeed, applyWalkSpeedOnSpawn, startInfiniteJump, stopConnection, getHumanoid, getRootPart)
 - [x] Legacy script wired with fallback for all above helpers
 - [x] `auto_mine_loop.lua` - Auto Mine main loop extracted with `ctx` state-bag pattern and inline fallback
+- [x] ESP Billboard now shows ore price from `oreReferenceFromList` (`esp_runtime.lua` + legacy script updated)
 - [x] Cache-bust bumped to `umt-modular-12`
 - [x] README changelog updated
 
