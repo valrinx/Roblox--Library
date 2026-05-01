@@ -103,7 +103,13 @@ function SafeMove.physicsMove(targetPos, options)
         end
         
         -- Calculate direction and speed
-        local direction = (actualTarget - currentPos).Unit
+        local toTarget = actualTarget - currentPos
+        local direction
+        if toTarget.Magnitude > 0.001 then
+            direction = toTarget.Unit
+        else
+            direction = Vector3.new(0, 0, 0) -- Already at target
+        end
         local speed = SafeMove.getRandomizedSpeed(options.speed or SafeMove.Config.DefaultSpeed)
         
         -- Slow down when approaching target (deceleration)
@@ -136,11 +142,14 @@ function SafeMove.humanoidMove(targetPos, options)
     local humanoid = SafeMove.getHumanoid(character)
     if not humanoid then return false, "No humanoid" end
     
+    local hrp = SafeMove.getHrp(character)
+    if not hrp then return false, "No hrp" end
+    
     local actualTarget = SafeMove.addHumanOffset(targetPos)
     local startTime = tick()
     
     -- For long distances, break into waypoints
-    local currentPos = character.HumanoidRootPart.Position
+    local currentPos = hrp.Position
     local totalDistance = (actualTarget - currentPos).Magnitude
     
     if totalDistance > 30 and not options.direct then
@@ -194,7 +203,13 @@ function SafeMove.smartApproach(targetPos, remoteAction, options)
     
     -- Move to edge of remote range
     local approachDistance = math.max(remoteRange - 2, 5)
-    local direction = (targetPos - hrp.Position).Unit
+    local toTarget = targetPos - hrp.Position
+    local direction
+    if toTarget.Magnitude > 0.001 then
+        direction = toTarget.Unit
+    else
+        direction = Vector3.new(0, 0, 1)
+    end
     local approachPos = targetPos - (direction * approachDistance)
     
     -- Move using physics
