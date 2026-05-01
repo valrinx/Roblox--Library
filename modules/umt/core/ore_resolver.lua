@@ -566,7 +566,7 @@ function OreResolver.getNeighborConsensusName(target, renderPart, mappings, useS
     for _, neighbor in ipairs(parent:GetChildren()) do
         if neighbor ~= target and (neighbor:IsA("BasePart") or neighbor:IsA("Model")) then
             local neighborRender = OreResolver.getOreRenderPart(neighbor)
-            if OreResolver.isInstance(neighborRender) then
+            if OreResolver.isInstance(neighborRender) and neighborRender.Position and renderPart and renderPart.Position then
                 local dist = (neighborRender.Position - renderPart.Position).Magnitude
                 if dist <= 14 then
                     local name, source = OreResolver.getMappedOreNameOnly(neighbor, neighborRender, mappings, useStrictColorRules)

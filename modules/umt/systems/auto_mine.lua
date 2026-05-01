@@ -11,7 +11,7 @@ function AutoMineSystem.hasNearbyPlayers(localPlayer, playersService, rootPart, 
     for _, otherPlayer in ipairs(playersService:GetPlayers()) do
         if otherPlayer ~= localPlayer and otherPlayer.Character then
             local otherRoot = otherPlayer.Character:FindFirstChild("HumanoidRootPart")
-            if otherRoot and (otherRoot.Position - rootPart.Position).Magnitude <= radius then
+            if otherRoot and otherRoot.Position and rootPart and rootPart.Position and (otherRoot.Position - rootPart.Position).Magnitude <= radius then
                 return true
             end
         end

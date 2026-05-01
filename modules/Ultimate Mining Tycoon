@@ -478,7 +478,7 @@ return function(Window, scriptInfo)
                         if container then
                             for _, ore in pairs(container:GetChildren()) do
                                 local part = ore:FindFirstChildWhichIsA("BasePart", true)
-                                if part then
+                                if part and part.Position and hrp and hrp.Position then
                                     local dist = (part.Position - hrp.Position).Magnitude
                                     if dist < nearestDist then
                                         nearestDist = dist
@@ -547,7 +547,7 @@ return function(Window, scriptInfo)
                                 local unloader = sub:FindFirstChild("Unloader1")
                                 if unloader then
                                     local cargoVol = unloader:FindFirstChild("CargoVolume")
-                                    if cargoVol and cargoVol:IsA("BasePart") then
+                                    if cargoVol and cargoVol:IsA("BasePart") and cargoVol.Position and hrp and hrp.Position then
                                         local dist = (cargoVol.Position - hrp.Position).Magnitude
                                         if dist < nearestDist then
                                             nearestDist = dist
@@ -1783,7 +1783,7 @@ return function(Window, scriptInfo)
             for _, neighbor in ipairs(parent:GetChildren()) do
                 if neighbor ~= target and (neighbor:IsA("BasePart") or neighbor:IsA("Model")) then
                     local neighborRender = getOreRenderPart(neighbor)
-                    if isInstance(neighborRender) then
+                    if isInstance(neighborRender) and neighborRender.Position and renderPart and renderPart.Position then
                         local dist = (neighborRender.Position - renderPart.Position).Magnitude
                         if dist <= 14 then
                             local name, source = getMappedOreNameOnly(neighbor, neighborRender)
@@ -2286,7 +2286,7 @@ return function(Window, scriptInfo)
             if ESP.activeRenderParts[renderPart] then return end
             local char = Players.LocalPlayer and Players.LocalPlayer.Character
             local hrp = char and char:FindFirstChild("HumanoidRootPart")
-            if hrp then
+            if hrp and hrp.Position and renderPart and renderPart.Position then
                 local dist = (hrp.Position - renderPart.Position).Magnitude
                 if dist > (ESP.maxDistance + ESP.applyDistancePadding) then
                     return
@@ -2569,6 +2569,7 @@ return function(Window, scriptInfo)
                             continue
                         end
                         local dist = (hrp.Position - pos).Magnitude
+                        if not dist then continue end
                         local visible = dist <= ESP.maxDistance
                         if espRuntimeHelper and type(espRuntimeHelper.setVisualVisibility) == "function" then
                             espRuntimeHelper.setVisualVisibility(v, visible)
@@ -2981,7 +2982,7 @@ return function(Window, scriptInfo)
                             for _, otherPlayer in ipairs(Players:GetPlayers()) do
                                 if otherPlayer ~= LocalPlayer and otherPlayer.Character then
                                     local otherRoot = otherPlayer.Character:FindFirstChild("HumanoidRootPart")
-                                    if otherRoot and (otherRoot.Position - rootPart.Position).Magnitude <= radius then
+                                    if otherRoot and otherRoot.Position and rootPart and rootPart.Position and (otherRoot.Position - rootPart.Position).Magnitude <= radius then
                                         return true
                                     end
                                 end
@@ -3539,6 +3540,9 @@ return function(Window, scriptInfo)
                             if not pickaxeCanMineOre(pickaxeDamage, economy) then
                                 return false
                             end
+                            if not rootPart or not rootPart.Position or not renderPart or not renderPart.Position then
+                                return false
+                            end
                             local dist = (rootPart.Position - renderPart.Position).Magnitude
                             return dist <= (autoMineRange + 8)
                         end
@@ -3659,8 +3663,9 @@ return function(Window, scriptInfo)
                                                     if isTargetTemporarilyBlocked(v, renderPart) then continue end
                                                     local oreName = getOreNameForEsp(v, renderPart)
                                                     if isIgnoredOre(oreName) then continue end
+                                                    if not root or not root.Position or not renderPart or not renderPart.Position then continue end
                                                     local dist = (root.Position - renderPart.Position).Magnitude
-                                                    if dist <= autoMineRange then
+                                                    if dist and dist <= autoMineRange then
                                                         anyInRange = true
                                                         local economy = getOreEconomyForAutoMine(oreName, v, renderPart)
                                                         if pickaxeCanMineOre(pickaxeDamage, economy) then
@@ -4184,7 +4189,7 @@ return function(Window, scriptInfo)
                                 for _, otherPlayer in ipairs(game.Players:GetPlayers()) do
                                     if otherPlayer ~= game.Players.LocalPlayer and otherPlayer.Character then
                                         local otherRoot = otherPlayer.Character:FindFirstChild("HumanoidRootPart")
-                                        if otherRoot and (otherRoot.Position - rootPart.Position).Magnitude <= radius then
+                                        if otherRoot and otherRoot.Position and rootPart and rootPart.Position and (otherRoot.Position - rootPart.Position).Magnitude <= radius then
                                             return true
                                         end
                                     end

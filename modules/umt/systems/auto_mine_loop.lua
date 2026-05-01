@@ -66,7 +66,7 @@ function AutoMineLoop.start(ctx)
         for _, otherPlayer in ipairs(Players:GetPlayers()) do
             if otherPlayer ~= LocalPlayer and otherPlayer.Character then
                 local otherRoot = otherPlayer.Character:FindFirstChild("HumanoidRootPart")
-                if otherRoot and (otherRoot.Position - rootPart.Position).Magnitude <= radius then
+                if otherRoot and otherRoot.Position and rootPart and rootPart.Position and (otherRoot.Position - rootPart.Position).Magnitude <= radius then
                     return true
                 end
             end
