@@ -38,6 +38,35 @@ local SCRIPTS = {
         version     = "v1.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/umt/main.lua",
     },
+    {
+        name        = "Blackhawk Rescue Mission 5",
+        description = "Player ESP | Zombie ESP | AI ESP",
+        version     = "v1.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/BlackhawkRescue5_ESP/loader.lua",
+        detector    = function()
+            -- BRM5 detection by common game elements
+            local Workspace = game:GetService("Workspace")
+            local ReplicatedStorage = game:GetService("ReplicatedStorage")
+            local name = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name:lower()
+            
+            -- Check game name
+            if name:find("blackhawk") or name:find("rescue mission") or name:find("brm5") then
+                return true
+            end
+            
+            -- Check for BRM5-specific folders
+            if Workspace:FindFirstChild("Enemies") or Workspace:FindFirstChild("Zombies") then
+                return true
+            end
+            
+            -- Check for BRM5 remote events
+            if ReplicatedStorage:FindFirstChild("GameData") or ReplicatedStorage:FindFirstChild("MissionData") then
+                return true
+            end
+            
+            return false
+        end,
+    },
     --[[
     {
         name      = "Another Game",
