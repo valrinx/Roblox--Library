@@ -49,6 +49,13 @@
 - ตรวจสอบ input และสถานะเกมก่อน execute logic สำคัญ
 
 ### Change Log (Roblox--Library/Ultimate Mining Tycoon)
+- แยก `Ore Resolver` engine เกือบทั้งหมด: เพิ่ม `modules/umt/core/ore_resolver.lua` ครอบคลุม pure utilities, signature generation, instance inspection, world finding, mapping lookup (`getMappedOreNameOnly`), inference engine (`scoreOreCandidate`, `collectOreCandidatesFromInstance`, `inferOreNameFromTarget`), neighbor consensus (`getNeighborConsensusName`), direct color classifier (`classifyOreByDirectColor`), target position, countTableEntries, getOreCategory, getOreColor พร้อม default static tables (`knownOreNames`, `knownOreCanonical`, `genericOreNames`) และให้ไฟล์หลัก delegate ผ่าน helper พร้อม fallback local ครบ
+- แยก `Settings Save` helper เพิ่ม `Settings.saveAsync` ใน `modules/umt/core/settings.lua` สำหรับ debounced write file settings พร้อมให้ไฟล์หลัก delegate `saveAutoSettings` ผ่าน helper แทน inline logic
+- แยก `ESP Visuals` helper เพิ่ม `EspRuntime.createOreVisuals` ใน `modules/umt/systems/esp_runtime.lua` สำหรับสร้าง BoxHandleAdornment/Highlight + BillboardGui + TextLabel พร้อมให้ `espApply` ในไฟล์หลัก delegate ผ่าน helper แทน inline logic
+- แยก `Settings Table Utility` helper เพิ่ม `isStringMap` และ `mergeStringMap` ใน `modules/umt/core/settings.lua` พร้อมให้ไฟล์หลัก delegate ผ่าน helper แทน inline logic; bump cache-bust เป็น `umt-modular-11`
+- แยก `Safe UI` helper: เพิ่ม `modules/umt/core/safe_ui.lua` (`wrapNotify`, `patchRayfield`, `safeSetText`) และให้ `safeNotify` / `safeSetUiText` ในไฟล์หลัก delegate ผ่าน helper พร้อม fallback local
+- แยก `Player Utility` helper: เพิ่ม `modules/umt/systems/player_util.lua` (`setWalkSpeed`, `applyWalkSpeedOnSpawn`, `startInfiniteJump`, `stopConnection`, `getHumanoid`, `getRootPart`) และให้ WalkSpeed / Infinite Jump / cleanup delegate ผ่าน helper พร้อม fallback local
+- แยก `Sell Ore / Auto Sell` helper: เพิ่ม `modules/umt/systems/sell.lua` (`countCarriedOres`, `findSellTargets`, `sellFromAnywhere`, `sellByMethod`) และให้ไฟล์หลักโหลดผ่าน helper พร้อม fallback local ครบ; Auto Sell loop เรียก `countCarriedOres` ผ่าน helper แทน inline duplication
 - ปิดโปรเจกเป็นสถานะ `CLOSED (Maintenance Mode)` และเพิ่มไฟล์ `PROJECT_STATUS.md` เพื่อกำหนดขอบเขตงานปิดรอบนี้อย่างชัดเจน
 - เก็บก้อน `Auto Mine runtime utility` เพิ่ม: helper รองรับ `isMadCommIdAllowed`, `markMadCommRemoteInvalid`, `ensureRemoteClientDrain`, `nextDrillPacketNonce` และไฟล์หลักเรียกผ่าน helper พร้อม fallback ครบ
 - ปิดก้อน `Auto Mine remote resolver` เพิ่ม: helper `modules/umt/systems/auto_mine.lua` รองรับ `resolveActivateRemote` และ `pickMineActivateRemoteAlternateDiscovered` พร้อมผูก counter กลับเข้า runtime เดิม
