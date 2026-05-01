@@ -730,14 +730,12 @@ return function(Window, scriptInfo)
                         Title = "Ore Sold",
                         Content = "Successfully sold " .. tostring(oreCount) .. " ores.",
                         Duration = 3,
-                        Image = "check-circle",
                     })
                 else
                     Rayfield:Notify({
                         Title = "Error",
                         Content = tostring(sellErr),
                         Duration = 3,
-                        Image = "circle-x",
                     })
                 end
             end,
@@ -812,8 +810,7 @@ return function(Window, scriptInfo)
                                     Title = "Error",
                                     Content = "Character not found. Try again.",
                                     Duration = 3,
-                                    Image = "circle-x",
-                                })
+                                                                    })
                                 return
                             end
                             local oldHold = proximityPrompt.HoldDuration
@@ -841,23 +838,20 @@ return function(Window, scriptInfo)
                                 Title = "Error",
                                 Content = "Vehicle spawner not found in FactoryGridItemsClient!",
                                 Duration = 3,
-                                Image = "circle-x",
-                            })
+                                                            })
                         end
                     else
                         Rayfield:Notify({
                             Title = "Error",
                             Content = "FactoryGridItemsClient not found!",
                             Duration = 3,
-                            Image = "circle-x",
-                        })
+                                                    })
                     end
                 else
                     Rayfield:Notify({
                         Title = "Error",
                         Content = "Your plot was not found! Make sure you have a tycoon slot.",
                         Duration = 3,
-                        Image = "circle-x",
                     })
                 end
             end, 
@@ -882,7 +876,6 @@ return function(Window, scriptInfo)
                             Title = "Error",
                             Content = "Character not found. Try again.",
                             Duration = 3,
-                            Image = "circle-x",
                         })
                         return
                     end
@@ -905,8 +898,7 @@ return function(Window, scriptInfo)
                             Title = "Error",
                             Content = shopName .. " not found in workspace",
                             Duration = 3,
-                            Image = "circle-x",
-                        })
+                                                    })
                         return
                     end
                     
@@ -921,8 +913,7 @@ return function(Window, scriptInfo)
                             Title = "Error",
                             Content = shopName .. " activation point not found",
                             Duration = 3,
-                            Image = "circle-x",
-                        })
+                                                    })
                         return
                     end
                     
@@ -941,8 +932,7 @@ return function(Window, scriptInfo)
                             Title = "Error",
                             Content = shopName .. " proximity prompt not found",
                             Duration = 3,
-                            Image = "circle-x",
-                        })
+                                                    })
                         return
                     end
                     local oldHold = proximityPrompt.HoldDuration
@@ -4287,7 +4277,6 @@ return function(Window, scriptInfo)
                                                 Title = "Auto Sell",
                                                 Content = "Sold " .. tostring(soldCount) .. " ores successfully!",
                                                 Duration = 3,
-                                                Image = "box",
                                             })
                                             task.wait(2)
                                         else
@@ -4295,7 +4284,6 @@ return function(Window, scriptInfo)
                                                 Title = "Auto Sell Error",
                                                 Content = tostring(sellErr),
                                                 Duration = 3,
-                                                Image = "circle-x",
                                             })
                                         end
                                     end
@@ -4333,7 +4321,6 @@ return function(Window, scriptInfo)
                             Title = "Ore Capacity Limited",
                             Content = "Maximum capacity is 64 ores. Set to 64.",
                             Duration = 3,
-                            Image = "alert-circle",
                         })
                     elseif value < 1 then
                         value = 1
@@ -4345,8 +4332,7 @@ return function(Window, scriptInfo)
                         Title = "Invalid Input",
                         Content = "Please enter a valid number between 1 and 64.",
                         Duration = 3,
-                        Image = "circle-x",
-                    })
+                                            })
                 end
             end,
         })
@@ -4380,14 +4366,12 @@ return function(Window, scriptInfo)
                                     Title = "Ore Sold",
                                     Content = "Successfully sold " .. tostring(oreCount) .. " ores.",
                                     Duration = 3,
-                                    Image = "check",
                                 })
                             else
                                 Rayfield:Notify({
                                     Title = "Error",
                                     Content = tostring(sellErr),
                                     Duration = 3,
-                                    Image = "circle-x",
                                 })
                             end
                         end
@@ -4396,8 +4380,7 @@ return function(Window, scriptInfo)
                         Title = "Key Bound",
                         Content = "Sell Ore key bound to: " .. Text,
                         Duration = 3,
-                        Image = "box",
-                    })
+                                            })
                 end
             end,
         })
@@ -4494,8 +4477,7 @@ return function(Window, scriptInfo)
                         Title = "Ore Debug",
                         Content = "No ore found in your crosshair.",
                         Duration = 3,
-                        Image = "circle-x",
-                    })
+                                            })
                     return
                 end
 
@@ -4526,8 +4508,7 @@ return function(Window, scriptInfo)
                         Title = "Ore Mapping",
                         Content = "No ore found in your crosshair.",
                         Duration = 3,
-                        Image = "circle-x",
-                    })
+                                            })
                     return
                 end
 
@@ -4538,7 +4519,6 @@ return function(Window, scriptInfo)
                     Title = ok and "Ore Mapping Saved" or "Ore Mapping Failed",
                     Content = message,
                     Duration = 4,
-                    Image = ok and "check-circle" or "circle-x",
                 })
 
                 if ok then
@@ -4582,7 +4562,6 @@ return function(Window, scriptInfo)
                     Title = "Exported",
                     Content = "Full settings copied (or ready). Size: " .. tostring(#text) .. " chars.",
                     Duration = 4,
-                    Image = "clipboard",
                 })
             end,
         })
@@ -4608,8 +4587,7 @@ return function(Window, scriptInfo)
                         Title = "Import Failed",
                         Content = err,
                         Duration = 4,
-                        Image = "circle-x",
-                    })
+                                            })
                     return
                 end
 
@@ -4659,8 +4637,7 @@ return function(Window, scriptInfo)
                     Title = "Imported",
                     Content = "Applied full settings. Re-toggle features if needed.",
                     Duration = 4,
-                    Image = "check-circle",
-                })
+                                    })
             end,
         })
 
@@ -4681,8 +4658,7 @@ return function(Window, scriptInfo)
                 Title = "Ore Mapping Reset",
                 Content = "Cleared learned ore mappings. Static rules remain unchanged.",
                 Duration = 4,
-                Image = "refresh-cw",
-            })
+                            })
         end
 
         local function showResetConfirmPopup(onConfirm)
@@ -4694,8 +4670,7 @@ return function(Window, scriptInfo)
                     Title = "Reset Confirmation",
                     Content = "PlayerGui not available. Try again.",
                     Duration = 3,
-                    Image = "circle-x",
-                })
+                                    })
                 return
             end
 
@@ -4818,8 +4793,7 @@ return function(Window, scriptInfo)
                         Title = "Ore ESP",
                         Content = "ESP เปิดแล้ว — scanning ore...",
                         Duration = 2,
-                        Image = "eye",
-                    })
+                                            })
                 else
                     espClearAll()
                 end
@@ -4886,15 +4860,13 @@ return function(Window, scriptInfo)
                         Title = "ESP Refreshed",
                         Content = "Re-scanned ore in workspace.",
                         Duration = 2,
-                        Image = "refresh-cw",
-                    })
+                                            })
                 else
                     Rayfield:Notify({
                         Title = "ESP ปิดอยู่",
                         Content = "เปิด Ore ESP ก่อนแล้วค่อย Refresh",
                         Duration = 2,
-                        Image = "eye-off",
-                    })
+                                            })
                 end
             end,
         })
@@ -4952,8 +4924,7 @@ return function(Window, scriptInfo)
                 Title = "Thanks for Using UtilityHub!",
                 Content = "Join our Discord server for updates and support!",
                 Duration = 5,
-                Image = "shield-alert",
-            })
+                            })
             while scriptRunning do
                 task.wait(500)
                 local messages = {
