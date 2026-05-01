@@ -2030,9 +2030,15 @@ return function(Window, scriptInfo)
     
             local color = getOreColor(target, oreName, renderPart)
 
+            local canonicalForPrice = canonicalizeOreName(oreName) or pickKnownOreFromText(oreName) or oreName
+            local orePrice = nil
+            if oreReferenceFromList[canonicalForPrice] and type(oreReferenceFromList[canonicalForPrice]) == "table" then
+                orePrice = tonumber(oreReferenceFromList[canonicalForPrice].price)
+            end
+
             local visuals = nil
             if espRuntimeHelper and type(espRuntimeHelper.createOreVisuals) == "function" then
-                visuals = espRuntimeHelper.createOreVisuals(renderPart, target, color, oreName, ESP.useAdornment)
+                visuals = espRuntimeHelper.createOreVisuals(renderPart, target, color, oreName, ESP.useAdornment, orePrice)
             else
                 local visual = nil
                 if ESP.useAdornment then
@@ -2061,7 +2067,7 @@ return function(Window, scriptInfo)
 
                 local bb = Instance.new("BillboardGui")
                 bb.Name        = "UH_ESP_Billboard"
-                bb.Size        = UDim2.new(0, 120, 0, 36)
+                bb.Size        = UDim2.new(0, 120, 0, orePrice and 44 or 36)
                 bb.StudsOffset = Vector3.new(0, 3.8, 0)
                 bb.AlwaysOnTop = true
                 bb.Adornee     = renderPart
@@ -2076,7 +2082,7 @@ return function(Window, scriptInfo)
                 lbl.Font                   = Enum.Font.GothamBold
                 lbl.TextSize               = 13
                 lbl.TextScaled             = false
-                lbl.Text                   = oreName
+                lbl.Text                   = orePrice and (oreName .. "\n$" .. tostring(orePrice)) or oreName
                 lbl.Parent                 = bb
 
                 visuals = { visual = visual, billboard = bb, label = lbl }
@@ -2088,6 +2094,7 @@ return function(Window, scriptInfo)
                 label = visuals.label,
                 renderPart = renderPart,
                 oreName = oreName,
+                orePrice = orePrice,
                 color = color,
                 lastDistanceInt = -1,
                 nextMetaRefreshAt = 0,
@@ -2351,7 +2358,8 @@ return function(Window, scriptInfo)
                             local distInt = math.floor(dist)
                             if distInt ~= v.lastDistanceInt then
                                 v.lastDistanceInt = distInt
-                                v.label.Text = string.format("%s\n[%d studs]", oreName, distInt)
+                                local priceTag = v.orePrice and string.format("$%d | ", v.orePrice) or ""
+                                v.label.Text = string.format("%s\n%s[%d studs]", oreName, priceTag, distInt)
                             end
                         end
                     end
