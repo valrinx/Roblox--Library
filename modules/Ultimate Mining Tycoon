@@ -474,15 +474,19 @@ return function(Window, scriptInfo)
                     local spawnedBlocks = workspace:FindFirstChild("SpawnedBlocks")
                     local nearest, nearestDist = nil, math.huge
 
-                    for _, container in ipairs({placedOre, spawnedBlocks}) do
-                        if container then
-                            for _, ore in pairs(container:GetChildren()) do
-                                local part = ore:FindFirstChildWhichIsA("BasePart", true)
-                                if part and part.Position and hrp and hrp.Position then
-                                    local dist = (part.Position - hrp.Position).Magnitude
-                                    if dist < nearestDist then
-                                        nearestDist = dist
-                                        nearest = part
+                    local hrpPos = hrp and hrp.Position
+                    if hrpPos then
+                        for _, container in ipairs({placedOre, spawnedBlocks}) do
+                            if container then
+                                for _, ore in pairs(container:GetChildren()) do
+                                    local part = ore:FindFirstChildWhichIsA("BasePart", true)
+                                    local partPos = part and part.Position
+                                    if partPos then
+                                        local dist = (partPos - hrpPos).Magnitude
+                                        if dist < nearestDist then
+                                            nearestDist = dist
+                                            nearest = part
+                                        end
                                     end
                                 end
                             end
@@ -492,18 +496,20 @@ return function(Window, scriptInfo)
                     if nearest then
                         -- Re-check hrp is valid before calculating
                         hrp = character:FindFirstChild("HumanoidRootPart")
-                        if not hrp or not hrp.Position then
+                        local hrpPos = hrp and hrp.Position
+                        local nearestPos = nearest and nearest.Position
+                        if not hrpPos or not nearestPos then
                             Rayfield:Notify({Title = "Error", Content = "Character position unavailable", Duration = 3})
                             return
                         end
                         Rayfield:Notify({Title = "Approaching", Content = "Moving to nearest ore...", Duration = 2})
                         local approachDist = 10
-                        local toOre = nearest.Position - hrp.Position
+                        local toOre = nearestPos - hrpPos
                         local targetPos
                         if toOre.Magnitude > 0.001 then
-                            targetPos = nearest.Position - toOre.Unit * approachDist
+                            targetPos = nearestPos - toOre.Unit * approachDist
                         else
-                            targetPos = nearest.Position - Vector3.new(0, 0, approachDist)
+                            targetPos = nearestPos - Vector3.new(0, 0, approachDist)
                         end
                         local success, msg = safeMoveHelper.physicsMove(targetPos, {speed = moveSpeedValue})
                         Rayfield:Notify({
@@ -540,18 +546,22 @@ return function(Window, scriptInfo)
                     end
 
                     local nearestSell, nearestDist = nil, math.huge
-                    for _, folder in pairs(factoryItems:GetChildren()) do
-                        if folder:IsA("Folder") then
-                            local sub = folder:FindFirstChild(folder.Name)
-                            if sub then
-                                local unloader = sub:FindFirstChild("Unloader1")
-                                if unloader then
-                                    local cargoVol = unloader:FindFirstChild("CargoVolume")
-                                    if cargoVol and cargoVol:IsA("BasePart") and cargoVol.Position and hrp and hrp.Position then
-                                        local dist = (cargoVol.Position - hrp.Position).Magnitude
-                                        if dist < nearestDist then
-                                            nearestDist = dist
-                                            nearestSell = cargoVol
+                    local hrpPos = hrp and hrp.Position
+                    if hrpPos then
+                        for _, folder in pairs(factoryItems:GetChildren()) do
+                            if folder:IsA("Folder") then
+                                local sub = folder:FindFirstChild(folder.Name)
+                                if sub then
+                                    local unloader = sub:FindFirstChild("Unloader1")
+                                    if unloader then
+                                        local cargoVol = unloader:FindFirstChild("CargoVolume")
+                                        local cargoPos = cargoVol and cargoVol:IsA("BasePart") and cargoVol.Position
+                                        if cargoPos then
+                                            local dist = (cargoPos - hrpPos).Magnitude
+                                            if dist < nearestDist then
+                                                nearestDist = dist
+                                                nearestSell = cargoVol
+                                            end
                                         end
                                     end
                                 end
@@ -562,18 +572,20 @@ return function(Window, scriptInfo)
                     if nearestSell then
                         -- Re-check hrp is valid before calculating
                         hrp = character:FindFirstChild("HumanoidRootPart")
-                        if not hrp or not hrp.Position then
+                        local hrpPos = hrp and hrp.Position
+                        local sellPos = nearestSell and nearestSell.Position
+                        if not hrpPos or not sellPos then
                             Rayfield:Notify({Title = "Error", Content = "Character position unavailable", Duration = 3})
                             return
                         end
                         Rayfield:Notify({Title = "Approaching", Content = "Moving to sell point...", Duration = 2})
                         local approachDist = 8
-                        local toSell = nearestSell.Position - hrp.Position
+                        local toSell = sellPos - hrpPos
                         local targetPos
                         if toSell.Magnitude > 0.001 then
-                            targetPos = nearestSell.Position - toSell.Unit * approachDist
+                            targetPos = sellPos - toSell.Unit * approachDist
                         else
-                            targetPos = nearestSell.Position - Vector3.new(0, 0, approachDist)
+                            targetPos = sellPos - Vector3.new(0, 0, approachDist)
                         end
                         local success, msg = safeMoveHelper.physicsMove(targetPos, {speed = moveSpeedValue})
                         Rayfield:Notify({
@@ -4231,11 +4243,15 @@ return function(Window, scriptInfo)
                                                             local unloader = sub:FindFirstChild("Unloader1")
                                                             if unloader then
                                                                 local cargoVol = unloader:FindFirstChild("CargoVolume")
-                                                                if cargoVol and cargoVol:IsA("BasePart") and cargoVol.Position then
-                                                                    local dist = (cargoVol.Position - hrp.Position).Magnitude
-                                                                    if dist < nearestDist then
-                                                                        nearestDist = dist
-                                                                        nearestSell = cargoVol
+                                                                if cargoVol and cargoVol:IsA("BasePart") then
+                                                                    local cargoPos = cargoVol.Position
+                                                                    local hrpPos = hrp and hrp.Position
+                                                                    if cargoPos and hrpPos then
+                                                                        local dist = (cargoPos - hrpPos).Magnitude
+                                                                        if dist < nearestDist then
+                                                                            nearestDist = dist
+                                                                            nearestSell = cargoVol
+                                                                        end
                                                                     end
                                                                 end
                                                             end
@@ -4247,13 +4263,15 @@ return function(Window, scriptInfo)
                                             -- If sell point found and we're too far, approach it
                                             -- Re-check hrp is still valid before using Position
                                             hrp = character:FindFirstChild("HumanoidRootPart")
-                                            if nearestSell and nearestDist > approachDist and hrp then
-                                                local toSell = nearestSell.Position - hrp.Position
+                                            local hrpPos = hrp and hrp.Position
+                                            local sellPos = nearestSell and nearestSell.Position
+                                            if nearestSell and nearestDist > approachDist and hrpPos and sellPos then
+                                                local toSell = sellPos - hrpPos
                                                 local targetPos
                                                 if toSell.Magnitude > 0.001 then
-                                                    targetPos = nearestSell.Position - toSell.Unit * approachDist
+                                                    targetPos = sellPos - toSell.Unit * approachDist
                                                 else
-                                                    targetPos = nearestSell.Position - Vector3.new(0, 0, approachDist)
+                                                    targetPos = sellPos - Vector3.new(0, 0, approachDist)
                                                 end
                                                 Rayfield:Notify({
                                                     Title = "Auto Sell",
