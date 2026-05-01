@@ -390,8 +390,7 @@ return function(Window, scriptInfo)
                     Rayfield:Notify({
                         Title = success and "Arrived" or "Failed",
                         Content = msg,
-                        Duration = 3,
-                        Image = success and "check-circle" or "circle-x"
+                        Duration = 3
                     })
                 end)
             end,
@@ -4239,7 +4238,9 @@ return function(Window, scriptInfo)
                                             end
 
                                             -- If sell point found and we're too far, approach it
-                                            if nearestSell and nearestDist > approachDist then
+                                            -- Re-check hrp is still valid before using Position
+                                            hrp = character:FindFirstChild("HumanoidRootPart")
+                                            if nearestSell and nearestDist > approachDist and hrp then
                                                 local toSell = nearestSell.Position - hrp.Position
                                                 local targetPos
                                                 if toSell.Magnitude > 0.001 then
@@ -4258,7 +4259,6 @@ return function(Window, scriptInfo)
                                                         Title = "Auto Sell",
                                                         Content = "Failed to approach: " .. tostring(moveErr),
                                                         Duration = 3,
-                                                        Image = "circle-x",
                                                     })
                                                     task.wait(1)
                                                     continue
