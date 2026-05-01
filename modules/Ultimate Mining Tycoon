@@ -49,7 +49,6 @@ return function(Window, scriptInfo)
     local playerUtilHelper = nil
     local oreResolverHelper = nil
     local autoMineLoopHelper = nil
-    local safeMoveHelper = nil
     pcall(function()
         settingsHelper = loadUmtHelper("core/settings.lua")
     end)
@@ -77,9 +76,6 @@ return function(Window, scriptInfo)
     pcall(function()
         autoMineLoopHelper = loadUmtHelper("systems/auto_mine_loop.lua")
     end)
-    pcall(function()
-        safeMoveHelper = loadUmtHelper("systems/safe_move.lua")
-    end)
 
     local function buildDefaultSettings()
         if settingsHelper and type(settingsHelper.buildDefaults) == "function" then
@@ -103,10 +99,6 @@ return function(Window, scriptInfo)
             walkSpeed = 16,
             infiniteJumpEnabled = false,
             sellOreKey = "",
-            safeMoveEnabled = false,
-            safeMoveSpeed = 16,
-            safeMoveForAutoSell = false,
-            safeMoveForAutoMine = false,
             oreEspEnabled = false,
             oreEspDistance = 100,
             oreEspFilter = "All",
@@ -210,10 +202,6 @@ return function(Window, scriptInfo)
             if type(decoded.sellOreKey) == "string" then
                 autoSettingsLoaded.sellOreKey = decoded.sellOreKey
             end
-            autoSettingsLoaded.safeMoveEnabled = decoded.safeMoveEnabled == true
-            autoSettingsLoaded.safeMoveSpeed = tonumber(decoded.safeMoveSpeed) or autoSettingsLoaded.safeMoveSpeed
-            autoSettingsLoaded.safeMoveForAutoSell = decoded.safeMoveForAutoSell == true
-            autoSettingsLoaded.safeMoveForAutoMine = decoded.safeMoveForAutoMine == true
             autoSettingsLoaded.oreEspEnabled = decoded.oreEspEnabled == true
             autoSettingsLoaded.oreEspDistance = tonumber(decoded.oreEspDistance) or autoSettingsLoaded.oreEspDistance
             if type(decoded.oreEspFilter) == "string" and decoded.oreEspFilter ~= "" then
@@ -325,281 +313,6 @@ return function(Window, scriptInfo)
         local Misc = Window:CreateTab("Misc", "boxes")
         local Section = Misc:CreateSection("Misc Area")
 
-        -- ============================================================
-        --   SAFE MOVEMENT TAB
-        -- ============================================================
-
-        local MoveTab = Window:CreateTab("Movement", "move")
-        local MoveSection = MoveTab:CreateSection("🛡️ Safe Physics Movement")
-
-        -- Warning paragraph
-        MoveTab:CreateParagraph({
-            Title = "⚠️ Shadowban Protection",
-            Content = "Uses LinearVelocity physics instead of Tween. Slower but much safer than TweenService."
-        })
-
-        MoveTab:CreateDivider()
-
-        -- Manual Movement Controls
-        local moveTargetPos = nil
-        MoveTab:CreateInput({
-            Name = "Target Position (X, Y, Z)",
-            CurrentValue = "",
-            PlaceholderText = "100, 0, 100",
-            RemoveTextAfterFocusLost = false,
-            Flag = "MoveTargetInput",
-            Callback = function(text)
-                local x, y, z = text:match("(%-?%d+),%s*(%-?%d+),%s*(%-?%d+)")
-                if x and y and z then
-                    moveTargetPos = Vector3.new(tonumber(x), tonumber(y), tonumber(z))
-                end
-            end,
-        })
-
-        local moveSpeedValue = safeMoveSpeed
-        MoveTab:CreateSlider({
-            Name = "Movement Speed",
-            Range = {8, 32},
-            Increment = 1,
-            Suffix = "studs/sec",
-            CurrentValue = safeMoveSpeed,
-            Flag = "SafeMoveSpeed",
-            Callback = function(value)
-                moveSpeedValue = value
-                safeMoveSpeed = value
-                autoSettingsLoaded.safeMoveSpeed = value
-                if saveAutoSettings then saveAutoSettings() end
-            end,
-        })
-
-        MoveTab:CreateButton({
-            Name = "🚀 Move to Target (Physics)",
-            Callback = function()
-                if not safeMoveHelper then
-                    Rayfield:Notify({Title = "Error", Content = "SafeMove not loaded", Duration = 3})
-                    return
-                end
-                if not moveTargetPos then
-                    Rayfield:Notify({Title = "Error", Content = "Enter target position (X, Y, Z)", Duration = 3})
-                    return
-                end
-
-                task.spawn(function()
-                    Rayfield:Notify({Title = "Moving", Content = "Using physics movement...", Duration = 2})
-                    local success, msg = safeMoveHelper.physicsMove(moveTargetPos, {speed = moveSpeedValue})
-                    Rayfield:Notify({
-                        Title = success and "Arrived" or "Failed",
-                        Content = msg,
-                        Duration = 3
-                    })
-                end)
-            end,
-        })
-
-        MoveTab:CreateButton({
-            Name = "🛑 Stop Movement",
-            Callback = function()
-                if safeMoveHelper then
-                    local player = game:GetService("Players").LocalPlayer
-                    safeMoveHelper.stop(player.Character)
-                    Rayfield:Notify({Title = "Stopped", Content = "Movement cancelled", Duration = 2})
-                end
-            end,
-        })
-
-        MoveTab:CreateDivider()
-
-        -- Auto Features with Safe Movement
-        local SafeMoveAutoSection = MoveTab:CreateSection("⚙️ Auto Features")
-
-        MoveTab:CreateToggle({
-            Name = "Use Safe Move for Auto Mine",
-            CurrentValue = safeMoveForAutoMine,
-            Flag = "SafeMoveAutoMine",
-            Callback = function(state)
-                safeMoveForAutoMine = state
-                autoSettingsLoaded.safeMoveForAutoMine = state
-                if saveAutoSettings then saveAutoSettings() end
-            end,
-        })
-
-        MoveTab:CreateToggle({
-            Name = "Use Safe Move for Auto Sell",
-            CurrentValue = safeMoveForAutoSell,
-            Flag = "SafeMoveAutoSell",
-            Callback = function(state)
-                safeMoveForAutoSell = state
-                autoSettingsLoaded.safeMoveForAutoSell = state
-                if saveAutoSettings then saveAutoSettings() end
-            end,
-        })
-
-        local safeMoveApproachDist = 10
-        MoveTab:CreateSlider({
-            Name = "Auto Approach Distance",
-            Range = {5, 25},
-            Increment = 1,
-            Suffix = "studs",
-            CurrentValue = 10,
-            Flag = "SafeMoveApproachDist",
-            Callback = function(value)
-                safeMoveApproachDist = value
-            end,
-        })
-
-        MoveTab:CreateDivider()
-
-        -- Quick Actions
-        local QuickMoveSection = MoveTab:CreateSection("⚡ Quick Move")
-
-        MoveTab:CreateButton({
-            Name = "⛏️ Approach Nearest Ore",
-            Callback = function()
-                if not safeMoveHelper then
-                    Rayfield:Notify({Title = "Error", Content = "SafeMove not loaded", Duration = 3})
-                    return
-                end
-
-                task.spawn(function()
-                    local player = game:GetService("Players").LocalPlayer
-                    local character = player.Character
-                    local hrp = character and character:FindFirstChild("HumanoidRootPart")
-                    if not hrp then
-                        Rayfield:Notify({Title = "Error", Content = "Character not found", Duration = 3})
-                        return
-                    end
-
-                    -- Find nearest ore
-                    local placedOre = workspace:FindFirstChild("PlacedOre")
-                    local spawnedBlocks = workspace:FindFirstChild("SpawnedBlocks")
-                    local nearest, nearestDist = nil, math.huge
-
-                    local hrpPos = hrp and hrp.Position
-                    if hrpPos then
-                        for _, container in ipairs({placedOre, spawnedBlocks}) do
-                            if container then
-                                for _, ore in pairs(container:GetChildren()) do
-                                    local part = ore:FindFirstChildWhichIsA("BasePart", true)
-                                    local partPos = part and part.Position
-                                    if partPos then
-                                        local dist = (partPos - hrpPos).Magnitude
-                                        if dist < nearestDist then
-                                            nearestDist = dist
-                                            nearest = part
-                                        end
-                                    end
-                                end
-                            end
-                        end
-                    end
-
-                    if nearest then
-                        -- Re-check hrp is valid before calculating
-                        hrp = character:FindFirstChild("HumanoidRootPart")
-                        local hrpPos = hrp and hrp.Position
-                        local nearestPos = nearest and nearest.Position
-                        if not hrpPos or not nearestPos then
-                            Rayfield:Notify({Title = "Error", Content = "Character position unavailable", Duration = 3})
-                            return
-                        end
-                        Rayfield:Notify({Title = "Approaching", Content = "Moving to nearest ore...", Duration = 2})
-                        local approachDist = 10
-                        local toOre = nearestPos - hrpPos
-                        local targetPos
-                        if toOre.Magnitude > 0.001 then
-                            targetPos = nearestPos - toOre.Unit * approachDist
-                        else
-                            targetPos = nearestPos - Vector3.new(0, 0, approachDist)
-                        end
-                        local success, msg = safeMoveHelper.physicsMove(targetPos, {speed = moveSpeedValue})
-                        Rayfield:Notify({
-                            Title = success and "Arrived" or "Failed",
-                            Content = msg,
-                            Duration = 3
-                        })
-                    else
-                        Rayfield:Notify({Title = "No Ore", Content = "No ore found nearby", Duration = 3})
-                    end
-                end)
-            end,
-        })
-
-        MoveTab:CreateButton({
-            Name = "🏭 Approach Sell Point",
-            Callback = function()
-                if not safeMoveHelper then
-                    Rayfield:Notify({Title = "Error", Content = "SafeMove not loaded", Duration = 3})
-                    return
-                end
-
-                task.spawn(function()
-                    local player = game:GetService("Players").LocalPlayer
-                    local character = player.Character
-                    local hrp = character and character:FindFirstChild("HumanoidRootPart")
-                    if not hrp then return end
-
-                    -- Find sell point
-                    local factoryItems = workspace:FindFirstChild("FactoryGridItemsClient")
-                    if not factoryItems then
-                        Rayfield:Notify({Title = "Error", Content = "Factory not found", Duration = 3})
-                        return
-                    end
-
-                    local nearestSell, nearestDist = nil, math.huge
-                    local hrpPos = hrp and hrp.Position
-                    if hrpPos then
-                        for _, folder in pairs(factoryItems:GetChildren()) do
-                            if folder:IsA("Folder") then
-                                local sub = folder:FindFirstChild(folder.Name)
-                                if sub then
-                                    local unloader = sub:FindFirstChild("Unloader1")
-                                    if unloader then
-                                        local cargoVol = unloader:FindFirstChild("CargoVolume")
-                                        local cargoPos = cargoVol and cargoVol:IsA("BasePart") and cargoVol.Position
-                                        if cargoPos then
-                                            local dist = (cargoPos - hrpPos).Magnitude
-                                            if dist < nearestDist then
-                                                nearestDist = dist
-                                                nearestSell = cargoVol
-                                            end
-                                        end
-                                    end
-                                end
-                            end
-                        end
-                    end
-
-                    if nearestSell then
-                        -- Re-check hrp is valid before calculating
-                        hrp = character:FindFirstChild("HumanoidRootPart")
-                        local hrpPos = hrp and hrp.Position
-                        local sellPos = nearestSell and nearestSell.Position
-                        if not hrpPos or not sellPos then
-                            Rayfield:Notify({Title = "Error", Content = "Character position unavailable", Duration = 3})
-                            return
-                        end
-                        Rayfield:Notify({Title = "Approaching", Content = "Moving to sell point...", Duration = 2})
-                        local approachDist = 8
-                        local toSell = sellPos - hrpPos
-                        local targetPos
-                        if toSell.Magnitude > 0.001 then
-                            targetPos = sellPos - toSell.Unit * approachDist
-                        else
-                            targetPos = sellPos - Vector3.new(0, 0, approachDist)
-                        end
-                        local success, msg = safeMoveHelper.physicsMove(targetPos, {speed = moveSpeedValue})
-                        Rayfield:Notify({
-                            Title = success and "Arrived" or "Failed",
-                            Content = success and "Ready to sell!" or msg,
-                            Duration = 3
-                        })
-                    else
-                        Rayfield:Notify({Title = "Not Found", Content = "No sell point found", Duration = 3})
-                    end
-                end)
-            end,
-        })
-        
         -- Sell Ore Button for Mobile
         local SellOreSection = MobileSupport:CreateSection("⚙️ Sell Ore")
         local autoSellMethod = "Remote"
@@ -981,10 +694,6 @@ return function(Window, scriptInfo)
         
         local walkSpeedValue = math.clamp(tonumber(autoSettingsLoaded.walkSpeed) or 16, 16, 500)
         local infiniteJumpEnabled = autoSettingsLoaded.infiniteJumpEnabled == true
-        local safeMoveEnabled = autoSettingsLoaded.safeMoveEnabled == true
-        local safeMoveSpeed = math.clamp(tonumber(autoSettingsLoaded.safeMoveSpeed) or 16, 8, 32)
-        local safeMoveForAutoSell = autoSettingsLoaded.safeMoveForAutoSell == true
-        local safeMoveForAutoMine = autoSettingsLoaded.safeMoveForAutoMine == true
 
         local Slider = Misc:CreateSlider({
             Name = "⚡ WalkSpeed Input",
@@ -2851,10 +2560,6 @@ return function(Window, scriptInfo)
                 walkSpeed = walkSpeedValue,
                 infiniteJumpEnabled = infiniteJumpEnabled,
                 sellOreKey = sellOreKeyValue,
-                safeMoveEnabled = safeMoveEnabled,
-                safeMoveSpeed = safeMoveSpeed,
-                safeMoveForAutoSell = safeMoveForAutoSell,
-                safeMoveForAutoMine = safeMoveForAutoMine,
                 oreEspEnabled = ESP.enabled,
                 oreEspDistance = ESP.maxDistance,
                 oreEspFilter = ESP.filterOre,
@@ -4223,74 +3928,6 @@ return function(Window, scriptInfo)
                                         if safeProfileEnabled and (os.clock() - lastAutoSellAt) < safeSellCooldown then
                                             task.wait(0.25)
                                             continue
-                                        end
-
-                                        -- Safe Movement: Approach sell point before selling
-                                        if safeMoveHelper and safeMoveForAutoSell then
-                                            local approachDist = Rayfield.Flags["SafeMoveApproachDist"] and Rayfield.Flags["SafeMoveApproachDist"].CurrentValue or 10
-                                            local moveSpeed = Rayfield.Flags["SafeMoveSpeed"] and Rayfield.Flags["SafeMoveSpeed"].CurrentValue or 16
-
-                                            -- Find sell point position
-                                            local factoryItems = workspace:FindFirstChild("FactoryGridItemsClient")
-                                            local nearestSell = nil
-                                            local nearestDist = math.huge
-
-                                            if factoryItems and hrp and hrp.Position then
-                                                for _, folder in pairs(factoryItems:GetChildren()) do
-                                                    if folder:IsA("Folder") then
-                                                        local sub = folder:FindFirstChild(folder.Name)
-                                                        if sub then
-                                                            local unloader = sub:FindFirstChild("Unloader1")
-                                                            if unloader then
-                                                                local cargoVol = unloader:FindFirstChild("CargoVolume")
-                                                                if cargoVol and cargoVol:IsA("BasePart") then
-                                                                    local cargoPos = cargoVol.Position
-                                                                    local hrpPos = hrp and hrp.Position
-                                                                    if cargoPos and hrpPos then
-                                                                        local dist = (cargoPos - hrpPos).Magnitude
-                                                                        if dist < nearestDist then
-                                                                            nearestDist = dist
-                                                                            nearestSell = cargoVol
-                                                                        end
-                                                                    end
-                                                                end
-                                                            end
-                                                        end
-                                                    end
-                                                end
-                                            end
-
-                                            -- If sell point found and we're too far, approach it
-                                            -- Re-check hrp is still valid before using Position
-                                            hrp = character:FindFirstChild("HumanoidRootPart")
-                                            local hrpPos = hrp and hrp.Position
-                                            local sellPos = nearestSell and nearestSell.Position
-                                            if nearestSell and nearestDist > approachDist and hrpPos and sellPos then
-                                                local toSell = sellPos - hrpPos
-                                                local targetPos
-                                                if toSell.Magnitude > 0.001 then
-                                                    targetPos = sellPos - toSell.Unit * approachDist
-                                                else
-                                                    targetPos = sellPos - Vector3.new(0, 0, approachDist)
-                                                end
-                                                Rayfield:Notify({
-                                                    Title = "Auto Sell",
-                                                    Content = "Approaching sell point...",
-                                                    Duration = 2,
-                                                })
-                                                local moved, moveErr = safeMoveHelper.physicsMove(targetPos, {speed = moveSpeed})
-                                                if not moved then
-                                                    Rayfield:Notify({
-                                                        Title = "Auto Sell",
-                                                        Content = "Failed to approach: " .. tostring(moveErr),
-                                                        Duration = 3,
-                                                    })
-                                                    task.wait(1)
-                                                    continue
-                                                end
-                                                -- Wait a bit after arriving
-                                                task.wait(math.random(10, 30) / 100)
-                                            end
                                         end
 
                                         local okSell, sellErr, soldCount = sellOreBySelectedMethod()
