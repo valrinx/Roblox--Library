@@ -89,7 +89,11 @@ function AutoMineLoop.start(ctx)
                 count = count + 1
             end
         end
-        return false, count, nil
+        local defaultCapacity = ctx.bagCapacity or 25
+        local threshold = ctx.bagFullThreshold or 100
+        local thresholdCount = math.floor(defaultCapacity * (threshold / 100))
+        local isFull = count >= thresholdCount
+        return isFull, count, defaultCapacity
     end
 
     local function collectNumericMadCommActivateEntries(madCommEvents)
