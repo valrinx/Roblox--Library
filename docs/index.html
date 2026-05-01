@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Topup Locations Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, sans-serif; }
+        #map { width: 100%; height: 100vh; }
+        .search-box {
+            position: absolute; top: 10px; left: 50px; z-index: 1000;
+            background: white; border-radius: 8px; padding: 8px 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3); display: flex; gap: 8px; align-items: center;
+        }
+        .search-box input {
+            border: 1px solid #ddd; border-radius: 6px; padding: 6px 10px;
+            font-size: 14px; width: 200px; outline: none;
+        }
+        .search-box input:focus { border-color: #4285f4; }
+        .count-badge {
+            background: #4285f4; color: white; border-radius: 12px;
+            padding: 4px 10px; font-size: 12px; font-weight: bold;
+        }
+        .custom-popup .leaflet-popup-content-wrapper {
+            border-radius: 8px; font-size: 14px;
+        }
+        .bt-label {
+            background: transparent; border: none; box-shadow: none;
+            font-size: 11px; font-weight: bold; color: #1a73e8;
+            white-space: nowrap;
+        }
+        .popup-content { text-align: center; }
+        .popup-content h3 { color: #1a73e8; margin-bottom: 6px; font-size: 16px; }
+        .popup-content p { color: #555; margin: 2px 0; font-size: 12px; }
+        .popup-content a {
+            display: inline-block; margin-top: 8px; padding: 4px 12px;
+            background: #1a73e8; color: white; border-radius: 4px;
+            text-decoration: none; font-size: 12px;
+        }
+        .popup-content a:hover { background: #1557b0; }
+        .list-panel {
+            position: absolute; top: 10px; right: 10px; z-index: 1000;
+            background: white; border-radius: 8px; width: 260px; max-height: 90vh;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3); display: flex; flex-direction: column;
+        }
+        .list-header {
+            padding: 10px 14px; border-bottom: 1px solid #eee;
+            font-weight: bold; font-size: 14px; color: #333;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .list-toggle {
+            background: #4285f4; color: white; border: none; border-radius: 4px;
+            padding: 2px 8px; cursor: pointer; font-size: 12px;
+        }
+        .list-body {
+            overflow-y: auto; flex: 1;
+        }
+        .list-item {
+            padding: 8px 14px; border-bottom: 1px solid #f0f0f0;
+            cursor: pointer; font-size: 13px; transition: background 0.15s;
+        }
+        .list-item:hover { background: #e8f0fe; }
+        .list-item .bt-name { font-weight: bold; color: #1a73e8; }
+        .list-item .bt-coords { color: #888; font-size: 11px; }
+
+        @media (max-width: 600px) {
+            .search-box { left: 10px; right: 10px; }
+            .search-box input { width: 100%; flex: 1; }
+            .list-panel { display: none; }
+            .list-panel.show { display: flex; width: 100%; left: 0; right: 0; top: auto; bottom: 0; max-height: 40vh; border-radius: 12px 12px 0 0; }
+        }
+    </style>
+</head>
+<body>
+    <div class="search-box">
+        <input type="text" id="search" placeholder="ค้นหา BT..." />
+        <span class="count-badge" id="count">97 จุด</span>
+    </div>
+
+    <div class="list-panel" id="listPanel">
+        <div class="list-header">
+            รายการทั้งหมด
+            <button class="list-toggle" id="listToggle">ซ่อน</button>
+        </div>
+        <div class="list-body" id="listBody"></div>
+    </div>
+
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+    <script>
+        const locations = [
+            {name:"BT01621",lat:13.8891,lng:100.477},
+            {name:"BT01830",lat:13.9006,lng:100.476},
+            {name:"BT03735",lat:13.8877,lng:100.48},
+            {name:"BT04877",lat:13.8975,lng:100.474},
+            {name:"BT04973",lat:13.8618,lng:100.475},
+            {name:"BT06206",lat:13.8506,lng:100.469},
+            {name:"BT06497",lat:13.8589,lng:100.4986},
+            {name:"BT06723",lat:13.865,lng:100.467},
+            {name:"BT09001",lat:13.8622,lng:100.4973},
+            {name:"BT09308",lat:13.8529,lng:100.4451},
+            {name:"BT104942",lat:13.8705,lng:100.5446},
+            {name:"BT106950",lat:13.8915,lng:100.473},
+            {name:"BT108230",lat:13.8633,lng:100.5038},
+            {name:"BT109092",lat:13.8454,lng:100.48},
+            {name:"BT111383",lat:13.8433,lng:100.4422},
+            {name:"BT117027",lat:13.8254,lng:100.8475},
+            {name:"BT11833",lat:13.8694,lng:100.474},
+            {name:"BT119706",lat:13.9334,lng:100.511},
+            {name:"BT123199",lat:13.8658,lng:100.456},
+            {name:"BT123251",lat:13.8843,lng:100.5032},
+            {name:"BT123852",lat:13.8618,lng:100.5005},
+            {name:"BT123853",lat:13.5124,lng:100.30036},
+            {name:"BT125111",lat:13.8945,lng:100.5522},
+            {name:"BT125137",lat:13.8747,lng:100.4992},
+            {name:"BT130136",lat:13.8624,lng:100.47},
+            {name:"BT132277",lat:13.8753,lng:100.4945},
+            {name:"BT132634",lat:13.9082,lng:100.5524},
+            {name:"BT133355",lat:13.9083,lng:100.5539},
+            {name:"BT133424",lat:13.859,lng:100.4882},
+            {name:"BT135702",lat:13.85,lng:100.4548},
+            {name:"BT136513",lat:13.9106,lng:100.5531},
+            {name:"BT138645",lat:13.8884,lng:100.48},
+            {name:"BT14065",lat:13.9119,lng:100.5534},
+            {name:"BT145851",lat:13.8865,lng:100.4913},
+            {name:"BT147932",lat:13.9701,lng:100.433},
+            {name:"BT147989",lat:13.8435,lng:100.4466},
+            {name:"BT147990",lat:13.8439,lng:100.447},
+            {name:"BT147993",lat:13.8414,lng:100.4463},
+            {name:"BT148017",lat:13.8738,lng:100.4936},
+            {name:"BT148668",lat:13.980757,lng:100.431074},
+            {name:"BT148698",lat:13.9367,lng:100.5185},
+            {name:"BT152270",lat:13.8859,lng:100.5184},
+            {name:"BT152289",lat:13.84329,lng:100.51107},
+            {name:"BT152332",lat:13.8835,lng:100.5274},
+            {name:"BT152335",lat:13.8778,lng:100.5254},
+            {name:"BT154087",lat:13.9225,lng:100.4739},
+            {name:"BT154098",lat:13.9231,lng:100.4739},
+            {name:"BT154119",lat:13.9356,lng:100.5189},
+            {name:"BT183385",lat:13.8356,lng:100.4819},
+            {name:"BT183386",lat:13.8552,lng:100.5091},
+            {name:"BT183387",lat:13.9121,lng:100.5209},
+            {name:"BT185001",lat:13.910586,lng:100.551488},
+            {name:"BT21229",lat:13.8192,lng:100.4569},
+            {name:"BT22028",lat:13.8557,lng:100.4867},
+            {name:"BT22319",lat:13.9276,lng:100.4834},
+            {name:"BT23320",lat:13.8226,lng:100.5023},
+            {name:"BT23761",lat:13.967666,lng:100.46255},
+            {name:"BT24465",lat:13.8431,lng:100.468},
+            {name:"BT24499",lat:13.901869,lng:100.450239},
+            {name:"BT25554",lat:13.923477,lng:100.485497},
+            {name:"BT28980",lat:13.838,lng:100.4677},
+            {name:"BT29015",lat:13.8588,lng:100.4839},
+            {name:"BT29097",lat:13.8443,lng:100.4953},
+            {name:"BT29189",lat:13.8477,lng:100.4419},
+            {name:"BT31076",lat:13.8305,lng:100.4749},
+            {name:"BT33469",lat:13.8979,lng:100.475},
+            {name:"BT33813",lat:13.871988,lng:100.45571},
+            {name:"BT35219",lat:13.9325,lng:100.5158},
+            {name:"BT36249",lat:13.954,lng:100.4443},
+            {name:"BT38114",lat:13.8418,lng:100.4946},
+            {name:"BT40871",lat:13.8321,lng:100.4814},
+            {name:"BT50238",lat:13.856609,lng:100.505107},
+            {name:"BT50527",lat:13.9424,lng:100.5409},
+            {name:"BT52586",lat:13.8618,lng:100.453},
+            {name:"BT52664",lat:13.9173,lng:100.486},
+            {name:"BT52809",lat:13.9003,lng:100.47},
+            {name:"BT52926",lat:13.8438,lng:100.4868},
+            {name:"BT53103",lat:13.8236,lng:100.5063},
+            {name:"BT54308",lat:13.985387,lng:100.399887},
+            {name:"BT55483",lat:13.9087,lng:100.5532},
+            {name:"BT59272",lat:13.8564,lng:100.4808},
+            {name:"BT59793",lat:13.8469,lng:100.4823},
+            {name:"BT62079",lat:13.848,lng:100.4672},
+            {name:"BT62355",lat:13.8464,lng:100.4791},
+            {name:"BT63749",lat:13.05811,lng:100.86315},
+            {name:"BT64012",lat:13.8223,lng:100.5043},
+            {name:"BT64420",lat:13.8926,lng:100.4977},
+            {name:"BT66127",lat:13.843686,lng:100.498283},
+            {name:"BT66629",lat:13.974616,lng:100.441362},
+            {name:"BT72649",lat:13.9342,lng:100.5145},
+            {name:"BT72650",lat:13.9325,lng:100.5158},
+            {name:"BT74057",lat:13.8813,lng:100.516},
+            {name:"BT74653",lat:13.9522,lng:100.544},
+            {name:"BT76691",lat:13.9414,lng:100.4606},
+            {name:"BT77253",lat:13.8618,lng:100.453},
+            {name:"BT91788",lat:13.845547,lng:100.481687}
+        ];
+
+        const map = L.map('map').setView([13.88, 100.49], 12);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors',
+            maxZoom: 19
+        }).addTo(map);
+
+        const markers = L.markerClusterGroup();
+        const markerMap = {};
+
+        locations.forEach(loc => {
+            const marker = L.marker([loc.lat, loc.lng]);
+            marker.bindTooltip(loc.name, {
+                permanent: true, direction: 'top', offset: [0, -10],
+                className: 'bt-label'
+            });
+            marker.bindPopup(`
+                <div class="popup-content">
+                    <h3>${loc.name}</h3>
+                    <p>Lat: ${loc.lat}, Lng: ${loc.lng}</p>
+                    <a href="https://www.google.com/maps?q=${loc.lat},${loc.lng}" target="_blank">เปิดใน Google Maps</a>
+                </div>
+            `, {className: 'custom-popup'});
+            markers.addLayer(marker);
+            markerMap[loc.name] = marker;
+        });
+
+        map.addLayer(markers);
+
+        // List panel
+        const listBody = document.getElementById('listBody');
+        const listToggle = document.getElementById('listToggle');
+        const listPanel = document.getElementById('listPanel');
+
+        function renderList(filtered) {
+            listBody.innerHTML = '';
+            filtered.forEach(loc => {
+                const item = document.createElement('div');
+                item.className = 'list-item';
+                item.innerHTML = `<div class="bt-name">${loc.name}</div><div class="bt-coords">${loc.lat}, ${loc.lng}</div>`;
+                item.onclick = () => {
+                    const m = markerMap[loc.name];
+                    markers.zoomToShowLayer(m, () => { m.openPopup(); });
+                };
+                listBody.appendChild(item);
+            });
+            document.getElementById('count').textContent = filtered.length + ' จุด';
+        }
+
+        renderList(locations);
+
+        listToggle.onclick = () => {
+            const body = listBody;
+            if (body.style.display === 'none') {
+                body.style.display = 'block';
+                listToggle.textContent = 'ซ่อน';
+            } else {
+                body.style.display = 'none';
+                listToggle.textContent = 'แสดง';
+            }
+        };
+
+        // Search
+        document.getElementById('search').addEventListener('input', (e) => {
+            const q = e.target.value.toUpperCase();
+            const filtered = locations.filter(l => l.name.toUpperCase().includes(q));
+            renderList(filtered);
+        });
+    </script>
+</body>
+</html>
