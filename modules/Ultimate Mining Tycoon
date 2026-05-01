@@ -7,6 +7,13 @@ return function(Window, scriptInfo)
     local Rayfield = scriptInfo.hubRayfield
     local rawRayfieldNotify = Rayfield and Rayfield.Notify
     local function safeNotify(payload)
+        if safeUiHelper and type(safeUiHelper.wrapNotify) == "function" then
+            local wrapped = safeUiHelper.wrapNotify(rawRayfieldNotify)
+            if type(wrapped) == "function" then
+                wrapped(payload)
+                return
+            end
+        end
         if type(rawRayfieldNotify) ~= "function" then return end
         pcall(function()
             rawRayfieldNotify(Rayfield, payload)
@@ -27,7 +34,7 @@ return function(Window, scriptInfo)
     local CURRENT_SETTINGS_VERSION = 2
     local function loadUmtHelper(relativePath)
         local baseUrl = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/umt/"
-        local raw = game:HttpGet(baseUrl .. relativePath .. "?v=umt-modular-2")
+        local raw = game:HttpGet(baseUrl .. relativePath .. "?v=umt-modular-11")
         local chunk, compileErr = loadstring(raw)
         assert(chunk, "compile helper failed (" .. relativePath .. "): " .. tostring(compileErr))
         return chunk()
@@ -37,6 +44,10 @@ return function(Window, scriptInfo)
     local espHelper = nil
     local espRuntimeHelper = nil
     local autoMineHelper = nil
+    local sellHelper = nil
+    local safeUiHelper = nil
+    local playerUtilHelper = nil
+    local oreResolverHelper = nil
     pcall(function()
         settingsHelper = loadUmtHelper("core/settings.lua")
     end)
@@ -48,6 +59,18 @@ return function(Window, scriptInfo)
     end)
     pcall(function()
         autoMineHelper = loadUmtHelper("systems/auto_mine.lua")
+    end)
+    pcall(function()
+        sellHelper = loadUmtHelper("systems/sell.lua")
+    end)
+    pcall(function()
+        safeUiHelper = loadUmtHelper("core/safe_ui.lua")
+    end)
+    pcall(function()
+        playerUtilHelper = loadUmtHelper("systems/player_util.lua")
+    end)
+    pcall(function()
+        oreResolverHelper = loadUmtHelper("core/ore_resolver.lua")
     end)
 
     local function buildDefaultSettings()
@@ -105,6 +128,9 @@ return function(Window, scriptInfo)
     end
 
     local function isStringMap(tbl)
+        if settingsHelper and type(settingsHelper.isStringMap) == "function" then
+            return settingsHelper.isStringMap(tbl)
+        end
         if type(tbl) ~= "table" then return false end
         for k, v in pairs(tbl) do
             if type(k) ~= "string" or type(v) ~= "string" then
@@ -115,6 +141,9 @@ return function(Window, scriptInfo)
     end
 
     local function sanitizeStringArray(tbl)
+        if settingsHelper and type(settingsHelper.sanitizeStringArray) == "function" then
+            return settingsHelper.sanitizeStringArray(tbl)
+        end
         if type(tbl) ~= "table" then return {} end
         local out = {}
         for _, value in ipairs(tbl) do
@@ -126,6 +155,10 @@ return function(Window, scriptInfo)
     end
 
     local function mergeStringMap(dst, src)
+        if settingsHelper and type(settingsHelper.mergeStringMap) == "function" then
+            settingsHelper.mergeStringMap(dst, src)
+            return
+        end
         if type(dst) ~= "table" or type(src) ~= "table" then return end
         for k, v in pairs(src) do
             if type(k) == "string" and type(v) == "string" and k ~= "" and v ~= "" then
@@ -281,8 +314,11 @@ return function(Window, scriptInfo)
         local SellOreSection = MobileSupport:CreateSection("⚙️ Sell Ore")
         local autoSellMethod = "Remote"
         local function countCarriedOres(player)
+            if sellHelper and type(sellHelper.countCarriedOres) == "function" then
+                return sellHelper.countCarriedOres(player)
+            end
             local count = 0
-            local playerWorkspace = workspace:FindFirstChild(player.Name)
+            local playerWorkspace = workspace:FindFirstChild(player and player.Name or "")
             if playerWorkspace then
                 local orePackCargo = playerWorkspace:FindFirstChild("OrePackCargo")
                 if orePackCargo then
@@ -297,6 +333,9 @@ return function(Window, scriptInfo)
         end
 
         local function findSellTargets()
+            if sellHelper and type(sellHelper.findSellTargets) == "function" then
+                return sellHelper.findSellTargets()
+            end
             local factoryGridItemsServer = workspace:FindFirstChild("FactoryGridItemsServer")
             if not factoryGridItemsServer then
                 return nil, nil, "FactoryGridItemsServer not found!"
@@ -341,6 +380,9 @@ return function(Window, scriptInfo)
         end
 
         local function sellOreFromAnywhere()
+            if sellHelper and type(sellHelper.sellFromAnywhere) == "function" then
+                return sellHelper.sellFromAnywhere()
+            end
             local player = game.Players.LocalPlayer
             local cargoPrompt, _, err = findSellTargets()
             if not cargoPrompt then
@@ -381,6 +423,9 @@ return function(Window, scriptInfo)
         end
 
         local function sellOreBySelectedMethod()
+            if sellHelper and type(sellHelper.sellByMethod) == "function" then
+                return sellHelper.sellByMethod(autoSellMethod)
+            end
             return sellOreFromAnywhere()
         end
 
@@ -663,26 +708,34 @@ return function(Window, scriptInfo)
             Increment = 10,
             Suffix = "Speed",
             CurrentValue = walkSpeedValue,
-            Flag = "Slider1", 
+            Flag = "Slider1",
             Callback = function(Value)
                 walkSpeedValue = Value
-                local player = game.Players.LocalPlayer
-                local character = player.Character or player.CharacterAdded:Wait()
-                local humanoid = character:FindFirstChildOfClass("Humanoid")
-                if humanoid then
-                    humanoid.WalkSpeed = Value
+                if playerUtilHelper and type(playerUtilHelper.setWalkSpeed) == "function" then
+                    playerUtilHelper.setWalkSpeed(game.Players.LocalPlayer, Value)
+                else
+                    local player = game.Players.LocalPlayer
+                    local character = player.Character or player.CharacterAdded:Wait()
+                    local humanoid = character:FindFirstChildOfClass("Humanoid")
+                    if humanoid then
+                        humanoid.WalkSpeed = Value
+                    end
                 end
                 if saveAutoSettings then
                     saveAutoSettings()
                 end
-            end,   
+            end,
         })
         task.defer(function()
-            local player = game.Players.LocalPlayer
-            local character = player and (player.Character or player.CharacterAdded:Wait())
-            local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-            if humanoid then
-                humanoid.WalkSpeed = walkSpeedValue
+            if playerUtilHelper and type(playerUtilHelper.setWalkSpeed) == "function" then
+                playerUtilHelper.setWalkSpeed(game.Players.LocalPlayer, walkSpeedValue)
+            else
+                local player = game.Players.LocalPlayer
+                local character = player and (player.Character or player.CharacterAdded:Wait())
+                local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+                if humanoid then
+                    humanoid.WalkSpeed = walkSpeedValue
+                end
             end
         end)
         
@@ -697,14 +750,18 @@ return function(Window, scriptInfo)
                      infiniteJumpConnection:Disconnect()
                      infiniteJumpConnection = nil
                   end
-                  infiniteJumpConnection = game:GetService("UserInputService").JumpRequest:Connect(function()
-                     local player = game.Players.LocalPlayer
-                     local character = player.Character or player.CharacterAdded:Wait()
-                     local humanoid = character:FindFirstChildOfClass("Humanoid")
-                     if humanoid then
-                        humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-                     end
-                  end)
+                  if playerUtilHelper and type(playerUtilHelper.startInfiniteJump) == "function" then
+                     infiniteJumpConnection = playerUtilHelper.startInfiniteJump()
+                  else
+                     infiniteJumpConnection = game:GetService("UserInputService").JumpRequest:Connect(function()
+                        local player = game.Players.LocalPlayer
+                        local character = player.Character or player.CharacterAdded:Wait()
+                        local humanoid = character:FindFirstChildOfClass("Humanoid")
+                        if humanoid then
+                           humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+                        end
+                     end)
+                  end
                else
                   if infiniteJumpConnection then
                      infiniteJumpConnection:Disconnect()
@@ -902,6 +959,9 @@ return function(Window, scriptInfo)
         }
 
         local function normalizeOreToken(value)
+            if oreResolverHelper and type(oreResolverHelper.normalizeOreToken) == "function" then
+                return oreResolverHelper.normalizeOreToken(value)
+            end
             if value == nil then return nil end
             local text = tostring(value)
             text = text:gsub("^%s+", ""):gsub("%s+$", "")
@@ -910,11 +970,17 @@ return function(Window, scriptInfo)
         end
 
         local function isMeaningfulOreName(name)
+            if oreResolverHelper and type(oreResolverHelper.isMeaningfulOreName) == "function" then
+                return oreResolverHelper.isMeaningfulOreName(name, genericOreNames)
+            end
             local n = normalizeOreToken(name)
             return n and not genericOreNames[n]
         end
 
         local function getStringAttribute(instance, key)
+            if oreResolverHelper and type(oreResolverHelper.getStringAttribute) == "function" then
+                return oreResolverHelper.getStringAttribute(instance, key)
+            end
             if not instance then return nil end
             local ok, value = pcall(function()
                 return instance:GetAttribute(key)
@@ -924,6 +990,9 @@ return function(Window, scriptInfo)
         end
 
         local function normalizeNameForMatch(name)
+            if oreResolverHelper and type(oreResolverHelper.normalizeNameForMatch) == "function" then
+                return oreResolverHelper.normalizeNameForMatch(name)
+            end
             local text = normalizeOreToken(name)
             if not text then return nil end
             text = text:gsub("([a-z])([A-Z])", "%1 %2")
@@ -934,6 +1003,9 @@ return function(Window, scriptInfo)
         end
 
         local function pickKnownOreFromText(name)
+            if oreResolverHelper and type(oreResolverHelper.pickKnownOreFromText) == "function" then
+                return oreResolverHelper.pickKnownOreFromText(name, knownOreNames)
+            end
             local normalized = normalizeNameForMatch(name)
             if not normalized then return nil end
             for _, ore in ipairs(knownOreNames) do
@@ -946,12 +1018,18 @@ return function(Window, scriptInfo)
         end
 
         local function canonicalizeOreName(name)
+            if oreResolverHelper and type(oreResolverHelper.canonicalizeOreName) == "function" then
+                return oreResolverHelper.canonicalizeOreName(name, knownOreCanonical)
+            end
             local normalized = normalizeNameForMatch(name)
             if not normalized then return nil end
             return knownOreCanonical[normalized]
         end
 
         local function colorToShortString(color)
+            if oreResolverHelper and type(oreResolverHelper.colorToShortString) == "function" then
+                return oreResolverHelper.colorToShortString(color)
+            end
             if typeof(color) ~= "Color3" then
                 return "0,0,0"
             end
@@ -964,6 +1042,9 @@ return function(Window, scriptInfo)
         end
 
         local function colorDistanceSq(a, b)
+            if oreResolverHelper and type(oreResolverHelper.colorDistanceSq) == "function" then
+                return oreResolverHelper.colorDistanceSq(a, b)
+            end
             if typeof(a) ~= "Color3" or typeof(b) ~= "Color3" then
                 return math.huge
             end
@@ -974,15 +1055,24 @@ return function(Window, scriptInfo)
         end
 
         local function numberToShortString(n)
+            if oreResolverHelper and type(oreResolverHelper.numberToShortString) == "function" then
+                return oreResolverHelper.numberToShortString(n)
+            end
             if type(n) ~= "number" then return "0" end
             return string.format("%.2f", n)
         end
 
         local function isInstance(value)
+            if oreResolverHelper and type(oreResolverHelper.isInstance) == "function" then
+                return oreResolverHelper.isInstance(value)
+            end
             return typeof(value) == "Instance"
         end
 
         local function makeOreSignature(target, renderPart)
+            if oreResolverHelper and type(oreResolverHelper.makeOreSignature) == "function" then
+                return oreResolverHelper.makeOreSignature(target, renderPart)
+            end
             local ok, signature = pcall(function()
                 local part = isInstance(renderPart) and renderPart or nil
                 if not part and type(getOreRenderPart) == "function" then
@@ -1034,6 +1124,9 @@ return function(Window, scriptInfo)
         end
 
         local function makeOreSignatureCoarse(target, renderPart)
+            if oreResolverHelper and type(oreResolverHelper.makeOreSignatureCoarse) == "function" then
+                return oreResolverHelper.makeOreSignatureCoarse(target, renderPart)
+            end
             local signature = makeOreSignature(target, renderPart)
             if not signature then
                 return nil
@@ -1056,6 +1149,9 @@ return function(Window, scriptInfo)
         end
 
         local function makeOreColorSignature(target, renderPart)
+            if oreResolverHelper and type(oreResolverHelper.makeOreColorSignature) == "function" then
+                return oreResolverHelper.makeOreColorSignature(target, renderPart)
+            end
             local part = renderPart
             if not isInstance(part) and type(getOreRenderPart) == "function" then
                 part = getOreRenderPart(target)
@@ -1075,6 +1171,9 @@ return function(Window, scriptInfo)
         end
 
         local function classifyOreByDirectColor(target, renderPart)
+            if oreResolverHelper and type(oreResolverHelper.classifyOreByDirectColor) == "function" then
+                return oreResolverHelper.classifyOreByDirectColor(target, renderPart, oreNameByColorSignature, useDirectColorClassifier)
+            end
             -- IMPORTANT: do NOT guess ore name from hardcoded palette.
             -- Only classify using verified mappings (color-signature table).
             if not useDirectColorClassifier then
@@ -1168,11 +1267,19 @@ return function(Window, scriptInfo)
         end
 
         local function scoreOreCandidate(bucket, candidate, score)
+            if oreResolverHelper and type(oreResolverHelper.scoreOreCandidate) == "function" then
+                oreResolverHelper.scoreOreCandidate(bucket, candidate, score)
+                return
+            end
             if not candidate or not score then return end
             bucket[candidate] = (bucket[candidate] or 0) + score
         end
 
         local function collectOreCandidatesFromInstance(instance, bucket, baseScore, scanDescendants)
+            if oreResolverHelper and type(oreResolverHelper.collectOreCandidatesFromInstance) == "function" then
+                oreResolverHelper.collectOreCandidatesFromInstance(instance, bucket, baseScore, scanDescendants, knownOreNames, knownOreCanonical)
+                return
+            end
             if not isInstance(instance) then return end
             local function hasOreKeyHint(text)
                 local n = string.lower(tostring(text or ""))
@@ -1239,6 +1346,9 @@ return function(Window, scriptInfo)
         end
 
         local function inferOreNameFromTarget(target, renderPart)
+            if oreResolverHelper and type(oreResolverHelper.inferOreNameFromTarget) == "function" then
+                return oreResolverHelper.inferOreNameFromTarget(target, renderPart, knownOreNames, knownOreCanonical)
+            end
             local bucket = {}
             collectOreCandidatesFromInstance(target, bucket, 12, true)
             collectOreCandidatesFromInstance(renderPart, bucket, 10, true)
@@ -1311,6 +1421,17 @@ return function(Window, scriptInfo)
         end
 
         local function getMappedOreNameOnly(target, renderPart)
+            if oreResolverHelper and type(oreResolverHelper.getMappedOreNameOnly) == "function" then
+                return oreResolverHelper.getMappedOreNameOnly(target, renderPart, {
+                    oreNameById = oreNameById,
+                    oreNameByStaticColorSignature = oreNameByStaticColorSignature,
+                    sharedOreNameByColorSignature = sharedOreNameByColorSignature,
+                    oreNameByColorSignature = oreNameByColorSignature,
+                    oreNameBySignature = oreNameBySignature,
+                    oreNameBySignatureCoarse = oreNameBySignatureCoarse,
+                    oreNameByRuntime = oreNameByRuntime,
+                }, useStrictColorRules)
+            end
             local ok, mapped, source = pcall(function()
                 local oreId = nil
                 if type(getOreIdentifierDeep) == "function" then
@@ -1363,6 +1484,17 @@ return function(Window, scriptInfo)
         end
 
         local function getNeighborConsensusName(target, renderPart)
+            if oreResolverHelper and type(oreResolverHelper.getNeighborConsensusName) == "function" then
+                return oreResolverHelper.getNeighborConsensusName(target, renderPart, {
+                    oreNameById = oreNameById,
+                    oreNameByStaticColorSignature = oreNameByStaticColorSignature,
+                    sharedOreNameByColorSignature = sharedOreNameByColorSignature,
+                    oreNameByColorSignature = oreNameByColorSignature,
+                    oreNameBySignature = oreNameBySignature,
+                    oreNameBySignatureCoarse = oreNameBySignatureCoarse,
+                    oreNameByRuntime = oreNameByRuntime,
+                }, useStrictColorRules)
+            end
             if useStrictColorRules then
                 return nil
             end
@@ -1411,6 +1543,9 @@ return function(Window, scriptInfo)
         end
 
         local function getNameFromAttributes(instance)
+            if oreResolverHelper and type(oreResolverHelper.getNameFromAttributes) == "function" then
+                return oreResolverHelper.getNameFromAttributes(instance, genericOreNames)
+            end
             if not instance then return nil end
             local keys = { "OreName", "MineId", "OreId", "ResourceName", "DisplayName", "ItemName", "Name" }
             for _, key in ipairs(keys) do
@@ -1429,6 +1564,9 @@ return function(Window, scriptInfo)
         end
 
         local function getOreIdentifier(instance)
+            if oreResolverHelper and type(oreResolverHelper.getOreIdentifier) == "function" then
+                return oreResolverHelper.getOreIdentifier(instance)
+            end
             if not isInstance(instance) then return nil end
             local keys = { "MineId", "OreId", "ResourceId", "BlockId", "Id" }
             for _, key in ipairs(keys) do
@@ -1441,6 +1579,9 @@ return function(Window, scriptInfo)
         end
 
         getOreIdentifierDeep = function(target, renderPart)
+            if oreResolverHelper and type(oreResolverHelper.getOreIdentifierDeep) == "function" then
+                return oreResolverHelper.getOreIdentifierDeep(target, renderPart)
+            end
             local direct = getOreIdentifier(target) or getOreIdentifier(renderPart)
             if direct then return direct end
 
@@ -1459,6 +1600,9 @@ return function(Window, scriptInfo)
         end
 
         local function getNameFromValueObjects(instance)
+            if oreResolverHelper and type(oreResolverHelper.getNameFromValueObjects) == "function" then
+                return oreResolverHelper.getNameFromValueObjects(instance, genericOreNames)
+            end
             if not instance then return nil end
             local preferred = { "OreName", "MineId", "OreId", "ResourceName", "DisplayName", "ItemName" }
             for _, key in ipairs(preferred) do
@@ -1474,6 +1618,9 @@ return function(Window, scriptInfo)
         end
 
         local function getNameFromDescendantHints(instance)
+            if oreResolverHelper and type(oreResolverHelper.getNameFromDescendantHints) == "function" then
+                return oreResolverHelper.getNameFromDescendantHints(instance, knownOreNames)
+            end
             if not isInstance(instance) or not instance.GetDescendants then
                 return nil
             end
@@ -1687,6 +1834,9 @@ return function(Window, scriptInfo)
         end
 
         local function findOreTargetFromInstance(instance)
+            if oreResolverHelper and type(oreResolverHelper.findOreTargetFromInstance) == "function" then
+                return oreResolverHelper.findOreTargetFromInstance(instance)
+            end
             local node = instance
             local placedOre = workspace:FindFirstChild("PlacedOre")
             local spawnedBlocks = workspace:FindFirstChild("SpawnedBlocks")
@@ -1707,6 +1857,9 @@ return function(Window, scriptInfo)
         end
 
         local function getLookedOreTarget()
+            if oreResolverHelper and type(oreResolverHelper.getLookedOreTarget) == "function" then
+                return oreResolverHelper.getLookedOreTarget()
+            end
             local players = game:GetService("Players")
             local localPlayer = players.LocalPlayer
             local camera = workspace.CurrentCamera
@@ -1730,6 +1883,9 @@ return function(Window, scriptInfo)
             return nil
         end
         local function getTargetGridPosition(target, renderPart)
+            if oreResolverHelper and type(oreResolverHelper.getTargetGridPosition) == "function" then
+                return oreResolverHelper.getTargetGridPosition(target, renderPart)
+            end
             local gridPos = target:GetAttribute("ChunkPosition") or target:GetAttribute("GridPosition")
             if not gridPos and renderPart then
                 gridPos = renderPart:GetAttribute("ChunkPosition") or renderPart:GetAttribute("GridPosition")
@@ -1738,6 +1894,9 @@ return function(Window, scriptInfo)
         end
 
         local function isMineableTarget(target, renderPart)
+            if oreResolverHelper and type(oreResolverHelper.isMineableTarget) == "function" then
+                return oreResolverHelper.isMineableTarget(target, renderPart)
+            end
             if not target then return false end
             if target:GetAttribute("MineId") or target:GetAttribute("OreId") then
                 return true
@@ -1750,6 +1909,9 @@ return function(Window, scriptInfo)
 
     
         getOreRenderPart = function(target)
+            if oreResolverHelper and type(oreResolverHelper.getOreRenderPart) == "function" then
+                return oreResolverHelper.getOreRenderPart(target)
+            end
             if not isInstance(target) then return nil end
             if target:IsA("BasePart") then return target end
             if target:IsA("Model") then
@@ -1808,10 +1970,16 @@ return function(Window, scriptInfo)
         end
 
         local function getOreCategory(oreName)
+            if oreResolverHelper and type(oreResolverHelper.getOreCategory) == "function" then
+                return oreResolverHelper.getOreCategory(oreName, oreCategoryByName)
+            end
             return oreCategoryByName[oreName] or "Unknown"
         end
 
         local function getOreColor(target, oreName, renderPart)
+            if oreResolverHelper and type(oreResolverHelper.getOreColor) == "function" then
+                return oreResolverHelper.getOreColor(target, oreName, renderPart, oreColors, oreCategoryColors, oreCategoryByName)
+            end
             local part = renderPart
             if not isInstance(part) then
                 part = getOreRenderPart(target)
@@ -1825,6 +1993,9 @@ return function(Window, scriptInfo)
         end
 
         local function getTargetPosition(target)
+            if oreResolverHelper and type(oreResolverHelper.getTargetPosition) == "function" then
+                return oreResolverHelper.getTargetPosition(target)
+            end
             local renderPart = getOreRenderPart(target)
             if renderPart then
                 return renderPart.Position
@@ -1854,56 +2025,63 @@ return function(Window, scriptInfo)
             if ESP.filterOre ~= "All" and oreName ~= ESP.filterOre then return end
     
             local color = getOreColor(target, oreName, renderPart)
-    
-            local visual = nil
-            if ESP.useAdornment then
-                local box = Instance.new("BoxHandleAdornment")
-                box.Name = "UH_ESP_Box"
-                box.Adornee = renderPart
-                box.AlwaysOnTop = true
-                box.ZIndex = 10
-                box.Color3 = color
-                box.Transparency = 0.72
-                box.Size = renderPart.Size + Vector3.new(0.05, 0.05, 0.05)
-                box.Parent = renderPart
-                visual = box
+
+            local visuals = nil
+            if espRuntimeHelper and type(espRuntimeHelper.createOreVisuals) == "function" then
+                visuals = espRuntimeHelper.createOreVisuals(renderPart, target, color, oreName, ESP.useAdornment)
             else
-                local hl = Instance.new("Highlight")
-                hl.Name                = "UH_ESP_Highlight"
-                hl.FillColor           = color
-                hl.OutlineColor        = color
-                hl.FillTransparency    = 0.78
-                hl.OutlineTransparency = 0.05
-                hl.DepthMode           = Enum.HighlightDepthMode.AlwaysOnTop
-                hl.Adornee             = target
-                hl.Parent              = target
-                visual = hl
+                local visual = nil
+                if ESP.useAdornment then
+                    local box = Instance.new("BoxHandleAdornment")
+                    box.Name = "UH_ESP_Box"
+                    box.Adornee = renderPart
+                    box.AlwaysOnTop = true
+                    box.ZIndex = 10
+                    box.Color3 = color
+                    box.Transparency = 0.72
+                    box.Size = renderPart.Size + Vector3.new(0.05, 0.05, 0.05)
+                    box.Parent = renderPart
+                    visual = box
+                else
+                    local hl = Instance.new("Highlight")
+                    hl.Name                = "UH_ESP_Highlight"
+                    hl.FillColor           = color
+                    hl.OutlineColor        = color
+                    hl.FillTransparency    = 0.78
+                    hl.OutlineTransparency = 0.05
+                    hl.DepthMode           = Enum.HighlightDepthMode.AlwaysOnTop
+                    hl.Adornee             = target
+                    hl.Parent              = target
+                    visual = hl
+                end
+
+                local bb = Instance.new("BillboardGui")
+                bb.Name        = "UH_ESP_Billboard"
+                bb.Size        = UDim2.new(0, 120, 0, 36)
+                bb.StudsOffset = Vector3.new(0, 3.8, 0)
+                bb.AlwaysOnTop = true
+                bb.Adornee     = renderPart
+                bb.Parent      = target
+
+                local lbl = Instance.new("TextLabel")
+                lbl.Size                   = UDim2.new(1, 0, 1, 0)
+                lbl.BackgroundTransparency = 1
+                lbl.TextColor3             = color
+                lbl.TextStrokeColor3       = Color3.new(0, 0, 0)
+                lbl.TextStrokeTransparency = 0
+                lbl.Font                   = Enum.Font.GothamBold
+                lbl.TextSize               = 13
+                lbl.TextScaled             = false
+                lbl.Text                   = oreName
+                lbl.Parent                 = bb
+
+                visuals = { visual = visual, billboard = bb, label = lbl }
             end
-    
-            local bb = Instance.new("BillboardGui")
-            bb.Name        = "UH_ESP_Billboard"
-            bb.Size        = UDim2.new(0, 120, 0, 36)
-            bb.StudsOffset = Vector3.new(0, 3.8, 0)
-            bb.AlwaysOnTop = true
-            bb.Adornee     = renderPart
-            bb.Parent      = target
-    
-            local lbl = Instance.new("TextLabel")
-            lbl.Size                   = UDim2.new(1, 0, 1, 0)
-            lbl.BackgroundTransparency = 1
-            lbl.TextColor3             = color
-            lbl.TextStrokeColor3       = Color3.new(0, 0, 0)
-            lbl.TextStrokeTransparency = 0
-            lbl.Font                   = Enum.Font.GothamBold
-            lbl.TextSize               = 13
-            lbl.TextScaled             = false
-            lbl.Text                   = oreName
-            lbl.Parent                 = bb
-    
+
             ESP.activeVisuals[target] = {
-                visual = visual,
-                billboard = bb,
-                label = lbl,
+                visual = visuals.visual,
+                billboard = visuals.billboard,
+                label = visuals.label,
                 renderPart = renderPart,
                 oreName = oreName,
                 color = color,
@@ -1911,11 +2089,11 @@ return function(Window, scriptInfo)
                 nextMetaRefreshAt = 0,
             }
             ESP.activeRenderParts[renderPart] = target
-    
+
             local conn = target.AncestryChanged:Connect(function()
                 if not target.Parent then
-                    if visual and visual.Parent then visual:Destroy() end
-                    if bb and bb.Parent then bb:Destroy() end
+                    if visuals.visual and visuals.visual.Parent then visuals.visual:Destroy() end
+                    if visuals.billboard and visuals.billboard.Parent then visuals.billboard:Destroy() end
                     ESP.activeVisuals[target] = nil
                     if ESP.activeRenderParts[renderPart] == target then
                         ESP.activeRenderParts[renderPart] = nil
@@ -2393,6 +2571,13 @@ return function(Window, scriptInfo)
         end
 
         saveAutoSettings = function()
+            if settingsHelper and type(settingsHelper.saveAsync) == "function" then
+                settingsHelper.saveAsync(SETTINGS_FILE, canWriteSettingsFile, buildSettingsPayload, function(ok, err)
+                    settingsSaveOk = ok
+                    settingsLastSaveError = err
+                end)
+                return
+            end
             if not canWriteSettingsFile then
                 settingsSaveOk = false
                 settingsLastSaveError = "writefile unavailable"
@@ -3682,18 +3867,7 @@ return function(Window, scriptInfo)
                             while autoSellEnabled do
                                 local player = game.Players.LocalPlayer
                                 local character = player.Character or player.CharacterAdded:Wait()
-                                local currentOres = 0
-                                local playerWorkspace = workspace:FindFirstChild(player.Name)
-                                if playerWorkspace then
-                                    local orePackCargo = playerWorkspace:FindFirstChild("OrePackCargo")
-                                    if orePackCargo then
-                                        for _, child in pairs(orePackCargo:GetChildren()) do
-                                            if not child:IsA("Weld") and not child:IsA("Motor6D") then
-                                                currentOres = currentOres + 1
-                                            end
-                                        end
-                                    end
-                                end
+                                local currentOres = countCarriedOres(player)
                                 
                                 if currentOres >= autoSellOreCount then
                                     local hrp = character:FindFirstChild("HumanoidRootPart")
@@ -3844,6 +4018,9 @@ return function(Window, scriptInfo)
         local OreManualName = ""
 
         local function safeSetUiText(element, text)
+            if safeUiHelper and type(safeUiHelper.safeSetText) == "function" then
+                return safeUiHelper.safeSetText(element, text)
+            end
             if not element or type(element.Set) ~= "function" then
                 return false
             end
@@ -3854,6 +4031,9 @@ return function(Window, scriptInfo)
         end
 
         local function countTableEntries(tbl)
+            if oreResolverHelper and type(oreResolverHelper.countTableEntries) == "function" then
+                return oreResolverHelper.countTableEntries(tbl)
+            end
             local n = 0
             if type(tbl) ~= "table" then return 0 end
             for _ in pairs(tbl) do
@@ -4334,7 +4514,13 @@ return function(Window, scriptInfo)
             espClearAll()
 
             if infiniteJumpConnection then
-                infiniteJumpConnection:Disconnect()
+                if playerUtilHelper and type(playerUtilHelper.stopConnection) == "function" then
+                    playerUtilHelper.stopConnection(infiniteJumpConnection)
+                else
+                    pcall(function()
+                        infiniteJumpConnection:Disconnect()
+                    end)
+                end
                 infiniteJumpConnection = nil
             end
 
