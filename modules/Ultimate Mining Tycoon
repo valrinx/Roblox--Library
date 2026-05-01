@@ -34,7 +34,7 @@ return function(Window, scriptInfo)
     local CURRENT_SETTINGS_VERSION = 2
     local function loadUmtHelper(relativePath)
         local baseUrl = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/umt/"
-        local raw = game:HttpGet(baseUrl .. relativePath .. "?v=umt-modular-11")
+        local raw = game:HttpGet(baseUrl .. relativePath .. "?v=umt-modular-12")
         local chunk, compileErr = loadstring(raw)
         assert(chunk, "compile helper failed (" .. relativePath .. "): " .. tostring(compileErr))
         return chunk()
@@ -48,6 +48,7 @@ return function(Window, scriptInfo)
     local safeUiHelper = nil
     local playerUtilHelper = nil
     local oreResolverHelper = nil
+    local autoMineLoopHelper = nil
     pcall(function()
         settingsHelper = loadUmtHelper("core/settings.lua")
     end)
@@ -71,6 +72,9 @@ return function(Window, scriptInfo)
     end)
     pcall(function()
         oreResolverHelper = loadUmtHelper("core/ore_resolver.lua")
+    end)
+    pcall(function()
+        autoMineLoopHelper = loadUmtHelper("systems/auto_mine_loop.lua")
     end)
 
     local function buildDefaultSettings()
@@ -2598,18 +2602,51 @@ return function(Window, scriptInfo)
             end)
         end
 
+        local autoMineCtx = {
+            enabled = false,
+            localPlayer = Players.LocalPlayer,
+            playersService = Players,
+            replicatedStorage = game:GetService("ReplicatedStorage"),
+            workspaceService = workspace,
+            range = autoMineRange,
+            delay = autoMineDelay,
+            forceDamage = forceMineDamage,
+            forceMadCommId = forceMineMadCommId,
+            safeProfile = safeProfileEnabled,
+            safeNearbyPause = safeNearbyPauseEnabled,
+            safeNearbyRadius = safeNearbyRadius,
+            oreIgnoreList = OreIgnoreList,
+            setStatus = function(text) OreLabel:Set(text) end,
+            clearVisual = clearAutoMineTargetVisual,
+            setVisual = setAutoMineTargetVisual,
+            trackConnection = trackConnection,
+            getOreRenderPart = getOreRenderPart,
+            getOreNameForEsp = getOreNameForEsp,
+            makeOreSignature = makeOreSignature,
+            getTargetGridPosition = getTargetGridPosition,
+            canonicalizeOreName = canonicalizeOreName,
+            pickKnownOreFromText = pickKnownOreFromText,
+            normalizeOreToken = normalizeOreToken,
+            oreReferenceFromList = oreReferenceFromList,
+            autoMineHelper = autoMineHelper,
+        }
+
         local AutoMineToggle = Farm:CreateToggle({
             Name = "Auto Mine",
             CurrentValue = autoMineEnabled,
             Flag = "AutoMineToggle",
             Callback = function(state)
                 autoMineEnabled = state
+                autoMineCtx.enabled = state
                 saveAutoSettings()
                 if autoMineEnabled then
-                    autoMineThread = task.spawn(function()
-                        local ReplicatedStorage = game:GetService("ReplicatedStorage")
-                        local Players = game:GetService("Players")
-                        local LocalPlayer = Players.LocalPlayer
+                    if autoMineLoopHelper and type(autoMineLoopHelper.start) == "function" then
+                        autoMineThread = autoMineLoopHelper.start(autoMineCtx)
+                    else
+                        autoMineThread = task.spawn(function()
+                            local ReplicatedStorage = game:GetService("ReplicatedStorage")
+                            local Players = game:GetService("Players")
+                            local LocalPlayer = Players.LocalPlayer
                         local lockedTarget = nil
                         local lastTargetSignature = nil
                         local sameTargetLoops = 0
@@ -3638,8 +3675,10 @@ return function(Window, scriptInfo)
                         end
                         clearAutoMineTargetVisual()
                     end)
+                end
                 else
                     autoMineEnabled = false
+                    autoMineCtx.enabled = false
                     clearAutoMineTargetVisual()
                     OreLabel:Set("Auto Mine Status: Idle")
                 end
@@ -3662,6 +3701,7 @@ return function(Window, scriptInfo)
             Flag = "AutoMineRange",
             Callback = function(Value)
                 autoMineRange = Value
+                autoMineCtx.range = Value
                 saveAutoSettings()
             end,
         })
@@ -3675,6 +3715,7 @@ return function(Window, scriptInfo)
             Flag = "MiningDelay",
             Callback = function(Value)
                 autoMineDelay = Value
+                autoMineCtx.delay = Value
                 saveAutoSettings()
             end,
         })
@@ -3690,6 +3731,7 @@ return function(Window, scriptInfo)
                     return
                 end
                 forceMineDamage = math.clamp(value, 0, 5000)
+                autoMineCtx.forceDamage = forceMineDamage
                 saveAutoSettings()
             end,
         })
@@ -3705,6 +3747,7 @@ return function(Window, scriptInfo)
                     return
                 end
                 forceMineMadCommId = math.max(0, math.floor(value))
+                autoMineCtx.forceMadCommId = forceMineMadCommId
                 saveAutoSettings()
             end,
         })
@@ -3721,6 +3764,7 @@ return function(Window, scriptInfo)
             Flag = "SafeProfileEnabled",
             Callback = function(Value)
                 safeProfileEnabled = Value
+                autoMineCtx.safeProfile = Value
                 saveAutoSettings()
             end,
         })
@@ -3730,6 +3774,7 @@ return function(Window, scriptInfo)
             Flag = "SafeNearbyPause",
             Callback = function(Value)
                 safeNearbyPauseEnabled = Value
+                autoMineCtx.safeNearbyPause = Value
                 saveAutoSettings()
             end,
         })
@@ -3742,6 +3787,7 @@ return function(Window, scriptInfo)
             Flag = "SafeNearbyRadius",
             Callback = function(Value)
                 safeNearbyRadius = Value
+                autoMineCtx.safeNearbyRadius = Value
                 saveAutoSettings()
             end,
         })
@@ -3815,6 +3861,7 @@ return function(Window, scriptInfo)
                     end
                 end
                 OreIgnoreList = normalized
+                autoMineCtx.oreIgnoreList = normalized
                 saveAutoSettings()
             end,
         })
