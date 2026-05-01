@@ -36,21 +36,6 @@
 ## Cache-Bust Strategy
 Current: `umt-modular-12`. Next bump: `umt-modular-13` when ESP loop or Auto Sell loop is extracted.
 
-## New Project: Blackhawk Rescue Mission 5 ESP
-
-### Completed (2026-05-01)
-- [x] `modules/BlackhawkRescue5_ESP/main.lua` - Core ESP system with Drawing API
-- [x] `modules/BlackhawkRescue5_ESP/entity_detector.lua` - BRM5-specific entity detection
-- [x] `modules/BlackhawkRescue5_ESP/loader.lua` - Simple loader script
-- [x] `RAVENHUB` - Added BRM5 to script registry with auto-detector
-
-**Features:**
-- Player ESP (blue) - Name, Distance, Health, Box
-- Zombie ESP (red) - Auto-detects zombie/infected patterns
-- AI ESP (yellow) - Detects NPCs, enemies, hostiles
-- Performance optimized with distance culling and throttled scans
-- Auto-load when entering BRM5 map
-
 ## Notes
 - All helper modules are pure functions or self-contained
 - Legacy script uses `pcall` + `type(helper.function) == "function"` fallback pattern
