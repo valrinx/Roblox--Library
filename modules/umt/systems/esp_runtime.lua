@@ -106,7 +106,7 @@ function EspRuntime.scanAll(workspaceRef, applyTargetFn, resolveTargetFromInstan
     end
 end
 
-function EspRuntime.createOreVisuals(renderPart, target, color, oreName, useAdornment)
+function EspRuntime.createOreVisuals(renderPart, target, color, oreName, useAdornment, price)
     local visual = nil
     if useAdornment then
         local box = Instance.new("BoxHandleAdornment")
@@ -134,7 +134,7 @@ function EspRuntime.createOreVisuals(renderPart, target, color, oreName, useAdor
 
     local bb = Instance.new("BillboardGui")
     bb.Name        = "UH_ESP_Billboard"
-    bb.Size        = UDim2.new(0, 120, 0, 36)
+    bb.Size        = UDim2.new(0, 120, 0, price and 44 or 36)
     bb.StudsOffset = Vector3.new(0, 3.8, 0)
     bb.AlwaysOnTop = true
     bb.Adornee     = renderPart
@@ -149,7 +149,7 @@ function EspRuntime.createOreVisuals(renderPart, target, color, oreName, useAdor
     lbl.Font                   = Enum.Font.GothamBold
     lbl.TextSize               = 13
     lbl.TextScaled             = false
-    lbl.Text                   = oreName
+    lbl.Text                   = price and (oreName .. "\n$" .. tostring(price)) or oreName
     lbl.Parent                 = bb
 
     return { visual = visual, billboard = bb, label = lbl }
