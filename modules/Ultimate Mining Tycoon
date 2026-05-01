@@ -2600,6 +2600,19 @@ return function(Window, scriptInfo)
             end)
         end
 
+        local function safeSetUiText(element, text)
+            if safeUiHelper and type(safeUiHelper.safeSetText) == "function" then
+                return safeUiHelper.safeSetText(element, text)
+            end
+            if not element or type(element.Set) ~= "function" then
+                return false
+            end
+            local ok = pcall(function()
+                element:Set(text)
+            end)
+            return ok
+        end
+
         local autoMineCtx = {
             enabled = false,
             localPlayer = Players.LocalPlayer,
@@ -2614,7 +2627,7 @@ return function(Window, scriptInfo)
             safeNearbyPause = safeNearbyPauseEnabled,
             safeNearbyRadius = safeNearbyRadius,
             oreIgnoreList = OreIgnoreList,
-            setStatus = function(text) OreLabel:Set(text) end,
+            setStatus = function(text) safeSetUiText(OreLabel, text) end,
             clearVisual = clearAutoMineTargetVisual,
             setVisual = setAutoMineTargetVisual,
             trackConnection = trackConnection,
@@ -2691,7 +2704,7 @@ return function(Window, scriptInfo)
                                 return
                             end
                             lastAutoMineStatusText = text
-                            OreLabel:Set(text)
+                            safeSetUiText(OreLabel, text)
                         end
 
                         local function hasNearbyPlayers(rootPart, radius)
@@ -3685,7 +3698,7 @@ return function(Window, scriptInfo)
                     autoMineEnabled = false
                     autoMineCtx.enabled = false
                     clearAutoMineTargetVisual()
-                    OreLabel:Set("Auto Mine Status: Idle")
+                    safeSetUiText(OreLabel, "Auto Mine Status: Idle")
                 end
             end,
         })
@@ -4062,19 +4075,6 @@ return function(Window, scriptInfo)
         local OreDebugLabel = OreESP:CreateLabel("Look at ore and press capture button")
         local OreLearningStatusLabel = OreESP:CreateLabel("Ore Memory: checking...")
         local OreManualName = ""
-
-        local function safeSetUiText(element, text)
-            if safeUiHelper and type(safeUiHelper.safeSetText) == "function" then
-                return safeUiHelper.safeSetText(element, text)
-            end
-            if not element or type(element.Set) ~= "function" then
-                return false
-            end
-            local ok = pcall(function()
-                element:Set(text)
-            end)
-            return ok
-        end
 
         local function countTableEntries(tbl)
             if oreResolverHelper and type(oreResolverHelper.countTableEntries) == "function" then
