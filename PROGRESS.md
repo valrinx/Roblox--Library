@@ -6,7 +6,7 @@
 - [x] `esp.lua` - ESP scan/watch helpers (scanAll, bindFolder, countActiveVisuals)
 - [x] `esp_runtime.lua` - ESP visual lifecycle (clearAll, setVisualVisibility, syncVisualStyle, createOreVisuals)
 - [x] `auto_mine.lua` - Auto Mine utilities (randomRange, hasNearbyPlayers, isMadCommIdAllowed, markMadCommRemoteInvalid, resolveToolMadCommId, resolveActivateRemote, pickMineActivateRemoteAlternateDiscovered, mineGridForActivateRemote, buildGridCandidates, ensureRemoteClientDrain, nextDrillPacketNonce)
-- [x] `sell.lua` - Sell ore utilities (countCarriedOres, findSellTargets, sellFromAnywhere, sellByMethod)
+- [x] `sell.lua` - Sell ore utilities (countCarriedOres, getBagCapacity, isBagFull, findSellTargets, sellFromAnywhere, sellByMethod)
 - [x] `safe_ui.lua` - Safe UI wrappers (wrapNotify, patchRayfield, safeSetText)
 - [x] `player_util.lua` - Player helpers (setWalkSpeed, applyWalkSpeedOnSpawn, startInfiniteJump, stopConnection, getHumanoid, getRootPart)
 - [x] Legacy script wired with fallback for all above helpers
@@ -14,6 +14,7 @@
 - [x] ESP Billboard now shows ore price from `oreReferenceFromList` (`esp_runtime.lua` + legacy script updated)
 - [x] Cache-bust bumped to `umt-modular-12`
 - [x] README changelog updated
+- [x] **NEW**: Auto Mine now checks bag/inventory status and pauses when full (`sell.lua` + `auto_mine_loop.lua` updated)
 
 ## Next Priority: Main Loop Extraction
 
