@@ -1,5 +1,23 @@
 local Sell = {}
 
+function Sell.getNumericByKeys(instance, keys)
+    if not instance or type(keys) ~= "table" then return nil end
+    for _, key in ipairs(keys) do
+        local attr = instance:GetAttribute(key)
+        if type(attr) == "number" then return attr end
+        local child = instance:FindFirstChild(key)
+        if child then
+            if child:IsA("NumberValue") or child:IsA("IntValue") or child:IsA("DoubleValue") then
+                return child.Value
+            elseif child:IsA("StringValue") then
+                local n = tonumber(child.Value)
+                if n then return n end
+            end
+        end
+    end
+    return nil
+end
+
 function Sell.countCarriedOres(player)
     local count = 0
     local playerWorkspace = workspace:FindFirstChild(player and player.Name or "")
@@ -115,6 +133,44 @@ function Sell.sellFromAnywhere(opts)
         return false, "Remote sell blocked by server distance check.", oreCountBefore
     end
     return true, nil, soldCount > 0 and soldCount or oreCountBefore
+end
+
+function Sell.getBagCapacity(player)
+    if not player then return nil end
+    local maxOres = nil
+    local stats = player:FindFirstChild("Stats")
+    if stats then
+        maxOres = Sell.getNumericByKeys(stats, {
+            "MaxOres", "MaxOre", "BagCapacity", "Capacity", "OreCapacity", "MaxCargo", "CargoLimit"
+        })
+    end
+    if not maxOres then
+        local leaderstats = player:FindFirstChild("leaderstats")
+        if leaderstats then
+            maxOres = Sell.getNumericByKeys(leaderstats, {
+                "MaxOres", "MaxOre", "BagCapacity", "Capacity", "OreCapacity"
+            })
+        end
+    end
+    local backpack = player:FindFirstChild("InnoBackpack")
+    if backpack and not maxOres then
+        maxOres = Sell.getNumericByKeys(backpack, {
+            "MaxOres", "MaxOre", "Capacity", "BagCapacity", "Limit", "MaxItems"
+        })
+    end
+    return maxOres
+end
+
+function Sell.isBagFull(player, thresholdPercent)
+    thresholdPercent = tonumber(thresholdPercent) or 100
+    local current = Sell.countCarriedOres(player)
+    local maxCapacity = Sell.getBagCapacity(player)
+    if not maxCapacity or maxCapacity <= 0 then
+        return false, current, nil
+    end
+    local thresholdCount = math.floor(maxCapacity * (thresholdPercent / 100))
+    local isFull = current >= thresholdCount
+    return isFull, current, maxCapacity
 end
 
 function Sell.getSupportedMethods()
