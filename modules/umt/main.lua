@@ -45,6 +45,12 @@ return function(Window, scriptInfo)
     end)
     if not okRun then
         warn("[Ultimate Mining Tycoon] runtime failed: " .. tostring(runErr))
-        notify("Runtime failed: " .. tostring(runErr))
+        -- Try to get more details about the error
+        local errStr = tostring(runErr)
+        if errStr:find("attempt to perform arithmetic") then
+            warn("[DEBUG] Arithmetic error detected. Stack trace:")
+            warn(debug.traceback())
+        end
+        notify("Runtime failed: " .. errStr:sub(1, 100))
     end
 end
