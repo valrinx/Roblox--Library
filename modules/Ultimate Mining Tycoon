@@ -34,7 +34,7 @@ return function(Window, scriptInfo)
     local CURRENT_SETTINGS_VERSION = 2
     local function loadUmtHelper(relativePath)
         local baseUrl = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/umt/"
-        local raw = game:HttpGet(baseUrl .. relativePath .. "?v=umt-modular-12")
+        local raw = game:HttpGet(baseUrl .. relativePath .. "?v=umt-modular-13")
         local chunk, compileErr = loadstring(raw)
         assert(chunk, "compile helper failed (" .. relativePath .. "): " .. tostring(compileErr))
         return chunk()
@@ -2627,6 +2627,9 @@ return function(Window, scriptInfo)
             normalizeOreToken = normalizeOreToken,
             oreReferenceFromList = oreReferenceFromList,
             autoMineHelper = autoMineHelper,
+            sellHelper = sellHelper,
+            bagCapacity = 25,
+            bagFullThreshold = 100,
         }
 
         local AutoMineToggle = Farm:CreateToggle({
