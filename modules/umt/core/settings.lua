@@ -1,5 +1,15 @@
 local Settings = {}
 
+local function isStringMap(tbl)
+    if type(tbl) ~= "table" then return false end
+    for k, v in pairs(tbl) do
+        if type(k) ~= "string" or type(v) ~= "string" then
+            return false
+        end
+    end
+    return true
+end
+
 local function copyStringMap(src)
     local out = {}
     if type(src) ~= "table" then
@@ -11,6 +21,15 @@ local function copyStringMap(src)
         end
     end
     return out
+end
+
+local function mergeStringMap(dst, src)
+    if type(dst) ~= "table" or type(src) ~= "table" then return end
+    for k, v in pairs(src) do
+        if type(k) == "string" and type(v) == "string" and k ~= "" and v ~= "" then
+            dst[k] = v
+        end
+    end
 end
 
 local function sanitizeStringArray(src)
@@ -65,6 +84,35 @@ function Settings.unwrapPayload(decoded)
         return decoded.data
     end
     return decoded
+end
+
+local HttpService = game:GetService("HttpService")
+local saveTaskId = 0
+
+function Settings.saveAsync(settingsFile, canWrite, getPayload, onComplete)
+    if not canWrite then
+        if type(onComplete) == "function" then
+            onComplete(false, "writefile unavailable")
+        end
+        return
+    end
+    saveTaskId = saveTaskId + 1
+    local currentTaskId = saveTaskId
+    task.delay(0.2, function()
+        if currentTaskId ~= saveTaskId then
+            return
+        end
+        local payload = nil
+        if type(getPayload) == "function" then
+            payload = getPayload()
+        end
+        local okWrite, errWrite = pcall(function()
+            writefile(settingsFile, HttpService:JSONEncode(payload))
+        end)
+        if type(onComplete) == "function" then
+            onComplete(okWrite, okWrite and nil or (errWrite and tostring(errWrite) or "unknown"))
+        end
+    end)
 end
 
 function Settings.applyDecoded(defaults, decoded, currentVersion)
