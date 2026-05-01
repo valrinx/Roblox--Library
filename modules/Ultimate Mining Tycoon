@@ -493,7 +493,14 @@ return function(Window, scriptInfo)
                     if nearest then
                         Rayfield:Notify({Title = "Approaching", Content = "Moving to nearest ore...", Duration = 2})
                         local approachDist = 10
-                        local success, msg = safeMoveHelper.physicsMove(nearest.Position - (nearest.Position - hrp.Position).Unit * approachDist, {speed = moveSpeedValue})
+                        local toOre = nearest.Position - hrp.Position
+                        local targetPos
+                        if toOre.Magnitude > 0.001 then
+                            targetPos = nearest.Position - toOre.Unit * approachDist
+                        else
+                            targetPos = nearest.Position - Vector3.new(0, 0, approachDist)
+                        end
+                        local success, msg = safeMoveHelper.physicsMove(targetPos, {speed = moveSpeedValue})
                         Rayfield:Notify({
                             Title = success and "Arrived" or "Failed",
                             Content = msg,
@@ -550,7 +557,14 @@ return function(Window, scriptInfo)
                     if nearestSell then
                         Rayfield:Notify({Title = "Approaching", Content = "Moving to sell point...", Duration = 2})
                         local approachDist = 8
-                        local success, msg = safeMoveHelper.physicsMove(nearestSell.Position - (nearestSell.Position - hrp.Position).Unit * approachDist, {speed = moveSpeedValue})
+                        local toSell = nearestSell.Position - hrp.Position
+                        local targetPos
+                        if toSell.Magnitude > 0.001 then
+                            targetPos = nearestSell.Position - toSell.Unit * approachDist
+                        else
+                            targetPos = nearestSell.Position - Vector3.new(0, 0, approachDist)
+                        end
+                        local success, msg = safeMoveHelper.physicsMove(targetPos, {speed = moveSpeedValue})
                         Rayfield:Notify({
                             Title = success and "Arrived" or "Failed",
                             Content = success and "Ready to sell!" or msg,
@@ -4226,7 +4240,13 @@ return function(Window, scriptInfo)
 
                                             -- If sell point found and we're too far, approach it
                                             if nearestSell and nearestDist > approachDist then
-                                                local targetPos = nearestSell.Position - (nearestSell.Position - hrp.Position).Unit * approachDist
+                                                local toSell = nearestSell.Position - hrp.Position
+                                                local targetPos
+                                                if toSell.Magnitude > 0.001 then
+                                                    targetPos = nearestSell.Position - toSell.Unit * approachDist
+                                                else
+                                                    targetPos = nearestSell.Position - Vector3.new(0, 0, approachDist)
+                                                end
                                                 Rayfield:Notify({
                                                     Title = "Auto Sell",
                                                     Content = "Approaching sell point...",
