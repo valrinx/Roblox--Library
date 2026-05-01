@@ -74,6 +74,24 @@ function AutoMineLoop.start(ctx)
         return false
     end
 
+    local function isBagFull()
+        if ctx.sellHelper and type(ctx.sellHelper.isBagFull) == "function" then
+            local isFull, current, maxCap = ctx.sellHelper.isBagFull(LocalPlayer, ctx.bagFullThreshold or 100)
+            return isFull, current, maxCap
+        end
+        local playerWorkspace = Workspace:FindFirstChild(LocalPlayer and LocalPlayer.Name or "")
+        if not playerWorkspace then return false, 0, nil end
+        local orePackCargo = playerWorkspace:FindFirstChild("OrePackCargo")
+        if not orePackCargo then return false, 0, nil end
+        local count = 0
+        for _, child in pairs(orePackCargo:GetChildren()) do
+            if not child:IsA("Weld") and not child:IsA("Motor6D") and not child:IsA("Attachment") then
+                count = count + 1
+            end
+        end
+        return false, count, nil
+    end
+
     local function collectNumericMadCommActivateEntries(madCommEvents)
         if ctx.autoMineHelper and type(ctx.autoMineHelper.collectNumericMadCommActivateEntries) == "function" then
             return ctx.autoMineHelper.collectNumericMadCommActivateEntries(madCommEvents, invalidMadCommIds)
@@ -708,6 +726,17 @@ function AutoMineLoop.start(ctx)
                     end
                     setAutoMineStatus("Auto Mine Status: paused (players nearby)")
                     task.wait(randomRange(0.3, 0.7))
+                    continue
+                end
+                local bagIsFull, currentOres, maxCap = isBagFull()
+                if bagIsFull then
+                    resetTargetLock()
+                    if type(ctx.clearVisual) == "function" then
+                        ctx.clearVisual()
+                    end
+                    local capText = maxCap and ("/" .. tostring(maxCap)) or ""
+                    setAutoMineStatus("Auto Mine Status: PAUSED - bag full (" .. tostring(currentOres) .. capText .. ")")
+                    task.wait(randomRange(0.5, 1.0))
                     continue
                 end
                 local pickaxeDamage = inVehicleDrill and 9999 or resolvePickaxeDamage(Tool)
