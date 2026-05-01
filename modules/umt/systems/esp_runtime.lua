@@ -106,6 +106,55 @@ function EspRuntime.scanAll(workspaceRef, applyTargetFn, resolveTargetFromInstan
     end
 end
 
+function EspRuntime.createOreVisuals(renderPart, target, color, oreName, useAdornment)
+    local visual = nil
+    if useAdornment then
+        local box = Instance.new("BoxHandleAdornment")
+        box.Name = "UH_ESP_Box"
+        box.Adornee = renderPart
+        box.AlwaysOnTop = true
+        box.ZIndex = 10
+        box.Color3 = color
+        box.Transparency = 0.72
+        box.Size = renderPart.Size + Vector3.new(0.05, 0.05, 0.05)
+        box.Parent = renderPart
+        visual = box
+    else
+        local hl = Instance.new("Highlight")
+        hl.Name                = "UH_ESP_Highlight"
+        hl.FillColor           = color
+        hl.OutlineColor        = color
+        hl.FillTransparency    = 0.78
+        hl.OutlineTransparency = 0.05
+        hl.DepthMode           = Enum.HighlightDepthMode.AlwaysOnTop
+        hl.Adornee             = target
+        hl.Parent              = target
+        visual = hl
+    end
+
+    local bb = Instance.new("BillboardGui")
+    bb.Name        = "UH_ESP_Billboard"
+    bb.Size        = UDim2.new(0, 120, 0, 36)
+    bb.StudsOffset = Vector3.new(0, 3.8, 0)
+    bb.AlwaysOnTop = true
+    bb.Adornee     = renderPart
+    bb.Parent      = target
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Size                   = UDim2.new(1, 0, 1, 0)
+    lbl.BackgroundTransparency = 1
+    lbl.TextColor3             = color
+    lbl.TextStrokeColor3       = Color3.new(0, 0, 0)
+    lbl.TextStrokeTransparency = 0
+    lbl.Font                   = Enum.Font.GothamBold
+    lbl.TextSize               = 13
+    lbl.TextScaled             = false
+    lbl.Text                   = oreName
+    lbl.Parent                 = bb
+
+    return { visual = visual, billboard = bb, label = lbl }
+end
+
 function EspRuntime.bindFolder(folder, isEnabledFn, applyTargetFn, resolveTargetFromInstanceFn)
     local conns = {}
     if not folder or type(applyTargetFn) ~= "function" then
