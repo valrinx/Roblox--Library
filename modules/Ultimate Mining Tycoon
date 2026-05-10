@@ -134,18 +134,38 @@ return function(Window, scriptInfo)
             humanoid.WalkSpeed = BYPASS_CONFIG.velocitySpoofSpeed
         end
         
-        local tween = TweenService:Create(
-            root,
-            TweenInfo.new(
-                duration,
-                BYPASS_CONFIG.easingStyle,
-                BYPASS_CONFIG.easingDirection
-            ),
-            {CFrame = targetCFrame}
-        )
+        -- Heartbeat-driven tween bypass (prevents server cancel)
+        local startCF = root.CFrame
+        local startTime = tick()
+        local connection
         
-        tween:Play()
-        tween.Completed:Wait()
+        connection = RunService.Heartbeat:Connect(function()
+            local elapsed = tick() - startTime
+            local alpha = math.min(elapsed / duration, 1)
+            
+            -- Sine InOut easing
+            local easedAlpha = alpha < 0.5 
+                and 2 * alpha * alpha 
+                or 1 - math.pow(-2 * alpha + 2, 2) / 2
+            
+            if root and root.Parent then
+                root.CFrame = startCF:Lerp(targetCFrame, easedAlpha)
+            end
+            
+            if alpha >= 1 then
+                connection:Disconnect()
+            end
+        end)
+        
+        task.wait(duration)
+        if connection and connection.Connected then
+            connection:Disconnect()
+        end
+        
+        -- Force final position
+        if root and root.Parent then
+            root.CFrame = targetCFrame
+        end
         
         if BYPASS_CONFIG.useVelocitySpoof then
             humanoid.WalkSpeed = originalSpeed
@@ -585,12 +605,21 @@ return function(Window, scriptInfo)
                 return sellHelper.sellFromAnywhere()
             end
             local player = game.Players.LocalPlayer
-            local cargoPrompt, _, err = findSellTargets()
+            local cargoPrompt, positionCargoVolume, err = findSellTargets()
             if not cargoPrompt then
                 return false, err or "No working CargoVolume found!", 0
             end
 
             local oreCountBefore = countCarriedOres(player)
+            
+            -- TP to sell location if positionCargoVolume exists
+            if positionCargoVolume and positionCargoVolume:IsA("BasePart") then
+                local targetCF = positionCargoVolume.CFrame * CFrame.new(0, 3, 0)
+                pcall(function()
+                    safeTween(targetCF, 0.4)
+                end)
+            end
+            
             local oldHold = cargoPrompt.HoldDuration
             local oldDistance = cargoPrompt.MaxActivationDistance
             local oldLos = cargoPrompt.RequiresLineOfSight
