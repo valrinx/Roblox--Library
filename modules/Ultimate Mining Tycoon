@@ -626,19 +626,40 @@ return function(Window, scriptInfo)
                 return false, "No valid TP target found for CargoVolume!", oreCountBefore
             end
             
-            -- Tween to sell location
-            local targetCF = tpTarget.CFrame * CFrame.new(0, 3, 0)
+            -- NUCLEAR: Direct instant TP + forced wait for replication
+            local targetCF = tpTarget.CFrame * CFrame.new(0, 2, 0)
+            
             local ok, tpErr = pcall(function()
-                safeTween(targetCF, 0.5)
+                if not root or not root.Parent then
+                    char = player.Character or player.CharacterAdded:Wait()
+                    root = char:WaitForChild("HumanoidRootPart")
+                end
+                
+                -- Instant teleport
+                root.CFrame = targetCF
+                
+                -- Force physics update
+                root.Velocity = Vector3.new(0, 0, 0)
+                root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                
+                -- Wait for server replication (critical)
+                task.wait(0.3)
             end)
             
             if not ok then
-                return false, "Tween to sell location failed: " .. tostring(tpErr), oreCountBefore
+                return false, "TP to sell location failed: " .. tostring(tpErr), oreCountBefore
             end
             
-            task.wait(0.15)
+            -- Double check we're close enough
+            if root and (root.Position - tpTarget.Position).Magnitude > 50 then
+                -- Force position again if server rejected first TP
+                pcall(function()
+                    root.CFrame = targetCF
+                    task.wait(0.2)
+                end)
+            end
             
-            -- Now physically trigger the prompt (we're close enough)
+            -- Now physically trigger the prompt
             local oldHold = cargoPrompt.HoldDuration
             
             pcall(function()
@@ -657,7 +678,7 @@ return function(Window, scriptInfo)
                 return false, "Prompt activation failed: " .. tostring(fireErr), oreCountBefore
             end
             
-            task.wait(0.35)
+            task.wait(0.4)
             local oreCountAfter = countCarriedOres(player)
             local soldCount = math.max(0, oreCountBefore - oreCountAfter)
             
