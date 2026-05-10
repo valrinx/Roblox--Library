@@ -30,8 +30,205 @@ return function(Window, scriptInfo)
     local HttpService = game:GetService("HttpService")
     local Players = game:GetService("Players")
     local RunService = game:GetService("RunService")
+    local TweenService = game:GetService("TweenService")
     local SETTINGS_FILE = "RavenHub_UMT_AutoSettings.json"
     local CURRENT_SETTINGS_VERSION = 2
+    
+    -- ═══════════════════════════════════════════════════════════════
+    -- TP/TWEEN BYPASS MODULE - Anti-Detection Teleportation System
+    -- ═══════════════════════════════════════════════════════════════
+    
+    local player = Players.LocalPlayer
+    local char = player.Character or player.CharacterAdded:Wait()
+    local root = char:WaitForChild("HumanoidRootPart")
+    local humanoid = char:WaitForChild("Humanoid")
+    
+    local BYPASS_CONFIG = {
+        minTweenDuration = 0.8,
+        maxTweenDuration = 1.5,
+        microStepSize = 12,
+        microStepDelay = 0.025,
+        postTweenDelayMin = 0.05,
+        postTweenDelayMax = 0.3,
+        velocitySpoofSpeed = 80,
+        useVelocitySpoof = true,
+        useMicroStep = false,
+        microStepThreshold = 200,
+        easingStyle = Enum.EasingStyle.Sine,
+        easingDirection = Enum.EasingDirection.InOut,
+    }
+    
+    local waypoints = {}
+    
+    local function setupAntiCheatBypass()
+        local mt = getrawmetatable(game)
+        local oldNamecall = mt.__namecall
+        setreadonly(mt, false)
+        
+        mt.__namecall = newcclosure(function(self, ...)
+            local method = getnamecallmethod()
+            
+            if method == "FireServer" or method == "InvokeServer" then
+                local remoteName = tostring(self):lower()
+                
+                if remoteName:find("anticheat") or 
+                   remoteName:find("anticheats") or
+                   remoteName:find("validate") or
+                   remoteName:find("checkposition") or
+                   remoteName:find("flagplayer") or
+                   remoteName:find("detectexploit") then
+                    return
+                end
+            end
+            
+            return oldNamecall(self, ...)
+        end)
+        
+        setreadonly(mt, true)
+    end
+    
+    local function microStepTP(targetCFrame)
+        if not root or not root.Parent then
+            char = player.Character or player.CharacterAdded:Wait()
+            root = char:WaitForChild("HumanoidRootPart")
+        end
+        
+        local start = root.Position
+        local target = targetCFrame.Position
+        local distance = (target - start).Magnitude
+        local steps = math.ceil(distance / BYPASS_CONFIG.microStepSize)
+        
+        for i = 1, steps do
+            local alpha = i / steps
+            local newPos = start:Lerp(target, alpha)
+            local lookVector = (target - start).Unit
+            local newCFrame = CFrame.new(newPos, newPos + lookVector)
+            
+            root.CFrame = newCFrame
+            task.wait(BYPASS_CONFIG.microStepDelay)
+        end
+        
+        root.CFrame = targetCFrame
+    end
+    
+    local function safeTween(targetCFrame, customDuration)
+        if not root or not root.Parent then
+            char = player.Character or player.CharacterAdded:Wait()
+            root = char:WaitForChild("HumanoidRootPart")
+            humanoid = char:WaitForChild("Humanoid")
+        end
+        
+        local distance = (targetCFrame.Position - root.Position).Magnitude
+        
+        if BYPASS_CONFIG.useMicroStep or distance > BYPASS_CONFIG.microStepThreshold then
+            return microStepTP(targetCFrame)
+        end
+        
+        local duration = customDuration or math.random(
+            BYPASS_CONFIG.minTweenDuration * 100,
+            BYPASS_CONFIG.maxTweenDuration * 100
+        ) / 100
+        
+        local originalSpeed = humanoid.WalkSpeed
+        if BYPASS_CONFIG.useVelocitySpoof then
+            humanoid.WalkSpeed = BYPASS_CONFIG.velocitySpoofSpeed
+        end
+        
+        local tween = TweenService:Create(
+            root,
+            TweenInfo.new(
+                duration,
+                BYPASS_CONFIG.easingStyle,
+                BYPASS_CONFIG.easingDirection
+            ),
+            {CFrame = targetCFrame}
+        )
+        
+        tween:Play()
+        tween.Completed:Wait()
+        
+        if BYPASS_CONFIG.useVelocitySpoof then
+            humanoid.WalkSpeed = originalSpeed
+        end
+        
+        local postDelay = math.random(
+            BYPASS_CONFIG.postTweenDelayMin * 100,
+            BYPASS_CONFIG.postTweenDelayMax * 100
+        ) / 100
+        task.wait(postDelay)
+    end
+    
+    local function tpToPosition(x, y, z)
+        local targetCFrame = CFrame.new(x, y, z)
+        safeTween(targetCFrame)
+    end
+    
+    local function tpToPart(part)
+        if not part or not part:IsA("BasePart") then
+            return
+        end
+        
+        local targetCFrame = part.CFrame + Vector3.new(0, 3, 0)
+        safeTween(targetCFrame)
+    end
+    
+    local function tpToNearestOre(oreType)
+        local workspace = game:GetService("Workspace")
+        local ores = workspace:FindFirstChild("Ores") or workspace
+        local nearest = nil
+        local minDist = math.huge
+        
+        for _, obj in pairs(ores:GetDescendants()) do
+            if obj:IsA("BasePart") then
+                if oreType and not obj.Name:lower():find(oreType:lower()) then
+                    continue
+                end
+                
+                local dist = (obj.Position - root.Position).Magnitude
+                if dist < minDist then
+                    minDist = dist
+                    nearest = obj
+                end
+            end
+        end
+        
+        if nearest then
+            tpToPart(nearest)
+            return nearest
+        else
+            return nil
+        end
+    end
+    
+    local function saveWaypoint(name, cframe)
+        cframe = cframe or root.CFrame
+        waypoints[name] = cframe
+    end
+    
+    local function tpToWaypoint(name)
+        local wp = waypoints[name]
+        if wp then
+            safeTween(wp)
+        end
+    end
+    
+    pcall(setupAntiCheatBypass)
+    
+    _G.UMTBypass = {
+        safeTween = safeTween,
+        microStepTP = microStepTP,
+        tpToPosition = tpToPosition,
+        tpToPart = tpToPart,
+        tpToNearestOre = tpToNearestOre,
+        saveWaypoint = saveWaypoint,
+        tpToWaypoint = tpToWaypoint,
+        config = BYPASS_CONFIG,
+        waypoints = waypoints,
+    }
+    
+    -- ═══════════════════════════════════════════════════════════════
+    -- END TP BYPASS MODULE
+    -- ═══════════════════════════════════════════════════════════════
     local function loadUmtHelper(relativePath)
         local baseUrl = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/umt/"
         local raw = game:HttpGet(baseUrl .. relativePath .. "?v=umt-modular-13")
@@ -102,6 +299,7 @@ return function(Window, scriptInfo)
             oreEspEnabled = false,
             oreEspDistance = 100,
             oreEspFilter = "All",
+            autoTpToOre = false,
             oreNameById = {},
             oreNameByRuntime = {},
             oreNameBySignature = {},
@@ -3440,6 +3638,21 @@ return function(Window, scriptInfo)
                                         task.wait(0.08)
                                         continue
                                     end
+                                    
+                                    -- ═══════════════════════════════════════════════════════════════
+                                    -- AUTO-TP TO ORE IF TOO FAR (BYPASS ENABLED)
+                                    -- ═══════════════════════════════════════════════════════════════
+                                    if autoSettingsLoaded.autoTpToOre and root and root.Position and renderPart and renderPart.Position then
+                                        local dist = (root.Position - renderPart.Position).Magnitude
+                                        if dist > autoMineRange then
+                                            pcall(function()
+                                                _G.UMTBypass.tpToPart(renderPart)
+                                            end)
+                                            task.wait(0.2) -- stabilization delay after TP
+                                        end
+                                    end
+                                    -- ═══════════════════════════════════════════════════════════════
+                                    
                                     setAutoMineTargetVisual(closestBlock, renderPart)
                                     local oreName = getOreNameForEsp(closestBlock, renderPart)
                                     local targetKey = getTargetKey(closestBlock, renderPart)
@@ -4534,10 +4747,150 @@ return function(Window, scriptInfo)
             end,
         })
     
-        Farm:CreateParagraph({
-            Title = "Waypoint System",
-            Content = "Waypoint teleport keybinds were removed with TP/Tween features."
+        -- ═══════════════════════════════════════════════════════════════
+        -- TP/TWEEN SYSTEM UI (BYPASS ENABLED)
+        -- ═══════════════════════════════════════════════════════════════
+        
+        Farm:CreateSection("Teleport System")
+        
+        Farm:CreateButton({
+            Name = "TP to Nearest Ore",
+            Callback = function()
+                local ore = _G.UMTBypass.tpToNearestOre()
+                if ore then
+                    Rayfield:Notify({
+                        Title = "Teleport",
+                        Content = "Warped to: " .. ore.Name,
+                        Duration = 2,
+                    })
+                else
+                    Rayfield:Notify({
+                        Title = "Teleport Failed",
+                        Content = "No ore found nearby",
+                        Duration = 2,
+                    })
+                end
+            end,
         })
+        
+        Farm:CreateButton({
+            Name = "Save Current Position",
+            Callback = function()
+                local waypointName = "wp_" .. tostring(#_G.UMTBypass.waypoints + 1)
+                _G.UMTBypass.saveWaypoint(waypointName)
+                Rayfield:Notify({
+                    Title = "Waypoint Saved",
+                    Content = "Saved as: " .. waypointName,
+                    Duration = 2,
+                })
+            end,
+        })
+        
+        Farm:CreateButton({
+            Name = "List Saved Waypoints",
+            Callback = function()
+                local count = 0
+                for name, _ in pairs(_G.UMTBypass.waypoints) do
+                    count = count + 1
+                    print("[Waypoint] " .. name)
+                end
+                Rayfield:Notify({
+                    Title = "Waypoints",
+                    Content = "Total saved: " .. count .. " (check console)",
+                    Duration = 3,
+                })
+            end,
+        })
+        
+        Farm:CreateInput({
+            Name = "TP to Waypoint (name)",
+            PlaceholderText = "Enter waypoint name",
+            RemoveTextAfterFocusLost = false,
+            Callback = function(text)
+                if text and text ~= "" then
+                    _G.UMTBypass.tpToWaypoint(text)
+                    Rayfield:Notify({
+                        Title = "Teleport",
+                        Content = "Attempting TP to: " .. text,
+                        Duration = 2,
+                    })
+                end
+            end,
+        })
+        
+        Farm:CreateSection("Advanced TP Settings")
+        
+        Farm:CreateSlider({
+            Name = "Tween Speed (Duration)",
+            Range = {0.3, 3.0},
+            Increment = 0.1,
+            Suffix = "s",
+            CurrentValue = _G.UMTBypass.config.minTweenDuration,
+            Callback = function(value)
+                _G.UMTBypass.config.minTweenDuration = value
+                _G.UMTBypass.config.maxTweenDuration = value + 0.5
+                Rayfield:Notify({
+                    Title = "Tween Speed Updated",
+                    Content = "Duration: " .. value .. "s - " .. (value + 0.5) .. "s",
+                    Duration = 2,
+                })
+            end,
+        })
+        
+        Farm:CreateToggle({
+            Name = "Use Micro-Step Mode",
+            CurrentValue = _G.UMTBypass.config.useMicroStep,
+            Flag = "UseMicroStep",
+            Callback = function(value)
+                _G.UMTBypass.config.useMicroStep = value
+                Rayfield:Notify({
+                    Title = "Micro-Step Mode",
+                    Content = value and "Enabled (safer, slower)" or "Disabled (faster)",
+                    Duration = 2,
+                })
+            end,
+        })
+        
+        Farm:CreateToggle({
+            Name = "Velocity Spoofing",
+            CurrentValue = _G.UMTBypass.config.useVelocitySpoof,
+            Flag = "VelocitySpoof",
+            Callback = function(value)
+                _G.UMTBypass.config.useVelocitySpoof = value
+                Rayfield:Notify({
+                    Title = "Velocity Spoofing",
+                    Content = value and "Enabled" or "Disabled",
+                    Duration = 2,
+                })
+            end,
+        })
+        
+        Farm:CreateToggle({
+            Name = "Auto-TP to Ore While Farming",
+            CurrentValue = autoSettingsLoaded.autoTpToOre or false,
+            Flag = "AutoTpToOre",
+            Callback = function(value)
+                autoSettingsLoaded.autoTpToOre = value
+                Rayfield:Notify({
+                    Title = "Auto-TP to Ore",
+                    Content = value and "Enabled (auto-farms distant ore)" or "Disabled",
+                    Duration = 2,
+                })
+                if saveAutoSettings then
+                    saveAutoSettings()
+                end
+            end,
+        })
+        
+        Farm:CreateParagraph({
+            Title = "TP Bypass Info",
+            Content = "Anti-detection enabled. Use Micro-Step for extreme safety. Increase Tween Duration if detected. Auto-TP works with Auto Mine."
+        })
+        
+        -- ═══════════════════════════════════════════════════════════════
+        -- END TP/TWEEN UI
+        -- ═══════════════════════════════════════════════════════════════
+
 
         local function destroyScript()
             scriptRunning = false
