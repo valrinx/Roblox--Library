@@ -612,7 +612,7 @@ return function(Window, scriptInfo)
 
             local oreCountBefore = countCarriedOres(player)
             
-            -- Aggressive TP to sell location
+            -- Find TP target
             local tpTarget = nil
             if positionCargoVolume and positionCargoVolume:IsA("BasePart") then
                 tpTarget = positionCargoVolume
@@ -622,52 +622,49 @@ return function(Window, scriptInfo)
                 tpTarget = cargoPrompt.Parent.Parent
             end
             
-            if tpTarget then
-                local targetCF = tpTarget.CFrame * CFrame.new(0, 5, 0)
-                local ok, tpErr = pcall(function()
-                    if root and root.Parent then
-                        -- Direct CFrame set (instant, no tween delay for auto sell)
-                        root.CFrame = targetCF
-                        task.wait(0.1)
-                    end
-                end)
-                if not ok then
-                    -- Fallback to safeTween if direct TP fails
-                    pcall(function()
-                        safeTween(targetCF, 0.3)
-                    end)
-                end
+            if not tpTarget then
+                return false, "No valid TP target found for CargoVolume!", oreCountBefore
             end
             
+            -- Tween to sell location
+            local targetCF = tpTarget.CFrame * CFrame.new(0, 3, 0)
+            local ok, tpErr = pcall(function()
+                safeTween(targetCF, 0.5)
+            end)
+            
+            if not ok then
+                return false, "Tween to sell location failed: " .. tostring(tpErr), oreCountBefore
+            end
+            
+            task.wait(0.15)
+            
+            -- Now physically trigger the prompt (we're close enough)
             local oldHold = cargoPrompt.HoldDuration
-            local oldDistance = cargoPrompt.MaxActivationDistance
-            local oldLos = cargoPrompt.RequiresLineOfSight
-
+            
             pcall(function()
                 cargoPrompt.HoldDuration = 0
-                cargoPrompt.MaxActivationDistance = math.max(1024, tonumber(oldDistance) or 0)
-                cargoPrompt.RequiresLineOfSight = false
             end)
-
+            
             local okFire, fireErr = pcall(function()
                 fireproximityprompt(cargoPrompt)
             end)
-
+            
             pcall(function()
                 cargoPrompt.HoldDuration = oldHold
-                cargoPrompt.MaxActivationDistance = oldDistance
-                cargoPrompt.RequiresLineOfSight = oldLos
             end)
 
             if not okFire then
-                return false, tostring(fireErr), oreCountBefore
+                return false, "Prompt activation failed: " .. tostring(fireErr), oreCountBefore
             end
+            
             task.wait(0.35)
             local oreCountAfter = countCarriedOres(player)
             local soldCount = math.max(0, oreCountBefore - oreCountAfter)
+            
             if oreCountBefore > 0 and soldCount <= 0 then
-                return false, "Remote sell blocked by server distance check.", oreCountBefore
+                return false, "Sell failed - no ores removed", oreCountBefore
             end
+            
             return true, nil, soldCount > 0 and soldCount or oreCountBefore
         end
 
