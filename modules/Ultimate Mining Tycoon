@@ -612,12 +612,31 @@ return function(Window, scriptInfo)
 
             local oreCountBefore = countCarriedOres(player)
             
-            -- TP to sell location if positionCargoVolume exists
+            -- Aggressive TP to sell location
+            local tpTarget = nil
             if positionCargoVolume and positionCargoVolume:IsA("BasePart") then
-                local targetCF = positionCargoVolume.CFrame * CFrame.new(0, 3, 0)
-                pcall(function()
-                    safeTween(targetCF, 0.4)
+                tpTarget = positionCargoVolume
+            elseif cargoPrompt.Parent and cargoPrompt.Parent:IsA("BasePart") then
+                tpTarget = cargoPrompt.Parent
+            elseif cargoPrompt.Parent and cargoPrompt.Parent.Parent and cargoPrompt.Parent.Parent:IsA("BasePart") then
+                tpTarget = cargoPrompt.Parent.Parent
+            end
+            
+            if tpTarget then
+                local targetCF = tpTarget.CFrame * CFrame.new(0, 5, 0)
+                local ok, tpErr = pcall(function()
+                    if root and root.Parent then
+                        -- Direct CFrame set (instant, no tween delay for auto sell)
+                        root.CFrame = targetCF
+                        task.wait(0.1)
+                    end
                 end)
+                if not ok then
+                    -- Fallback to safeTween if direct TP fails
+                    pcall(function()
+                        safeTween(targetCF, 0.3)
+                    end)
+                end
             end
             
             local oldHold = cargoPrompt.HoldDuration
