@@ -1,0 +1,348 @@
+-- ============================================================
+--   MODULE: Spirit ESP  v0.1
+--   Map: somtum
+-- ============================================================
+
+return function(Window, scriptInfo)
+
+    local Players      = game:GetService("Players")
+    local RunService   = game:GetService("RunService")
+    local TweenService = game:GetService("TweenService")
+
+    local player    = Players.LocalPlayer
+    local camera    = workspace.CurrentCamera
+
+    -- ── Config ───────────────────────────────────────────────
+
+    local CONFIG = {
+        enabled        = false,
+        boxEnabled     = true,
+        nameEnabled    = true,
+        distanceEnabled = true,
+        highlightColor = Color3.fromRGB(255, 0, 0),
+        fillColor      = Color3.fromRGB(255, 0, 0):Lerp(Color3.new(1, 1, 1), 0.5),
+        boxThickness   = 2,
+        textSize       = 14,
+        maxDistance    = 500,
+        refreshRate    = 0.05,
+    }
+
+    -- ── State ───────────────────────────────────────────────
+
+    local activeHighlights = {}
+    local espConnection    = nil
+
+    -- ── Helpers ─────────────────────────────────────────────
+
+    local function getSpiritFolder()
+        -- ลองหา Spirit spawns folder
+        return workspace:FindFirstChild("SpiritSpawns")
+            or workspace:FindFirstChild("Spirits")
+            or workspace:FindFirstChild("Enemies")
+            or workspace
+    end
+
+    local function isSpirit(model)
+        if not model or not model:IsA("Model") then return false end
+        local name = model.Name or ""
+        return string.find(string.lower(name), "spirit")
+            or string.find(string.lower(name), "vengence")
+    end
+
+    local function getSpiritRoot(spirit)
+        return spirit:FindFirstChild("HumanoidRootPart")
+            or spirit:FindFirstChild("Root")
+            or spirit:FindFirstChild("Torso")
+            or spirit:FindFirstChild("PrimaryPart")
+            or spirit.PrimaryPart
+    end
+
+    local function getAllSpirits()
+        local spirits = {}
+        local folder = getSpiritFolder()
+        for _, descendant in ipairs(folder:GetDescendants()) do
+            if descendant:IsA("Model") and isSpirit(descendant) then
+                table.insert(spirits, descendant)
+            end
+        end
+        -- fallback: scan entire workspace
+        if #spirits == 0 then
+            for _, descendant in ipairs(workspace:GetDescendants()) do
+                if descendant:IsA("Model") and isSpirit(descendant) then
+                    table.insert(spirits, descendant)
+                end
+            end
+        end
+        return spirits
+    end
+
+    local function worldToScreen(point)
+        local vec, onScreen = camera:WorldToScreenPoint(point)
+        return vec, onScreen
+    end
+
+    local function getModelBox(model)
+        local cf, size
+        local root = getSpiritRoot(model)
+        if root then
+            cf = root.Position
+        else
+            cf = model:GetBoundingBox()
+        end
+
+        local minV, maxV = model:GetBoundingBox()
+        if minV and maxV then
+            size = (maxV - minV)
+            cf = (maxV + minV) / 2
+        else
+            local primary = model.PrimaryPart
+            if primary then
+                cf = primary.Position
+            else
+                return nil
+            end
+            size = Vector3.new(2, 2, 2)
+        end
+
+        local screenPos, onScreen = worldToScreen(cf)
+        if not onScreen then return nil end
+
+        local distance = (camera.CFrame.Position - cf).Magnitude
+        if distance > CONFIG.maxDistance then return nil end
+
+        local scale = 1000 / math.max(distance, 1)
+        local w = math.clamp(size.X * scale * 0.5, 20, 200)
+        local h = math.clamp(size.Y * scale * 0.5, 30, 300)
+
+        return {
+            screenPos  = Vector2.new(screenPos.X, screenPos.Y),
+            width      = w,
+            height     = h,
+            distance   = distance,
+        }
+    end
+
+    local function drawESPBox(info)
+        local pos   = info.screenPos
+        local w     = info.width
+        local h     = info.height
+        local color = CONFIG.highlightColor
+
+        local function makeQuad(offsetX, offsetY, cornerW, cornerH, cornerColor)
+            local quad = Drawing.new("Quad")
+            quad.Thickness  = CONFIG.boxThickness
+            quad.Color      = cornerColor or color
+            quad.Transparency = 0
+            quad.Filled     = false
+            quad.ZIndex     = 10
+
+            local x1 = pos.X + offsetX
+            local y1 = pos.Y + offsetY
+            local x2 = x1 + cornerW
+            local y2 = y1 + cornerH
+
+            quad.PointA = Vector2.new(x1, y1)
+            quad.PointB = Vector2.new(x2, y1)
+            quad.PointC = Vector2.new(x2, y2)
+            quad.PointD = Vector2.new(x1, y2)
+            return quad
+        end
+
+        -- TL ─── top left
+        local tl = makeQuad(-w / 2, -h / 2, w * 0.3, 3)
+        local tl2 = makeQuad(-w / 2, -h / 2, 3, h * 0.15)
+
+        -- TR ─── top right
+        local tr = makeQuad(w / 2 - w * 0.3, -h / 2, w * 0.3, 3)
+        local tr2 = makeQuad(w / 2 - 3, -h / 2, 3, h * 0.15)
+
+        -- BL ─── bottom left
+        local bl = makeQuad(-w / 2, h / 2 - 3, w * 0.3, 3)
+        local bl2 = makeQuad(-w / 2, h / 2 - h * 0.15, 3, h * 0.15)
+
+        -- BR ─── bottom right
+        local br = makeQuad(w / 2 - w * 0.3, h / 2 - 3, w * 0.3, 3)
+        local br2 = makeQuad(w / 2 - 3, h / 2 - h * 0.15, 3, h * 0.15)
+
+        return { tl, tl2, tr, tr2, bl, bl2, br, br2 }
+    end
+
+    local function drawNameLabel(spirit, info)
+        local text = Drawing.new("Text")
+        text.Text      = spirit.Name or "Spirit"
+        text.Size      = CONFIG.textSize
+        text.Color     = Color3.new(1, 1, 1)
+        text.Outline   = true
+        text.OutlineColor = Color3.new(0, 0, 0)
+        text.Center    = true
+        text.AnchorPoint = Vector2.new(0.5, 0.5)
+        text.Position  = Vector2.new(info.screenPos.X, info.screenPos.Y - info.height / 2 - 15)
+        text.ZIndex    = 11
+        text.Font      = Enum.Font.GothamBold
+        return text
+    end
+
+    local function drawDistanceLabel(info)
+        local text = Drawing.new("Text")
+        text.Text    = "[" .. math.floor(info.distance) .. "m]"
+        text.Size    = CONFIG.textSize - 2
+        text.Color   = Color3.new(0.7, 0.7, 0.7)
+        text.Outline = true
+        text.OutlineColor = Color3.new(0, 0, 0)
+        text.Center  = true
+        text.AnchorPoint = Vector2.new(0.5, 0.5)
+        text.Position = Vector2.new(info.screenPos.X, info.screenPos.Y + info.height / 2 + 12)
+        text.ZIndex   = 11
+        text.Font     = Enum.Font.Gotham
+        return text
+    end
+
+    local function clearHighlight(spirit)
+        if activeHighlights[spirit] then
+            for _, drawing in ipairs(activeHighlights[spirit]) do
+                if drawing and drawing.Remove then
+                    pcall(function() drawing:Remove() end)
+                end
+            end
+            activeHighlights[spirit] = nil
+        end
+    end
+
+    local function renderSpirit(spirit)
+        clearHighlight(spirit)
+        if not CONFIG.enabled then return end
+
+        local boxInfo = getModelBox(spirit)
+        if not boxInfo then return end
+
+        local drawings = {}
+
+        if CONFIG.boxEnabled then
+            local quads = drawESPBox(boxInfo)
+            for _, q in ipairs(quads) do table.insert(drawings, q) end
+        end
+
+        if CONFIG.nameEnabled then
+            local nameLabel = drawNameLabel(spirit, boxInfo)
+            table.insert(drawings, nameLabel)
+        end
+
+        if CONFIG.distanceEnabled then
+            local distLabel = drawDistanceLabel(boxInfo)
+            table.insert(drawings, distLabel)
+        end
+
+        activeHighlights[spirit] = drawings
+    end
+
+    local function clearAllHighlights()
+        for spirit, _ in pairs(activeHighlights) do
+            clearHighlight(spirit)
+        end
+    end
+
+    local function startESP()
+        if espConnection then return end
+        espConnection = RunService.RenderStepped:Connect(function()
+            if not CONFIG.enabled then return end
+
+            local spirits = getAllSpirits()
+            local tracked = {}
+
+            -- render/update
+            for _, spirit in ipairs(spirits) do
+                renderSpirit(spirit)
+                tracked[spirit] = true
+            end
+
+            -- clear stale
+            for spirit, _ in pairs(activeHighlights) do
+                if not tracked[spirit] then
+                    clearHighlight(spirit)
+                end
+            end
+        end)
+    end
+
+    local function stopESP()
+        if espConnection then
+            espConnection:Disconnect()
+            espConnection = nil
+        end
+        clearAllHighlights()
+    end
+
+    -- ── UI ───────────────────────────────────────────────────
+
+    local MainTab = Window:CreateTab("Spirit ESP", 6031068420)
+
+    MainTab:CreateLabel("Map: somtum")
+    MainTab:CreateLabel("Detects: Spirit, VengenceSpirit")
+
+    MainTab:CreateToggle({
+        Name        = "Enable Spirit ESP",
+        CurrentValue = false,
+        Flag        = "spiritEspEnabled",
+        Callback    = function(Value)
+            CONFIG.enabled = Value
+            if Value then
+                startESP()
+            else
+                stopESP()
+            end
+        end,
+    })
+
+    MainTab:CreateToggle({
+        Name        = "Box ESP",
+        CurrentValue = true,
+        Flag        = "spiritEspBox",
+        Callback    = function(Value) CONFIG.boxEnabled = Value end,
+    })
+
+    MainTab:CreateToggle({
+        Name        = "Name Label",
+        CurrentValue = true,
+        Flag        = "spiritEspName",
+        Callback    = function(Value) CONFIG.nameEnabled = Value end,
+    })
+
+    MainTab:CreateToggle({
+        Name        = "Distance",
+        CurrentValue = true,
+        Flag        = "spiritEspDist",
+        Callback    = function(Value) CONFIG.distanceEnabled = Value end,
+    })
+
+    MainTab:CreateSlider({
+        Name        = "Max Distance",
+        Range        = {100, 1000},
+        Increment   = 50,
+        CurrentValue = 500,
+        Flag        = "spiritEspDistMax",
+        Callback    = function(Value) CONFIG.maxDistance = Value end,
+    })
+
+    MainTab:CreateColorPicker({
+        Name        = "ESP Color",
+        Color        = CONFIG.highlightColor,
+        Flag        = "spiritEspColor",
+        Callback    = function(Value) CONFIG.highlightColor = Value end,
+    })
+
+    MainTab:CreateButton({
+        Name        = "Refresh Spirits",
+        Callback    = function()
+            clearAllHighlights()
+            local count = #getAllSpirits()
+            warn("[Spirit ESP] Found " .. count .. " spirits")
+        end,
+    })
+
+    -- ── Cleanup ─────────────────────────────────────────────
+
+    scriptInfo.registerCleanup(function()
+        stopESP()
+    end)
+
+end
