@@ -38,6 +38,13 @@ local SCRIPTS = {
         version     = "v1.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/umt/main.lua",
     },
+    {
+        name        = "Spirit ESP",
+        description = "Wallhack | Box ESP | Name | Distance | somtum map",
+        universal   = true,
+        version     = "v0.1",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/Spirit%20ESP",
+    },
     --[[
     {
         name      = "Another Game",
