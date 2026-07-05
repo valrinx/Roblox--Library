@@ -26,6 +26,7 @@ local SCRIPTS = {
     {
         name        = "Slime Seas ⚔️ Anime RPG",
         description = "Teleport | Auto Farm | Kill Aura | Infinite Stamina",
+        placeIds    = {99046552174353},
         gameIds     = {99046552174353},
         version     = "v0.1",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/Slime%20Seas%20%E2%9A%94%EF%B8%8F%20Anime%20RPG",
@@ -37,13 +38,6 @@ local SCRIPTS = {
         gameIds     = {18680867089},
         version     = "v1.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/umt/main.lua",
-    },
-    {
-        name        = "Spirit ESP",
-        description = "Wallhack | Box ESP | Name | Distance | somtum map",
-        universal   = true,
-        version     = "v0.1",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/Spirit%20ESP",
     },
     --[[
     {
