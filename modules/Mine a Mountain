@@ -1,0 +1,647 @@
+-- Crystal ESP v4 — ข้อมูลจาก Attributes | ESP ดีไซน์ใหม่ | UI fix
+-- RightShift = toggle menu
+
+local Players          = game:GetService("Players")
+local RunService       = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService     = game:GetService("TweenService")
+local CoreGui          = game:GetService("CoreGui")
+local LocalPlayer      = Players.LocalPlayer
+
+-- ============================================================
+-- CONFIG
+-- ============================================================
+local CFG = {
+    Enabled      = true,
+    MaxDistance  = 300,
+    ShowDropped  = true,
+    ShowMap      = true,
+    ShowDist     = true,
+    SelectedTiers = { [1]=true,[2]=true,[3]=true,[4]=true,[5]=true,[6]=true },
+    FallbackColors = {
+        Color3.fromRGB(180,180,180),
+        Color3.fromRGB(100,210,100),
+        Color3.fromRGB(100,160,255),
+        Color3.fromRGB(200,100,255),
+        Color3.fromRGB(255,200,50),
+        Color3.fromRGB(255,80,180),
+    },
+    TierLabels = { "Common","Uncommon","Rare","Epic","Legendary","Mythic" },
+    TierTags   = { "C","U","R","E","L","M" },
+}
+
+-- ============================================================
+-- STATE
+-- ============================================================
+local espObjects     = {}
+local scannedFolders = {}
+
+-- ============================================================
+-- UTIL
+-- ============================================================
+local function getPartFromInstance(inst)
+    if inst:IsA("BasePart") then return inst end
+    if inst:IsA("Model") and inst.PrimaryPart then return inst.PrimaryPart end
+    return inst:FindFirstChildWhichIsA("BasePart", true)
+end
+
+local function readAttribs(inst)
+    local a = {}
+    a.tierNum     = inst:GetAttribute("Tier")
+    a.tierName    = inst:GetAttribute("TierName")
+    a.crystalName = inst:GetAttribute("CrystalName")
+    a.value       = inst:GetAttribute("Value")
+    a.weightKg    = inst:GetAttribute("WeightKg")
+    a.sizeClass   = inst:GetAttribute("SizeClassName")
+    a.luck        = inst:GetAttribute("LuckBoost") or inst:GetAttribute("Luck")
+    local r = inst:GetAttribute("TierColorR")
+    local g = inst:GetAttribute("TierColorG")
+    local b = inst:GetAttribute("TierColorB")
+    if r and g and b then a.tierColor = Color3.fromRGB(r,g,b) end
+    return a
+end
+
+local function fmtValue(v)
+    if not v then return nil end
+    v = tonumber(v); if not v then return nil end
+    -- แสดงตัวเลขเต็มพร้อม comma เหมือน map จริง
+    local s = tostring(math.floor(v))
+    -- ใส่ comma ทุก 3 หลัก
+    local result = s:reverse():gsub("(%d%d%d)", "%1,"):reverse()
+    result = result:gsub("^,", "")
+    return "$" .. result
+end
+
+-- ============================================================
+-- ESP CREATE
+-- ============================================================
+local function removeAllESP()
+    for part, obj in pairs(espObjects) do
+        if obj.bb and obj.bb.Parent then obj.bb:Destroy() end
+        espObjects[part] = nil
+    end
+end
+
+local function createESP(part, inst, isDropped)
+    if not part or not inst then return end
+    if espObjects[part] then return end
+
+    local a = readAttribs(inst)
+    local tierNum = a.tierNum or 0
+    if tierNum < 1 or tierNum > 6 then return end
+    if not CFG.SelectedTiers[tierNum] then return end
+    if isDropped  and not CFG.ShowDropped then return end
+    if not isDropped and not CFG.ShowMap  then return end
+
+    local color    = a.tierColor or CFG.FallbackColors[tierNum] or Color3.new(1,1,1)
+    local tag      = CFG.TierTags[tierNum]   or "?"
+    local tierName = a.tierName or CFG.TierLabels[tierNum] or ("T"..tierNum)
+
+    -- ===== BillboardGui =====
+    local bb = Instance.new("BillboardGui")
+    bb.Name        = "CrystalESP"
+    bb.AlwaysOnTop = true
+    bb.Size        = UDim2.new(0, 200, 0, 130)
+    bb.StudsOffset = Vector3.new(0, 4, 0)
+    bb.Adornee     = part
+    bb.Parent      = CoreGui
+
+    local yPos = 0
+    local BLACK = Color3.new(0, 0, 0)
+
+    local function makeLbl(text, txtColor, font, size, h)
+        local lbl = Instance.new("TextLabel")
+        lbl.Size                   = UDim2.new(1, 0, 0, h)
+        lbl.Position               = UDim2.new(0, 0, 0, yPos)
+        lbl.BackgroundTransparency = 1
+        lbl.TextColor3             = txtColor
+        lbl.TextStrokeTransparency = 0.25
+        lbl.TextStrokeColor3       = BLACK
+        lbl.Font                   = font
+        lbl.TextSize               = size
+        lbl.TextScaled             = false
+        lbl.TextXAlignment         = Enum.TextXAlignment.Center
+        lbl.Text                   = text
+        lbl.Parent                 = bb
+        yPos = yPos + h + 2
+        return lbl
+    end
+
+    -- SizeClass tag: "Small"→"S", "Medium"→"M", "Large"→"L" ฯลฯ
+    local sizeTag = a.sizeClass and a.sizeClass:sub(1,1):upper() or "?"
+
+    -- Line 1: [L] Legendary — size tag + tier name กึ่งกลาง
+    local hH = 30
+    local hLbl = Instance.new("TextLabel")
+    hLbl.Size                   = UDim2.new(1, 0, 0, hH)
+    hLbl.Position               = UDim2.new(0, 0, 0, yPos)
+    hLbl.BackgroundTransparency = 1
+    hLbl.TextColor3             = color
+    hLbl.TextStrokeTransparency = 0.2
+    hLbl.TextStrokeColor3       = BLACK
+    hLbl.Font                   = Enum.Font.GothamBold
+    hLbl.RichText               = true
+    hLbl.TextSize               = 26
+    hLbl.TextScaled             = false
+    hLbl.TextXAlignment         = Enum.TextXAlignment.Center
+    hLbl.Text                   = string.format('<font color="#ffffff">[%s]</font> %s%s',
+        sizeTag, tierName, isDropped and " 📦" or "")
+    hLbl.Parent = bb
+    yPos = yPos + hH + 1
+
+    -- Line 2: weight (กึ่งกลาง, ขาว)
+    if a.weightKg then
+        makeLbl(string.format("%.1f kg", a.weightKg), Color3.fromRGB(230,230,230), Enum.Font.GothamBold, 16, 18)
+    end
+
+    -- Line 3: value เหลืองทอง
+    local valStr = fmtValue(a.value)
+    if valStr then
+        makeLbl(valStr, Color3.fromRGB(255,215,0), Enum.Font.GothamBold, 22, 24)
+    end
+
+    -- Line 4: luck สีเหลืองอมส้ม
+    if a.luck and tonumber(a.luck) and tonumber(a.luck) > 0 then
+        makeLbl(
+            string.format("Luck: +%.2f%%", tonumber(a.luck)),
+            Color3.fromRGB(255,220,50),
+            Enum.Font.GothamBold, 14, 16
+        )
+    end
+
+    -- Line 5: distance เทาเล็ก อัปเดตทุก frame
+    if CFG.ShowDist then
+        local distLbl = Instance.new("TextLabel")
+        distLbl.Name                   = "DistLabel"
+        distLbl.Size                   = UDim2.new(1, 0, 0, 16)
+        distLbl.Position               = UDim2.new(0, 0, 0, yPos)
+        distLbl.BackgroundTransparency = 1
+        distLbl.TextColor3             = Color3.fromRGB(160, 160, 180)
+        distLbl.TextStrokeTransparency = 0.4
+        distLbl.TextXAlignment         = Enum.TextXAlignment.Center
+        distLbl.TextStrokeColor3       = Color3.new(0, 0, 0)
+        distLbl.Font                   = Enum.Font.Gotham
+        distLbl.TextSize               = 14
+        distLbl.TextScaled             = false
+        distLbl.Text                   = "..."
+        distLbl.Parent                 = bb
+    end
+
+    -- resize bb height ให้พอดี content จริง
+    bb.Size = UDim2.new(0, 200, 0, yPos + 18)
+
+    espObjects[part] = { bb = bb, tierNum = tierNum }
+
+    part.AncestryChanged:Connect(function()
+        if not part:IsDescendantOf(game) then
+            local obj = espObjects[part]
+            if obj and obj.bb then obj.bb:Destroy() end
+            espObjects[part] = nil
+        end
+    end)
+end
+
+-- ============================================================
+-- SCAN / PROCESS
+-- ============================================================
+local function processCrystal(crystal, isDropped)
+    if not crystal or not crystal.Parent then return end
+    task.spawn(function()
+        local attempts = 0
+        while not crystal:GetAttribute("Tier") and attempts < 20 and crystal.Parent do
+            task.wait(0.3); attempts += 1
+        end
+        if not crystal.Parent then return end
+        local part = getPartFromInstance(crystal)
+        if not part then return end
+        if espObjects[part] then return end
+        createESP(part, crystal, isDropped)
+    end)
+end
+
+local function rescan()
+    removeAllESP()
+    task.wait()
+    local dropped = workspace:FindFirstChild("DroppedCrystals")
+    if dropped then
+        for _, c in ipairs(dropped:GetChildren()) do processCrystal(c, true) end
+    end
+    local things = workspace:FindFirstChild("Things")
+    local crs = things and things:FindFirstChild("Crystals")
+    if crs then
+        for _, c in ipairs(crs:GetChildren()) do processCrystal(c, false) end
+    end
+end
+
+local function scanFolder(folder, isDropped)
+    if scannedFolders[folder] then return end
+    scannedFolders[folder] = true
+    for _, c in ipairs(folder:GetChildren()) do processCrystal(c, isDropped) end
+    folder.ChildAdded:Connect(function(c) processCrystal(c, isDropped) end)
+end
+
+-- ============================================================
+-- HEARTBEAT
+-- ============================================================
+RunService.Heartbeat:Connect(function()
+    local char = LocalPlayer.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    for part, obj in pairs(espObjects) do
+        local bb = obj.bb
+        if not bb or not bb.Parent then espObjects[part] = nil; continue end
+        if not CFG.SelectedTiers[obj.tierNum] then
+            bb:Destroy(); espObjects[part] = nil; continue
+        end
+        local ok, dist = pcall(function() return (part.Position - root.Position).Magnitude end)
+        if not ok then bb:Destroy(); espObjects[part] = nil; continue end
+        bb.Enabled = CFG.Enabled and dist <= CFG.MaxDistance
+        if bb.Enabled then
+            local dl = bb:FindFirstChild("DistLabel")
+            if dl then
+                dl.Visible = CFG.ShowDist
+                dl.Text    = string.format("%.0f studs", dist)
+            end
+        end
+    end
+end)
+
+task.spawn(function()
+    local dropped = workspace:WaitForChild("DroppedCrystals", 15)
+    if dropped then scanFolder(dropped, true) end
+    local things = workspace:FindFirstChild("Things")
+    local crs = things and things:FindFirstChild("Crystals")
+    if crs then scanFolder(crs, false) end
+end)
+
+-- ============================================================
+-- UI  (เขียนใหม่ทั้งหมด: Frame ธรรมดา + manual Y, ไม่ใช้ ScrollingFrame)
+-- ============================================================
+if CoreGui:FindFirstChild("CrystalESP_Menu") then
+    CoreGui:FindFirstChild("CrystalESP_Menu"):Destroy()
+end
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name           = "CrystalESP_Menu"
+ScreenGui.ResetOnSpawn   = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.Parent         = CoreGui
+
+-- Main window
+local PANEL_W = 280
+local Main = Instance.new("Frame", ScreenGui)
+Main.Name             = "Main"
+Main.Size             = UDim2.new(0, PANEL_W, 0, 40)  -- เริ่มต้น header ก่อน, จะ resize
+Main.Position         = UDim2.new(1, -PANEL_W - 10, 0, 20)
+Main.BackgroundColor3 = Color3.fromRGB(13, 13, 20)
+Main.BorderSizePixel  = 0
+Main.ClipsDescendants = true
+Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 10)
+
+local Stroke = Instance.new("UIStroke", Main)
+Stroke.Color       = Color3.fromRGB(70, 110, 255)
+Stroke.Thickness   = 1.5
+Stroke.Transparency = 0.4
+
+-- Header bar
+local Header = Instance.new("Frame", Main)
+Header.Size             = UDim2.new(1, 0, 0, 40)
+Header.Position         = UDim2.new(0, 0, 0, 0)
+Header.BackgroundColor3 = Color3.fromRGB(18, 18, 32)
+Header.BorderSizePixel  = 0
+Instance.new("UICorner", Header).CornerRadius = UDim.new(0, 10)
+-- ปิดรอย corner ส่วนล่าง
+local HFix = Instance.new("Frame", Header)
+HFix.Size             = UDim2.new(1, 0, 0.5, 0)
+HFix.Position         = UDim2.new(0, 0, 0.5, 0)
+HFix.BackgroundColor3 = Color3.fromRGB(18, 18, 32)
+HFix.BorderSizePixel  = 0
+
+local TitleLbl = Instance.new("TextLabel", Header)
+TitleLbl.Size               = UDim2.new(1, -76, 1, 0)
+TitleLbl.Position           = UDim2.new(0, 12, 0, 0)
+TitleLbl.BackgroundTransparency = 1
+TitleLbl.TextColor3         = Color3.fromRGB(100, 160, 255)
+TitleLbl.TextSize           = 15
+TitleLbl.Font               = Enum.Font.GothamBold
+TitleLbl.Text               = "💎 Crystal ESP"
+TitleLbl.TextXAlignment     = Enum.TextXAlignment.Left
+
+local MinBtn = Instance.new("TextButton", Header)
+MinBtn.Size             = UDim2.new(0, 28, 0, 28)
+MinBtn.Position         = UDim2.new(1, -66, 0, 6)
+MinBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 75)
+MinBtn.BorderSizePixel  = 0
+MinBtn.TextColor3       = Color3.fromRGB(200, 200, 220)
+MinBtn.TextSize         = 16
+MinBtn.Font             = Enum.Font.GothamBold
+MinBtn.Text             = "—"
+Instance.new("UICorner", MinBtn).CornerRadius = UDim.new(0, 6)
+
+local CloseBtn = Instance.new("TextButton", Header)
+CloseBtn.Size             = UDim2.new(0, 28, 0, 28)
+CloseBtn.Position         = UDim2.new(1, -32, 0, 6)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(200, 55, 55)
+CloseBtn.BorderSizePixel  = 0
+CloseBtn.TextColor3       = Color3.fromRGB(255, 255, 255)
+CloseBtn.TextSize         = 14
+CloseBtn.Font             = Enum.Font.GothamBold
+CloseBtn.Text             = "✕"
+Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 6)
+
+-- Content area (Frame ธรรมดา + UIListLayout)
+local Body = Instance.new("Frame", Main)
+Body.Name             = "Body"
+Body.Position         = UDim2.new(0, 0, 0, 44)
+Body.Size             = UDim2.new(1, 0, 0, 0)
+Body.AutomaticSize    = Enum.AutomaticSize.Y
+Body.BackgroundTransparency = 1
+Body.BorderSizePixel  = 0
+
+local BodyList = Instance.new("UIListLayout", Body)
+BodyList.SortOrder          = Enum.SortOrder.LayoutOrder
+BodyList.Padding            = UDim.new(0, 5)
+BodyList.HorizontalAlignment = Enum.HorizontalAlignment.Center
+
+local BodyPad = Instance.new("UIPadding", Body)
+BodyPad.PaddingTop    = UDim.new(0, 6)
+BodyPad.PaddingBottom = UDim.new(0, 10)
+
+-- auto-resize Main ตาม Body
+local function updateMainSize()
+    local contentH = BodyList.AbsoluteContentSize.Y + 10 + 6 + 44
+    Main.Size = UDim2.new(0, PANEL_W, 0, contentH)
+end
+BodyList:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(updateMainSize)
+
+local lo = 0
+local function nextLO() lo += 1; return lo end
+
+-- Section label
+local function makeSection(label)
+    local f = Instance.new("Frame", Body)
+    f.Size             = UDim2.new(1, -16, 0, 22)
+    f.BackgroundTransparency = 1
+    f.LayoutOrder      = nextLO()
+    local lbl = Instance.new("TextLabel", f)
+    lbl.Size             = UDim2.new(1, 0, 1, 0)
+    lbl.BackgroundTransparency = 1
+    lbl.TextColor3       = Color3.fromRGB(90, 150, 255)
+    lbl.TextSize         = 11
+    lbl.Font             = Enum.Font.GothamBold
+    lbl.Text             = label:upper()
+    lbl.TextXAlignment   = Enum.TextXAlignment.Left
+    lbl.Position         = UDim2.new(0, 4, 0, 0)
+end
+
+-- Toggle row
+local function makeToggle(label, getVal, onToggle)
+    local Row = Instance.new("Frame", Body)
+    Row.Size             = UDim2.new(1, -16, 0, 36)
+    Row.BackgroundColor3 = Color3.fromRGB(20, 20, 32)
+    Row.BorderSizePixel  = 0
+    Row.LayoutOrder      = nextLO()
+    Instance.new("UICorner", Row).CornerRadius = UDim.new(0, 8)
+
+    local Lbl = Instance.new("TextLabel", Row)
+    Lbl.Size               = UDim2.new(1, -54, 1, 0)
+    Lbl.Position           = UDim2.new(0, 12, 0, 0)
+    Lbl.BackgroundTransparency = 1
+    Lbl.TextColor3         = Color3.fromRGB(210, 210, 230)
+    Lbl.TextSize           = 13
+    Lbl.Font               = Enum.Font.Gotham
+    Lbl.Text               = label
+    Lbl.TextXAlignment     = Enum.TextXAlignment.Left
+
+    local Track = Instance.new("Frame", Row)
+    Track.Size             = UDim2.new(0, 40, 0, 20)
+    Track.Position         = UDim2.new(1, -48, 0.5, -10)
+    Track.BorderSizePixel  = 0
+    Instance.new("UICorner", Track).CornerRadius = UDim.new(1, 0)
+
+    local Dot = Instance.new("Frame", Track)
+    Dot.Size             = UDim2.new(0, 16, 0, 16)
+    Dot.AnchorPoint      = Vector2.new(0, 0.5)
+    Dot.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    Dot.BorderSizePixel  = 0
+    Instance.new("UICorner", Dot).CornerRadius = UDim.new(1, 0)
+
+    local function refresh()
+        local on = getVal()
+        TweenService:Create(Track, TweenInfo.new(0.12), {
+            BackgroundColor3 = on and Color3.fromRGB(70,120,255) or Color3.fromRGB(40,40,60)
+        }):Play()
+        TweenService:Create(Dot, TweenInfo.new(0.12), {
+            Position = on and UDim2.new(1,-18,0.5,-8) or UDim2.new(0,2,0.5,-8)
+        }):Play()
+    end
+    refresh()
+
+    local Btn = Instance.new("TextButton", Row)
+    Btn.Size               = UDim2.new(1, 0, 1, 0)
+    Btn.BackgroundTransparency = 1
+    Btn.Text               = ""
+    Btn.MouseButton1Click:Connect(function() onToggle(); refresh() end)
+end
+
+-- Slider row
+local function makeSlider(label, min, max, getValue, onChanged)
+    local Row = Instance.new("Frame", Body)
+    Row.Size             = UDim2.new(1, -16, 0, 52)
+    Row.BackgroundColor3 = Color3.fromRGB(20, 20, 32)
+    Row.BorderSizePixel  = 0
+    Row.LayoutOrder      = nextLO()
+    Instance.new("UICorner", Row).CornerRadius = UDim.new(0, 8)
+
+    local Lbl = Instance.new("TextLabel", Row)
+    Lbl.Size               = UDim2.new(0.65, 0, 0, 22)
+    Lbl.Position           = UDim2.new(0, 10, 0, 4)
+    Lbl.BackgroundTransparency = 1
+    Lbl.TextColor3         = Color3.fromRGB(210, 210, 230)
+    Lbl.TextSize           = 13
+    Lbl.Font               = Enum.Font.Gotham
+    Lbl.Text               = label
+    Lbl.TextXAlignment     = Enum.TextXAlignment.Left
+
+    local ValLbl = Instance.new("TextLabel", Row)
+    ValLbl.Size               = UDim2.new(0.35, -10, 0, 22)
+    ValLbl.Position           = UDim2.new(0.65, 0, 0, 4)
+    ValLbl.BackgroundTransparency = 1
+    ValLbl.TextColor3         = Color3.fromRGB(100, 160, 255)
+    ValLbl.TextSize           = 13
+    ValLbl.Font               = Enum.Font.GothamBold
+    ValLbl.Text               = tostring(getValue())
+    ValLbl.TextXAlignment     = Enum.TextXAlignment.Right
+
+    local Track = Instance.new("Frame", Row)
+    Track.Size             = UDim2.new(1, -20, 0, 6)
+    Track.Position         = UDim2.new(0, 10, 0, 34)
+    Track.BackgroundColor3 = Color3.fromRGB(35, 35, 55)
+    Track.BorderSizePixel  = 0
+    Instance.new("UICorner", Track).CornerRadius = UDim.new(1, 0)
+
+    local t0 = (getValue() - min) / (max - min)
+    local Fill = Instance.new("Frame", Track)
+    Fill.Size             = UDim2.new(t0, 0, 1, 0)
+    Fill.BackgroundColor3 = Color3.fromRGB(70, 120, 255)
+    Fill.BorderSizePixel  = 0
+    Instance.new("UICorner", Fill).CornerRadius = UDim.new(1, 0)
+
+    local Handle = Instance.new("Frame", Track)
+    Handle.Size             = UDim2.new(0, 14, 0, 14)
+    Handle.AnchorPoint      = Vector2.new(0.5, 0.5)
+    Handle.Position         = UDim2.new(t0, 0, 0.5, 0)
+    Handle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    Handle.BorderSizePixel  = 0
+    Instance.new("UICorner", Handle).CornerRadius = UDim.new(1, 0)
+
+    local dragging = false
+    local function update(x)
+        local abs = Track.AbsolutePosition.X
+        local w   = Track.AbsoluteSize.X
+        local t   = math.clamp((x - abs) / w, 0, 1)
+        local val = math.floor(min + t * (max - min))
+        Fill.Size       = UDim2.new(t, 0, 1, 0)
+        Handle.Position = UDim2.new(t, 0, 0.5, 0)
+        ValLbl.Text     = tostring(val)
+        onChanged(val)
+    end
+
+    local SBtn = Instance.new("TextButton", Track)
+    SBtn.Size = UDim2.new(1, 0, 4, 0); SBtn.Position = UDim2.new(0, 0, -1.5, 0)
+    SBtn.BackgroundTransparency = 1; SBtn.Text = ""
+    SBtn.MouseButton1Down:Connect(function()
+        dragging = true; update(UserInputService:GetMouseLocation().X)
+    end)
+    UserInputService.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
+    end)
+    UserInputService.InputChanged:Connect(function(i)
+        if dragging and i.UserInputType == Enum.UserInputType.MouseMovement then
+            update(i.Position.X)
+        end
+    end)
+end
+
+-- Tier filter
+local function makeTierFilter()
+    local Row = Instance.new("Frame", Body)
+    Row.Size             = UDim2.new(1, -16, 0, 84)
+    Row.BackgroundColor3 = Color3.fromRGB(20, 20, 32)
+    Row.BorderSizePixel  = 0
+    Row.LayoutOrder      = nextLO()
+    Instance.new("UICorner", Row).CornerRadius = UDim.new(0, 8)
+
+    local Lbl = Instance.new("TextLabel", Row)
+    Lbl.Size               = UDim2.new(1, 0, 0, 20)
+    Lbl.Position           = UDim2.new(0, 10, 0, 4)
+    Lbl.BackgroundTransparency = 1
+    Lbl.TextColor3         = Color3.fromRGB(210, 210, 230)
+    Lbl.TextSize           = 12
+    Lbl.Font               = Enum.Font.Gotham
+    Lbl.Text               = "Tier Filter"
+    Lbl.TextXAlignment     = Enum.TextXAlignment.Left
+
+    local tierColors = {
+        Color3.fromRGB(155,155,155),
+        Color3.fromRGB(70,185,70),
+        Color3.fromRGB(70,120,255),
+        Color3.fromRGB(160,70,255),
+        Color3.fromRGB(255,185,25),
+        Color3.fromRGB(255,70,180),
+    }
+    local btns = {}
+    local function refreshBtns()
+        for i, b in ipairs(btns) do
+            local on = CFG.SelectedTiers[i]
+            b.BackgroundColor3 = on and tierColors[i] or Color3.fromRGB(30,30,48)
+            b.TextColor3       = on and Color3.new(1,1,1) or Color3.fromRGB(120,120,150)
+        end
+    end
+    for i = 1, 6 do
+        local col = (i-1) % 3
+        local row = math.floor((i-1)/3)
+        local Btn = Instance.new("TextButton", Row)
+        Btn.Size             = UDim2.new(0, 38, 0, 22)
+        Btn.Position         = UDim2.new(0, 8 + col*48, 0, 28 + row*30)
+        Btn.BorderSizePixel  = 0
+        Btn.TextSize         = 11
+        Btn.Font             = Enum.Font.GothamBold
+        Btn.Text             = "T"..i
+        Instance.new("UICorner", Btn).CornerRadius = UDim.new(0, 5)
+        btns[i] = Btn
+        Btn.MouseButton1Click:Connect(function()
+            if CFG.SelectedTiers[i] then CFG.SelectedTiers[i] = nil
+            else CFG.SelectedTiers[i] = true end
+            refreshBtns(); rescan()
+        end)
+    end
+    refreshBtns()
+end
+
+-- ============================================================
+-- BUILD MENU
+-- ============================================================
+makeSection("General")
+makeToggle("ESP Enabled",    function() return CFG.Enabled end,  function() CFG.Enabled = not CFG.Enabled end)
+makeToggle("Show Distance",  function() return CFG.ShowDist end, function() CFG.ShowDist = not CFG.ShowDist end)
+
+makeSection("Filter")
+makeToggle("Show Map Crystals",     function() return CFG.ShowMap end,     function() CFG.ShowMap = not CFG.ShowMap; rescan() end)
+makeToggle("Show Dropped Crystals", function() return CFG.ShowDropped end, function() CFG.ShowDropped = not CFG.ShowDropped; rescan() end)
+makeTierFilter()
+
+makeSection("Range")
+makeSlider("Max Distance", 50, 800, function() return CFG.MaxDistance end, function(v) CFG.MaxDistance = v end)
+
+-- จบ layout → ปรับ size Main ครั้งสุดท้าย
+task.defer(updateMainSize)
+
+-- Drag header
+do
+    local dragging, ds, sp
+    Header.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true; ds = i.Position; sp = Main.Position
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
+    end)
+    UserInputService.InputChanged:Connect(function(i)
+        if dragging and i.UserInputType == Enum.UserInputType.MouseMovement then
+            local d = i.Position - ds
+            Main.Position = UDim2.new(sp.X.Scale, sp.X.Offset+d.X, sp.Y.Scale, sp.Y.Offset+d.Y)
+        end
+    end)
+end
+
+-- Minimize
+local minimized = false
+MinBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    if minimized then
+        Main.ClipsDescendants = true
+        TweenService:Create(Main, TweenInfo.new(0.18), { Size = UDim2.new(0, PANEL_W, 0, 40) }):Play()
+    else
+        TweenService:Create(Main, TweenInfo.new(0.18), {
+            Size = UDim2.new(0, PANEL_W, 0, BodyList.AbsoluteContentSize.Y + 54)
+        }):Play()
+    end
+    MinBtn.Text = minimized and "□" or "—"
+end)
+
+-- Close
+CloseBtn.MouseButton1Click:Connect(function()
+    TweenService:Create(Main, TweenInfo.new(0.18), { Size = UDim2.new(0, PANEL_W, 0, 0) }):Play()
+    task.delay(0.2, function() ScreenGui:Destroy() end)
+end)
+
+-- RightShift toggle
+UserInputService.InputBegan:Connect(function(i, gp)
+    if gp then return end
+    if i.KeyCode == Enum.KeyCode.RightShift then Main.Visible = not Main.Visible end
+end)
+
+print("[ESP v4] loaded | RightShift = toggle menu")
