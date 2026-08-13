@@ -1023,7 +1023,6 @@ return function(Window, scriptInfo)
         })
     end
 
-    local PlayersTab = Window:CreateTab("Spectate", 4483362458)
     local playerDropdown
 
     local function getDropdownValue(value)
@@ -1119,41 +1118,6 @@ return function(Window, scriptInfo)
         notify("Spectate", "Watching " .. playerLabel(player))
     end
 
-    local initialOptions = collectPlayerOptions()
-    playerDropdown = PlayersTab:CreateDropdown({
-        Name = "Select Player",
-        Options = initialOptions,
-        CurrentOption = {initialOptions[1]},
-        MultipleOptions = false,
-        Flag = "TWDO3SpectatePlayer",
-        Callback = function(value)
-            selectedUserId = playerByLabel[getDropdownValue(value)]
-            if spectateEnabled and selectedUserId then
-                spectatePlayer(Players:GetPlayerByUserId(selectedUserId))
-            end
-        end,
-    })
-    PlayersTab:CreateButton({
-        Name = "Refresh Player List",
-        Callback = function()
-            refreshPlayerDropdown()
-            notify("Players", "Player list refreshed")
-        end,
-    })
-    PlayersTab:CreateButton({
-        Name = "Spectate Selected Player",
-        Callback = function()
-            spectatePlayer(selectedUserId and Players:GetPlayerByUserId(selectedUserId))
-        end,
-    })
-    PlayersTab:CreateButton({
-        Name = "Return Camera To Me",
-        Callback = function()
-            setCameraToLocalPlayer()
-            notify("Spectate", "Camera returned to your character")
-        end,
-    })
-
     local extrasOk, extrasResult = pcall(function()
         local extrasUrl = "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/twdo3_extras.lua?v=twdo3-7"
         local extrasSource = game:HttpGet(extrasUrl)
@@ -1209,6 +1173,42 @@ return function(Window, scriptInfo)
         warn("[RAVEN HUB] " .. tostring(combatResult))
         notify("TWDO3", "Combat suite failed: " .. tostring(combatResult))
     end
+
+    local PlayersTab = Window:CreateTab("Spectate", 4483362458)
+    local initialOptions = collectPlayerOptions()
+    playerDropdown = PlayersTab:CreateDropdown({
+        Name = "Select Player",
+        Options = initialOptions,
+        CurrentOption = {initialOptions[1]},
+        MultipleOptions = false,
+        Flag = "TWDO3SpectatePlayer",
+        Callback = function(value)
+            selectedUserId = playerByLabel[getDropdownValue(value)]
+            if spectateEnabled and selectedUserId then
+                spectatePlayer(Players:GetPlayerByUserId(selectedUserId))
+            end
+        end,
+    })
+    PlayersTab:CreateButton({
+        Name = "Refresh Player List",
+        Callback = function()
+            refreshPlayerDropdown()
+            notify("Players", "Player list refreshed")
+        end,
+    })
+    PlayersTab:CreateButton({
+        Name = "Spectate Selected Player",
+        Callback = function()
+            spectatePlayer(selectedUserId and Players:GetPlayerByUserId(selectedUserId))
+        end,
+    })
+    PlayersTab:CreateButton({
+        Name = "Return Camera To Me",
+        Callback = function()
+            setCameraToLocalPlayer()
+            notify("Spectate", "Camera returned to your character")
+        end,
+    })
 
     local function trackPlayer(player)
         if player == localPlayer then
