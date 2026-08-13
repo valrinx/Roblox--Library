@@ -24,7 +24,7 @@ local RavenUI
 do
     local ok, result = pcall(function()
         local source = game:HttpGet(
-            'https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/raven_ui.lua?v=raven-ui-2'
+            'https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/raven_ui.lua?v=raven-ui-3'
         )
         assert(type(source) == "string" and #source > 1000, "library download was empty")
         local chunk, compileError = loadstring(source)
@@ -108,7 +108,7 @@ end)
 local windowOk, Window = pcall(function()
     return RavenUI:CreateWindow({
         Name            = "RAVEN UI",
-        LoadingTitle    = "RAVEN UI  |  v1.0.1",
+        LoadingTitle    = "RAVEN UI  |  v1.1.0",
         LoadingSubtitle = "by valrinx",
         ConfigurationSaving = {
             Enabled    = true,
@@ -126,14 +126,17 @@ end
 -- ============================================================
 
 local HomeTab = Window:CreateTab("Overview", 4483362458)
-HomeTab:CreateLabel("Welcome to RAVEN HUB")
+HomeTab:CreateSection("Experience")
+local ModuleStatusLabel = HomeTab:CreateStatus({
+    Title = "Checking experience",
+    Content = "Checking for a compatible game module...",
+})
 HomeTab:CreateLabel("PlaceId: " .. tostring(game.PlaceId))
-HomeTab:CreateLabel("Build: " .. HUB_BUILD)
-local ModuleStatusLabel = HomeTab:CreateLabel("Module status: Checking...")
+HomeTab:CreateLabel("RAVEN HUB build: " .. HUB_BUILD)
 
 local function setModuleStatus(text)
     pcall(function()
-        ModuleStatusLabel:Set("Module status: " .. tostring(text))
+        ModuleStatusLabel:Set(tostring(text))
     end)
 end
 
@@ -142,6 +145,7 @@ for _, s in ipairs(SCRIPTS) do
     table.insert(scriptNames, s.name .. "  [" .. s.version .. "]  |  " .. s.description)
 end
 
+HomeTab:CreateSection("Library")
 HomeTab:CreateDropdown({
     Name            = "Scripts in this Hub",
     Options         = scriptNames,
@@ -283,6 +287,10 @@ end
 if not matchedAnyScript then
     setModuleStatus("No matching module for PlaceId " .. tostring(currentPlaceId)
         .. " / GameId " .. tostring(currentGameId))
+    local unavailableMessage = "No compatible module is loaded for " .. tostring(game.Name) .. "."
+    Window:CreatePlaceholderTab("Automation", "robot", unavailableMessage)
+    Window:CreatePlaceholderTab("Visuals", "eye", unavailableMessage)
+    Window:CreatePlaceholderTab("Movement", "walk", unavailableMessage)
 end
 
 -- ============================================================

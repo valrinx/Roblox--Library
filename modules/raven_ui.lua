@@ -5,7 +5,7 @@
 ]]
 
 local Raven = {
-    Version = "1.0.1",
+    Version = "1.1.0",
     Flags = {},
 }
 
@@ -27,13 +27,31 @@ local THEME = {
     Border = Color3.fromRGB(37, 44, 52),
     BorderSoft = Color3.fromRGB(28, 34, 40),
     Text = Color3.fromRGB(242, 245, 247),
-    Muted = Color3.fromRGB(135, 145, 156),
-    Dim = Color3.fromRGB(92, 101, 112),
+    Muted = Color3.fromRGB(151, 160, 169),
+    Dim = Color3.fromRGB(118, 128, 139),
     Accent = Color3.fromRGB(183, 255, 60),
+    AccentInk = Color3.fromRGB(8, 10, 13),
     AccentDark = Color3.fromRGB(94, 132, 24),
+    AccentSurface = Color3.fromRGB(28, 38, 15),
+    AccentSelection = Color3.fromRGB(31, 43, 17),
+    AccentSoft = Color3.fromRGB(205, 255, 116),
     Cyan = Color3.fromRGB(63, 190, 239),
     Danger = Color3.fromRGB(255, 92, 92),
+    Track = Color3.fromRGB(48, 55, 62),
+    BorderStrong = Color3.fromRGB(65, 74, 84),
+    BlockTop = Color3.fromRGB(154, 162, 170),
+    BlockLeft = Color3.fromRGB(102, 112, 121),
+    BlockRight = Color3.fromRGB(190, 196, 201),
 }
+
+-- Hallmark pre-emit critique: P4 H4 E4 S5 R4 V5.
+-- Hallmark design stamp: technical-atmospheric / Workbench / N3 side rail.
+-- Layout and iconography are code-native so the UI renders consistently across executors.
+local WINDOW_WIDTH = 1280
+local WINDOW_HEIGHT = 760
+local SIDEBAR_WIDTH = 128
+local TOPBAR_HEIGHT = 76
+local FOOTER_HEIGHT = 56
 
 local activeWindow = nil
 local connections = {}
@@ -305,20 +323,6 @@ local function keyCodeFromName(name)
     return Enum.KeyCode.Unknown
 end
 
-local function shortName(name)
-    local words = {}
-    for word in tostring(name):gmatch("[%w]+") do
-        table.insert(words, word)
-    end
-    if #words == 0 then
-        return "UI"
-    end
-    if #words == 1 then
-        return string.upper(words[1]:sub(1, 2))
-    end
-    return string.upper(words[1]:sub(1, 1) .. words[2]:sub(1, 1))
-end
-
 local function addHover(target, surface, normalColor, hoverColor)
     connect(target.MouseEnter, function()
         tween(surface, 0.12, {BackgroundColor3 = hoverColor or THEME.SurfaceHover})
@@ -328,8 +332,266 @@ local function addHover(target, surface, normalColor, hoverColor)
     end)
 end
 
+local function displayTabName(name)
+    local aliases = {
+        Home = "Overview",
+        Farm = "Automation",
+        ["Ore ESP"] = "Visuals",
+        Mobile = "Movement",
+    }
+    return aliases[tostring(name)] or tostring(name)
+end
+
 local WindowMethods = {}
 local TabMethods = {}
+
+local function addColorTarget(targets, object, property)
+    table.insert(targets, {object = object, property = property or "BackgroundColor3"})
+    return object
+end
+
+local function setIconColor(icon, color)
+    for _, target in ipairs(icon and icon._colorTargets or {}) do
+        if target.object and target.object.Parent then
+            target.object[target.property] = color
+        end
+    end
+end
+
+local function iconPart(parent, targets, properties, radius)
+    properties.Parent = parent
+    local part = create("Frame", properties, radius and {corner(radius)} or nil)
+    addColorTarget(targets, part)
+    return part
+end
+
+local function makeIcon(parent, name, position, size, color)
+    local holder = create("Frame", {
+        Parent = parent,
+        BackgroundTransparency = 1,
+        Position = position,
+        Size = size,
+    })
+    local targets = {}
+    local key = string.lower(tostring(name or ""))
+
+    if key:find("overview", 1, true) or key:find("home", 1, true) or key:find("grid", 1, true) then
+        for _, point in ipairs({{4, 6}, {16, 6}, {4, 18}, {16, 18}}) do
+            iconPart(holder, targets, {
+                BackgroundColor3 = color,
+                BorderSizePixel = 0,
+                Position = UDim2.fromOffset(point[1], point[2]),
+                Size = UDim2.fromOffset(9, 9),
+            }, 2)
+        end
+    elseif key:find("farm", 1, true) or key:find("auto", 1, true)
+        or key:find("robot", 1, true) or key:find("combat", 1, true) then
+        local face = create("Frame", {
+            Parent = holder,
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            Position = UDim2.fromOffset(5, 9),
+            Size = UDim2.fromOffset(20, 16),
+        }, {corner(4)})
+        local faceStroke = stroke(color, 0, 2)
+        faceStroke.Parent = face
+        addColorTarget(targets, faceStroke, "Color")
+        iconPart(holder, targets, {BackgroundColor3 = color, BorderSizePixel = 0, Position = UDim2.fromOffset(11, 4), Size = UDim2.fromOffset(8, 3)}, 2)
+        iconPart(holder, targets, {BackgroundColor3 = color, BorderSizePixel = 0, Position = UDim2.fromOffset(14, 2), Size = UDim2.fromOffset(2, 5)}, 1)
+        iconPart(holder, targets, {BackgroundColor3 = color, BorderSizePixel = 0, Position = UDim2.fromOffset(9, 15), Size = UDim2.fromOffset(4, 4)}, 2)
+        iconPart(holder, targets, {BackgroundColor3 = color, BorderSizePixel = 0, Position = UDim2.fromOffset(17, 15), Size = UDim2.fromOffset(4, 4)}, 2)
+        iconPart(holder, targets, {BackgroundColor3 = color, BorderSizePixel = 0, Position = UDim2.fromOffset(2, 14), Size = UDim2.fromOffset(3, 7)}, 1)
+        iconPart(holder, targets, {BackgroundColor3 = color, BorderSizePixel = 0, Position = UDim2.fromOffset(25, 14), Size = UDim2.fromOffset(3, 7)}, 1)
+    elseif key:find("esp", 1, true) or key:find("visual", 1, true)
+        or key:find("eye", 1, true) or key:find("spectate", 1, true)
+        or key:find("awareness", 1, true) then
+        local eye = create("Frame", {
+            Parent = holder,
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            Position = UDim2.fromOffset(3, 9),
+            Size = UDim2.fromOffset(24, 15),
+        }, {corner(15)})
+        local eyeStroke = stroke(color, 0, 2)
+        eyeStroke.Parent = eye
+        addColorTarget(targets, eyeStroke, "Color")
+        iconPart(holder, targets, {BackgroundColor3 = color, BorderSizePixel = 0, Position = UDim2.fromOffset(12, 13), Size = UDim2.fromOffset(7, 7)}, 7)
+    elseif key:find("mobile", 1, true) or key:find("movement", 1, true)
+        or key:find("walk", 1, true) or key:find("smartphone", 1, true) then
+        iconPart(holder, targets, {AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = color, BorderSizePixel = 0, Position = UDim2.fromOffset(15, 8), Rotation = -25, Size = UDim2.fromOffset(5, 9)}, 3)
+        iconPart(holder, targets, {AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = color, BorderSizePixel = 0, Position = UDim2.fromOffset(15, 16), Rotation = 28, Size = UDim2.fromOffset(5, 14)}, 3)
+        iconPart(holder, targets, {AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = color, BorderSizePixel = 0, Position = UDim2.fromOffset(8, 20), Rotation = 48, Size = UDim2.fromOffset(4, 13)}, 2)
+        iconPart(holder, targets, {AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = color, BorderSizePixel = 0, Position = UDim2.fromOffset(22, 23), Rotation = -38, Size = UDim2.fromOffset(4, 13)}, 2)
+        iconPart(holder, targets, {AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = color, BorderSizePixel = 0, Position = UDim2.fromOffset(22, 14), Rotation = 70, Size = UDim2.fromOffset(4, 12)}, 2)
+    elseif key:find("setting", 1, true) or key:find("misc", 1, true)
+        or key:find("tool", 1, true) or key:find("box", 1, true) then
+        local ring = create("Frame", {
+            Parent = holder,
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            Position = UDim2.fromOffset(6, 6),
+            Size = UDim2.fromOffset(18, 18),
+        }, {corner(18)})
+        local ringStroke = stroke(color, 0, 3)
+        ringStroke.Parent = ring
+        addColorTarget(targets, ringStroke, "Color")
+        iconPart(holder, targets, {BackgroundColor3 = color, BorderSizePixel = 0, Position = UDim2.fromOffset(13, 11), Size = UDim2.fromOffset(4, 8)}, 2)
+        for _, notch in ipairs({{13, 2, 4, 6}, {13, 22, 4, 6}, {2, 13, 6, 4}, {22, 13, 6, 4}}) do
+            iconPart(holder, targets, {BackgroundColor3 = color, BorderSizePixel = 0, Position = UDim2.fromOffset(notch[1], notch[2]), Size = UDim2.fromOffset(notch[3], notch[4])}, 2)
+        end
+    else
+        local ring = create("Frame", {
+            Parent = holder,
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            Position = UDim2.fromOffset(5, 5),
+            Size = UDim2.fromOffset(20, 20),
+        }, {corner(20)})
+        local ringStroke = stroke(color, 0, 2)
+        ringStroke.Parent = ring
+        addColorTarget(targets, ringStroke, "Color")
+        iconPart(holder, targets, {BackgroundColor3 = color, BorderSizePixel = 0, Position = UDim2.fromOffset(14, 10), Size = UDim2.fromOffset(3, 3)}, 3)
+        iconPart(holder, targets, {BackgroundColor3 = color, BorderSizePixel = 0, Position = UDim2.fromOffset(14, 15), Size = UDim2.fromOffset(3, 9)}, 2)
+    end
+
+    return {
+        _holder = holder,
+        _colorTargets = targets,
+    }
+end
+
+local function makeMagnifier(parent, position, color)
+    local holder = create("Frame", {
+        Parent = parent,
+        BackgroundTransparency = 1,
+        Position = position,
+        Size = UDim2.fromOffset(28, 28),
+    })
+    local lens = create("Frame", {
+        Parent = holder,
+        BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(3, 3),
+        Size = UDim2.fromOffset(15, 15),
+    }, {corner(15)})
+    local lensStroke = stroke(color, 0, 2)
+    lensStroke.Parent = lens
+    create("Frame", {
+        Parent = holder,
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundColor3 = color,
+        BorderSizePixel = 0,
+        Position = UDim2.fromOffset(20, 20),
+        Rotation = -45,
+        Size = UDim2.fromOffset(2, 10),
+    }, {corner(2)})
+end
+
+local function makeClockIcon(parent, position, color)
+    local holder = create("Frame", {
+        Parent = parent,
+        BackgroundTransparency = 1,
+        Position = position,
+        Size = UDim2.fromOffset(72, 72),
+    })
+    local clockFace = create("Frame", {
+        Parent = holder,
+        BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(5, 5),
+        Size = UDim2.fromOffset(62, 62),
+    }, {corner(62)})
+    local clockStroke = stroke(color, 0, 3)
+    clockStroke.Parent = clockFace
+    create("Frame", {
+        Parent = holder,
+        AnchorPoint = Vector2.new(0.5, 1),
+        BackgroundColor3 = color,
+        BorderSizePixel = 0,
+        Position = UDim2.fromOffset(36, 36),
+        Size = UDim2.fromOffset(3, 21),
+    }, {corner(2)})
+    create("Frame", {
+        Parent = holder,
+        AnchorPoint = Vector2.new(0, 0.5),
+        BackgroundColor3 = color,
+        BorderSizePixel = 0,
+        Position = UDim2.fromOffset(36, 36),
+        Rotation = 38,
+        Size = UDim2.fromOffset(20, 3),
+    }, {corner(2)})
+end
+
+local function makeProfileIcon(parent, color)
+    create("Frame", {
+        Parent = parent,
+        AnchorPoint = Vector2.new(0.5, 0),
+        BackgroundColor3 = color,
+        BorderSizePixel = 0,
+        Position = UDim2.new(0.5, 0, 0, 11),
+        Size = UDim2.fromOffset(22, 22),
+    }, {corner(22)})
+    create("Frame", {
+        Parent = parent,
+        AnchorPoint = Vector2.new(0.5, 1),
+        BackgroundColor3 = color,
+        BorderSizePixel = 0,
+        Position = UDim2.new(0.5, 0, 1, -8),
+        Size = UDim2.fromOffset(42, 25),
+    }, {corner(20)})
+    local verified = create("Frame", {
+        Parent = parent,
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundColor3 = THEME.Accent,
+        BorderSizePixel = 0,
+        Position = UDim2.new(1, -2, 1, -7),
+        Size = UDim2.fromOffset(18, 18),
+    }, {corner(18), stroke(THEME.Surface, 0, 2)})
+    label({
+        Parent = verified,
+        Size = UDim2.fromScale(1, 1),
+        Font = Enum.Font.GothamBold,
+        Text = "v",
+        TextColor3 = THEME.AccentInk,
+        TextSize = 11,
+        TextXAlignment = Enum.TextXAlignment.Center,
+    })
+end
+
+local function makeGameIcon(parent)
+    local holder = create("Frame", {
+        Parent = parent,
+        BackgroundColor3 = THEME.SurfaceHover,
+        BorderSizePixel = 0,
+        Position = UDim2.fromOffset(7, 7),
+        Size = UDim2.fromOffset(32, 32),
+    }, {corner(5)})
+    create("Frame", {
+        Parent = holder,
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundColor3 = THEME.BlockTop,
+        BorderSizePixel = 0,
+        Position = UDim2.fromOffset(16, 14),
+        Rotation = 45,
+        Size = UDim2.fromOffset(14, 14),
+    }, {corner(2)})
+    create("Frame", {
+        Parent = holder,
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundColor3 = THEME.BlockLeft,
+        BorderSizePixel = 0,
+        Position = UDim2.fromOffset(12, 19),
+        Rotation = 45,
+        Size = UDim2.fromOffset(9, 9),
+    }, {corner(1)})
+    create("Frame", {
+        Parent = holder,
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundColor3 = THEME.BlockRight,
+        BorderSizePixel = 0,
+        Position = UDim2.fromOffset(20, 19),
+        Rotation = 45,
+        Size = UDim2.fromOffset(9, 9),
+    }, {corner(1)})
+end
 
 local function updateScale(window)
     local camera = workspace.CurrentCamera
@@ -337,8 +599,8 @@ local function updateScale(window)
         return
     end
     local viewport = camera.ViewportSize
-    local scale = math.min((viewport.X - 24) / 1120, (viewport.Y - 24) / 700, 1)
-    window._scale.Scale = math.max(scale, 0.56)
+    local scale = math.min((viewport.X - 32) / WINDOW_WIDTH, (viewport.Y - 32) / WINDOW_HEIGHT, 1.2)
+    window._scale.Scale = math.max(scale, 0.24)
 end
 
 local function makeDraggable(window, handle)
@@ -383,43 +645,38 @@ local function makeLogo(parent)
         Name = "Logo",
         Parent = parent,
         BackgroundTransparency = 1,
-        Position = UDim2.fromOffset(24, 17),
-        Size = UDim2.fromOffset(72, 38),
+        Position = UDim2.fromOffset(20, 12),
+        Size = UDim2.fromOffset(88, 50),
     })
-    local leftWing = create("Frame", {
+    for index, spec in ipairs({{28, 14, 34}, {31, 23, 28}, {35, 31, 22}}) do
+        create("Frame", {
+            Parent = holder,
+            AnchorPoint = Vector2.new(1, 0.5),
+            BackgroundColor3 = THEME.Text,
+            BorderSizePixel = 0,
+            Position = UDim2.fromOffset(spec[1], spec[2]),
+            Rotation = 35,
+            Size = UDim2.fromOffset(spec[3], 7),
+        }, {corner(2)})
+        create("Frame", {
+            Parent = holder,
+            AnchorPoint = Vector2.new(0, 0.5),
+            BackgroundColor3 = THEME.Accent,
+            BorderSizePixel = 0,
+            Position = UDim2.fromOffset(60 - spec[1] + 28, spec[2]),
+            Rotation = -35,
+            Size = UDim2.fromOffset(spec[3], 7),
+        }, {corner(2)})
+    end
+    create("Frame", {
         Parent = holder,
         AnchorPoint = Vector2.new(0.5, 0.5),
         BackgroundColor3 = THEME.Text,
         BorderSizePixel = 0,
-        Position = UDim2.fromOffset(25, 19),
+        Position = UDim2.fromOffset(44, 35),
         Rotation = 45,
-        Size = UDim2.fromOffset(22, 22),
-    }, {corner(3)})
-    create("Frame", {
-        Parent = leftWing,
-        BackgroundColor3 = THEME.Background,
-        BorderSizePixel = 0,
-        Position = UDim2.fromOffset(8, -4),
-        Rotation = -20,
-        Size = UDim2.fromOffset(18, 28),
-    })
-    local rightWing = create("Frame", {
-        Parent = holder,
-        AnchorPoint = Vector2.new(0.5, 0.5),
-        BackgroundColor3 = THEME.Accent,
-        BorderSizePixel = 0,
-        Position = UDim2.fromOffset(47, 19),
-        Rotation = 45,
-        Size = UDim2.fromOffset(22, 22),
-    }, {corner(3)})
-    create("Frame", {
-        Parent = rightWing,
-        BackgroundColor3 = THEME.Background,
-        BorderSizePixel = 0,
-        Position = UDim2.fromOffset(-4, 8),
-        Rotation = 20,
-        Size = UDim2.fromOffset(28, 18),
-    })
+        Size = UDim2.fromOffset(12, 12),
+    }, {corner(2)})
 end
 
 local function createMetricCard(parent, position, size, title, accent)
@@ -443,7 +700,7 @@ local function createMetricCard(parent, position, size, title, accent)
         Font = Enum.Font.GothamBold,
         Text = string.upper(title),
         TextColor3 = THEME.Muted,
-        TextSize = 12,
+        TextSize = 13,
     })
     return card
 end
@@ -474,7 +731,7 @@ function WindowMethods:_addActivity(text, kind)
         Size = UDim2.new(1, -116, 1, 0),
         Text = tostring(text),
         TextColor3 = THEME.Text,
-        TextSize = 12,
+        TextSize = 13,
         TextTruncate = Enum.TextTruncate.AtEnd,
     })
     label({
@@ -483,7 +740,7 @@ function WindowMethods:_addActivity(text, kind)
         Size = UDim2.fromOffset(66, 48),
         Text = os.date("%H:%M:%S"),
         TextColor3 = THEME.Dim,
-        TextSize = 11,
+        TextSize = 12,
         TextXAlignment = Enum.TextXAlignment.Right,
     })
     create("Frame", {
@@ -536,8 +793,8 @@ function WindowMethods:_showToast(title, content, duration, kind)
         Parent = indicator,
         Size = UDim2.fromScale(1, 1),
         Font = Enum.Font.GothamBold,
-        Text = kind == "danger" and "!" or "✓",
-        TextColor3 = THEME.Background,
+        Text = kind == "danger" and "!" or "v",
+        TextColor3 = THEME.AccentInk,
         TextSize = 13,
         TextXAlignment = Enum.TextXAlignment.Center,
     })
@@ -547,7 +804,7 @@ function WindowMethods:_showToast(title, content, duration, kind)
         Size = UDim2.new(1, -56, 0, 20),
         Font = Enum.Font.GothamBold,
         Text = tostring(title or "RAVEN UI"),
-        TextSize = 12,
+        TextSize = 13,
         TextTruncate = Enum.TextTruncate.AtEnd,
     })
     label({
@@ -556,7 +813,7 @@ function WindowMethods:_showToast(title, content, duration, kind)
         Size = UDim2.new(1, -56, 0, 28),
         Text = tostring(content or ""),
         TextColor3 = THEME.Muted,
-        TextSize = 11,
+        TextSize = 12,
         TextTruncate = Enum.TextTruncate.AtEnd,
     })
     tween(toast, 0.18, {BackgroundTransparency = 0})
@@ -581,16 +838,16 @@ function WindowMethods:_selectTab(tab)
         self._activeTab._page.Visible = false
         tween(self._activeTab._nav, 0.12, {BackgroundColor3 = THEME.Background})
         self._activeTab._navText.TextColor3 = THEME.Muted
-        self._activeTab._navIcon.TextColor3 = THEME.Muted
+        setIconColor(self._activeTab._navIcon, THEME.Muted)
         self._activeTab._indicator.Visible = false
     end
     self._activeTab = tab
     tab._page.Visible = true
     tween(tab._nav, 0.12, {BackgroundColor3 = THEME.SurfaceHover})
     tab._navText.TextColor3 = THEME.Accent
-    tab._navIcon.TextColor3 = THEME.Accent
+    setIconColor(tab._navIcon, THEME.Accent)
     tab._indicator.Visible = true
-    self._pageTitle.Text = string.upper(tab._name)
+    self._pageTitle.Text = string.upper(tab._displayName)
     self:_applySearch(self._search.Text)
 end
 
@@ -614,9 +871,27 @@ function WindowMethods:_applySearch(query)
 end
 
 function WindowMethods:CreateTab(name, icon)
+    local displayName = displayTabName(name or "Tab")
+    local existing = self._tabsByDisplay and self._tabsByDisplay[displayName]
+    if existing and existing._placeholder then
+        for _, section in ipairs(existing._sections) do
+            if section._frame and section._frame.Parent then
+                section._frame:Destroy()
+            end
+        end
+        existing._name = tostring(name or "Tab")
+        existing._displayName = displayName
+        existing._icon = icon
+        existing._sections = {}
+        existing._currentSection = nil
+        existing._placeholder = false
+        return existing
+    end
+
     local tab = setmetatable({
         _window = self,
         _name = tostring(name or "Tab"),
+        _displayName = displayName,
         _icon = icon,
         _sections = {},
         _currentSection = nil,
@@ -627,35 +902,34 @@ function WindowMethods:CreateTab(name, icon)
         BackgroundColor3 = THEME.Background,
         BackgroundTransparency = 0,
         LayoutOrder = #self._tabs + 1,
-        Size = UDim2.new(1, 0, 0, 64),
+        Size = UDim2.new(1, 0, 0, 94),
     })
     tab._nav = nav
     tab._indicator = create("Frame", {
         Parent = nav,
         BackgroundColor3 = THEME.Accent,
         BorderSizePixel = 0,
-        Position = UDim2.fromOffset(0, 8),
-        Size = UDim2.fromOffset(2, 48),
+        Position = UDim2.fromOffset(0, 0),
+        Size = UDim2.fromOffset(3, 94),
         Visible = false,
     }, {corner(2)})
-    tab._navIcon = label({
-        Parent = nav,
-        Position = UDim2.fromOffset(14, 12),
-        Size = UDim2.fromOffset(30, 40),
-        Font = Enum.Font.GothamBold,
-        Text = shortName(tab._name),
-        TextColor3 = THEME.Muted,
-        TextSize = 12,
-        TextXAlignment = Enum.TextXAlignment.Center,
-    })
+    local iconName = type(icon) == "string" and icon or tab._name
+    tab._navIcon = makeIcon(
+        nav,
+        iconName .. " " .. tab._name,
+        UDim2.new(0.5, -15, 0, 15),
+        UDim2.fromOffset(30, 30),
+        THEME.Muted
+    )
     tab._navText = label({
         Parent = nav,
-        Position = UDim2.fromOffset(52, 0),
-        Size = UDim2.new(1, -58, 1, 0),
-        Text = tab._name == "Home" and "Overview" or tab._name,
+        Position = UDim2.fromOffset(8, 50),
+        Size = UDim2.new(1, -16, 0, 34),
+        Text = tab._displayName,
         TextColor3 = THEME.Muted,
-        TextSize = 12,
+        TextSize = 14,
         TextTruncate = Enum.TextTruncate.AtEnd,
+        TextXAlignment = Enum.TextXAlignment.Center,
     })
 
     local page = create("ScrollingFrame", {
@@ -683,9 +957,23 @@ function WindowMethods:CreateTab(name, icon)
         self:_selectTab(tab)
     end)
     table.insert(self._tabs, tab)
+    self._tabsByDisplay[tab._displayName] = tab
     if not self._activeTab then
         self:_selectTab(tab)
     end
+    return tab
+end
+
+function WindowMethods:CreatePlaceholderTab(name, icon, message)
+    local tab = self:CreateTab(name, icon)
+    tab._placeholder = true
+    tab:CreateSection(name)
+    tab:CreateStatus({
+        Title = name .. " unavailable",
+        Content = tostring(message or "No compatible module is loaded for this experience."),
+        Action = "Join a supported experience to unlock this category",
+        Static = true,
+    })
     return tab
 end
 
@@ -729,7 +1017,7 @@ function TabMethods:CreateSection(name)
         Font = Enum.Font.GothamBold,
         Text = "   " .. string.upper(section._name),
         TextColor3 = THEME.Muted,
-        TextSize = 11,
+        TextSize = 13,
     })
     table.insert(self._sections, section)
     self._currentSection = section
@@ -769,7 +1057,7 @@ function TabMethods:CreateLabel(text)
         Size = UDim2.new(1, -36, 1, 0),
         Text = tostring(text or ""),
         TextColor3 = THEME.Muted,
-        TextSize = 12,
+        TextSize = 13,
         TextWrapped = true,
     })
     local element = {}
@@ -777,6 +1065,82 @@ function TabMethods:CreateLabel(text)
         textLabel.Text = tostring(value or "")
         entry._searchText = textLabel.Text
     end
+    return element
+end
+
+function TabMethods:CreateStatus(options)
+    options = options or {}
+    local frame, entry = self:_newEntry(options.Title or "Experience module", 116)
+    local statusIcon = makeIcon(
+        frame,
+        "info",
+        UDim2.fromOffset(18, 20),
+        UDim2.fromOffset(30, 30),
+        THEME.Cyan
+    )
+    local titleLabel = label({
+        Parent = frame,
+        Position = UDim2.fromOffset(60, 12),
+        Size = UDim2.new(1, -78, 0, 32),
+        Font = Enum.Font.GothamBold,
+        Text = tostring(options.Title or "Checking experience"),
+        TextSize = 16,
+    })
+    local bodyLabel = label({
+        Parent = frame,
+        Position = UDim2.fromOffset(60, 42),
+        Size = UDim2.new(1, -78, 0, 42),
+        Text = tostring(options.Content or "Looking for a compatible game module."),
+        TextColor3 = THEME.Muted,
+        TextSize = 12,
+        TextWrapped = true,
+        TextYAlignment = Enum.TextYAlignment.Top,
+    })
+    local actionLabel = label({
+        Parent = frame,
+        Position = UDim2.fromOffset(60, 84),
+        Size = UDim2.new(1, -78, 0, 22),
+        Font = Enum.Font.GothamMedium,
+        Text = tostring(options.Action or "Join a supported experience to load controls"),
+        TextColor3 = THEME.Cyan,
+        TextSize = 12,
+    })
+    local element = {}
+
+    function element:Set(value)
+        local text = tostring(value or "")
+        local lower = string.lower(text)
+        local tone = THEME.Cyan
+        local title = "Checking experience"
+        local action = "Controls load automatically when a module matches"
+        if lower:find("no matching", 1, true) then
+            title = "No module for this experience"
+            action = "Join a supported experience to load automation controls"
+        elseif lower:find("failed", 1, true) then
+            title = "Module failed to load"
+            tone = THEME.Danger
+            action = "Check the activity panel for the runtime error"
+        elseif lower:find("loaded", 1, true) then
+            title = "Experience module ready"
+            tone = THEME.Accent
+            action = "Automation and visual controls are now available"
+        elseif lower:find("loading", 1, true) then
+            title = "Loading experience module"
+        end
+        if options.Static == true then
+            title = tostring(options.Title or title)
+            action = tostring(options.Action or action)
+            tone = options.Tone == "danger" and THEME.Danger or THEME.Dim
+        end
+        titleLabel.Text = title
+        bodyLabel.Text = text
+        actionLabel.Text = action
+        actionLabel.TextColor3 = tone
+        setIconColor(statusIcon, tone)
+        entry._searchText = title .. " " .. text .. " " .. action
+    end
+
+    element:Set(options.Content or "Checking for a compatible game module...")
     return element
 end
 
@@ -794,14 +1158,14 @@ function TabMethods:CreateButton(options)
         Size = UDim2.new(1, -66, 1, 0),
         Font = Enum.Font.GothamMedium,
         Text = name,
-        TextSize = 13,
+        TextSize = 15,
     })
     label({
         Parent = frame,
         Position = UDim2.new(1, -45, 0, 0),
         Size = UDim2.fromOffset(26, 56),
         Font = Enum.Font.GothamBold,
-        Text = "›",
+        Text = ">",
         TextColor3 = THEME.Accent,
         TextSize = 22,
         TextXAlignment = Enum.TextXAlignment.Center,
@@ -843,7 +1207,7 @@ function TabMethods:CreateToggle(options)
         Size = UDim2.new(1, -116, 1, 0),
         Font = Enum.Font.GothamMedium,
         Text = name,
-        TextSize = 13,
+        TextSize = 15,
     })
     local track = create("Frame", {
         Parent = frame,
@@ -876,7 +1240,7 @@ function TabMethods:CreateToggle(options)
         else
             tween(knob, 0.16, properties)
         end
-        track.BackgroundColor3 = value and Color3.fromRGB(28, 38, 15) or THEME.Background
+        track.BackgroundColor3 = value and THEME.AccentSurface or THEME.Background
         lamp.BackgroundColor3 = value and THEME.Accent or THEME.Dim
     end
 
@@ -920,14 +1284,14 @@ function TabMethods:CreateSlider(options)
         Size = UDim2.new(1, -150, 0, 30),
         Font = Enum.Font.GothamMedium,
         Text = name,
-        TextSize = 13,
+        TextSize = 15,
     })
     local valueLabel = label({
         Parent = frame,
         Position = UDim2.new(1, -136, 0, 8),
         Size = UDim2.fromOffset(118, 30),
         TextColor3 = THEME.Muted,
-        TextSize = 12,
+        TextSize = 13,
         TextXAlignment = Enum.TextXAlignment.Right,
     })
     local decrease = button({
@@ -937,7 +1301,7 @@ function TabMethods:CreateSlider(options)
         BackgroundTransparency = 0,
         Position = UDim2.fromOffset(18, 60),
         Size = UDim2.fromOffset(28, 28),
-        Text = "−",
+        Text = "-",
         TextColor3 = THEME.Muted,
         TextSize = 16,
     })
@@ -958,7 +1322,7 @@ function TabMethods:CreateSlider(options)
     stroke(THEME.Border, 0, 1).Parent = increase
     local track = create("Frame", {
         Parent = frame,
-        BackgroundColor3 = Color3.fromRGB(48, 55, 62),
+        BackgroundColor3 = THEME.Track,
         BorderSizePixel = 0,
         Position = UDim2.fromOffset(58, 58),
         Size = UDim2.new(1, -116, 0, 4),
@@ -976,7 +1340,7 @@ function TabMethods:CreateSlider(options)
         BorderSizePixel = 0,
         Position = UDim2.fromScale(0, 0.5),
         Size = UDim2.fromOffset(18, 18),
-    }, {corner(5), stroke(Color3.fromRGB(205, 255, 116), 0.25, 1)})
+    }, {corner(5), stroke(THEME.AccentSoft, 0.25, 1)})
     local hitbox = button({
         Parent = track,
         AnchorPoint = Vector2.new(0, 0.5),
@@ -1067,7 +1431,7 @@ function TabMethods:CreateDropdown(options)
         Size = UDim2.new(0.45, -18, 1, 0),
         Font = Enum.Font.GothamMedium,
         Text = name,
-        TextSize = 13,
+        TextSize = 15,
         TextTruncate = Enum.TextTruncate.AtEnd,
     })
     local selector = button({
@@ -1086,7 +1450,7 @@ function TabMethods:CreateDropdown(options)
         Position = UDim2.fromOffset(12, 0),
         Size = UDim2.new(1, -38, 1, 0),
         TextColor3 = THEME.Muted,
-        TextSize = 11,
+        TextSize = 13,
         TextTruncate = Enum.TextTruncate.AtEnd,
     })
     label({
@@ -1094,7 +1458,7 @@ function TabMethods:CreateDropdown(options)
         Position = UDim2.new(1, -28, 0, 0),
         Size = UDim2.fromOffset(20, 38),
         Font = Enum.Font.GothamBold,
-        Text = "⌄",
+        Text = "v",
         TextColor3 = THEME.Muted,
         TextSize = 15,
         TextXAlignment = Enum.TextXAlignment.Center,
@@ -1113,7 +1477,7 @@ function TabMethods:CreateDropdown(options)
                 self._window._profileLabel.Text = selection[1]
             end
             if self._window._profileBadge then
-                self._window._profileBadge.Text = selection[1] .. "                 ⌄"
+                self._window._profileBadge.Text = selection[1] .. "                 v"
             end
         end
         if not skipCallback then
@@ -1184,11 +1548,11 @@ function TabMethods:CreateDropdown(options)
             local selected = table.find(selection, choice) ~= nil
             local choiceButton = button({
                 Parent = popup,
-                BackgroundColor3 = selected and Color3.fromRGB(31, 43, 17) or THEME.SurfaceRaised,
+                BackgroundColor3 = selected and THEME.AccentSelection or THEME.SurfaceRaised,
                 BackgroundTransparency = 0,
                 LayoutOrder = index,
                 Size = UDim2.new(1, 0, 0, 34),
-                Text = (selected and "  ✓  " or "     ") .. choice,
+                Text = (selected and "  v  " or "     ") .. choice,
                 TextColor3 = selected and THEME.Accent or THEME.Text,
                 TextSize = 11,
                 TextXAlignment = Enum.TextXAlignment.Left,
@@ -1233,7 +1597,7 @@ function TabMethods:CreateInput(options)
         Size = UDim2.new(0.42, -18, 1, 0),
         Font = Enum.Font.GothamMedium,
         Text = name,
-        TextSize = 13,
+        TextSize = 15,
         TextTruncate = Enum.TextTruncate.AtEnd,
     })
     local textBox = create("TextBox", {
@@ -1249,7 +1613,7 @@ function TabMethods:CreateInput(options)
         Size = UDim2.new(0.56, 0, 0, 40),
         Text = value,
         TextColor3 = THEME.Text,
-        TextSize = 11,
+        TextSize = 13,
         TextTruncate = Enum.TextTruncate.AtEnd,
         TextXAlignment = Enum.TextXAlignment.Left,
     }, {corner(6), stroke(THEME.Border, 0, 1), padding(12, 12, 0, 0)})
@@ -1291,7 +1655,7 @@ function TabMethods:CreateKeybind(options)
         Size = UDim2.new(1, -116, 1, 0),
         Font = Enum.Font.GothamMedium,
         Text = name,
-        TextSize = 13,
+        TextSize = 15,
     })
     local keyButton = button({
         Parent = frame,
@@ -1301,7 +1665,7 @@ function TabMethods:CreateKeybind(options)
         Position = UDim2.new(1, -18, 0.5, 0),
         Size = UDim2.fromOffset(82, 38),
         TextColor3 = THEME.Text,
-        TextSize = 11,
+        TextSize = 13,
     })
     corner(6).Parent = keyButton
     stroke(THEME.Border, 0, 1).Parent = keyButton
@@ -1349,23 +1713,14 @@ end
 
 local function buildDashboard(window, parent)
     local session = createMetricCard(parent, UDim2.new(0, 0, 0, 0), UDim2.new(0.47, 0, 0, 220), "Session", THEME.Cyan)
-    label({
-        Parent = session,
-        Position = UDim2.fromOffset(18, 54),
-        Size = UDim2.new(1, -36, 0, 56),
-        Font = Enum.Font.Gotham,
-        Text = "◷",
-        TextColor3 = THEME.Cyan,
-        TextSize = 46,
-        TextXAlignment = Enum.TextXAlignment.Center,
-    })
+    makeClockIcon(session, UDim2.new(0.5, -36, 0, 48), THEME.Cyan)
     window._sessionLabel = label({
         Parent = session,
-        Position = UDim2.fromOffset(18, 120),
+        Position = UDim2.fromOffset(18, 124),
         Size = UDim2.new(1, -36, 0, 48),
         Font = Enum.Font.GothamBold,
         Text = "00m 00s",
-        TextSize = 24,
+        TextSize = 28,
         TextXAlignment = Enum.TextXAlignment.Center,
     })
     label({
@@ -1374,7 +1729,7 @@ local function buildDashboard(window, parent)
         Size = UDim2.new(1, -36, 0, 24),
         Text = "ACTIVE SESSION",
         TextColor3 = THEME.Dim,
-        TextSize = 9,
+        TextSize = 11,
         TextXAlignment = Enum.TextXAlignment.Center,
     })
 
@@ -1385,35 +1740,27 @@ local function buildDashboard(window, parent)
         BackgroundColor3 = THEME.SurfaceHover,
         BorderSizePixel = 0,
         Position = UDim2.new(0.5, 0, 0, 50),
-        Size = UDim2.fromOffset(66, 66),
-    }, {corner(66), stroke(THEME.Accent, 0, 2)})
-    label({
-        Parent = avatar,
-        Size = UDim2.fromScale(1, 1),
-        Font = Enum.Font.GothamBold,
-        Text = LOCAL_PLAYER and string.upper(LOCAL_PLAYER.Name:sub(1, 1)) or "R",
-        TextColor3 = THEME.Muted,
-        TextSize = 24,
-        TextXAlignment = Enum.TextXAlignment.Center,
-    })
+        Size = UDim2.fromOffset(76, 76),
+    }, {corner(76), stroke(THEME.Accent, 0, 2)})
+    makeProfileIcon(avatar, THEME.Muted)
     window._profileLabel = label({
         Parent = profile,
-        Position = UDim2.fromOffset(18, 124),
+        Position = UDim2.fromOffset(18, 128),
         Size = UDim2.new(1, -36, 0, 34),
         Font = Enum.Font.GothamMedium,
         Text = "Balanced",
-        TextSize = 16,
+        TextSize = 18,
         TextXAlignment = Enum.TextXAlignment.Center,
     })
     local profileBadge = label({
         Parent = profile,
         BackgroundColor3 = THEME.Background,
         BackgroundTransparency = 0,
-        Position = UDim2.fromOffset(18, 166),
-        Size = UDim2.new(1, -36, 0, 36),
-        Text = "Balanced                 ⌄",
+        Position = UDim2.fromOffset(18, 168),
+        Size = UDim2.new(1, -36, 0, 38),
+        Text = "Balanced                 v",
         TextColor3 = THEME.Muted,
-        TextSize = 11,
+        TextSize = 13,
     })
     corner(6).Parent = profileBadge
     stroke(THEME.Border, 0, 1).Parent = profileBadge
@@ -1433,7 +1780,7 @@ local function buildDashboard(window, parent)
         Font = Enum.Font.GothamBold,
         Text = "RECENT ACTIVITY",
         TextColor3 = THEME.Muted,
-        TextSize = 11,
+        TextSize = 13,
     })
     create("Frame", {
         Parent = activity,
@@ -1487,8 +1834,8 @@ function Raven:CreateWindow(options)
         BackgroundColor3 = THEME.Background,
         BorderSizePixel = 0,
         Position = UDim2.fromScale(0.5, 0.5),
-        Size = UDim2.fromOffset(1120, 700),
-    }, {corner(8), stroke(Color3.fromRGB(65, 74, 84), 0, 1)})
+        Size = UDim2.fromOffset(WINDOW_WIDTH, WINDOW_HEIGHT),
+    }, {corner(8), stroke(THEME.BorderStrong, 0, 1)})
     local scale = create("UIScale", {Parent = root, Scale = 1})
 
     local window = setmetatable({
@@ -1496,6 +1843,7 @@ function Raven:CreateWindow(options)
         _root = root,
         _scale = scale,
         _tabs = {},
+        _tabsByDisplay = {},
         _activeTab = nil,
         _startedAt = os.clock(),
         _minimized = false,
@@ -1506,14 +1854,14 @@ function Raven:CreateWindow(options)
         Parent = root,
         BackgroundColor3 = THEME.Background,
         BorderSizePixel = 0,
-        Size = UDim2.new(0, 136, 1, 0),
+        Size = UDim2.new(0, SIDEBAR_WIDTH, 1, 0),
     })
     makeLogo(sidebar)
     create("Frame", {
         Parent = sidebar,
         BackgroundColor3 = THEME.BorderSoft,
         BorderSizePixel = 0,
-        Position = UDim2.fromOffset(135, 0),
+        Position = UDim2.fromOffset(SIDEBAR_WIDTH - 1, 0),
         Size = UDim2.new(0, 1, 1, 0),
     })
     window._navList = create("ScrollingFrame", {
@@ -1536,8 +1884,8 @@ function Raven:CreateWindow(options)
         Parent = root,
         BackgroundColor3 = THEME.Surface,
         BorderSizePixel = 0,
-        Position = UDim2.fromOffset(136, 0),
-        Size = UDim2.new(1, -136, 0, 76),
+        Position = UDim2.fromOffset(SIDEBAR_WIDTH, 0),
+        Size = UDim2.new(1, -SIDEBAR_WIDTH, 0, TOPBAR_HEIGHT),
     })
     create("Frame", {
         Parent = topbar,
@@ -1549,11 +1897,11 @@ function Raven:CreateWindow(options)
     })
     label({
         Parent = topbar,
-        Position = UDim2.fromOffset(22, 0),
-        Size = UDim2.fromOffset(178, 76),
+        Position = UDim2.fromOffset(26, 0),
+        Size = UDim2.fromOffset(182, TOPBAR_HEIGHT),
         Font = Enum.Font.GothamBold,
         Text = tostring(options.Name or "RAVEN UI"),
-        TextSize = 19,
+        TextSize = 22,
     })
 
     local experienceName = "Roblox Experience"
@@ -1564,29 +1912,27 @@ function Raven:CreateWindow(options)
         Parent = topbar,
         BackgroundColor3 = THEME.Background,
         BorderSizePixel = 0,
-        Position = UDim2.fromOffset(198, 16),
-        Size = UDim2.fromOffset(250, 44),
+        Position = UDim2.fromOffset(220, 16),
+        Size = UDim2.fromOffset(300, 44),
     }, {corner(6), stroke(THEME.Border, 0, 1)})
-    local cube = label({
-        Parent = gameBadge,
-        BackgroundColor3 = THEME.SurfaceHover,
-        BackgroundTransparency = 0,
-        Position = UDim2.fromOffset(7, 7),
-        Size = UDim2.fromOffset(30, 30),
-        Font = Enum.Font.GothamBold,
-        Text = "R",
-        TextColor3 = THEME.Muted,
-        TextSize = 13,
-        TextXAlignment = Enum.TextXAlignment.Center,
-    })
-    corner(5).Parent = cube
+    makeGameIcon(gameBadge)
     label({
         Parent = gameBadge,
-        Position = UDim2.fromOffset(46, 0),
-        Size = UDim2.new(1, -58, 1, 0),
+        Position = UDim2.fromOffset(50, 0),
+        Size = UDim2.new(1, -78, 1, 0),
         Text = experienceName,
-        TextSize = 11,
+        TextSize = 14,
         TextTruncate = Enum.TextTruncate.AtEnd,
+    })
+    label({
+        Parent = gameBadge,
+        Position = UDim2.new(1, -30, 0, 0),
+        Size = UDim2.fromOffset(20, 44),
+        Font = Enum.Font.GothamBold,
+        Text = "v",
+        TextColor3 = THEME.Muted,
+        TextSize = 14,
+        TextXAlignment = Enum.TextXAlignment.Center,
     })
 
     local searchBox = create("TextBox", {
@@ -1597,56 +1943,48 @@ function Raven:CreateWindow(options)
         Font = Enum.Font.Gotham,
         PlaceholderColor3 = THEME.Dim,
         PlaceholderText = "Search commands...",
-        Position = UDim2.new(0, 466, 0, 16),
-        Size = UDim2.new(1, -720, 0, 44),
+        Position = UDim2.new(0, 548, 0, 16),
+        Size = UDim2.new(1, -800, 0, 44),
         Text = "",
         TextColor3 = THEME.Text,
-        TextSize = 12,
+        TextSize = 14,
         TextXAlignment = Enum.TextXAlignment.Left,
     }, {corner(6), stroke(THEME.Border, 0, 1), padding(38, 12, 0, 0)})
     window._search = searchBox
-    label({
-        Parent = searchBox,
-        Position = UDim2.fromOffset(-28, 0),
-        Size = UDim2.fromOffset(26, 44),
-        Text = "⌕",
-        TextColor3 = THEME.Muted,
-        TextSize = 24,
-        TextXAlignment = Enum.TextXAlignment.Center,
-    })
+    makeMagnifier(searchBox, UDim2.fromOffset(-31, 9), THEME.Muted)
 
     local connectionDot = create("Frame", {
         Parent = topbar,
         AnchorPoint = Vector2.new(1, 0.5),
         BackgroundColor3 = THEME.Accent,
         BorderSizePixel = 0,
-        Position = UDim2.new(1, -152, 0.5, 0),
+        Position = UDim2.new(1, -174, 0.5, 0),
         Size = UDim2.fromOffset(9, 9),
     }, {corner(2)})
     label({
         Parent = topbar,
         AnchorPoint = Vector2.new(1, 0),
-        Position = UDim2.new(1, -66, 0, 0),
-        Size = UDim2.fromOffset(78, 76),
+        Position = UDim2.new(1, -82, 0, 0),
+        Size = UDim2.fromOffset(90, TOPBAR_HEIGHT),
         Text = "Connected",
-        TextSize = 11,
+        TextSize = 13,
         TextXAlignment = Enum.TextXAlignment.Right,
     })
     connectionDot.Visible = true
 
     local minimize = button({
         Parent = topbar,
-        Position = UDim2.new(1, -58, 0, 0),
-        Size = UDim2.fromOffset(28, 76),
-        Text = "−",
+        Position = UDim2.new(1, -62, 0, 0),
+        Size = UDim2.fromOffset(30, TOPBAR_HEIGHT),
+        Text = "-",
         TextColor3 = THEME.Muted,
         TextSize = 19,
     })
     local close = button({
         Parent = topbar,
-        Position = UDim2.new(1, -30, 0, 0),
-        Size = UDim2.fromOffset(28, 76),
-        Text = "×",
+        Position = UDim2.new(1, -32, 0, 0),
+        Size = UDim2.fromOffset(30, TOPBAR_HEIGHT),
+        Text = "x",
         TextColor3 = THEME.Muted,
         TextSize = 22,
     })
@@ -1655,29 +1993,29 @@ function Raven:CreateWindow(options)
         Parent = root,
         BackgroundColor3 = THEME.SurfaceRaised,
         BorderSizePixel = 0,
-        Position = UDim2.fromOffset(136, 76),
-        Size = UDim2.new(1, -136, 1, -132),
+        Position = UDim2.fromOffset(SIDEBAR_WIDTH, TOPBAR_HEIGHT),
+        Size = UDim2.new(1, -SIDEBAR_WIDTH, 1, -(TOPBAR_HEIGHT + FOOTER_HEIGHT)),
     })
     window._pageTitle = label({
         Parent = content,
-        Position = UDim2.fromOffset(18, 4),
-        Size = UDim2.new(0.55, -24, 0, 36),
+        Position = UDim2.fromOffset(24, 8),
+        Size = UDim2.new(0.47, -30, 0, 38),
         Font = Enum.Font.GothamBold,
         Text = "OVERVIEW",
         TextColor3 = THEME.Muted,
-        TextSize = 10,
+        TextSize = 12,
     })
     window._pageHolder = create("Frame", {
         Parent = content,
         BackgroundTransparency = 1,
-        Position = UDim2.fromOffset(18, 40),
-        Size = UDim2.new(0.55, -24, 1, -54),
+        Position = UDim2.fromOffset(24, 50),
+        Size = UDim2.new(0.47, -30, 1, -68),
     })
     local dashboard = create("Frame", {
         Parent = content,
         BackgroundTransparency = 1,
-        Position = UDim2.new(0.55, 6, 0, 16),
-        Size = UDim2.new(0.45, -24, 1, -30),
+        Position = UDim2.new(0.47, 8, 0, 22),
+        Size = UDim2.new(0.53, -32, 1, -42),
     })
     buildDashboard(window, dashboard)
 
@@ -1685,8 +2023,8 @@ function Raven:CreateWindow(options)
         Parent = root,
         BackgroundColor3 = THEME.Surface,
         BorderSizePixel = 0,
-        Position = UDim2.new(0, 136, 1, -56),
-        Size = UDim2.new(1, -136, 0, 56),
+        Position = UDim2.new(0, SIDEBAR_WIDTH, 1, -FOOTER_HEIGHT),
+        Size = UDim2.new(1, -SIDEBAR_WIDTH, 0, FOOTER_HEIGHT),
     })
     create("Frame", {
         Parent = footer,
@@ -1708,7 +2046,7 @@ function Raven:CreateWindow(options)
         Size = UDim2.fromOffset(92, 56),
         Text = "Connected",
         TextColor3 = THEME.Muted,
-        TextSize = 11,
+        TextSize = 13,
     })
     label({
         Parent = footer,
@@ -1716,7 +2054,7 @@ function Raven:CreateWindow(options)
         Size = UDim2.fromOffset(90, 56),
         Text = "v" .. Raven.Version,
         TextColor3 = THEME.Dim,
-        TextSize = 11,
+        TextSize = 12,
     })
     label({
         Parent = sidebar,
@@ -1724,7 +2062,7 @@ function Raven:CreateWindow(options)
         Size = UDim2.new(1, -28, 0, 38),
         Text = "RightShift  ·  Toggle",
         TextColor3 = THEME.Dim,
-        TextSize = 9,
+        TextSize = 10,
         TextXAlignment = Enum.TextXAlignment.Center,
     })
 
@@ -1735,11 +2073,11 @@ function Raven:CreateWindow(options)
         ZIndex = 40,
     })
     window._toastHolder = create("Frame", {
-        Parent = screenGui,
+        Parent = root,
         AnchorPoint = Vector2.new(1, 1),
         BackgroundTransparency = 1,
-        Position = UDim2.new(1, -18, 1, -18),
-        Size = UDim2.fromOffset(300, 280),
+        Position = UDim2.new(1, -16, 1, -12),
+        Size = UDim2.fromOffset(350, 280),
     }, {
         create("UIListLayout", {
             Padding = UDim.new(0, 8),
@@ -1760,9 +2098,12 @@ function Raven:CreateWindow(options)
         content.Visible = not window._minimized
         footer.Visible = not window._minimized
         sidebar.Visible = not window._minimized
-        root.Size = window._minimized and UDim2.fromOffset(984, 76) or UDim2.fromOffset(1120, 700)
-        topbar.Position = window._minimized and UDim2.fromOffset(0, 0) or UDim2.fromOffset(136, 0)
-        topbar.Size = window._minimized and UDim2.fromScale(1, 1) or UDim2.new(1, -136, 0, 76)
+        root.Size = window._minimized
+            and UDim2.fromOffset(WINDOW_WIDTH - SIDEBAR_WIDTH, TOPBAR_HEIGHT)
+            or UDim2.fromOffset(WINDOW_WIDTH, WINDOW_HEIGHT)
+        topbar.Position = window._minimized and UDim2.fromOffset(0, 0) or UDim2.fromOffset(SIDEBAR_WIDTH, 0)
+        topbar.Size = window._minimized and UDim2.fromScale(1, 1)
+            or UDim2.new(1, -SIDEBAR_WIDTH, 0, TOPBAR_HEIGHT)
     end)
     makeDraggable(window, topbar)
 
