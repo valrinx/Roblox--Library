@@ -23,6 +23,7 @@ return function(Window, scriptInfo)
     local playerByLabel = {}
     local spectateEnabled = false
     local spectateCharacterConnection = nil
+    local extrasController = nil
 
     local settings = {
         playerEnabled = false,
@@ -36,11 +37,21 @@ return function(Window, scriptInfo)
         fillTransparency = 0.78,
         textSize = 12,
         healthBarWidth = 120,
+        adaptiveDistance = true,
+        detailDistance = 700,
+        threatColors = true,
+        threatNearDistance = 80,
+        threatMediumDistance = 200,
+        wallCheckEnabled = true,
+        hideBehindWalls = false,
+        wallCheckInterval = 0.2,
         playerDistance = 2500,
         walkerDistance = 800,
         lootDistance = 600,
         maxWalkers = 40,
         maxLoot = 40,
+        lootSearch = "",
+        lootMinimumRarity = 1,
         lootCategories = {
             military = true,
             medical = true,
@@ -56,6 +67,9 @@ return function(Window, scriptInfo)
         medical = Color3.fromRGB(78, 220, 130),
         supply = Color3.fromRGB(255, 210, 74),
         general = Color3.fromRGB(94, 185, 255),
+        uncommon = Color3.fromRGB(92, 220, 145),
+        rare = Color3.fromRGB(174, 104, 255),
+        legendary = Color3.fromRGB(255, 178, 47),
     }
 
     local function disconnect(connection)
@@ -176,6 +190,24 @@ return function(Window, scriptInfo)
         return "general"
     end
 
+    local function classifyLootRarity(name, category)
+        local lower = string.lower(tostring(name or ""))
+        if lower:find("legendary", 1, true)
+            or lower:find("airdrop", 1, true)
+            or lower:find("vault", 1, true) then
+            return 4, "Legendary", COLORS.legendary
+        end
+        if category == "military"
+            or lower:find("rare", 1, true)
+            or lower:find("weapon", 1, true) then
+            return 3, "Rare", COLORS.rare
+        end
+        if category == "medical" or category == "supply" then
+            return 2, "Uncommon", COLORS.uncommon
+        end
+        return 1, "Common", COLORS.general
+    end
+
     local function getPlayerColor(player)
         if settings.useTeamColor and player and player.Team then
             return player.TeamColor.Color
@@ -192,12 +224,33 @@ return function(Window, scriptInfo)
         return settings.lootDistance
     end
 
+    local function needsAwarenessRecords()
+        return settings.radarEnabled == true
+            or settings.proximityAlerts == true
+            or settings.boxESP == true
+            or settings.tracerESP == true
+            or settings.skeletonESP == true
+            or settings.monitorActive == true
+    end
+
+    local function categoryEspEnabled(category)
+        if category == "player" then
+            return settings.playerEnabled
+        elseif category == "walker" then
+            return settings.walkerEnabled
+        end
+        return settings.lootEnabled
+    end
+
     local function destroyRecord(category, key)
         local record = records[category][key]
         if not record then
             return
         end
         record.active = false
+        if extrasController and extrasController.OnRecordRemoved then
+            pcall(extrasController.OnRecordRemoved, extrasController, record)
+        end
         if record.connections then
             for _, connection in ipairs(record.connections) do
                 disconnect(connection)
@@ -251,6 +304,62 @@ return function(Window, scriptInfo)
         record.healthFill.Size = UDim2.fromScale(ratio, 1)
         record.healthFill.BackgroundColor3 = Color3.fromHSV(ratio * 0.33, 0.85, 1)
         record.healthText = string.format("HP %s/%s", formatHealth(health), formatHealth(maxHealth))
+    end
+
+    local function markDeath(record)
+        if record.deathHandled then
+            return
+        end
+        record.deathHandled = true
+        if extrasController and extrasController.OnDeath then
+            pcall(extrasController.OnDeath, extrasController, record)
+        end
+    end
+
+    local function isOccluded(record)
+        if not settings.wallCheckEnabled or record.category == "loot" then
+            return false
+        end
+        local now = os.clock()
+        if record.lastWallCheck and now - record.lastWallCheck < settings.wallCheckInterval then
+            return record.wallBlocked == true
+        end
+        record.lastWallCheck = now
+
+        local camera = workspace.CurrentCamera
+        local targetPosition = safePosition(record.target, record.root)
+        if not camera or not targetPosition then
+            return false
+        end
+        local exclusions = {espFolder}
+        local localCharacter = localPlayer.Character
+        if localCharacter then
+            table.insert(exclusions, localCharacter)
+        end
+        local params = RaycastParams.new()
+        params.FilterType = Enum.RaycastFilterType.Exclude
+        params.FilterDescendantsInstances = exclusions
+        params.IgnoreWater = true
+        params.RespectCanCollide = true
+        local result = workspace:Raycast(camera.CFrame.Position, targetPosition - camera.CFrame.Position, params)
+        local blocked = result ~= nil
+        if result and (result.Instance == record.target or result.Instance:IsDescendantOf(record.target)) then
+            blocked = false
+        end
+        record.wallBlocked = blocked
+        return blocked
+    end
+
+    local function getDisplayColor(record, distance)
+        local color = record.color
+        if settings.threatColors and record.category ~= "loot" then
+            if distance <= settings.threatNearDistance then
+                return Color3.fromRGB(255, 55, 55)
+            elseif distance <= settings.threatMediumDistance then
+                return Color3.fromRGB(255, 170, 45)
+            end
+        end
+        return color
     end
 
     local function createRecord(category, key, target, options)
@@ -368,6 +477,9 @@ return function(Window, scriptInfo)
             healthFill = healthFill,
             healthText = "",
             connections = {},
+            wallBlocked = false,
+            lastWallCheck = 0,
+            deathHandled = false,
             staticPosition = options.position,
         }
         records[category][key] = record
@@ -375,6 +487,7 @@ return function(Window, scriptInfo)
         if record.humanoid then
             local function removeIfDead()
                 if record.active and record.humanoid.Health <= 0 and records[category][key] == record then
+                    markDeath(record)
                     destroyRecord(category, key)
                 end
             end
@@ -396,6 +509,9 @@ return function(Window, scriptInfo)
                 destroyRecord(category, key)
             end
         end))
+        if extrasController and extrasController.OnRecordCreated then
+            pcall(extrasController.OnRecordCreated, extrasController, record)
+        end
         return record
     end
 
@@ -429,6 +545,7 @@ return function(Window, scriptInfo)
         end
 
         if record.humanoid and record.humanoid.Health <= 0 then
+            markDeath(record)
             return false
         end
 
@@ -441,14 +558,20 @@ return function(Window, scriptInfo)
         end
 
         local distance = localPosition and (position - localPosition).Magnitude or 0
-        local visible = not localPosition or distance <= getRange(record.category)
-        local color = record.color
+        local blocked = isOccluded(record)
+        local visible = categoryEspEnabled(record.category)
+            and (not localPosition or distance <= getRange(record.category))
+            and not (settings.hideBehindWalls and blocked)
+        local color = getDisplayColor(record, distance)
+        record.distance = distance
+        record.displayColor = color
 
         record.billboard.Enabled = visible
         record.billboard.MaxDistance = getRange(record.category)
         record.billboard.AlwaysOnTop = settings.throughWalls
         record.nameLabel.TextColor3 = color
-        record.nameLabel.TextSize = settings.textSize
+        local compact = settings.adaptiveDistance and distance > settings.detailDistance
+        record.nameLabel.TextSize = math.max(settings.textSize - (compact and 2 or 0), 8)
         record.detailLabel.TextColor3 = color
         record.detailLabel.TextSize = math.max(settings.textSize - 1, 8)
         if record.highlight then
@@ -469,13 +592,16 @@ return function(Window, scriptInfo)
             applyHealthVisual(record)
             table.insert(detailParts, record.healthText)
         end
+        if settings.wallCheckEnabled and record.category ~= "loot" then
+            table.insert(detailParts, blocked and "[WALL]" or "[VISIBLE]")
+        end
         record.nameLabel.Text = record.label
         record.nameLabel.Visible = settings.showNames
         record.detailLabel.Text = table.concat(detailParts, "  |  ")
-        record.detailLabel.Visible = #detailParts > 0
+        record.detailLabel.Visible = #detailParts > 0 and not compact
 
         local showHealthBar = settings.showHealth and record.humanoid ~= nil
-        record.healthBackground.Visible = showHealthBar
+        record.healthBackground.Visible = showHealthBar and not compact
         if showHealthBar then
             applyHealthVisual(record)
         end
@@ -483,7 +609,7 @@ return function(Window, scriptInfo)
     end
 
     local function ensurePlayerRecord(player)
-        if not settings.playerEnabled or player == localPlayer then
+        if (not settings.playerEnabled and not needsAwarenessRecords()) or player == localPlayer then
             return
         end
         local character, humanoid, root, head = getCharacterParts(player)
@@ -506,7 +632,7 @@ return function(Window, scriptInfo)
     end
 
     local function refreshPlayers()
-        if not settings.playerEnabled then
+        if not settings.playerEnabled and not needsAwarenessRecords() then
             clearCategory("player")
             return
         end
@@ -548,7 +674,7 @@ return function(Window, scriptInfo)
     end
 
     local function syncWalkers(localPosition)
-        if not settings.walkerEnabled then
+        if not settings.walkerEnabled and not needsAwarenessRecords() then
             clearCategory("walker")
             return
         end
@@ -588,12 +714,17 @@ return function(Window, scriptInfo)
         if not position then
             return
         end
+        local category = classifyLoot(target.Name)
+        local rarityRank, rarityName, rarityColor = classifyLootRarity(target.Name, category)
         lootIndex[target] = {
             target = target,
             adornee = adornee,
             position = position,
-            category = classifyLoot(target.Name),
-            label = cleanLootName(target.Name),
+            category = category,
+            rarityRank = rarityRank,
+            rarityName = rarityName,
+            color = rarityColor,
+            label = string.format("[%s] %s", rarityName, cleanLootName(target.Name)),
         }
         lootIndexCount += 1
     end
@@ -614,7 +745,10 @@ return function(Window, scriptInfo)
         for target, item in pairs(lootIndex) do
             if not target.Parent then
                 removeLootIndex(target)
-            elseif settings.lootCategories[item.category] then
+            elseif settings.lootCategories[item.category]
+                and item.rarityRank >= settings.lootMinimumRarity
+                and (settings.lootSearch == ""
+                    or string.find(string.lower(item.label), string.lower(settings.lootSearch), 1, true)) then
                 local distance = (item.position - localPosition).Magnitude
                 if distance <= settings.lootDistance then
                     item.distance = distance
@@ -623,6 +757,9 @@ return function(Window, scriptInfo)
             end
         end
         table.sort(candidates, function(left, right)
+            if left.rarityRank ~= right.rarityRank then
+                return left.rarityRank > right.rarityRank
+            end
             return left.distance < right.distance
         end)
         return candidates
@@ -643,7 +780,7 @@ return function(Window, scriptInfo)
                     adornee = item.adornee,
                     position = item.position,
                     label = item.label,
-                    color = COLORS[item.category],
+                    color = item.color or COLORS[item.category],
                     height = 2.2,
                 })
             end
@@ -984,6 +1121,36 @@ return function(Window, scriptInfo)
         end,
     })
 
+    local extrasOk, extrasResult = pcall(function()
+        local extrasUrl = "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/twdo3_extras.lua?v=twdo3-7"
+        local extrasSource = game:HttpGet(extrasUrl)
+        local extrasChunk, extrasCompileError = loadstring(extrasSource)
+        assert(extrasChunk, "TWDO3 extras compile error: " .. tostring(extrasCompileError))
+        local extrasFactory = extrasChunk()
+        assert(type(extrasFactory) == "function", "TWDO3 extras did not return a factory")
+        return extrasFactory({
+            Window = Window,
+            localPlayer = localPlayer,
+            settings = settings,
+            records = records,
+            espFolder = espFolder,
+            notify = notify,
+            getCharacterParts = getCharacterParts,
+            safePosition = safePosition,
+            playerLabel = playerLabel,
+            countRecords = countRecords,
+            clearAllVisuals = clearAllVisuals,
+            spectatePlayer = spectatePlayer,
+        })
+    end)
+    if extrasOk then
+        extrasController = extrasResult
+        notify("TWDO3", "Awareness suite loaded")
+    else
+        warn("[RAVEN HUB] " .. tostring(extrasResult))
+        notify("TWDO3", "Awareness suite failed: " .. tostring(extrasResult))
+    end
+
     local function trackPlayer(player)
         if player == localPlayer then
             return
@@ -1099,6 +1266,10 @@ return function(Window, scriptInfo)
         end
         scriptRunning = false
         setCameraToLocalPlayer()
+        if extrasController and extrasController.Destroy then
+            pcall(extrasController.Destroy, extrasController)
+        end
+        extrasController = nil
         clearAllVisuals()
         for _, connection in ipairs(cleanupConnections) do
             disconnect(connection)

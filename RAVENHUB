@@ -10,7 +10,7 @@ local VirtualUser = game:GetService("VirtualUser")
 local player    = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local camera    = game.Workspace.CurrentCamera
-local HUB_BUILD = "twdo3-6"
+local HUB_BUILD = "twdo3-7"
 
 -- ============================================================
 --   SCRIPT REGISTRY
@@ -42,11 +42,11 @@ local SCRIPTS = {
     },
     {
         name        = "The Walking Dead Online 3",
-        description = "Player ESP | Spectate",
+        description = "Full ESP | Radar | Wall Check | Spectate",
         placeIds    = {128039018996175},
         gameIds     = {7208219743},
-        version     = "v0.6",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/twdo3.lua?v=twdo3-6",
+        version     = "v0.7",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/twdo3.lua?v=twdo3-7",
     },
     --[[
     {
