@@ -126,6 +126,14 @@ local HUB_BUILD = "maclib-2"
 
 local SCRIPTS = {
     {
+        name        = "Dueling Grounds ⚔️",
+        description = "Marker Auto Parry | Auto Face | Target Assist",
+        placeIds    = {94217045453265},
+        gameIds     = {9051406594},
+        version     = "v0.1",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/dueling_grounds.lua",
+    },
+    {
         name        = "My Knife Farm",
         description = "Auto Roll | Auto Buy | Auto Sell | Anti AFK",
         gameIds     = {125003919504672},
