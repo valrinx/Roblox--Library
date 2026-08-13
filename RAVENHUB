@@ -39,6 +39,14 @@ local SCRIPTS = {
         version     = "v1.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/umt/main.lua",
     },
+    {
+        name        = "The Walking Dead Online 3",
+        description = "Player ESP | Spectate",
+        placeIds    = {128039018996175},
+        gameIds     = {7208219743},
+        version     = "v0.1",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/The%20Walking%20Dead%20Online%203",
+    },
     --[[
     {
         name      = "Another Game",
