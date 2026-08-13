@@ -51,6 +51,7 @@ return function(Window, scriptInfo)
         walkerDistance = 800,
         lootDistance = 600,
         maxWalkers = 40,
+        walkerLabelDeclutter = true,
         maxLoot = 40,
         lootSearch = "",
         lootMinimumRarity = 1,
@@ -438,7 +439,7 @@ return function(Window, scriptInfo)
         billboard.AlwaysOnTop = settings.throughWalls
         billboard.LightInfluence = 0
         billboard.MaxDistance = getRange(category)
-        billboard.Size = UDim2.fromOffset(260, 56)
+        billboard.Size = UDim2.fromOffset(category == "walker" and 170 or 260, 56)
         billboard.StudsOffsetWorldSpace = Vector3.new(0, options.height or 3.2, 0)
         billboard.Parent = espFolder
 
@@ -595,6 +596,7 @@ return function(Window, scriptInfo)
         local color = getDisplayColor(record, distance)
         record.distance = distance
         record.displayColor = color
+        record.visualVisible = visible
 
         record.billboard.Enabled = visible
         record.billboard.MaxDistance = getRange(record.category)
@@ -639,6 +641,58 @@ return function(Window, scriptInfo)
             applyHealthVisual(record)
         end
         return true
+    end
+
+    local function declutterWalkerLabels()
+        local camera = workspace.CurrentCamera
+        if not camera then
+            return
+        end
+
+        local visibleWalkers = {}
+        for _, record in pairs(records.walker) do
+            if record.visualVisible and record.root and record.root.Parent then
+                local point, onScreen = camera:WorldToViewportPoint(record.root.Position + Vector3.new(0, 3.5, 0))
+                if onScreen and point.Z > 0 then
+                    table.insert(visibleWalkers, {
+                        record = record,
+                        point = point,
+                        distance = record.distance or math.huge,
+                    })
+                else
+                    record.billboard.Enabled = false
+                end
+            elseif record.billboard then
+                record.billboard.Enabled = false
+            end
+        end
+
+        table.sort(visibleWalkers, function(left, right)
+            return left.distance < right.distance
+        end)
+
+        if not settings.walkerLabelDeclutter then
+            for _, item in ipairs(visibleWalkers) do
+                item.record.billboard.Enabled = true
+            end
+            return
+        end
+
+        -- Keep the nearest label in each screen-space cell. Highlights remain
+        -- visible for suppressed labels, preserving awareness without text piles.
+        local occupied = {}
+        local cellWidth = math.max(180, settings.textSize * 13)
+        local cellHeight = math.max(42, settings.textSize * 3)
+        for _, item in ipairs(visibleWalkers) do
+            local column = math.floor(item.point.X / cellWidth)
+            local row = math.floor(item.point.Y / cellHeight)
+            local key = tostring(column) .. ":" .. tostring(row)
+            local show = occupied[key] == nil
+            item.record.billboard.Enabled = show
+            if show then
+                occupied[key] = item.record
+            end
+        end
     end
 
     local function ensurePlayerRecord(player)
@@ -898,6 +952,14 @@ return function(Window, scriptInfo)
         Flag = "TWDO3ESPHealth",
         Callback = function(value)
             settings.showHealth = value
+        end,
+    })
+    EspTab:CreateToggle({
+        Name = "Declutter Walker Labels",
+        CurrentValue = true,
+        Flag = "TWDO3WalkerLabelDeclutter",
+        Callback = function(value)
+            settings.walkerLabelDeclutter = value
         end,
     })
     EspTab:CreateToggle({
@@ -1298,6 +1360,7 @@ return function(Window, scriptInfo)
                     destroyRecord(category, key)
                 end
             end
+            declutterWalkerLabels()
         end
         if scanAccumulator >= 0.75 then
             scanAccumulator = 0

@@ -2,6 +2,7 @@
 return function(context)
     local Players = game:GetService("Players")
     local RunService = game:GetService("RunService")
+    local Stats = game:GetService("Stats")
     local UserInputService = game:GetService("UserInputService")
 
     local Window = context.Window
@@ -19,6 +20,11 @@ return function(context)
     local triggerPending = false
     local lastTrigger = 0
     local triggerUnsupportedNotified = false
+    local velocitySamples = setmetatable({}, {__mode = "k"})
+    local pingCache = {
+        value = 0,
+        updatedAt = 0,
+    }
 
     local function applyDefault(key, value)
         if settings[key] == nil then
@@ -39,6 +45,11 @@ return function(context)
     applyDefault("predictionEnabled", true)
     applyDefault("predictionTime", 0.12)
     applyDefault("predictionDistanceScale", 0.08)
+    applyDefault("adaptivePrediction", true)
+    applyDefault("predictionBias", 0)
+    applyDefault("predictionMaxTime", 0.16)
+    applyDefault("velocitySmoothing", 0.35)
+    applyDefault("targetSwitchHysteresis", 0.18)
     applyDefault("aimWallCheck", true)
     applyDefault("ignoreTeammates", true)
     applyDefault("triggerBot", false)
@@ -97,6 +108,74 @@ return function(context)
         return humanoid ~= nil and humanoid.Health > 0
     end
 
+    local function getOneWayPing()
+        local now = os.clock()
+        if now - pingCache.updatedAt < 0.5 then
+            return pingCache.value
+        end
+
+        local ok, value = pcall(function()
+            local network = Stats:FindFirstChild("Network")
+            local serverStats = network and network:FindFirstChild("ServerStatsItem")
+            local pingItem = serverStats and serverStats:FindFirstChild("Data Ping")
+            return pingItem and pingItem:GetValue() or 0
+        end)
+        pingCache.updatedAt = now
+        pingCache.value = ok and math.clamp((tonumber(value) or 0) / 2000, 0, 0.15) or 0
+        return pingCache.value
+    end
+
+    local function getSmoothedVelocity(root)
+        local now = os.clock()
+        local position = root.Position
+        local replicatedVelocity = root.AssemblyLinearVelocity
+        local sample = velocitySamples[root]
+        if not sample then
+            sample = {
+                position = position,
+                time = now,
+                velocity = replicatedVelocity,
+            }
+            velocitySamples[root] = sample
+            return replicatedVelocity
+        end
+
+        local deltaTime = now - sample.time
+        if deltaTime >= 1 / 120 then
+            local measured = (position - sample.position) / deltaTime
+            if measured.Magnitude > 160 then
+                measured = replicatedVelocity
+            end
+            local rawVelocity = measured:Lerp(replicatedVelocity, 0.45)
+            local alpha = math.clamp(settings.velocitySmoothing, 0.05, 1)
+            sample.velocity = sample.velocity:Lerp(rawVelocity, alpha)
+            sample.position = position
+            sample.time = now
+        end
+        return sample.velocity
+    end
+
+    local function getPredictionLead(target, distance)
+        if not settings.predictionEnabled then
+            return 0
+        end
+        if settings.adaptivePrediction then
+            -- TWDO3 resolves gun rays instantly. Only compensate for replication age,
+            -- render cadence and the user's optional tuning bias.
+            local renderLead = target.kind == "walker" and 1 / 90 or 1 / 60
+            return math.clamp(
+                getOneWayPing() + renderLead + settings.predictionBias,
+                0,
+                settings.predictionMaxTime
+            )
+        end
+        return math.clamp(
+            settings.predictionTime + (distance / 1000) * settings.predictionDistanceScale,
+            0,
+            settings.predictionMaxTime
+        )
+    end
+
     local function getPredictedPosition(target)
         local part = getTargetPart(target.model)
         if not part or not part:IsA("BasePart") then
@@ -107,9 +186,8 @@ return function(context)
             local root = getRoot(target.model) or part
             local camera = workspace.CurrentCamera
             local distance = camera and (part.Position - camera.CFrame.Position).Magnitude or 0
-            local leadTime = settings.predictionTime
-                + (distance / 1000) * settings.predictionDistanceScale
-            position += root.AssemblyLinearVelocity * leadTime
+            local leadTime = getPredictionLead(target, distance)
+            position += getSmoothedVelocity(root) * leadTime
         end
         return position
     end
@@ -248,6 +326,14 @@ return function(context)
                 end
             end
         end
+
+        if currentTarget and best and currentTarget ~= best then
+            local currentScore = scoreTarget(currentTarget, camera, localRoot)
+            local margin = math.clamp(settings.targetSwitchHysteresis, 0, 1)
+            if currentScore and currentScore <= bestScore * (1 + margin) then
+                return currentTarget
+            end
+        end
         return best
     end
 
@@ -301,7 +387,7 @@ return function(context)
     targetIndicator.BackgroundColor3 = Color3.fromRGB(12, 14, 18)
     targetIndicator.BackgroundTransparency = 0.25
     targetIndicator.BorderSizePixel = 0
-    targetIndicator.Size = UDim2.fromOffset(220, 24)
+    targetIndicator.Size = UDim2.fromOffset(320, 24)
     targetIndicator.Font = Enum.Font.GothamBold
     targetIndicator.TextColor3 = Color3.fromRGB(230, 235, 245)
     targetIndicator.TextSize = 11
@@ -324,7 +410,17 @@ return function(context)
         fovStroke.Color = currentTarget and Color3.fromRGB(255, 95, 75) or Color3.fromRGB(110, 180, 255)
         targetIndicator.Position = UDim2.fromOffset(center.X, center.Y + settings.aimFov + 12)
         targetIndicator.Visible = settings.showTargetIndicator and (settings.aimPlayers or settings.aimWalkers)
-        targetIndicator.Text = "TARGET: " .. targetLabel(currentTarget)
+        local suffix = ""
+        if currentTarget then
+            local _, _, localRoot = context.getCharacterParts(localPlayer)
+            local targetRoot = getRoot(currentTarget.model)
+            if localRoot and targetRoot then
+                local distance = (targetRoot.Position - localRoot.Position).Magnitude
+                local lead = getPredictionLead(currentTarget, distance)
+                suffix = string.format(" | %.0f studs | %.0f ms", distance, lead * 1000)
+            end
+        end
+        targetIndicator.Text = "TARGET: " .. targetLabel(currentTarget) .. suffix
     end
 
     local function restoreHitbox(part)
@@ -627,11 +723,41 @@ return function(context)
         end,
     })
     CombatTab:CreateToggle({
-        Name = "Manual Aim Prediction",
+        Name = "Aim Prediction",
         CurrentValue = true,
         Flag = "TWDO3AimPrediction",
         Callback = function(value)
             settings.predictionEnabled = value
+        end,
+    })
+    CombatTab:CreateToggle({
+        Name = "Adaptive Hitscan Prediction",
+        CurrentValue = true,
+        Flag = "TWDO3AdaptivePrediction",
+        Callback = function(value)
+            settings.adaptivePrediction = value
+        end,
+    })
+    CombatTab:CreateSlider({
+        Name = "Adaptive Prediction Bias",
+        Range = {-80, 120},
+        Increment = 5,
+        Suffix = " ms",
+        CurrentValue = 0,
+        Flag = "TWDO3PredictionBias",
+        Callback = function(value)
+            settings.predictionBias = value / 1000
+        end,
+    })
+    CombatTab:CreateSlider({
+        Name = "Maximum Prediction Lead",
+        Range = {40, 300},
+        Increment = 10,
+        Suffix = " ms",
+        CurrentValue = 160,
+        Flag = "TWDO3PredictionMaxLead",
+        Callback = function(value)
+            settings.predictionMaxTime = value / 1000
         end,
     })
     CombatTab:CreateSlider({
@@ -654,6 +780,17 @@ return function(context)
         Flag = "TWDO3AimDistancePrediction",
         Callback = function(value)
             settings.predictionDistanceScale = value / 1000
+        end,
+    })
+    CombatTab:CreateSlider({
+        Name = "Target Switch Hysteresis",
+        Range = {0, 60},
+        Increment = 5,
+        Suffix = "%",
+        CurrentValue = 20,
+        Flag = "TWDO3TargetSwitchHysteresis",
+        Callback = function(value)
+            settings.targetSwitchHysteresis = value / 100
         end,
     })
     CombatTab:CreateToggle({
