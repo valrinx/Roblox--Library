@@ -24,6 +24,7 @@ return function(Window, scriptInfo)
     local spectateEnabled = false
     local spectateCharacterConnection = nil
     local extrasController = nil
+    local combatController = nil
 
     local settings = {
         playerEnabled = false,
@@ -34,6 +35,7 @@ return function(Window, scriptInfo)
         showHealth = true,
         throughWalls = true,
         useTeamColor = true,
+        teammateEsp = true,
         fillTransparency = 0.78,
         textSize = 12,
         healthBarWidth = 120,
@@ -62,6 +64,7 @@ return function(Window, scriptInfo)
 
     local COLORS = {
         player = Color3.fromRGB(235, 72, 72),
+        teammate = Color3.fromRGB(72, 205, 255),
         walker = Color3.fromRGB(255, 151, 46),
         military = Color3.fromRGB(255, 74, 74),
         medical = Color3.fromRGB(78, 220, 130),
@@ -161,6 +164,13 @@ return function(Window, scriptInfo)
         return player.DisplayName .. " (@" .. player.Name .. ")"
     end
 
+    local function isTeammate(player)
+        return player
+            and player ~= localPlayer
+            and localPlayer.Team ~= nil
+            and player.Team == localPlayer.Team
+    end
+
     local function cleanLootName(name)
         local cleaned = tostring(name or "Loot")
         cleaned = cleaned:gsub("^Loot_", "")
@@ -209,6 +219,9 @@ return function(Window, scriptInfo)
     end
 
     local function getPlayerColor(player)
+        if isTeammate(player) then
+            return COLORS.teammate
+        end
         if settings.useTeamColor and player and player.Team then
             return player.TeamColor.Color
         end
@@ -340,11 +353,25 @@ return function(Window, scriptInfo)
         params.FilterType = Enum.RaycastFilterType.Exclude
         params.FilterDescendantsInstances = exclusions
         params.IgnoreWater = true
-        params.RespectCanCollide = true
-        local result = workspace:Raycast(camera.CFrame.Position, targetPosition - camera.CFrame.Position, params)
-        local blocked = result ~= nil
-        if result and (result.Instance == record.target or result.Instance:IsDescendantOf(record.target)) then
-            blocked = false
+        params.RespectCanCollide = false
+        local direction = targetPosition - camera.CFrame.Position
+        local blocked = false
+        for _ = 1, 8 do
+            local result = workspace:Raycast(camera.CFrame.Position, direction, params)
+            if not result then
+                break
+            end
+            if result.Instance == record.target or result.Instance:IsDescendantOf(record.target) then
+                break
+            end
+            local canSkip = result.Instance:IsA("BasePart")
+                and (not result.Instance.CanCollide or result.Instance.Transparency >= 0.95)
+            if not canSkip then
+                blocked = true
+                break
+            end
+            table.insert(exclusions, result.Instance)
+            params.FilterDescendantsInstances = exclusions
         end
         record.wallBlocked = blocked
         return blocked
@@ -562,6 +589,9 @@ return function(Window, scriptInfo)
         local visible = categoryEspEnabled(record.category)
             and (not localPosition or distance <= getRange(record.category))
             and not (settings.hideBehindWalls and blocked)
+        if record.category == "player" and isTeammate(record.player) and not settings.teammateEsp then
+            visible = false
+        end
         local color = getDisplayColor(record, distance)
         record.distance = distance
         record.displayColor = color
@@ -595,7 +625,10 @@ return function(Window, scriptInfo)
         if settings.wallCheckEnabled and record.category ~= "loot" then
             table.insert(detailParts, blocked and "[WALL]" or "[VISIBLE]")
         end
-        record.nameLabel.Text = record.label
+        record.label = record.category == "player" and playerLabel(record.player) or record.label
+        record.nameLabel.Text = record.category == "player" and isTeammate(record.player)
+            and ("[TEAM] " .. record.label)
+            or record.label
         record.nameLabel.Visible = settings.showNames
         record.detailLabel.Text = table.concat(detailParts, "  |  ")
         record.detailLabel.Visible = #detailParts > 0 and not compact
@@ -1151,6 +1184,32 @@ return function(Window, scriptInfo)
         notify("TWDO3", "Awareness suite failed: " .. tostring(extrasResult))
     end
 
+    local combatOk, combatResult = pcall(function()
+        local combatUrl = "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/twdo3_combat.lua?v=twdo3-8"
+        local combatSource = game:HttpGet(combatUrl)
+        local combatChunk, combatCompileError = loadstring(combatSource)
+        assert(combatChunk, "TWDO3 combat compile error: " .. tostring(combatCompileError))
+        local combatFactory = combatChunk()
+        assert(type(combatFactory) == "function", "TWDO3 combat did not return a factory")
+        return combatFactory({
+            Window = Window,
+            localPlayer = localPlayer,
+            settings = settings,
+            espFolder = espFolder,
+            notify = notify,
+            getCharacterParts = getCharacterParts,
+            getDropdownValue = getDropdownValue,
+            playerLabel = playerLabel,
+        })
+    end)
+    if combatOk then
+        combatController = combatResult
+        notify("TWDO3", "Combat suite loaded")
+    else
+        warn("[RAVEN HUB] " .. tostring(combatResult))
+        notify("TWDO3", "Combat suite failed: " .. tostring(combatResult))
+    end
+
     local function trackPlayer(player)
         if player == localPlayer then
             return
@@ -1266,6 +1325,10 @@ return function(Window, scriptInfo)
         end
         scriptRunning = false
         setCameraToLocalPlayer()
+        if combatController and combatController.Destroy then
+            pcall(combatController.Destroy, combatController)
+        end
+        combatController = nil
         if extrasController and extrasController.Destroy then
             pcall(extrasController.Destroy, extrasController)
         end

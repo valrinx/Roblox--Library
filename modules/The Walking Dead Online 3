@@ -1,5 +1,5 @@
 -- Compatibility bridge for cached RAVEN HUB registries.
-local moduleUrl = "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/twdo3.lua?v=twdo3-7"
+local moduleUrl = "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/twdo3.lua?v=twdo3-8"
 local raw = game:HttpGet(moduleUrl)
 local chunk, compileError = loadstring(raw)
 assert(chunk, "TWDO3 compatibility bridge compile error: " .. tostring(compileError))
