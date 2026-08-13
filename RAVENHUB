@@ -3,7 +3,9 @@
 --   Lazy Load + Module pattern
 -- ============================================================
 
-local Rayfield    = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+local RavenUI     = loadstring(game:HttpGet(
+    'https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/raven_ui.lua?v=raven-ui-1'
+))()
 local Players     = game:GetService("Players")
 local VirtualUser = game:GetService("VirtualUser")
 
@@ -73,9 +75,9 @@ end)
 --   WINDOW
 -- ============================================================
 
-local Window = Rayfield:CreateWindow({
-    Name            = "RAVEN HUB",
-    LoadingTitle    = "RAVEN HUB  |  v3.8b",
+local Window = RavenUI:CreateWindow({
+    Name            = "RAVEN UI",
+    LoadingTitle    = "RAVEN UI  |  v1.0.0",
     LoadingSubtitle = "by valrinx",
     ConfigurationSaving = {
         Enabled    = true,
@@ -88,7 +90,7 @@ local Window = Rayfield:CreateWindow({
 --   HOME TAB
 -- ============================================================
 
-local HomeTab = Window:CreateTab("Home", 4483362458)
+local HomeTab = Window:CreateTab("Overview", 4483362458)
 HomeTab:CreateLabel("Welcome to RAVEN HUB")
 HomeTab:CreateLabel("PlaceId: " .. tostring(game.PlaceId))
 HomeTab:CreateLabel("Build: " .. HUB_BUILD)
@@ -196,7 +198,8 @@ local function loadScriptModule(scriptInfo)
                 "module must return function, got: " .. type(moduleFunc))
 
             local runtimeInfo = table.clone(scriptInfo)
-            runtimeInfo.hubRayfield = Rayfield
+            runtimeInfo.hubRayfield = RavenUI -- compatibility field for existing game modules
+            runtimeInfo.hubUI = RavenUI
             runtimeInfo.hubWindow = Window
             runtimeInfo.registerCleanup = function(cleanupFn)
                 if type(cleanupFn) == "function" then
@@ -212,7 +215,7 @@ local function loadScriptModule(scriptInfo)
             warn("[RAVEN HUB] Failed to load '" .. scriptInfo.name .. "': " .. tostring(result))
             setModuleStatus("FAILED - " .. scriptInfo.name .. ": " .. tostring(result))
             pcall(function()
-                Rayfield:Notify({
+                RavenUI:Notify({
                     Title = "RAVEN HUB - Module failed",
                     Content = scriptInfo.name .. ": " .. tostring(result),
                     Duration = 10,
@@ -251,7 +254,7 @@ end
 --   HUB SETTINGS
 -- ============================================================
 
-local HubSettingsTab = Window:CreateTab("Hub Settings", 4483362458)
+local HubSettingsTab = Window:CreateTab("Settings", 4483362458)
 
 HubSettingsTab:CreateButton({
     Name = "Destroy Hub",
@@ -262,6 +265,6 @@ HubSettingsTab:CreateButton({
                 warn("[RAVEN HUB] Cleanup failed for '" .. tostring(scriptName) .. "': " .. tostring(err))
             end
         end
-        Rayfield:Destroy()
+        RavenUI:Destroy()
     end,
 })
