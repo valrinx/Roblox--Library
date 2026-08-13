@@ -32,7 +32,18 @@ local function removeRetiredInterfaces()
 
     for _, root in ipairs(roots) do
         for _, child in ipairs(root:GetChildren()) do
-            if child.Name == "RavenUI" or child.Name == "RavenMacLib" then
+            local isRetiredMacLib = false
+            if child:IsA("ScreenGui")
+                and child:FindFirstChild("Base")
+                and child:FindFirstChild("Notifications") then
+                for _, descendant in ipairs(child:GetDescendants()) do
+                    if descendant:IsA("TextLabel") and descendant.Text == "RAVEN HUB" then
+                        isRetiredMacLib = true
+                        break
+                    end
+                end
+            end
+            if child.Name == "RavenUI" or child.Name == "RavenMacLib" or isRetiredMacLib then
                 child:Destroy()
             end
         end
@@ -75,7 +86,7 @@ local HubUI
 do
     local ok, result = pcall(function()
         local source = game:HttpGet(
-            "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/maclib_adapter.lua?v=maclib-adapter-1"
+            "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/maclib_adapter.lua?v=maclib-adapter-2"
         )
         assert(type(source) == "string" and #source > 1000, "MacLib adapter download was empty")
         local chunk, compileError = loadstring(source)
@@ -93,7 +104,7 @@ end
 local player    = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local camera    = game.Workspace.CurrentCamera
-local HUB_BUILD = "maclib-1"
+local HUB_BUILD = "maclib-2"
 
 -- ============================================================
 --   SCRIPT REGISTRY
