@@ -10,6 +10,7 @@ local VirtualUser = game:GetService("VirtualUser")
 local player    = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local camera    = game.Workspace.CurrentCamera
+local HUB_BUILD = "twdo3-2"
 
 -- ============================================================
 --   SCRIPT REGISTRY
@@ -44,8 +45,8 @@ local SCRIPTS = {
         description = "Player ESP | Spectate",
         placeIds    = {128039018996175},
         gameIds     = {7208219743},
-        version     = "v0.1",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/The%20Walking%20Dead%20Online%203",
+        version     = "v0.2",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/twdo3.lua?v=twdo3-2",
     },
     --[[
     {
@@ -90,6 +91,14 @@ local Window = Rayfield:CreateWindow({
 local HomeTab = Window:CreateTab("Home", 4483362458)
 HomeTab:CreateLabel("Welcome to RAVEN HUB")
 HomeTab:CreateLabel("PlaceId: " .. tostring(game.PlaceId))
+HomeTab:CreateLabel("Build: " .. HUB_BUILD)
+local ModuleStatusLabel = HomeTab:CreateLabel("Module status: Checking...")
+
+local function setModuleStatus(text)
+    pcall(function()
+        ModuleStatusLabel:Set("Module status: " .. tostring(text))
+    end)
+end
 
 local scriptNames = {}
 for _, s in ipairs(SCRIPTS) do
@@ -99,7 +108,7 @@ end
 HomeTab:CreateDropdown({
     Name            = "Scripts in this Hub",
     Options         = scriptNames,
-    CurrentValue    = scriptNames[1],
+    CurrentOption   = {scriptNames[1]},
     MultipleOptions = false,
     Callback        = function() end,
 })
@@ -171,6 +180,7 @@ local function loadScriptModule(scriptInfo)
     if loadedScripts[scriptInfo.name] then return end
     loadedScripts[scriptInfo.name] = true
     scriptCleanupHandlers[scriptInfo.name] = nil
+    setModuleStatus("Loading " .. scriptInfo.name .. "...")
 
     task.spawn(function()
         local ok, result = pcall(function()
@@ -200,12 +210,24 @@ local function loadScriptModule(scriptInfo)
             loadedScripts[scriptInfo.name] = nil
             scriptCleanupHandlers[scriptInfo.name] = nil
             warn("[RAVEN HUB] Failed to load '" .. scriptInfo.name .. "': " .. tostring(result))
+            setModuleStatus("FAILED - " .. scriptInfo.name .. ": " .. tostring(result))
+            pcall(function()
+                Rayfield:Notify({
+                    Title = "RAVEN HUB - Module failed",
+                    Content = scriptInfo.name .. ": " .. tostring(result),
+                    Duration = 10,
+                })
+            end)
+        else
+            setModuleStatus("Loaded " .. scriptInfo.name)
         end
     end)
 end
 
+local matchedAnyScript = false
 for _, scriptInfo in ipairs(SCRIPTS) do
     if shouldLoadScript(scriptInfo) then
+        matchedAnyScript = true
         loadScriptModule(scriptInfo)
     elseif scriptInfo.detector then
         task.spawn(function()
@@ -218,6 +240,11 @@ for _, scriptInfo in ipairs(SCRIPTS) do
             end
         end)
     end
+end
+
+if not matchedAnyScript then
+    setModuleStatus("No matching module for PlaceId " .. tostring(currentPlaceId)
+        .. " / GameId " .. tostring(currentGameId))
 end
 
 -- ============================================================
