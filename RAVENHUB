@@ -7,6 +7,40 @@ local Players     = game:GetService("Players")
 local VirtualUser = game:GetService("VirtualUser")
 local StarterGui  = game:GetService("StarterGui")
 
+local function removeRetiredInterfaces()
+    local roots = {}
+    local seen = {}
+    local function addRoot(root)
+        if root and not seen[root] then
+            seen[root] = true
+            table.insert(roots, root)
+        end
+    end
+
+    pcall(function()
+        if type(gethui) == "function" then
+            addRoot(gethui())
+        end
+    end)
+    pcall(function()
+        addRoot(game:GetService("CoreGui"))
+    end)
+    pcall(function()
+        local localPlayer = Players.LocalPlayer
+        addRoot(localPlayer and localPlayer:FindFirstChildOfClass("PlayerGui"))
+    end)
+
+    for _, root in ipairs(roots) do
+        for _, child in ipairs(root:GetChildren()) do
+            if child.Name == "RavenUI" or child.Name == "RavenMacLib" then
+                child:Destroy()
+            end
+        end
+    end
+end
+
+removeRetiredInterfaces()
+
 local function failBootstrap(message)
     local text = "RAVEN HUB failed: " .. tostring(message)
     warn(text)

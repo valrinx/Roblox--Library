@@ -457,6 +457,18 @@ return function(MacLib)
             AcrylicBlur = true,
         })
 
+        pcall(function()
+            local root = type(gethui) == "function" and gethui() or game:GetService("CoreGui")
+            for _, child in ipairs(root:GetChildren()) do
+                if child:IsA("ScreenGui")
+                    and child.Name == "ScreenGui"
+                    and child:FindFirstChild("Base")
+                    and child:FindFirstChild("Notifications") then
+                    child.Name = "RavenMacLib"
+                end
+            end
+        end)
+
         local saving = type(options.ConfigurationSaving) == "table" and options.ConfigurationSaving or {}
         if saving.Enabled ~= false then
             MacLib:SetFolder(tostring(saving.FolderName or "RAVENHUB"))
