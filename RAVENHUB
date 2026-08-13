@@ -24,7 +24,7 @@ local RavenUI
 do
     local ok, result = pcall(function()
         local source = game:HttpGet(
-            'https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/raven_ui.lua?v=raven-ui-3'
+            'https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/raven_ui.lua?v=raven-ui-4'
         )
         assert(type(source) == "string" and #source > 1000, "library download was empty")
         local chunk, compileError = loadstring(source)
@@ -108,7 +108,7 @@ end)
 local windowOk, Window = pcall(function()
     return RavenUI:CreateWindow({
         Name            = "RAVEN UI",
-        LoadingTitle    = "RAVEN UI  |  v1.1.0",
+        LoadingTitle    = "RAVEN UI  |  v1.1.1",
         LoadingSubtitle = "by valrinx",
         ConfigurationSaving = {
             Enabled    = true,

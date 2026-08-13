@@ -5,7 +5,7 @@
 ]]
 
 local Raven = {
-    Version = "1.1.0",
+    Version = "1.1.1",
     Flags = {},
 }
 
@@ -44,14 +44,16 @@ local THEME = {
     BlockRight = Color3.fromRGB(190, 196, 201),
 }
 
--- Hallmark pre-emit critique: P4 H4 E4 S5 R4 V5.
+-- Hallmark pre-emit critique: P4 H5 E4 S5 R4 V4.
 -- Hallmark design stamp: technical-atmospheric / Workbench / N3 side rail.
+-- Variation knobs: separated sidebar header / tall status footer / compact command bar / solid geometry icons.
 -- Layout and iconography are code-native so the UI renders consistently across executors.
 local WINDOW_WIDTH = 1280
 local WINDOW_HEIGHT = 760
-local SIDEBAR_WIDTH = 128
-local TOPBAR_HEIGHT = 76
-local FOOTER_HEIGHT = 56
+local SIDEBAR_WIDTH = 136
+local SIDEBAR_HEADER_HEIGHT = 104
+local TOPBAR_HEIGHT = 84
+local FOOTER_HEIGHT = 76
 
 local activeWindow = nil
 local connections = {}
@@ -405,24 +407,32 @@ local function makeIcon(parent, name, position, size, color)
     elseif key:find("esp", 1, true) or key:find("visual", 1, true)
         or key:find("eye", 1, true) or key:find("spectate", 1, true)
         or key:find("awareness", 1, true) then
-        local eye = create("Frame", {
-            Parent = holder,
-            BackgroundTransparency = 1,
+        for _, segment in ipairs({
+            {8, 10, -24}, {22, 10, 24}, {8, 20, 24}, {22, 20, -24},
+        }) do
+            iconPart(holder, targets, {
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                BackgroundColor3 = color,
+                BorderSizePixel = 0,
+                Position = UDim2.fromOffset(segment[1], segment[2]),
+                Rotation = segment[3],
+                Size = UDim2.fromOffset(14, 3),
+            }, 2)
+        end
+        iconPart(holder, targets, {
+            BackgroundColor3 = color,
             BorderSizePixel = 0,
-            Position = UDim2.fromOffset(3, 9),
-            Size = UDim2.fromOffset(24, 15),
-        }, {corner(15)})
-        local eyeStroke = stroke(color, 0, 2)
-        eyeStroke.Parent = eye
-        addColorTarget(targets, eyeStroke, "Color")
-        iconPart(holder, targets, {BackgroundColor3 = color, BorderSizePixel = 0, Position = UDim2.fromOffset(12, 13), Size = UDim2.fromOffset(7, 7)}, 7)
+            Position = UDim2.fromOffset(11, 11),
+            Size = UDim2.fromOffset(8, 8),
+        }, 8)
     elseif key:find("mobile", 1, true) or key:find("movement", 1, true)
         or key:find("walk", 1, true) or key:find("smartphone", 1, true) then
-        iconPart(holder, targets, {AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = color, BorderSizePixel = 0, Position = UDim2.fromOffset(15, 8), Rotation = -25, Size = UDim2.fromOffset(5, 9)}, 3)
-        iconPart(holder, targets, {AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = color, BorderSizePixel = 0, Position = UDim2.fromOffset(15, 16), Rotation = 28, Size = UDim2.fromOffset(5, 14)}, 3)
-        iconPart(holder, targets, {AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = color, BorderSizePixel = 0, Position = UDim2.fromOffset(8, 20), Rotation = 48, Size = UDim2.fromOffset(4, 13)}, 2)
-        iconPart(holder, targets, {AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = color, BorderSizePixel = 0, Position = UDim2.fromOffset(22, 23), Rotation = -38, Size = UDim2.fromOffset(4, 13)}, 2)
-        iconPart(holder, targets, {AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = color, BorderSizePixel = 0, Position = UDim2.fromOffset(22, 14), Rotation = 70, Size = UDim2.fromOffset(4, 12)}, 2)
+        iconPart(holder, targets, {BackgroundColor3 = color, BorderSizePixel = 0, Position = UDim2.fromOffset(15, 2), Size = UDim2.fromOffset(7, 7)}, 7)
+        iconPart(holder, targets, {AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = color, BorderSizePixel = 0, Position = UDim2.fromOffset(15, 15), Rotation = 28, Size = UDim2.fromOffset(5, 14)}, 3)
+        iconPart(holder, targets, {AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = color, BorderSizePixel = 0, Position = UDim2.fromOffset(9, 14), Rotation = 58, Size = UDim2.fromOffset(4, 12)}, 2)
+        iconPart(holder, targets, {AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = color, BorderSizePixel = 0, Position = UDim2.fromOffset(22, 14), Rotation = -58, Size = UDim2.fromOffset(4, 12)}, 2)
+        iconPart(holder, targets, {AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = color, BorderSizePixel = 0, Position = UDim2.fromOffset(9, 24), Rotation = 44, Size = UDim2.fromOffset(4, 13)}, 2)
+        iconPart(holder, targets, {AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = color, BorderSizePixel = 0, Position = UDim2.fromOffset(22, 25), Rotation = -38, Size = UDim2.fromOffset(4, 13)}, 2)
     elseif key:find("setting", 1, true) or key:find("misc", 1, true)
         or key:find("tool", 1, true) or key:find("box", 1, true) then
         local ring = create("Frame", {
@@ -435,8 +445,17 @@ local function makeIcon(parent, name, position, size, color)
         local ringStroke = stroke(color, 0, 3)
         ringStroke.Parent = ring
         addColorTarget(targets, ringStroke, "Color")
-        iconPart(holder, targets, {BackgroundColor3 = color, BorderSizePixel = 0, Position = UDim2.fromOffset(13, 11), Size = UDim2.fromOffset(4, 8)}, 2)
-        for _, notch in ipairs({{13, 2, 4, 6}, {13, 22, 4, 6}, {2, 13, 6, 4}, {22, 13, 6, 4}}) do
+        create("Frame", {
+            Parent = holder,
+            BackgroundColor3 = THEME.Background,
+            BorderSizePixel = 0,
+            Position = UDim2.fromOffset(11, 11),
+            Size = UDim2.fromOffset(8, 8),
+        }, {corner(8)})
+        for _, notch in ipairs({
+            {13, 1, 4, 7}, {13, 22, 4, 7}, {1, 13, 7, 4}, {22, 13, 7, 4},
+            {5, 5, 5, 5}, {20, 5, 5, 5}, {5, 20, 5, 5}, {20, 20, 5, 5},
+        }) do
             iconPart(holder, targets, {BackgroundColor3 = color, BorderSizePixel = 0, Position = UDim2.fromOffset(notch[1], notch[2]), Size = UDim2.fromOffset(notch[3], notch[4])}, 2)
         end
     else
@@ -599,7 +618,7 @@ local function updateScale(window)
         return
     end
     local viewport = camera.ViewportSize
-    local scale = math.min((viewport.X - 32) / WINDOW_WIDTH, (viewport.Y - 32) / WINDOW_HEIGHT, 1.2)
+    local scale = math.min((viewport.X - 56) / WINDOW_WIDTH, (viewport.Y - 56) / WINDOW_HEIGHT, 1.2)
     window._scale.Scale = math.max(scale, 0.24)
 end
 
@@ -645,27 +664,27 @@ local function makeLogo(parent)
         Name = "Logo",
         Parent = parent,
         BackgroundTransparency = 1,
-        Position = UDim2.fromOffset(20, 12),
+        Position = UDim2.fromOffset(28, 24),
         Size = UDim2.fromOffset(88, 50),
     })
-    for index, spec in ipairs({{28, 14, 34}, {31, 23, 28}, {35, 31, 22}}) do
+    for _, spec in ipairs({{12, 38, 8}, {21, 31, 8}, {30, 24, 7}}) do
         create("Frame", {
             Parent = holder,
             AnchorPoint = Vector2.new(1, 0.5),
             BackgroundColor3 = THEME.Text,
             BorderSizePixel = 0,
-            Position = UDim2.fromOffset(spec[1], spec[2]),
-            Rotation = 35,
-            Size = UDim2.fromOffset(spec[3], 7),
+            Position = UDim2.fromOffset(43, spec[1]),
+            Rotation = 28,
+            Size = UDim2.fromOffset(spec[2], spec[3]),
         }, {corner(2)})
         create("Frame", {
             Parent = holder,
             AnchorPoint = Vector2.new(0, 0.5),
             BackgroundColor3 = THEME.Accent,
             BorderSizePixel = 0,
-            Position = UDim2.fromOffset(60 - spec[1] + 28, spec[2]),
-            Rotation = -35,
-            Size = UDim2.fromOffset(spec[3], 7),
+            Position = UDim2.fromOffset(45, spec[1]),
+            Rotation = -28,
+            Size = UDim2.fromOffset(spec[2], spec[3]),
         }, {corner(2)})
     end
     create("Frame", {
@@ -673,7 +692,7 @@ local function makeLogo(parent)
         AnchorPoint = Vector2.new(0.5, 0.5),
         BackgroundColor3 = THEME.Text,
         BorderSizePixel = 0,
-        Position = UDim2.fromOffset(44, 35),
+        Position = UDim2.fromOffset(44, 34),
         Rotation = 45,
         Size = UDim2.fromOffset(12, 12),
     }, {corner(2)})
@@ -1871,9 +1890,9 @@ function Raven:CreateWindow(options)
         BackgroundTransparency = 1,
         BorderSizePixel = 0,
         CanvasSize = UDim2.fromOffset(0, 0),
-        Position = UDim2.fromOffset(0, 76),
+        Position = UDim2.fromOffset(0, SIDEBAR_HEADER_HEIGHT),
         ScrollBarThickness = 0,
-        Size = UDim2.new(1, 0, 1, -132),
+        Size = UDim2.new(1, 0, 1, -(SIDEBAR_HEADER_HEIGHT + FOOTER_HEIGHT)),
     }, {
         create("UIListLayout", {
             SortOrder = Enum.SortOrder.LayoutOrder,
@@ -1912,8 +1931,8 @@ function Raven:CreateWindow(options)
         Parent = topbar,
         BackgroundColor3 = THEME.Background,
         BorderSizePixel = 0,
-        Position = UDim2.fromOffset(220, 16),
-        Size = UDim2.fromOffset(300, 44),
+        Position = UDim2.fromOffset(208, 20),
+        Size = UDim2.fromOffset(280, 44),
     }, {corner(6), stroke(THEME.Border, 0, 1)})
     makeGameIcon(gameBadge)
     label({
@@ -1943,8 +1962,8 @@ function Raven:CreateWindow(options)
         Font = Enum.Font.Gotham,
         PlaceholderColor3 = THEME.Dim,
         PlaceholderText = "Search commands...",
-        Position = UDim2.new(0, 548, 0, 16),
-        Size = UDim2.new(1, -800, 0, 44),
+        Position = UDim2.new(0, 548, 0, 20),
+        Size = UDim2.new(1, -828, 0, 44),
         Text = "",
         TextColor3 = THEME.Text,
         TextSize = 14,
@@ -1958,19 +1977,27 @@ function Raven:CreateWindow(options)
         AnchorPoint = Vector2.new(1, 0.5),
         BackgroundColor3 = THEME.Accent,
         BorderSizePixel = 0,
-        Position = UDim2.new(1, -174, 0.5, 0),
+        Position = UDim2.new(1, -232, 0.5, 0),
         Size = UDim2.fromOffset(9, 9),
     }, {corner(2)})
     label({
         Parent = topbar,
         AnchorPoint = Vector2.new(1, 0),
-        Position = UDim2.new(1, -82, 0, 0),
-        Size = UDim2.fromOffset(90, TOPBAR_HEIGHT),
+        Position = UDim2.new(1, -128, 0, 0),
+        Size = UDim2.fromOffset(96, TOPBAR_HEIGHT),
         Text = "Connected",
         TextSize = 13,
         TextXAlignment = Enum.TextXAlignment.Right,
     })
     connectionDot.Visible = true
+
+    create("Frame", {
+        Parent = topbar,
+        BackgroundColor3 = THEME.Border,
+        BorderSizePixel = 0,
+        Position = UDim2.new(1, -88, 0, 20),
+        Size = UDim2.fromOffset(1, 44),
+    })
 
     local minimize = button({
         Parent = topbar,
@@ -2037,13 +2064,13 @@ function Raven:CreateWindow(options)
         AnchorPoint = Vector2.new(0, 0.5),
         BackgroundColor3 = THEME.Accent,
         BorderSizePixel = 0,
-        Position = UDim2.fromOffset(20, 28),
+        Position = UDim2.new(0, 20, 0.5, 0),
         Size = UDim2.fromOffset(9, 9),
     }, {corner(2)})
     label({
         Parent = footer,
         Position = UDim2.fromOffset(40, 0),
-        Size = UDim2.fromOffset(92, 56),
+        Size = UDim2.fromOffset(92, FOOTER_HEIGHT),
         Text = "Connected",
         TextColor3 = THEME.Muted,
         TextSize = 13,
@@ -2051,15 +2078,15 @@ function Raven:CreateWindow(options)
     label({
         Parent = footer,
         Position = UDim2.fromOffset(138, 0),
-        Size = UDim2.fromOffset(90, 56),
+        Size = UDim2.fromOffset(90, FOOTER_HEIGHT),
         Text = "v" .. Raven.Version,
         TextColor3 = THEME.Dim,
         TextSize = 12,
     })
     label({
         Parent = sidebar,
-        Position = UDim2.new(0, 14, 1, -54),
-        Size = UDim2.new(1, -28, 0, 38),
+        Position = UDim2.new(0, 8, 1, -FOOTER_HEIGHT),
+        Size = UDim2.new(1, -16, 0, FOOTER_HEIGHT),
         Text = "RightShift  ·  Toggle",
         TextColor3 = THEME.Dim,
         TextSize = 10,
