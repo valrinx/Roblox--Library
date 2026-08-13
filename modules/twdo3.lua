@@ -197,6 +197,13 @@ return function(Window, scriptInfo)
         if not record then
             return
         end
+        record.active = false
+        if record.connections then
+            for _, connection in ipairs(record.connections) do
+                disconnect(connection)
+            end
+            table.clear(record.connections)
+        end
         if record.highlight then
             record.highlight:Destroy()
         end
@@ -223,6 +230,27 @@ return function(Window, scriptInfo)
         clearCategory("player")
         clearCategory("walker")
         clearCategory("loot")
+    end
+
+    local function formatHealth(value)
+        if math.abs(value - math.round(value)) < 0.05 then
+            return string.format("%.0f", value)
+        end
+        return string.format("%.1f", value)
+    end
+
+    local function applyHealthVisual(record)
+        if not record.active or not record.humanoid or not record.healthBackground.Parent then
+            return
+        end
+
+        local health = math.max(record.humanoid.Health, 0)
+        local maxHealth = math.max(record.humanoid.MaxHealth, 1)
+        local ratio = math.clamp(health / maxHealth, 0, 1)
+        record.healthBackground.Size = UDim2.fromOffset(settings.healthBarWidth, 4)
+        record.healthFill.Size = UDim2.fromScale(ratio, 1)
+        record.healthFill.BackgroundColor3 = Color3.fromHSV(ratio * 0.33, 0.85, 1)
+        record.healthText = string.format("HP %s/%s", formatHealth(health), formatHealth(maxHealth))
     end
 
     local function createRecord(category, key, target, options)
@@ -322,6 +350,7 @@ return function(Window, scriptInfo)
         healthFill.Parent = healthBackground
 
         local record = {
+            active = true,
             category = category,
             target = target,
             adornee = adornee,
@@ -337,9 +366,36 @@ return function(Window, scriptInfo)
             detailLabel = detailLabel,
             healthBackground = healthBackground,
             healthFill = healthFill,
+            healthText = "",
+            connections = {},
             staticPosition = options.position,
         }
         records[category][key] = record
+
+        if record.humanoid then
+            local function removeIfDead()
+                if record.active and record.humanoid.Health <= 0 and records[category][key] == record then
+                    destroyRecord(category, key)
+                end
+            end
+            table.insert(record.connections, record.humanoid.HealthChanged:Connect(function()
+                if record.humanoid.Health <= 0 then
+                    removeIfDead()
+                else
+                    applyHealthVisual(record)
+                end
+            end))
+            table.insert(record.connections, record.humanoid:GetPropertyChangedSignal("MaxHealth"):Connect(function()
+                applyHealthVisual(record)
+            end))
+            table.insert(record.connections, record.humanoid.Died:Connect(removeIfDead))
+            applyHealthVisual(record)
+        end
+        table.insert(record.connections, target.AncestryChanged:Connect(function(_, parent)
+            if not parent and record.active and records[category][key] == record then
+                destroyRecord(category, key)
+            end
+        end))
         return record
     end
 
@@ -353,7 +409,9 @@ return function(Window, scriptInfo)
             if character ~= record.target or not humanoid or not root or not head then
                 return false
             end
-            record.humanoid = humanoid
+            if humanoid ~= record.humanoid then
+                return false
+            end
             record.root = root
             record.color = getPlayerColor(record.player)
         elseif record.category == "walker" then
@@ -364,8 +422,14 @@ return function(Window, scriptInfo)
             if not humanoid or not root then
                 return false
             end
-            record.humanoid = humanoid
+            if humanoid ~= record.humanoid then
+                return false
+            end
             record.root = root
+        end
+
+        if record.humanoid and record.humanoid.Health <= 0 then
+            return false
         end
 
         local position = record.staticPosition or safePosition(record.target, record.root)
@@ -377,8 +441,7 @@ return function(Window, scriptInfo)
         end
 
         local distance = localPosition and (position - localPosition).Magnitude or 0
-        local alive = not record.humanoid or record.humanoid.Health > 0
-        local visible = alive and (not localPosition or distance <= getRange(record.category))
+        local visible = not localPosition or distance <= getRange(record.category)
         local color = record.color
 
         record.billboard.Enabled = visible
@@ -403,7 +466,8 @@ return function(Window, scriptInfo)
             table.insert(detailParts, string.format("%.0f studs", distance))
         end
         if settings.showHealth and record.humanoid then
-            table.insert(detailParts, string.format("HP %.0f/%.0f", record.humanoid.Health, record.humanoid.MaxHealth))
+            applyHealthVisual(record)
+            table.insert(detailParts, record.healthText)
         end
         record.nameLabel.Text = record.label
         record.nameLabel.Visible = settings.showNames
@@ -412,12 +476,8 @@ return function(Window, scriptInfo)
 
         local showHealthBar = settings.showHealth and record.humanoid ~= nil
         record.healthBackground.Visible = showHealthBar
-        record.healthBackground.Size = UDim2.fromOffset(settings.healthBarWidth, 4)
         if showHealthBar then
-            local maxHealth = math.max(record.humanoid.MaxHealth, 1)
-            local ratio = math.clamp(record.humanoid.Health / maxHealth, 0, 1)
-            record.healthFill.Size = UDim2.fromScale(ratio, 1)
-            record.healthFill.BackgroundColor3 = Color3.fromHSV(ratio * 0.33, 0.85, 1)
+            applyHealthVisual(record)
         end
         return true
     end
@@ -431,7 +491,7 @@ return function(Window, scriptInfo)
         if current and current.target == character then
             return
         end
-        if not character or not humanoid or not root or not head then
+        if not character or not humanoid or humanoid.Health <= 0 or not root or not head then
             return
         end
         createRecord("player", player, character, {

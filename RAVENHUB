@@ -10,7 +10,7 @@ local VirtualUser = game:GetService("VirtualUser")
 local player    = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local camera    = game.Workspace.CurrentCamera
-local HUB_BUILD = "twdo3-5"
+local HUB_BUILD = "twdo3-6"
 
 -- ============================================================
 --   SCRIPT REGISTRY
@@ -45,8 +45,8 @@ local SCRIPTS = {
         description = "Player ESP | Spectate",
         placeIds    = {128039018996175},
         gameIds     = {7208219743},
-        version     = "v0.5",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/twdo3.lua?v=twdo3-5",
+        version     = "v0.6",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/twdo3.lua?v=twdo3-6",
     },
     --[[
     {
