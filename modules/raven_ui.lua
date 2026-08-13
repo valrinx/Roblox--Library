@@ -5,7 +5,7 @@
 ]]
 
 local Raven = {
-    Version = "1.0.0",
+    Version = "1.0.1",
     Flags = {},
 }
 
@@ -47,11 +47,27 @@ local configState = {
 
 local function create(className, properties, children)
     local instance = Instance.new(className)
+    local requestedParent = properties and properties.Parent
     for property, value in pairs(properties or {}) do
-        instance[property] = value
+        if property ~= "Parent" then
+            local ok, err = pcall(function()
+                instance[property] = value
+            end)
+            if not ok then
+                warn(string.format(
+                    "[RAVEN UI] Skipped unsupported %s.%s: %s",
+                    className,
+                    tostring(property),
+                    tostring(err)
+                ))
+            end
+        end
     end
     for _, child in ipairs(children or {}) do
         child.Parent = instance
+    end
+    if requestedParent then
+        instance.Parent = requestedParent
     end
     return instance
 end
@@ -143,22 +159,60 @@ local function formatClock(seconds)
     return string.format("%02dm %02ds", minutes, remaining)
 end
 
-local function getGuiParent()
+local function getGuiParents()
+    local parents = {}
+    local seen = {}
+    local function add(candidate)
+        if candidate and not seen[candidate] then
+            seen[candidate] = true
+            table.insert(parents, candidate)
+        end
+    end
+
     if type(gethui) == "function" then
         local ok, result = pcall(gethui)
         if ok and result then
-            return result
+            add(result)
         end
     end
-    if RunService:IsStudio() and LOCAL_PLAYER then
-        return LOCAL_PLAYER:WaitForChild("PlayerGui")
+
+    if LOCAL_PLAYER then
+        local ok, playerGui = pcall(function()
+            return LOCAL_PLAYER:FindFirstChildOfClass("PlayerGui")
+                or LOCAL_PLAYER:WaitForChild("PlayerGui", 3)
+        end)
+        if ok then
+            add(playerGui)
+        end
     end
-    return CoreGui
+
+    add(CoreGui)
+    return parents
 end
 
-local function getExistingGui()
-    local parent = getGuiParent()
-    return parent and parent:FindFirstChild(GUI_NAME)
+local function destroyExistingGuis()
+    for _, parent in ipairs(getGuiParents()) do
+        pcall(function()
+            local existing = parent:FindFirstChild(GUI_NAME)
+            if existing then
+                existing:Destroy()
+            end
+        end)
+    end
+end
+
+local function mountScreenGui(screenGui)
+    local failures = {}
+    for _, parent in ipairs(getGuiParents()) do
+        local ok, err = pcall(function()
+            screenGui.Parent = parent
+        end)
+        if ok and screenGui.Parent == parent then
+            return parent
+        end
+        table.insert(failures, tostring(err))
+    end
+    error("Unable to mount ScreenGui: " .. table.concat(failures, " | "))
 end
 
 local function canUseFiles()
@@ -1413,10 +1467,7 @@ function Raven:CreateWindow(options)
     Raven.Flags = {}
     loadConfig()
 
-    local existing = getExistingGui()
-    if existing then
-        existing:Destroy()
-    end
+    destroyExistingGuis()
 
     local screenGui = create("ScreenGui", {
         Name = GUI_NAME,
@@ -1428,7 +1479,7 @@ function Raven:CreateWindow(options)
     if type(syn) == "table" and type(syn.protect_gui) == "function" then
         pcall(syn.protect_gui, screenGui)
     end
-    screenGui.Parent = getGuiParent()
+    mountScreenGui(screenGui)
 
     local root = create("Frame", {
         Parent = screenGui,

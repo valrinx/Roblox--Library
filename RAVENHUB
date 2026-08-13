@@ -3,11 +3,41 @@
 --   Lazy Load + Module pattern
 -- ============================================================
 
-local RavenUI     = loadstring(game:HttpGet(
-    'https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/raven_ui.lua?v=raven-ui-1'
-))()
 local Players     = game:GetService("Players")
 local VirtualUser = game:GetService("VirtualUser")
+local StarterGui  = game:GetService("StarterGui")
+
+local function failBootstrap(message)
+    local text = "RAVEN UI failed: " .. tostring(message)
+    warn(text)
+    pcall(function()
+        StarterGui:SetCore("SendNotification", {
+            Title = "RAVEN UI - Startup error",
+            Text = text:sub(1, 220),
+            Duration = 12,
+        })
+    end)
+    error(text, 0)
+end
+
+local RavenUI
+do
+    local ok, result = pcall(function()
+        local source = game:HttpGet(
+            'https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/raven_ui.lua?v=raven-ui-2'
+        )
+        assert(type(source) == "string" and #source > 1000, "library download was empty")
+        local chunk, compileError = loadstring(source)
+        assert(chunk, "library compile error: " .. tostring(compileError))
+        local library = chunk()
+        assert(type(library) == "table", "library returned " .. type(library))
+        return library
+    end)
+    if not ok then
+        failBootstrap(result)
+    end
+    RavenUI = result
+end
 
 local player    = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
@@ -75,16 +105,21 @@ end)
 --   WINDOW
 -- ============================================================
 
-local Window = RavenUI:CreateWindow({
-    Name            = "RAVEN UI",
-    LoadingTitle    = "RAVEN UI  |  v1.0.0",
-    LoadingSubtitle = "by valrinx",
-    ConfigurationSaving = {
-        Enabled    = true,
-        FolderName = "RAVENHUB",
-        FileName   = "HubConfig",
-    },
-})
+local windowOk, Window = pcall(function()
+    return RavenUI:CreateWindow({
+        Name            = "RAVEN UI",
+        LoadingTitle    = "RAVEN UI  |  v1.0.1",
+        LoadingSubtitle = "by valrinx",
+        ConfigurationSaving = {
+            Enabled    = true,
+            FolderName = "RAVENHUB",
+            FileName   = "HubConfig",
+        },
+    })
+end)
+if not windowOk then
+    failBootstrap(Window)
+end
 
 -- ============================================================
 --   HOME TAB
