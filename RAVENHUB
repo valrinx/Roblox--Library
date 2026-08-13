@@ -1,6 +1,6 @@
 -- ============================================================
---   RAVEN HUB  |  Version 2.0
---   Lazy Load + Module pattern
+--   RAVEN HUB  |  Version 2.1
+--   MacLib UI + Lazy Load + Module pattern
 -- ============================================================
 
 local Players     = game:GetService("Players")
@@ -8,11 +8,11 @@ local VirtualUser = game:GetService("VirtualUser")
 local StarterGui  = game:GetService("StarterGui")
 
 local function failBootstrap(message)
-    local text = "RAVEN UI failed: " .. tostring(message)
+    local text = "RAVEN HUB failed: " .. tostring(message)
     warn(text)
     pcall(function()
         StarterGui:SetCore("SendNotification", {
-            Title = "RAVEN UI - Startup error",
+            Title = "RAVEN HUB - Startup error",
             Text = text:sub(1, 220),
             Duration = 12,
         })
@@ -20,29 +20,46 @@ local function failBootstrap(message)
     error(text, 0)
 end
 
-local RavenUI
+local MacLib
 do
     local ok, result = pcall(function()
-        local source = game:HttpGet(
-            'https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/raven_ui.lua?v=raven-ui-4'
-        )
-        assert(type(source) == "string" and #source > 1000, "library download was empty")
+        local source = game:HttpGet("https://github.com/biggaboy212/Maclib/releases/latest/download/maclib.txt")
+        assert(type(source) == "string" and #source > 1000, "MacLib download was empty")
         local chunk, compileError = loadstring(source)
-        assert(chunk, "library compile error: " .. tostring(compileError))
+        assert(chunk, "MacLib compile error: " .. tostring(compileError))
         local library = chunk()
-        assert(type(library) == "table", "library returned " .. type(library))
+        assert(type(library) == "table", "MacLib returned " .. type(library))
         return library
     end)
     if not ok then
         failBootstrap(result)
     end
-    RavenUI = result
+    MacLib = result
+end
+
+local HubUI
+do
+    local ok, result = pcall(function()
+        local source = game:HttpGet(
+            "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/maclib_adapter.lua?v=maclib-adapter-1"
+        )
+        assert(type(source) == "string" and #source > 1000, "MacLib adapter download was empty")
+        local chunk, compileError = loadstring(source)
+        assert(chunk, "MacLib adapter compile error: " .. tostring(compileError))
+        local factory = chunk()
+        assert(type(factory) == "function", "MacLib adapter returned " .. type(factory))
+        return factory(MacLib)
+    end)
+    if not ok then
+        failBootstrap(result)
+    end
+    HubUI = result
 end
 
 local player    = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local camera    = game.Workspace.CurrentCamera
-local HUB_BUILD = "twdo3-8"
+local HUB_BUILD = "maclib-1"
 
 -- ============================================================
 --   SCRIPT REGISTRY
@@ -106,9 +123,9 @@ end)
 -- ============================================================
 
 local windowOk, Window = pcall(function()
-    return RavenUI:CreateWindow({
-        Name            = "RAVEN UI",
-        LoadingTitle    = "RAVEN UI  |  v1.1.1",
+    return HubUI:CreateWindow({
+        Name            = "RAVEN HUB",
+        LoadingTitle    = "RAVEN HUB  |  MacLib",
         LoadingSubtitle = "by valrinx",
         ConfigurationSaving = {
             Enabled    = true,
@@ -237,8 +254,8 @@ local function loadScriptModule(scriptInfo)
                 "module must return function, got: " .. type(moduleFunc))
 
             local runtimeInfo = table.clone(scriptInfo)
-            runtimeInfo.hubRayfield = RavenUI -- compatibility field for existing game modules
-            runtimeInfo.hubUI = RavenUI
+            runtimeInfo.hubRayfield = HubUI -- compatibility field for existing game modules
+            runtimeInfo.hubUI = HubUI
             runtimeInfo.hubWindow = Window
             runtimeInfo.registerCleanup = function(cleanupFn)
                 if type(cleanupFn) == "function" then
@@ -254,7 +271,7 @@ local function loadScriptModule(scriptInfo)
             warn("[RAVEN HUB] Failed to load '" .. scriptInfo.name .. "': " .. tostring(result))
             setModuleStatus("FAILED - " .. scriptInfo.name .. ": " .. tostring(result))
             pcall(function()
-                RavenUI:Notify({
+                HubUI:Notify({
                     Title = "RAVEN HUB - Module failed",
                     Content = scriptInfo.name .. ": " .. tostring(result),
                     Duration = 10,
@@ -299,15 +316,32 @@ end
 
 local HubSettingsTab = Window:CreateTab("Settings", 4483362458)
 
+local cleanupFinished = false
+local function cleanupHubScripts()
+    if cleanupFinished then
+        return
+    end
+    cleanupFinished = true
+    for scriptName, cleanupFn in pairs(scriptCleanupHandlers) do
+        local ok, err = pcall(cleanupFn)
+        if not ok then
+            warn("[RAVEN HUB] Cleanup failed for '" .. tostring(scriptName) .. "': " .. tostring(err))
+        end
+    end
+end
+
+Window:OnUnload(cleanupHubScripts)
+
 HubSettingsTab:CreateButton({
     Name = "Destroy Hub",
     Callback = function()
-        for scriptName, cleanupFn in pairs(scriptCleanupHandlers) do
-            local ok, err = pcall(cleanupFn)
-            if not ok then
-                warn("[RAVEN HUB] Cleanup failed for '" .. tostring(scriptName) .. "': " .. tostring(err))
-            end
-        end
-        RavenUI:Destroy()
+        cleanupHubScripts()
+        HubUI:Destroy()
     end,
 })
+
+HubSettingsTab:InsertConfigSection("Right")
+
+pcall(function()
+    HubUI:LoadAutoLoadConfig()
+end)

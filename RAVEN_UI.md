@@ -1,94 +1,24 @@
-# RAVEN UI
+# RAVEN HUB UI
 
-RAVEN UI is the repository's original native Roblox interface library. It uses Roblox GUI instances directly and has no Rayfield dependency.
+RAVEN HUB now uses [MacLib](https://github.com/biggaboy212/Maclib) for the complete interface. The previous custom RAVEN UI runtime has been retired.
 
-## Load
+## Runtime
 
 ```lua
-local RavenUI = loadstring(game:HttpGet(
-    "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/raven_ui.lua"
+local MacLib = loadstring(game:HttpGet(
+    "https://github.com/biggaboy212/Maclib/releases/latest/download/maclib.txt"
 ))()
-
-local Window = RavenUI:CreateWindow({
-    Name = "RAVEN UI",
-    LoadingTitle = "RAVEN UI | v1.0.0",
-    LoadingSubtitle = "by valrinx",
-    ConfigurationSaving = {
-        Enabled = true,
-        FolderName = "RAVENHUB",
-        FileName = "HubConfig",
-    },
-})
 ```
 
-## Controls
+`RAVENHUB` then loads `modules/maclib_adapter.lua`. The adapter only translates the existing Rayfield-style calls used by the game modules into MacLib controls; all visible windows, tabs, sections, controls, notifications, acrylic blur, user information, and configuration UI are rendered by MacLib.
 
-```lua
-local Tab = Window:CreateTab("Automation")
-Tab:CreateSection("Mining")
+## Supported compatibility calls
 
-local Status = Tab:CreateLabel("Ready")
-Status:Set("Connected")
+- `CreateWindow`
+- `CreateTab` / `CreatePlaceholderTab`
+- `CreateSection` / `CreateStatus` / `CreateLabel` / `CreateParagraph` / `CreateDivider`
+- `CreateButton` / `CreateToggle` / `CreateSlider`
+- `CreateDropdown` / `CreateInput` / `CreateKeybind`
+- `Notify` / `Destroy` / `LoadAutoLoadConfig`
 
-Tab:CreateToggle({
-    Name = "Auto Mine",
-    CurrentValue = false,
-    Flag = "AutoMine",
-    Callback = function(enabled)
-        print("Auto Mine", enabled)
-    end,
-})
-
-Tab:CreateSlider({
-    Name = "Walk Speed",
-    Range = {16, 100},
-    Increment = 1,
-    Suffix = " studs/s",
-    CurrentValue = 24,
-    Flag = "WalkSpeed",
-    Callback = function(value)
-        print("Walk Speed", value)
-    end,
-})
-
-local Profile = Tab:CreateDropdown({
-    Name = "Performance Preset",
-    Options = {"Low", "Balanced", "Ultra"},
-    CurrentOption = {"Balanced"},
-    Flag = "PerformancePreset",
-    Callback = function(selection)
-        print(selection[1])
-    end,
-})
-
-Profile:Refresh({"Low", "Balanced", "Ultra"}, true)
-
-Tab:CreateInput({
-    Name = "Loot Name Search",
-    PlaceholderText = "ammo, military, fridge...",
-    CurrentValue = "",
-    Flag = "LootSearch",
-    Callback = function(value)
-        print(value)
-    end,
-})
-
-Tab:CreateKeybind({
-    Name = "Panic Key",
-    CurrentKeybind = "End",
-    HoldToInteract = false,
-    Flag = "PanicKey",
-    Callback = function()
-        print("Panic")
-    end,
-})
-
-Tab:CreateButton({
-    Name = "Destroy Hub",
-    Callback = function()
-        RavenUI:Destroy()
-    end,
-})
-```
-
-Use `RightShift` to hide or show the interface. Controls with a `Flag` are saved when `ConfigurationSaving.Enabled` is enabled and the executor exposes file APIs.
+Use `RightShift` to hide or show the MacLib window.
