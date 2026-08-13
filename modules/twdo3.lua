@@ -34,6 +34,8 @@ return function(Window, scriptInfo)
         throughWalls = true,
         useTeamColor = true,
         fillTransparency = 0.78,
+        textSize = 12,
+        healthBarWidth = 120,
         playerDistance = 2500,
         walkerDistance = 800,
         lootDistance = 600,
@@ -272,21 +274,34 @@ return function(Window, scriptInfo)
         billboard.AlwaysOnTop = settings.throughWalls
         billboard.LightInfluence = 0
         billboard.MaxDistance = getRange(category)
-        billboard.Size = UDim2.fromOffset(320, 66)
+        billboard.Size = UDim2.fromOffset(260, 56)
         billboard.StudsOffsetWorldSpace = Vector3.new(0, options.height or 3.2, 0)
         billboard.Parent = espFolder
 
-        local textLabel = Instance.new("TextLabel")
-        textLabel.Name = "Info"
-        textLabel.BackgroundTransparency = 1
-        textLabel.Size = UDim2.new(1, 0, 0, 46)
-        textLabel.Font = Enum.Font.GothamSemibold
-        textLabel.TextColor3 = color
-        textLabel.TextSize = 13
-        textLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
-        textLabel.TextStrokeTransparency = 0.2
-        textLabel.TextWrapped = false
-        textLabel.Parent = billboard
+        local nameLabel = Instance.new("TextLabel")
+        nameLabel.Name = "Name"
+        nameLabel.BackgroundTransparency = 1
+        nameLabel.Size = UDim2.new(1, 0, 0, 18)
+        nameLabel.Font = Enum.Font.GothamBold
+        nameLabel.TextColor3 = color
+        nameLabel.TextSize = settings.textSize
+        nameLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
+        nameLabel.TextStrokeTransparency = 0.15
+        nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
+        nameLabel.Parent = billboard
+
+        local detailLabel = Instance.new("TextLabel")
+        detailLabel.Name = "Details"
+        detailLabel.BackgroundTransparency = 1
+        detailLabel.Position = UDim2.fromOffset(0, 18)
+        detailLabel.Size = UDim2.new(1, 0, 0, 15)
+        detailLabel.Font = Enum.Font.GothamSemibold
+        detailLabel.TextColor3 = color
+        detailLabel.TextSize = math.max(settings.textSize - 1, 8)
+        detailLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
+        detailLabel.TextStrokeTransparency = 0.2
+        detailLabel.TextTruncate = Enum.TextTruncate.AtEnd
+        detailLabel.Parent = billboard
 
         local healthBackground = Instance.new("Frame")
         healthBackground.Name = "HealthBackground"
@@ -294,8 +309,8 @@ return function(Window, scriptInfo)
         healthBackground.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
         healthBackground.BackgroundTransparency = 0.15
         healthBackground.BorderSizePixel = 0
-        healthBackground.Position = UDim2.new(0.5, 0, 0, 49)
-        healthBackground.Size = UDim2.new(0.56, 0, 0, 5)
+        healthBackground.Position = UDim2.new(0.5, 0, 0, 37)
+        healthBackground.Size = UDim2.fromOffset(settings.healthBarWidth, 4)
         healthBackground.Visible = options.humanoid ~= nil and settings.showHealth
         healthBackground.Parent = billboard
 
@@ -318,7 +333,8 @@ return function(Window, scriptInfo)
             marker = marker,
             highlight = highlight,
             billboard = billboard,
-            textLabel = textLabel,
+            nameLabel = nameLabel,
+            detailLabel = detailLabel,
             healthBackground = healthBackground,
             healthFill = healthFill,
             staticPosition = options.position,
@@ -368,7 +384,10 @@ return function(Window, scriptInfo)
         record.billboard.Enabled = visible
         record.billboard.MaxDistance = getRange(record.category)
         record.billboard.AlwaysOnTop = settings.throughWalls
-        record.textLabel.TextColor3 = color
+        record.nameLabel.TextColor3 = color
+        record.nameLabel.TextSize = settings.textSize
+        record.detailLabel.TextColor3 = color
+        record.detailLabel.TextSize = math.max(settings.textSize - 1, 8)
         if record.highlight then
             record.highlight.Enabled = visible
             record.highlight.DepthMode = settings.throughWalls
@@ -386,19 +405,14 @@ return function(Window, scriptInfo)
         if settings.showHealth and record.humanoid then
             table.insert(detailParts, string.format("HP %.0f/%.0f", record.humanoid.Health, record.humanoid.MaxHealth))
         end
-        local details = table.concat(detailParts, "  |  ")
-        if settings.showNames and details ~= "" then
-            record.textLabel.Text = record.label .. "\n" .. details
-        elseif settings.showNames then
-            record.textLabel.Text = record.label
-        elseif details ~= "" then
-            record.textLabel.Text = details
-        else
-            record.textLabel.Text = " "
-        end
+        record.nameLabel.Text = record.label
+        record.nameLabel.Visible = settings.showNames
+        record.detailLabel.Text = table.concat(detailParts, "  |  ")
+        record.detailLabel.Visible = #detailParts > 0
 
         local showHealthBar = settings.showHealth and record.humanoid ~= nil
         record.healthBackground.Visible = showHealthBar
+        record.healthBackground.Size = UDim2.fromOffset(settings.healthBarWidth, 4)
         if showHealthBar then
             local maxHealth = math.max(record.humanoid.MaxHealth, 1)
             local ratio = math.clamp(record.humanoid.Health / maxHealth, 0, 1)
@@ -681,6 +695,27 @@ return function(Window, scriptInfo)
         Flag = "TWDO3ESPFillTransparency",
         Callback = function(value)
             settings.fillTransparency = math.clamp(value / 100, 0, 1)
+        end,
+    })
+    EspTab:CreateSlider({
+        Name = "ESP Text Size",
+        Range = {8, 18},
+        Increment = 1,
+        CurrentValue = 12,
+        Flag = "TWDO3ESPTextSize",
+        Callback = function(value)
+            settings.textSize = value
+        end,
+    })
+    EspTab:CreateSlider({
+        Name = "Health Bar Width",
+        Range = {60, 200},
+        Increment = 10,
+        Suffix = " px",
+        CurrentValue = 120,
+        Flag = "TWDO3ESPHealthBarWidth",
+        Callback = function(value)
+            settings.healthBarWidth = value
         end,
     })
 
