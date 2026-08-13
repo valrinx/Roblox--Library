@@ -46,7 +46,7 @@ local SCRIPTS = {
         placeIds    = {128039018996175},
         gameIds     = {7208219743},
         version     = "v0.6",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/twdo3.lua?v=twdo3-6",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/twdo3.lua?v=twdo3-6",
     },
     --[[
     {
