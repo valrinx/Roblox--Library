@@ -272,20 +272,20 @@ return function(Window, scriptInfo)
         billboard.AlwaysOnTop = settings.throughWalls
         billboard.LightInfluence = 0
         billboard.MaxDistance = getRange(category)
-        billboard.Size = UDim2.fromOffset(260, 62)
+        billboard.Size = UDim2.fromOffset(320, 66)
         billboard.StudsOffsetWorldSpace = Vector3.new(0, options.height or 3.2, 0)
         billboard.Parent = espFolder
 
         local textLabel = Instance.new("TextLabel")
         textLabel.Name = "Info"
         textLabel.BackgroundTransparency = 1
-        textLabel.Size = UDim2.new(1, 0, 0, 42)
+        textLabel.Size = UDim2.new(1, 0, 0, 46)
         textLabel.Font = Enum.Font.GothamSemibold
         textLabel.TextColor3 = color
-        textLabel.TextSize = 14
+        textLabel.TextSize = 13
         textLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
         textLabel.TextStrokeTransparency = 0.2
-        textLabel.TextWrapped = true
+        textLabel.TextWrapped = false
         textLabel.Parent = billboard
 
         local healthBackground = Instance.new("Frame")
@@ -294,8 +294,8 @@ return function(Window, scriptInfo)
         healthBackground.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
         healthBackground.BackgroundTransparency = 0.15
         healthBackground.BorderSizePixel = 0
-        healthBackground.Position = UDim2.new(0.5, 0, 0, 45)
-        healthBackground.Size = UDim2.new(0.72, 0, 0, 6)
+        healthBackground.Position = UDim2.new(0.5, 0, 0, 49)
+        healthBackground.Size = UDim2.new(0.56, 0, 0, 5)
         healthBackground.Visible = options.humanoid ~= nil and settings.showHealth
         healthBackground.Parent = billboard
 
@@ -379,17 +379,23 @@ return function(Window, scriptInfo)
             record.highlight.OutlineColor = color
         end
 
-        local lines = {}
-        if settings.showNames then
-            table.insert(lines, record.label)
-        end
+        local detailParts = {}
         if settings.showDistance then
-            table.insert(lines, string.format("%.0f studs", distance))
+            table.insert(detailParts, string.format("%.0f studs", distance))
         end
         if settings.showHealth and record.humanoid then
-            table.insert(lines, string.format("HP %.0f / %.0f", record.humanoid.Health, record.humanoid.MaxHealth))
+            table.insert(detailParts, string.format("HP %.0f/%.0f", record.humanoid.Health, record.humanoid.MaxHealth))
         end
-        record.textLabel.Text = #lines > 0 and table.concat(lines, "  |  ") or " "
+        local details = table.concat(detailParts, "  |  ")
+        if settings.showNames and details ~= "" then
+            record.textLabel.Text = record.label .. "\n" .. details
+        elseif settings.showNames then
+            record.textLabel.Text = record.label
+        elseif details ~= "" then
+            record.textLabel.Text = details
+        else
+            record.textLabel.Text = " "
+        end
 
         local showHealthBar = settings.showHealth and record.humanoid ~= nil
         record.healthBackground.Visible = showHealthBar
