@@ -6,6 +6,20 @@
 local Players     = game:GetService("Players")
 local VirtualUser = game:GetService("VirtualUser")
 local StarterGui  = game:GetService("StarterGui")
+local MarketplaceService = game:GetService("MarketplaceService")
+
+local function getExperienceName()
+    local fallback = tostring(game.Name or "Roblox Experience")
+    local ok, info = pcall(function()
+        return MarketplaceService:GetProductInfo(game.PlaceId)
+    end)
+    if ok and type(info) == "table" and type(info.Name) == "string" and info.Name ~= "" then
+        return info.Name
+    end
+    return fallback
+end
+
+local EXPERIENCE_NAME = getExperienceName()
 
 local function removeRetiredInterfaces()
     local roots = {}
@@ -86,7 +100,7 @@ local HubUI
 do
     local ok, result = pcall(function()
         local source = game:HttpGet(
-            "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/maclib_adapter.lua?v=maclib-adapter-2"
+            "https://raw.githubusercontent.com/valrinx/Roblox--Library/b91e2d9/modules/maclib_adapter.lua"
         )
         assert(type(source) == "string" and #source > 1000, "MacLib adapter download was empty")
         local chunk, compileError = loadstring(source)
@@ -171,7 +185,7 @@ local windowOk, Window = pcall(function()
     return HubUI:CreateWindow({
         Name            = "RAVEN HUB",
         LoadingTitle    = "RAVEN HUB  |  MacLib",
-        LoadingSubtitle = "by valrinx",
+        LoadingSubtitle = EXPERIENCE_NAME .. "  |  by valrinx",
         ConfigurationSaving = {
             Enabled    = true,
             FolderName = "RAVENHUB",
@@ -194,6 +208,7 @@ local ModuleStatusLabel = HomeTab:CreateStatus({
     Content = "Checking for a compatible game module...",
 })
 HomeTab:CreateLabel("PlaceId: " .. tostring(game.PlaceId))
+HomeTab:CreateLabel("Experience: " .. EXPERIENCE_NAME)
 HomeTab:CreateLabel("RAVEN HUB build: " .. HUB_BUILD)
 
 local function setModuleStatus(text)
