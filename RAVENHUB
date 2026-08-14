@@ -169,8 +169,8 @@ local SCRIPTS = {
         description = "Train | Rebirth | Combat | Dungeon | Rewards | Utility",
         placeIds    = {133188236593503},
         gameIds     = {10506207587},
-        version     = "v0.9",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/magic_loot.lua?v=magic-loot-9",
+        version     = "v1.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/magic_loot.lua?v=magic-loot-10",
     },
     --[[
     {
@@ -316,12 +316,14 @@ end
 
 local loadedScripts = {}
 local scriptCleanupHandlers = {}
+local pendingModuleLoads = 0
 
 local function loadScriptModule(scriptInfo)
     if loadedScripts[scriptInfo.name] then return end
     loadedScripts[scriptInfo.name] = true
     scriptCleanupHandlers[scriptInfo.name] = nil
     setModuleStatus("Loading " .. scriptInfo.name .. "...")
+    pendingModuleLoads += 1
 
     task.spawn(function()
         local ok, result = pcall(function()
@@ -363,6 +365,7 @@ local function loadScriptModule(scriptInfo)
         else
             setModuleStatus("Loaded " .. scriptInfo.name)
         end
+        pendingModuleLoads = math.max(0, pendingModuleLoads-1)
     end)
 end
 
@@ -425,6 +428,11 @@ HubSettingsTab:CreateButton({
 
 HubSettingsTab:InsertConfigSection("Right")
 
+-- Module controls register asynchronously. Loading config before they exist
+-- silently skips their flags, which made Save/Auto Load appear intermittent.
+local configLoadDeadline = os.clock()+15
+repeat task.wait(0.05)
+until pendingModuleLoads==0 or os.clock()>=configLoadDeadline
 pcall(function()
     HubUI:LoadAutoLoadConfig()
 end)

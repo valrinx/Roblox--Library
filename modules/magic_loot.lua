@@ -1111,11 +1111,17 @@ return function(Window, scriptInfo)
     CombatTab:CreateSection("Money Loop")
     local moneyStageOptions = {}
     local careerStage = player:FindFirstChild("CareerMaxStage")
-    local highestMoneyStage = math.max(1, math.floor(careerStage and careerStage.Value or 1))
-    settings.moneyStage = highestMoneyStage
+    local highestUnlockedStage = math.max(1, math.floor(careerStage and careerStage.Value or 1))
+    local highestMoneyStage = highestUnlockedStage
+    for _, object in ipairs(workspace:GetDescendants()) do
+        if object:IsA("BasePart") and object:GetAttribute("BattleArea")==true then
+            highestMoneyStage=math.max(highestMoneyStage,math.floor(tonumber(object:GetAttribute("Stage")) or 0))
+        end
+    end
+    settings.moneyStage = highestUnlockedStage
     for stage = 1, highestMoneyStage do table.insert(moneyStageOptions, "Stage " .. stage) end
     CombatTab:CreateDropdown({
-        Name="Money Farm Stage",Options=moneyStageOptions,CurrentOption={"Stage "..highestMoneyStage},
+        Name="Money Farm Stage",Options=moneyStageOptions,CurrentOption={"Stage "..highestUnlockedStage},
         Flag="MagicLootMoneyStage",Callback=function(v)
             local value=type(v)=="table" and v[1] or v
             settings.moneyStage=math.clamp(tonumber(tostring(value):match("%d+")) or 1,1,highestMoneyStage)
