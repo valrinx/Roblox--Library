@@ -519,8 +519,23 @@ return function(Window, scriptInfo)
         -- The next stage is often not streamed until the player crosses the
         -- current stage's exit. A persisted safe spot is still valid while its
         -- BattleArea part is absent; validate it once that part has streamed.
-        if not saved or (battleArea and not isPointInsidePart(battleArea, saved.Position, 2)) then
+        if not saved then
             return false, "missing-safe-spot"
+        end
+        if battleArea and not isPointInsidePart(battleArea, saved.Position, 2) then
+            -- Older saved positions may sit a few studs outside the server's
+            -- BattleArea (Stage 15 is a known example). Move them just inside
+            -- the boundary so crossing the gate can activate the next wave.
+            local point = battleArea.CFrame:PointToObjectSpace(saved.Position)
+            local half = battleArea.Size*0.5
+            local repairedPoint = Vector3.new(
+                math.clamp(point.X,-half.X+5,half.X-5),
+                math.clamp(point.Y,-half.Y+3,half.Y+6),
+                math.clamp(point.Z,-half.Z+5,half.Z-5)
+            )
+            saved = CFrame.new(battleArea.CFrame:PointToWorldSpace(repairedPoint))*saved.Rotation
+            safeSpots[tostring(stage)] = saved
+            pcall(persistSafeSpots)
         end
         -- Enter through the next stage's official safe trigger first. Jumping
         -- straight from one BattleArea to another can race the server's door
@@ -541,7 +556,7 @@ return function(Window, scriptInfo)
         end
         battleArea = battleArea or findStageArea(stage, "BattleArea")
         if battleArea and not isPointInsidePart(battleArea, saved.Position, 2) then
-            return false, "missing-safe-spot"
+            return false, "invalid-safe-spot"
         end
         if not teleportTo(saved, false) then return false, "battle-entry-failed" end
         local dungeon = player:FindFirstChild("InDungeonChallenge")
