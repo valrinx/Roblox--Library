@@ -785,10 +785,37 @@ return function(Window, scriptInfo)
 
     local function performMoneySell()
         local candidates = {}
+        local unlockedForSale = {}
+        local unlockedForSaleSet = {}
         local ok = pcall(function()
             local utilities = require(ReplicatedFirst.AllSideCode.UtilsSystem)
             local bag = utilities.PlayerData.GetPlrDataByKey(player, "Bag")
             local materialType = utilities.EnumMgr.ItemType.Material
+            -- Keep-list selection is the Money mode protection source. Unlock
+            -- other sellable materials first, otherwise a full bag made only of
+            -- locked drops can never be emptied.
+            for _, item in pairs(type(bag)=="table" and bag or {}) do
+                local id=type(item)=="table" and tonumber(item.id) or nil
+                local onlyId=type(item)=="table" and tonumber(item.onlyID) or nil
+                local locked=type(item)=="table" and (item.lock==true or item.lock==1)
+                local recipeProtected=false
+                if id and type(utilities.GetData.IsMarkedRecipeMaterial)=="function" then
+                    pcall(function() recipeProtected=utilities.GetData.IsMarkedRecipeMaterial(player,id)==true end)
+                end
+                if id and onlyId and tonumber(item.tp)==materialType and locked
+                    and not recipeProtected and not settings.moneyKeepIds[id] then
+                    item.lock=0
+                    table.insert(unlockedForSale,onlyId)
+                    unlockedForSaleSet[onlyId]=true
+                end
+            end
+            if #unlockedForSale>0 then
+                utilities.NetWork.FireServer(utilities.NetMsg.BAG_LOCK_ITEMS,{
+                    unlockOnlyIds=unlockedForSale,
+                })
+                task.wait(0.35)
+                bag=utilities.PlayerData.GetPlrDataByKey(player,"Bag")
+            end
             for _, item in pairs(type(bag)=="table" and bag or {}) do
                 local id = type(item)=="table" and tonumber(item.id) or nil
                 local onlyId = type(item)=="table" and tonumber(item.onlyID) or nil
@@ -797,7 +824,8 @@ return function(Window, scriptInfo)
                 if id and type(utilities.GetData.IsMarkedRecipeMaterial)=="function" then
                     pcall(function() recipeProtected=utilities.GetData.IsMarkedRecipeMaterial(player,id)==true end)
                 end
-                if id and onlyId and tonumber(item.tp)==materialType and not locked
+                if id and onlyId and tonumber(item.tp)==materialType
+                    and (not locked or unlockedForSaleSet[onlyId])
                     and not recipeProtected and not settings.moneyKeepIds[id] then
                     table.insert(candidates, onlyId)
                 end
@@ -806,7 +834,14 @@ return function(Window, scriptInfo)
                 local result = utilities.NetWork.InvokeServer(utilities.NetMsg.SELL_MATERIAL, {
                     onlyIDList = candidates,
                 })
-                if result ~= true then error("server rejected selective sell") end
+                if result ~= true then
+                    if #unlockedForSale>0 then
+                        utilities.NetWork.FireServer(utilities.NetMsg.BAG_LOCK_ITEMS,{
+                            lockOnlyIds=unlockedForSale,
+                        })
+                    end
+                    error("server rejected selective sell")
+                end
             end
         end)
         return ok, #candidates
