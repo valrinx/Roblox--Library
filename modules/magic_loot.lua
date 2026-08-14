@@ -66,6 +66,7 @@ return function(Window, scriptInfo)
         autoMoney = false,
         moneyStage = 1,
         moneyBagSlots = 20,
+        moneyKeepIds = {},
         useSafeSpots = true,
         skillInterval = 0.65,
         autoDrops = false,
@@ -637,6 +638,58 @@ return function(Window, scriptInfo)
         return count
     end
 
+    local function materialKeepOptions()
+        local options, seen = {}, {}
+        pcall(function()
+            local utilities = require(ReplicatedFirst.AllSideCode.UtilsSystem)
+            local bag = utilities.PlayerData.GetPlrDataByKey(player, "Bag")
+            local materialType = utilities.EnumMgr.ItemType.Material
+            for _, item in pairs(type(bag)=="table" and bag or {}) do
+                local id = type(item)=="table" and tonumber(item.id) or nil
+                if id and tonumber(item.tp)==materialType and not seen[id] then
+                    seen[id] = true
+                    local config = utilities.CfgFind.FindCfgByID(id, materialType)
+                    local name = config and (config.ZhName or config.Model or config.Name) or "Material"
+                    table.insert(options, tostring(id).." | "..tostring(name))
+                end
+            end
+        end)
+        table.sort(options, function(a,b)
+            return (tonumber(a:match("^%d+")) or 0) < (tonumber(b:match("^%d+")) or 0)
+        end)
+        if #options == 0 then options = {"No materials found - refresh after collecting"} end
+        return options
+    end
+
+    local function performMoneySell()
+        local candidates = {}
+        local ok = pcall(function()
+            local utilities = require(ReplicatedFirst.AllSideCode.UtilsSystem)
+            local bag = utilities.PlayerData.GetPlrDataByKey(player, "Bag")
+            local materialType = utilities.EnumMgr.ItemType.Material
+            for _, item in pairs(type(bag)=="table" and bag or {}) do
+                local id = type(item)=="table" and tonumber(item.id) or nil
+                local onlyId = type(item)=="table" and tonumber(item.onlyID) or nil
+                local locked = type(item)=="table" and (item.lock==true or item.lock==1)
+                local recipeProtected = false
+                if id and type(utilities.GetData.IsMarkedRecipeMaterial)=="function" then
+                    pcall(function() recipeProtected=utilities.GetData.IsMarkedRecipeMaterial(player,id)==true end)
+                end
+                if id and onlyId and tonumber(item.tp)==materialType and not locked
+                    and not recipeProtected and not settings.moneyKeepIds[id] then
+                    table.insert(candidates, onlyId)
+                end
+            end
+            if #candidates > 0 then
+                local result = utilities.NetWork.InvokeServer(utilities.NetMsg.SELL_MATERIAL, {
+                    onlyIDList = candidates,
+                })
+                if result ~= true then error("server rejected selective sell") end
+            end
+        end)
+        return ok, #candidates
+    end
+
     local function isMoneyBagFull()
         local serverLimit = player:FindFirstChild("LimitBagUsed")
         local materialSlots = materialBagCount()
@@ -1018,6 +1071,21 @@ return function(Window, scriptInfo)
         Name="Sell At Material Slots",Range={1,100},Increment=1,CurrentValue=20,Suffix=" slots",
         Flag="MagicLootMoneyBagSlots",Callback=function(v) settings.moneyBagSlots=v end,
     })
+    local moneyKeepDropdown
+    moneyKeepDropdown=CombatTab:CreateDropdown({
+        Name="Keep Materials (Do Not Sell)",Options=materialKeepOptions(),CurrentOption={},
+        MultipleOptions=true,Flag="MagicLootMoneyKeepItems",Callback=function(values)
+            local protected = {}
+            for _, value in ipairs(type(values)=="table" and values or {values}) do
+                local id=tonumber(tostring(value):match("^%d+"))
+                if id then protected[id]=true end
+            end
+            settings.moneyKeepIds=protected
+        end,
+    })
+    CombatTab:CreateButton({Name="Refresh Keep-Item List",Callback=function()
+        moneyKeepDropdown:Refresh(materialKeepOptions(),true)
+    end})
     CombatTab:CreateToggle({
         Name="Auto Money (Farm > Safe > Sell > Repeat)",CurrentValue=false,Flag="MagicLootAutoMoney",
         Callback=function(v) settings.autoMoney=v end,
@@ -1141,7 +1209,14 @@ return function(Window, scriptInfo)
                             or "Money: bag full, but no unlocked materials can be sold")
                         if materialSlots > 0 and now-moneySellAt > 2 then
                             moneySellAt = now
-                            performSell()
+                            local soldOk, soldCount = performMoneySell()
+                            if not soldOk then
+                                combatStatus:Set("Money: selective sell failed; retrying")
+                            elseif soldCount == 0 then
+                                combatStatus:Set("Money: all remaining materials are protected")
+                            else
+                                combatStatus:Set("Money: sold "..soldCount.." material slots")
+                            end
                         end
                     end
                 -- Dungeon modes own stage travel. Do this before scanning for
@@ -1274,6 +1349,8 @@ return function(Window, scriptInfo)
         Sell = performSell,
         MaterialBagCount = materialBagCount,
         IsMoneyBagFull = isMoneyBagFull,
+        MoneyKeepOptions = materialKeepOptions,
+        MoneySell = performMoneySell,
         ClaimRewards = claimOnlineRewards,
         CollectAlchemy = collectAlchemy,
         ClaimEventRewards = claimEventRewards,
