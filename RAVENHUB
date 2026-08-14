@@ -170,7 +170,7 @@ local SCRIPTS = {
         placeIds    = {133188236593503},
         gameIds     = {10506207587},
         version     = "v2.1",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/magic_loot.lua?v=magic-loot-21",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/3f8a57b67de58598b9da65d9d038dc3b3a75ae33/modules/magic_loot.lua",
     },
     --[[
     {
