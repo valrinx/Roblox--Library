@@ -146,6 +146,13 @@ return function(MacLib)
                             option:UpdateState(saved.state == true)
                         elseif saved.type == "Slider" and saved.value ~= nil then
                             option:UpdateValue(tonumber(saved.value) or saved.value)
+                            -- MacLib updates the slider display/value without
+                            -- replaying its callback during config loads. Keep
+                            -- the game module's runtime settings in sync too.
+                            local callback = option.Settings and option.Settings.Callback
+                            if type(callback) == "function" then
+                                callback(option:GetValue())
+                            end
                         elseif saved.type == "Input" and saved.text ~= nil then
                             option:UpdateText(tostring(saved.text))
                         elseif saved.type == "Keybind" and saved.bind then

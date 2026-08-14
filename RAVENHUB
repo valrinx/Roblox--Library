@@ -164,6 +164,14 @@ local SCRIPTS = {
         version     = "v0.8",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/twdo3.lua?v=twdo3-8",
     },
+    {
+        name        = "Magic Loot",
+        description = "Train | Rebirth | Combat | Dungeon | Rewards | Utility",
+        placeIds    = {133188236593503},
+        gameIds     = {10506207587},
+        version     = "v0.2",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/magic_loot.lua?v=magic-loot-2",
+    },
     --[[
     {
         name      = "Another Game",
@@ -189,6 +197,12 @@ end)
 --   WINDOW
 -- ============================================================
 
+-- Keep configuration profiles isolated per Roblox experience. Using GameId
+-- intentionally lets every place inside the same experience share profiles,
+-- while unrelated games no longer appear in one combined config list.
+local CONFIG_SCOPE_ID = game.GameId ~= 0 and game.GameId or game.PlaceId
+local CONFIG_FOLDER = "RAVENHUB-" .. tostring(CONFIG_SCOPE_ID)
+
 local windowOk, Window = pcall(function()
     return HubUI:CreateWindow({
         Name            = "RAVEN HUB",
@@ -196,8 +210,8 @@ local windowOk, Window = pcall(function()
         LoadingSubtitle = EXPERIENCE_NAME .. "  |  by valrinx",
         ConfigurationSaving = {
             Enabled    = true,
-            FolderName = "RAVENHUB",
-            FileName   = "HubConfig",
+            FolderName = CONFIG_FOLDER,
+            FileName   = "HubConfig-" .. tostring(CONFIG_SCOPE_ID),
         },
     })
 end)
@@ -218,6 +232,7 @@ local ModuleStatusLabel = HomeTab:CreateStatus({
 HomeTab:CreateLabel("PlaceId: " .. tostring(game.PlaceId))
 HomeTab:CreateLabel("Experience: " .. EXPERIENCE_NAME)
 HomeTab:CreateLabel("RAVEN HUB build: " .. HUB_BUILD)
+HomeTab:CreateLabel("Config scope: " .. tostring(CONFIG_SCOPE_ID))
 
 local function setModuleStatus(text)
     pcall(function()
