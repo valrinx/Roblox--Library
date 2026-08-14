@@ -512,6 +512,32 @@ return function(Window, scriptInfo)
         return teleportStage(0)
     end
 
+    local function fallbackStageCFrame(battleArea, entryArea, rotation)
+        if not battleArea then return nil end
+        local half = battleArea.Size*0.5
+        local entryPoint = entryArea and battleArea.CFrame:PointToObjectSpace(entryArea.Position)
+            or Vector3.new(0,0,half.Z)
+        local inward = Vector3.new(-entryPoint.X,0,-entryPoint.Z)
+        inward = inward.Magnitude>0.01 and inward.Unit or Vector3.new(0,0,-1)
+        local localPoint = entryPoint+inward*14
+        localPoint = Vector3.new(
+            math.clamp(localPoint.X,-half.X+6,half.X-6),
+            half.Y+20,
+            math.clamp(localPoint.Z,-half.Z+6,half.Z-6)
+        )
+        local probe = battleArea.CFrame:PointToWorldSpace(localPoint)
+        local character, humanoid, root = getCharacter()
+        local params = RaycastParams.new()
+        params.FilterType = Enum.RaycastFilterType.Exclude
+        params.FilterDescendantsInstances = character and {character,battleArea} or {battleArea}
+        local hit = workspace:Raycast(probe,Vector3.new(0,-math.max(100,battleArea.Size.Y+60),0),params)
+        local rootOffset = (humanoid and humanoid.HipHeight or 2)
+            +(root and root.Size.Y*0.5 or 1)
+        local position = hit and (hit.Position+Vector3.new(0,rootOffset+0.25,0))
+            or battleArea.Position
+        return CFrame.new(position)*(rotation or battleArea.CFrame.Rotation)
+    end
+
     local function advanceMoneyStage(stage)
         stage = math.max(1, math.floor(tonumber(stage) or 1))
         local saved = safeSpots[tostring(stage)]
@@ -519,10 +545,7 @@ return function(Window, scriptInfo)
         -- The next stage is often not streamed until the player crosses the
         -- current stage's exit. A persisted safe spot is still valid while its
         -- BattleArea part is absent; validate it once that part has streamed.
-        if not saved then
-            return false, "missing-safe-spot"
-        end
-        if battleArea and not isPointInsidePart(battleArea, saved.Position, 2) then
+        if saved and battleArea and not isPointInsidePart(battleArea, saved.Position, 2) then
             -- Older saved positions may sit a few studs outside the server's
             -- BattleArea (Stage 15 is a known example). Move them just inside
             -- the boundary so crossing the gate can activate the next wave.
@@ -545,7 +568,11 @@ return function(Window, scriptInfo)
         local safeArea = findStageArea(stage-1, "SafeArea")
             or findStageArea(stage, "SafeArea")
         if safeArea then
-            local safeDestination = CFrame.new(safeArea.Position) * saved.Rotation
+            local _,_,root = getCharacter()
+            local transitionRotation = saved and saved.Rotation
+                or root and root.CFrame.Rotation or safeArea.CFrame.Rotation
+            local safeDestination = CFrame.new(safeArea.Position+Vector3.new(0,4,0))
+                *transitionRotation
             if not teleportTo(safeDestination, false) then return false, "safe-entry-failed" end
             local officialSafe = player:FindFirstChild("InStageSafeArea")
             local safeDeadline = os.clock()+4
@@ -555,6 +582,14 @@ return function(Window, scriptInfo)
                 or (officialSafe and officialSafe.Value>0) or battleArea
         end
         battleArea = battleArea or findStageArea(stage, "BattleArea")
+        if not saved and battleArea then
+            saved = fallbackStageCFrame(battleArea,safeArea)
+            if saved then
+                safeSpots[tostring(stage)] = saved
+                pcall(persistSafeSpots)
+            end
+        end
+        if not saved then return false,"stage-not-streamed" end
         if battleArea and not isPointInsidePart(battleArea, saved.Position, 2) then
             return false, "invalid-safe-spot"
         end
