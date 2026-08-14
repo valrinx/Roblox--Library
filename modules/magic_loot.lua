@@ -137,6 +137,17 @@ return function(Window, scriptInfo)
             and math.abs(point.Z) <= math.max(0, half.Z-margin)
     end
 
+    local function stageAtPosition(position)
+        if typeof(position)~="Vector3" then return nil end
+        for _,object in ipairs(workspace:GetDescendants()) do
+            if object:IsA("BasePart") and object:GetAttribute("BattleArea")==true
+                and isPointInsidePart(object,position,0) then
+                return math.floor(tonumber(object:GetAttribute("Stage")) or 0),object
+            end
+        end
+        return nil
+    end
+
     local function persistSafeSpots()
         if type(writefile) ~= "function" then return false end
         if next(safeSpots) == nil and type(isfile) == "function" and type(delfile) == "function"
@@ -159,7 +170,10 @@ return function(Window, scriptInfo)
         local _, _, root = getCharacter()
         local dungeon = player:FindFirstChild("InDungeonChallenge")
         local officialSafe = player:FindFirstChild("InStageSafeArea")
-        local stage = currentCombatStage()
+        -- DungeonAggroStage can remain on the old stage after automation is
+        -- disabled. Prefer the BattleArea physically containing the player so
+        -- Save writes to the stage the player is actually standing in.
+        local stage = stageAtPosition(root.Position) or currentCombatStage()
         if not root or stage <= 0 then return false, stage, "Unable to detect the current stage" end
         if not dungeon or dungeon.Value <= 0 then
             return false, stage, "Enter the stage before saving its combat safe spot"
@@ -173,6 +187,7 @@ return function(Window, scriptInfo)
         end
         safeSpots[tostring(stage)] = root.CFrame
         persistSafeSpots()
+        warn("[RAVEN HUB][Magic Loot] saved Stage "..stage.." safe spot at "..tostring(root.Position))
         return true, stage
     end
 
