@@ -28,9 +28,16 @@ return function(Window, scriptInfo)
         return character and character:FindFirstChild("HumanoidRootPart")
     end
     local function isAlive(plr)
-        local alive = workspace:FindFirstChild("Alive")
         local character = getCharacter(plr)
-        return character and alive and character.Parent == alive
+        if not character then return false end
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if not humanoid or humanoid.Health <= 0 then return false end
+        local alive = workspace:FindFirstChild("Alive")
+        if alive and character.Parent == alive then return true end
+        -- Training mode: player stays in Dead folder but is still active
+        local dead = workspace:FindFirstChild("Dead")
+        if dead and character.Parent == dead and humanoid.Health > 0 then return true end
+        return false
     end
     local function getPingMs()
         if not settings.pingCompensation then return 0 end
