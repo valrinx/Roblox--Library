@@ -853,7 +853,24 @@ return function(Window, scriptInfo)
         -- its first increment as "full" made Money mode return safe instantly.
         local usedSlots = math.max(materialSlots, math.floor(tonumber(serverLimit and serverLimit.Value) or 0))
         local threshold = math.max(1, tonumber(settings.moneyBagSlots) or 20)
-        return usedSlots >= threshold, materialSlots, usedSlots
+        local sellableSlots = 0
+        pcall(function()
+            local utilities=require(ReplicatedFirst.AllSideCode.UtilsSystem)
+            local bag=utilities.PlayerData.GetPlrDataByKey(player,"Bag")
+            local materialType=utilities.EnumMgr.ItemType.Material
+            for _,item in pairs(type(bag)=="table" and bag or {}) do
+                local id=type(item)=="table" and tonumber(item.id) or nil
+                local recipeProtected=false
+                if id and type(utilities.GetData.IsMarkedRecipeMaterial)=="function" then
+                    pcall(function() recipeProtected=utilities.GetData.IsMarkedRecipeMaterial(player,id)==true end)
+                end
+                if id and tonumber(item.tp)==materialType and tonumber(item.onlyID)
+                    and not recipeProtected and not settings.moneyKeepIds[id] then
+                    sellableSlots+=1
+                end
+            end
+        end)
+        return usedSlots>=threshold and sellableSlots>0,materialSlots,usedSlots,sellableSlots
     end
 
     local function claimOnlineRewards()
@@ -1042,11 +1059,11 @@ return function(Window, scriptInfo)
         return {prompt=prompt, model=model, itemId=itemId, stage=stage, rarity=rarity, price=price}
     end
 
-    local function rankedDrops()
+    local function rankedDrops(wantedStage)
         local drops = workspace:FindFirstChild("DropsClient")
         local _, _, root = getCharacter()
         if not drops or not root then return {} end
-        local currentStage = activeDropStage()
+        local currentStage = tonumber(wantedStage) or activeDropStage()
         local candidates = {}
         for _, object in ipairs(drops:GetDescendants()) do
             if object:IsA("ProximityPrompt") and object.Name == "PickupPrompt" and object.Enabled then
@@ -1070,8 +1087,8 @@ return function(Window, scriptInfo)
         return candidates
     end
 
-    local function collectDrops()
-        local best = rankedDrops()[1]
+    local function collectDrops(wantedStage)
+        local best = rankedDrops(wantedStage)[1]
         if not best then return 0 end
         local object = best.prompt
         if type(fireproximityprompt) == "function" then
@@ -1302,6 +1319,7 @@ return function(Window, scriptInfo)
     local travelAt = 0
     local dungeonEmptySince = 0
     local moneySellAt = 0
+    local moneySellRequested = false
 
     -- Cache streamed grounds immediately, including temporary/admin grounds
     -- that may disappear after the player travels to another area.
@@ -1355,8 +1373,9 @@ return function(Window, scriptInfo)
             -- Intermediate stages are traversal only for Money mode. Suppress
             -- collection there even if the standalone Auto Drops toggle was
             -- left enabled, so bag capacity is reserved for the chosen stage.
+            local collectedDropCount = 0
             if (settings.autoDrops or settings.autoMoney) and moneyAtTargetStage then
-                collectDrops()
+                collectedDropCount=collectDrops(settings.autoMoney and settings.moneyStage or nil)
             end
 
             if (settings.autoFarm or settings.autoDungeon or settings.autoMoney) and not settings.autoTrain then
@@ -1365,7 +1384,7 @@ return function(Window, scriptInfo)
                 local dungeonValue=dungeonState and dungeonState.Value or 0
                 local aggroValue=aggroStage and aggroStage.Value or 0
                 local moneyProgress=math.max(dungeonValue,aggroValue)
-                local bagFull, materialSlots, usedSlots = isMoneyBagFull()
+                local bagFull, materialSlots, usedSlots, sellableSlots = isMoneyBagFull()
                 local preferredStage=settings.autoMoney and (moneyProgress > 0 and moneyProgress or settings.moneyStage)
                     or settings.autoDungeon and math.max(
                     dungeonValue,
@@ -1377,25 +1396,31 @@ return function(Window, scriptInfo)
                 end
                 -- Money mode returns to the town/safe area before selling, then
                 -- re-enters the same user-selected stage for the next cycle.
-                if settings.autoMoney and bagFull then
+                if settings.autoMoney and (bagFull or moneySellRequested) then
                     dungeonEmptySince = 0
-                    if dungeonValue > 0 then
-                        combatStatus:Set("Money: bag full ("..usedSlots.." slots) | returning safe")
+                    if moneyProgress > 0 then
+                        moneySellRequested=true
+                        combatStatus:Set((bagFull and ("Money: bag full ("..usedSlots.." slots)")
+                            or "Money: target stage cleared").." | returning safe")
                         if now-travelAt > 3 then travelAt=now returnFromDungeon() end
                     else
                         combatStatus:Set(materialSlots > 0
                             and ("Money: selling "..materialSlots.." material slots")
                             or "Money: bag full, but no unlocked materials can be sold")
-                        if materialSlots > 0 and now-moneySellAt > 2 then
+                        if sellableSlots > 0 and now-moneySellAt > 2 then
                             moneySellAt = now
                             local soldOk, soldCount = performMoneySell()
                             if not soldOk then
                                 combatStatus:Set("Money: selective sell failed; retrying")
                             elseif soldCount == 0 then
+                                moneySellRequested=false
                                 combatStatus:Set("Money: all remaining materials are protected")
                             else
+                                moneySellRequested=false
                                 combatStatus:Set("Money: sold "..soldCount.." material slots")
                             end
+                        elseif sellableSlots==0 then
+                            moneySellRequested=false
                         end
                     end
                 -- Dungeon modes own stage travel. Do this before scanning for
@@ -1449,7 +1474,10 @@ return function(Window, scriptInfo)
                         combatStatus:Set("Combat: waiting for monsters")
                         if settings.autoMoney then
                             if dungeonEmptySince == 0 then dungeonEmptySince = now end
-                            if now-dungeonEmptySince >= 4 and now-travelAt > 3 then
+                            if moneyProgress>=settings.moneyStage and collectedDropCount>0 then
+                                dungeonEmptySince=now
+                                combatStatus:Set("Money: collecting target-stage drops")
+                            elseif now-dungeonEmptySince >= 6 and now-travelAt > 3 then
                                 travelAt = now
                                 dungeonEmptySince = now
                                 if moneyProgress < settings.moneyStage then
@@ -1463,7 +1491,8 @@ return function(Window, scriptInfo)
                                         combatStatus:Set("Money: Stage "..nextStage.." did not activate; retrying")
                                     end
                                 else
-                                    combatStatus:Set("Money: Stage "..settings.moneyStage.." cleared | restarting run")
+                                    moneySellRequested=true
+                                    combatStatus:Set("Money: drops drained | returning safe to sell")
                                     returnFromDungeon()
                                 end
                             end
