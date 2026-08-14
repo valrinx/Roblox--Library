@@ -727,6 +727,21 @@ return function(Window, scriptInfo)
         return count
     end
 
+    local function gameMoneyBagUsage()
+        local gui=screenGui()
+        local main=gui and gui:FindFirstChild("Main")
+        local bottomLeft=main and (main:FindFirstChild("ButtomLeft") or main:FindFirstChild("BottomLeft"))
+        if not bottomLeft then return nil,nil end
+        for _,object in ipairs(bottomLeft:GetDescendants()) do
+            if object:IsA("TextLabel") or object:IsA("TextButton") then
+                local used,capacity=tostring(object.Text):match("^%s*(%d+)%s*/%s*(%d+)%s*$")
+                used,capacity=tonumber(used),tonumber(capacity)
+                if used and capacity and capacity>0 then return used,capacity end
+            end
+        end
+        return nil,nil
+    end
+
     local function materialKeepOptions()
         local options, seen = {}, {}
         pcall(function()
@@ -856,8 +871,11 @@ return function(Window, scriptInfo)
         local materialSlots = materialBagCount()
         -- LimitBagUsed is a used-slot counter, not a boolean full flag. Treating
         -- its first increment as "full" made Money mode return safe instantly.
-        local usedSlots = math.max(materialSlots, math.floor(tonumber(serverLimit and serverLimit.Value) or 0))
-        local threshold = math.max(1, tonumber(settings.moneyBagSlots) or 20)
+        local gameUsed,gameCapacity=gameMoneyBagUsage()
+        local usedSlots=gameUsed or math.max(materialSlots,
+            math.floor(tonumber(serverLimit and serverLimit.Value) or 0))
+        local threshold=gameCapacity or math.max(1,tonumber(settings.moneyBagSlots) or 20)
+        if gameCapacity then settings.moneyBagSlots=gameCapacity end
         local sellableSlots = 0
         pcall(function()
             local utilities=require(ReplicatedFirst.AllSideCode.UtilsSystem)
@@ -875,7 +893,9 @@ return function(Window, scriptInfo)
                 end
             end
         end)
-        return usedSlots>=threshold and sellableSlots>0,materialSlots,usedSlots,sellableSlots
+        local full=gameCapacity and usedSlots>=threshold
+            or usedSlots>=threshold and sellableSlots>0
+        return full,materialSlots,usedSlots,sellableSlots,threshold
     end
 
     local function claimOnlineRewards()
@@ -1255,10 +1275,7 @@ return function(Window, scriptInfo)
             settings.moneyStage=math.clamp(tonumber(tostring(value):match("%d+")) or 1,1,highestMoneyStage)
         end,
     })
-    CombatTab:CreateSlider({
-        Name="Sell At Material Slots",Range={1,100},Increment=1,CurrentValue=20,Suffix=" slots",
-        Flag="MagicLootMoneyBagSlots",Callback=function(v) settings.moneyBagSlots=v end,
-    })
+    CombatTab:CreateLabel("Money Bag Capacity: Auto-detected from game (config value is fallback)")
     local moneyKeepDropdown
     moneyKeepDropdown=CombatTab:CreateDropdown({
         Name="Keep Materials (Do Not Sell)",Options=materialKeepOptions(),CurrentOption={},
