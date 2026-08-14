@@ -63,6 +63,9 @@ return function(Window, scriptInfo)
         autoEventRewards = false,
         autoFarm = false,
         autoDungeon = false,
+        autoMoney = false,
+        moneyStage = 1,
+        moneyBagSlots = 20,
         useSafeSpots = true,
         skillInterval = 0.65,
         autoDrops = false,
@@ -428,8 +431,12 @@ return function(Window, scriptInfo)
         return not ((inGround and inGround.Value) or (autoTraining and autoTraining.Value))
     end
 
-    local function teleportHighestStage()
+    local function teleportStage(wantedStage)
         local dungeonState = player:FindFirstChild("InDungeonChallenge")
+        wantedStage = math.max(0, math.floor(tonumber(wantedStage) or 0))
+        if dungeonState and wantedStage > 0 and dungeonState.Value == wantedStage then
+            return true, wantedStage
+        end
         if dungeonState and dungeonState.Value ~= 0 then
             if not returnFromDungeon() then return false end
             local deadline = os.clock() + 5
@@ -449,8 +456,13 @@ return function(Window, scriptInfo)
                         stage = tonumber(node.Name) or stage
                         node = node.Parent
                     end
-                    if stage and isActuallyVisible(object) and (not bestStage or stage > bestStage) then
-                        best, bestStage = object, stage
+                    if stage and isActuallyVisible(object) then
+                        if wantedStage > 0 and stage == wantedStage then
+                            best, bestStage = object, stage
+                            break
+                        elseif wantedStage <= 0 and (not bestStage or stage > bestStage) then
+                            best, bestStage = object, stage
+                        end
                     end
                 end
             end
@@ -458,6 +470,10 @@ return function(Window, scriptInfo)
         local clicked = best and activate(best) or false
         closeModule(module)
         return clicked, bestStage
+    end
+
+    local function teleportHighestStage()
+        return teleportStage(0)
     end
 
     local function useTrainingPotion()
@@ -556,6 +572,31 @@ return function(Window, scriptInfo)
         local clicked = button and isActuallyVisible(button) and activate(button) and 1 or 0
         closeModule(module)
         return clicked > 0
+    end
+
+    local function materialBagCount()
+        local count = 0
+        pcall(function()
+            local utilities = require(ReplicatedFirst.AllSideCode.UtilsSystem)
+            local bag = utilities.PlayerData.GetPlrDataByKey(player, "Bag")
+            local materialType = utilities.EnumMgr.ItemType.Material
+            if type(bag) == "table" then
+                for _, item in pairs(bag) do
+                    if type(item) == "table" and tonumber(item.tp) == materialType
+                        and item.lock ~= true and item.lock ~= 1 then
+                        count += 1
+                    end
+                end
+            end
+        end)
+        return count
+    end
+
+    local function isMoneyBagFull()
+        local serverLimit = player:FindFirstChild("LimitBagUsed")
+        local used = materialBagCount()
+        return (serverLimit and tonumber(serverLimit.Value) and serverLimit.Value > 0)
+            or used >= math.max(1, tonumber(settings.moneyBagSlots) or 20), used
     end
 
     local function claimOnlineRewards()
@@ -912,6 +953,28 @@ return function(Window, scriptInfo)
     CombatTab:CreateToggle({Name="Auto Collect Drops",CurrentValue=false,Flag="MagicLootAutoDrops",Callback=function(v) settings.autoDrops=v end})
     CombatTab:CreateDropdown({Name="Drop Priority",Options={"Rarity then Price","Price then Rarity"},CurrentOption={"Rarity then Price"},Flag="MagicLootDropPriority",Callback=function(v) settings.dropPriority=type(v)=="table" and v[1] or v end})
 
+    CombatTab:CreateSection("Money Loop")
+    local moneyStageOptions = {}
+    local careerStage = player:FindFirstChild("CareerMaxStage")
+    local highestMoneyStage = math.max(1, math.floor(careerStage and careerStage.Value or 1))
+    settings.moneyStage = highestMoneyStage
+    for stage = 1, highestMoneyStage do table.insert(moneyStageOptions, "Stage " .. stage) end
+    CombatTab:CreateDropdown({
+        Name="Money Farm Stage",Options=moneyStageOptions,CurrentOption={"Stage "..highestMoneyStage},
+        Flag="MagicLootMoneyStage",Callback=function(v)
+            local value=type(v)=="table" and v[1] or v
+            settings.moneyStage=math.clamp(tonumber(tostring(value):match("%d+")) or 1,1,highestMoneyStage)
+        end,
+    })
+    CombatTab:CreateSlider({
+        Name="Sell At Material Slots",Range={1,100},Increment=1,CurrentValue=20,Suffix=" slots",
+        Flag="MagicLootMoneyBagSlots",Callback=function(v) settings.moneyBagSlots=v end,
+    })
+    CombatTab:CreateToggle({
+        Name="Auto Money (Farm > Safe > Sell > Repeat)",CurrentValue=false,Flag="MagicLootAutoMoney",
+        Callback=function(v) settings.autoMoney=v end,
+    })
+
     local UtilityTab = Window:CreateTab("Rewards & Utility", 4483362458)
     UtilityTab:CreateSection("Claims")
     UtilityTab:CreateToggle({Name="Auto Online Rewards",CurrentValue=false,Flag="MagicLootRewards",Callback=function(v) settings.autoRewards=v end})
@@ -956,6 +1019,7 @@ return function(Window, scriptInfo)
     local skillAt = 0
     local travelAt = 0
     local dungeonEmptySince = 0
+    local moneySellAt = 0
 
     -- Cache streamed grounds immediately, including temporary/admin grounds
     -- that may disappear after the player travels to another area.
@@ -1000,13 +1064,14 @@ return function(Window, scriptInfo)
             if settings.autoRewards and now-rewardAt>=15 then rewardAt=now claimOnlineRewards() end
             if settings.autoAlchemy and now-alchemyAt>=20 then alchemyAt=now collectAlchemy() end
             if settings.autoEventRewards and now-eventAt>=20 then eventAt=now claimEventRewards() end
-            if settings.autoDrops then collectDrops() end
+            if settings.autoDrops or settings.autoMoney then collectDrops() end
 
-            if (settings.autoFarm or settings.autoDungeon) and not settings.autoTrain then
+            if (settings.autoFarm or settings.autoDungeon or settings.autoMoney) and not settings.autoTrain then
                 local dungeonState=player:FindFirstChild("InDungeonChallenge")
                 local aggroStage=player:FindFirstChild("DungeonAggroStage")
                 local dungeonValue=dungeonState and dungeonState.Value or 0
-                local preferredStage=settings.autoDungeon and math.max(
+                local bagFull, materialSlots = isMoneyBagFull()
+                local preferredStage=settings.autoMoney and settings.moneyStage or settings.autoDungeon and math.max(
                     dungeonValue,
                     aggroStage and aggroStage.Value or 0
                 ) or nil
@@ -1014,15 +1079,33 @@ return function(Window, scriptInfo)
                     local career = player:FindFirstChild("CareerMaxStage")
                     preferredStage = career and career.Value or nil
                 end
-                -- Dungeon mode owns stage travel. Do this before scanning for
+                -- Money mode returns to the town/safe area before selling, then
+                -- re-enters the same user-selected stage for the next cycle.
+                if settings.autoMoney and bagFull then
+                    dungeonEmptySince = 0
+                    if dungeonValue > 0 then
+                        combatStatus:Set("Money: bag full ("..materialSlots..") | returning safe")
+                        if now-travelAt > 3 then travelAt=now returnFromDungeon() end
+                    else
+                        combatStatus:Set(materialSlots > 0
+                            and ("Money: selling "..materialSlots.." material slots")
+                            or "Money: bag full, but no unlocked materials can be sold")
+                        if materialSlots > 0 and now-moneySellAt > 2 then
+                            moneySellAt = now
+                            performSell()
+                        end
+                    end
+                -- Dungeon modes own stage travel. Do this before scanning for
                 -- monsters because streamed stage models can remain visible in
                 -- the overworld and previously prevented Stage Jump entirely.
-                if settings.autoDungeon and dungeonValue <= 0 then
+                elseif (settings.autoDungeon or settings.autoMoney) and dungeonValue <= 0 then
                     dungeonEmptySince = 0
-                    combatStatus:Set("Dungeon: entering highest available stage")
+                    combatStatus:Set(settings.autoMoney
+                        and ("Money: entering Stage "..tostring(settings.moneyStage))
+                        or "Dungeon: entering highest available stage")
                     if now-travelAt > 5 then
                         travelAt = now
-                        teleportHighestStage()
+                        if settings.autoMoney then teleportStage(settings.moneyStage) else teleportHighestStage() end
                     end
                 else
                     local target=nearestMonster(preferredStage)
@@ -1049,7 +1132,7 @@ return function(Window, scriptInfo)
                         end
                     else
                         combatStatus:Set("Combat: waiting for monsters")
-                        if settings.autoDungeon then
+                        if settings.autoDungeon and not settings.autoMoney then
                             if dungeonEmptySince == 0 then dungeonEmptySince = now end
                             -- Once a cleared stage has no targets for a short
                             -- grace period, leave it and jump to the newly
@@ -1111,6 +1194,8 @@ return function(Window, scriptInfo)
         Rebirth = performRebirth,
         EquipBest = equipBest,
         Sell = performSell,
+        MaterialBagCount = materialBagCount,
+        IsMoneyBagFull = isMoneyBagFull,
         ClaimRewards = claimOnlineRewards,
         CollectAlchemy = collectAlchemy,
         ClaimEventRewards = claimEventRewards,
@@ -1122,6 +1207,7 @@ return function(Window, scriptInfo)
         RefreshESP = refreshEsp,
         LeaveTrainingGround = leaveTrainingGround,
         ReturnFromDungeon = returnFromDungeon,
+        TeleportStage = teleportStage,
         TeleportHighestStage = teleportHighestStage,
     }
 
