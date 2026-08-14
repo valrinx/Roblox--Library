@@ -87,6 +87,11 @@ return function(Window, scriptInfo)
         end
     end
 
+    local function setStatus(label, text)
+        if not label or type(label.Set)~="function" then return false end
+        return pcall(function() label:Set(text) end)
+    end
+
     local function connect(signal, callback)
         local connection = signal:Connect(callback)
         table.insert(connections, connection)
@@ -1336,7 +1341,7 @@ return function(Window, scriptInfo)
                 local inGround = player:FindFirstChild("InTrainGround")
                 local groundId = player:FindFirstChild("TrainGroundId")
                 if ground then
-                    trainStatus:Set(string.format("Train: x%s | server id %s", ground.multiplier, groundId and groundId.Value or "?"))
+                    setStatus(trainStatus,string.format("Train: x%s | server id %s", ground.multiplier, groundId and groundId.Value or "?"))
                     local _, _, root = getCharacter()
                     local groundCFrame=trainingCFrame(ground)
                     if settings.trainKeepPosition and root and groundCFrame
@@ -1345,12 +1350,12 @@ return function(Window, scriptInfo)
                     end
                 elseif now-travelAt>5 then
                     travelAt=now
-                    trainStatus:Set("Train: returning from dungeon")
+                    setStatus(trainStatus,"Train: returning from dungeon")
                     returnFromDungeon()
                 end
                 if settings.autoTrainingPotion and now-trainingPotionAt>30 then trainingPotionAt=now useTrainingPotion() end
             else
-                trainStatus:Set("Train: idle")
+                setStatus(trainStatus,"Train: idle")
             end
 
             if settings.autoRebirth and now-rebirthAt>=settings.rebirthInterval then rebirthAt=now performRebirth() end
@@ -1400,24 +1405,24 @@ return function(Window, scriptInfo)
                     dungeonEmptySince = 0
                     if moneyProgress > 0 then
                         moneySellRequested=true
-                        combatStatus:Set((bagFull and ("Money: bag full ("..usedSlots.." slots)")
+                        setStatus(combatStatus,(bagFull and ("Money: bag full ("..usedSlots.." slots)")
                             or "Money: target stage cleared").." | returning safe")
                         if now-travelAt > 3 then travelAt=now returnFromDungeon() end
                     else
-                        combatStatus:Set(materialSlots > 0
+                        setStatus(combatStatus,materialSlots > 0
                             and ("Money: selling "..materialSlots.." material slots")
                             or "Money: bag full, but no unlocked materials can be sold")
                         if sellableSlots > 0 and now-moneySellAt > 2 then
                             moneySellAt = now
                             local soldOk, soldCount = performMoneySell()
                             if not soldOk then
-                                combatStatus:Set("Money: selective sell failed; retrying")
+                                setStatus(combatStatus,"Money: selective sell failed; retrying")
                             elseif soldCount == 0 then
                                 moneySellRequested=false
-                                combatStatus:Set("Money: all remaining materials are protected")
+                                setStatus(combatStatus,"Money: all remaining materials are protected")
                             else
                                 moneySellRequested=false
-                                combatStatus:Set("Money: sold "..soldCount.." material slots")
+                                setStatus(combatStatus,"Money: sold "..soldCount.." material slots")
                             end
                         elseif sellableSlots==0 then
                             moneySellRequested=false
@@ -1428,7 +1433,7 @@ return function(Window, scriptInfo)
                 -- the overworld and previously prevented Stage Jump entirely.
                 elseif (settings.autoDungeon or settings.autoMoney) and dungeonValue <= 0 then
                     dungeonEmptySince = 0
-                    combatStatus:Set(settings.autoMoney
+                    setStatus(combatStatus,settings.autoMoney
                         and ("Money: entering Stage "..tostring(settings.moneyStage))
                         or "Dungeon: entering highest available stage")
                     if now-travelAt > 5 then
@@ -1436,7 +1441,7 @@ return function(Window, scriptInfo)
                         if settings.autoMoney then
                             local entered = teleportStage(settings.moneyStage)
                             if not entered then
-                                combatStatus:Set("Money: Stage "..settings.moneyStage
+                                setStatus(combatStatus,"Money: Stage "..settings.moneyStage
                                     .." needs a safe spot saved inside its battle area")
                             end
                         else
@@ -1451,11 +1456,11 @@ return function(Window, scriptInfo)
                         local stage = preferredStage or currentCombatStage()
                         local safeCFrame = safeSpots[tostring(stage)]
                         if settings.useSafeSpots and not safeCFrame then
-                            combatStatus:Set("Stage "..tostring(stage)..": save a safe spot first")
+                            setStatus(combatStatus,"Stage "..tostring(stage)..": save a safe spot first")
                         elseif settings.useSafeSpots and player:FindFirstChild("InStageSafeArea")
                             and player.InStageSafeArea.Value > 0
                             and safeCFrame and (root.Position-safeCFrame.Position).Magnitude < 8 then
-                            combatStatus:Set("Stage "..tostring(stage)..": saved spot is inside the official safe area")
+                            setStatus(combatStatus,"Stage "..tostring(stage)..": saved spot is inside the official safe area")
                         else
                             if safeCFrame then
                                 root.AssemblyLinearVelocity = Vector3.zero
@@ -1466,17 +1471,17 @@ return function(Window, scriptInfo)
                                 -- but this mode still never teleports to a monster.
                                 root.CFrame = CFrame.lookAt(root.Position, target.root.Position)
                             end
-                            combatStatus:Set("Stage "..tostring(stage).." | Target: "..target.model.Name
+                            setStatus(combatStatus,"Stage "..tostring(stage).." | Target: "..target.model.Name
                                 .." | "..math.floor(target.humanoid.Health).." HP")
                             if now-skillAt>=settings.skillInterval then skillAt=now castSkills() end
                         end
                     else
-                        combatStatus:Set("Combat: waiting for monsters")
+                        setStatus(combatStatus,"Combat: waiting for monsters")
                         if settings.autoMoney then
                             if dungeonEmptySince == 0 then dungeonEmptySince = now end
                             if moneyProgress>=settings.moneyStage and collectedDropCount>0 then
                                 dungeonEmptySince=now
-                                combatStatus:Set("Money: collecting target-stage drops")
+                                setStatus(combatStatus,"Money: collecting target-stage drops")
                             elseif now-dungeonEmptySince >= 6 and now-travelAt > 3 then
                                 travelAt = now
                                 dungeonEmptySince = now
@@ -1484,15 +1489,15 @@ return function(Window, scriptInfo)
                                     local nextStage = moneyProgress + 1
                                     local advanced, advanceReason = advanceMoneyStage(nextStage)
                                     if advanced then
-                                        combatStatus:Set("Money: advancing "..moneyProgress.." > "..nextStage)
+                                        setStatus(combatStatus,"Money: advancing "..moneyProgress.." > "..nextStage)
                                     elseif advanceReason == "missing-safe-spot" then
-                                        combatStatus:Set("Money: save a battle-area spot for Stage "..nextStage)
+                                        setStatus(combatStatus,"Money: save a battle-area spot for Stage "..nextStage)
                                     else
-                                        combatStatus:Set("Money: Stage "..nextStage.." did not activate; retrying")
+                                        setStatus(combatStatus,"Money: Stage "..nextStage.." did not activate; retrying")
                                     end
                                 else
                                     moneySellRequested=true
-                                    combatStatus:Set("Money: drops drained | returning safe to sell")
+                                    setStatus(combatStatus,"Money: drops drained | returning safe to sell")
                                     returnFromDungeon()
                                 end
                             end
@@ -1504,13 +1509,13 @@ return function(Window, scriptInfo)
                             if now-dungeonEmptySince >= 4 and now-travelAt > 5 then
                                 travelAt = now
                                 dungeonEmptySince = now
-                                combatStatus:Set("Dungeon: advancing stage")
+                                setStatus(combatStatus,"Dungeon: advancing stage")
                                 teleportHighestStage()
                             end
                         end
                     end
                 end
-            else combatStatus:Set("Combat: idle") end
+            else setStatus(combatStatus,"Combat: idle") end
 
             if (settings.monsterEsp or settings.dropEsp) and now-espAt>=0.75 then espAt=now refreshEsp() end
             end, function(message)
