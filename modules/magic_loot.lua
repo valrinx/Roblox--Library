@@ -549,8 +549,22 @@ return function(Window, scriptInfo)
         local character, humanoid, root = getCharacter()
         local params = RaycastParams.new()
         params.FilterType = Enum.RaycastFilterType.Exclude
-        params.FilterDescendantsInstances = character and {character,battleArea} or {battleArea}
-        local hit = workspace:Raycast(probe,Vector3.new(0,-math.max(100,battleArea.Size.Y+60),0),params)
+        local excluded=character and {character,battleArea} or {battleArea}
+        params.FilterDescendantsInstances=excluded
+        local hit
+        for _=1,16 do
+            local candidate=workspace:Raycast(probe,
+                Vector3.new(0,-math.max(100,battleArea.Size.Y+60),0),params)
+            if not candidate then break end
+            local maximumFloorY=battleArea.Position.Y+battleArea.Size.Y*0.5+2
+            if candidate.Instance.CanCollide and candidate.Instance.Transparency<0.95
+                and candidate.Normal.Y>0.55 and candidate.Position.Y<=maximumFloorY then
+                hit=candidate
+                break
+            end
+            table.insert(excluded,candidate.Instance)
+            params.FilterDescendantsInstances=excluded
+        end
         local rootOffset = (humanoid and humanoid.HipHeight or 2)
             +(root and root.Size.Y*0.5 or 1)
         local position = hit and (hit.Position+Vector3.new(0,rootOffset+0.25,0))
@@ -587,6 +601,15 @@ return function(Window, scriptInfo)
         -- Stage N-1's exit first; using Stage N's SafeArea skips the spawn gate.
         local safeArea = findStageArea(stage-1, "SafeArea")
             or findStageArea(stage, "SafeArea")
+        if saved and battleArea
+            and saved.Position.Y>battleArea.Position.Y+battleArea.Size.Y*0.5+3 then
+            local repaired=fallbackStageCFrame(battleArea,safeArea,saved.Rotation)
+            if repaired then
+                saved=repaired
+                safeSpots[tostring(stage)]=saved
+                pcall(persistSafeSpots)
+            end
+        end
         if safeArea then
             local _,_,root = getCharacter()
             local transitionRotation = saved and saved.Rotation
