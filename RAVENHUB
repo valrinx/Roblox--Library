@@ -316,57 +316,52 @@ end
 
 local loadedScripts = {}
 local scriptCleanupHandlers = {}
-local pendingModuleLoads = 0
 
 local function loadScriptModule(scriptInfo)
     if loadedScripts[scriptInfo.name] then return end
     loadedScripts[scriptInfo.name] = true
     scriptCleanupHandlers[scriptInfo.name] = nil
     setModuleStatus("Loading " .. scriptInfo.name .. "...")
-    pendingModuleLoads += 1
 
-    task.spawn(function()
-        local ok, result = pcall(function()
-            local raw = game:HttpGet(scriptInfo.moduleUrl)
-            assert(type(raw) == "string" and #raw > 10,
-                "HttpGet empty — URL: " .. scriptInfo.moduleUrl)
+    local ok, result = pcall(function()
+        local raw = game:HttpGet(scriptInfo.moduleUrl)
+        assert(type(raw) == "string" and #raw > 10,
+            "HttpGet empty — URL: " .. scriptInfo.moduleUrl)
 
-            local fn, compileErr = loadstring(raw)
-            assert(fn, "loadstring error: " .. tostring(compileErr))
+        local fn, compileErr = loadstring(raw)
+        assert(fn, "loadstring error: " .. tostring(compileErr))
 
-            local moduleFunc = fn()
-            assert(type(moduleFunc) == "function",
-                "module must return function, got: " .. type(moduleFunc))
+        local moduleFunc = fn()
+        assert(type(moduleFunc) == "function",
+            "module must return function, got: " .. type(moduleFunc))
 
-            local runtimeInfo = table.clone(scriptInfo)
-            runtimeInfo.hubRayfield = HubUI -- compatibility field for existing game modules
-            runtimeInfo.hubUI = HubUI
-            runtimeInfo.hubWindow = Window
-            runtimeInfo.registerCleanup = function(cleanupFn)
-                if type(cleanupFn) == "function" then
-                    scriptCleanupHandlers[scriptInfo.name] = cleanupFn
-                end
+        local runtimeInfo = table.clone(scriptInfo)
+        runtimeInfo.hubRayfield = HubUI -- compatibility field for existing game modules
+        runtimeInfo.hubUI = HubUI
+        runtimeInfo.hubWindow = Window
+        runtimeInfo.registerCleanup = function(cleanupFn)
+            if type(cleanupFn) == "function" then
+                scriptCleanupHandlers[scriptInfo.name] = cleanupFn
             end
-
-            moduleFunc(Window, runtimeInfo)
-        end)
-        if not ok then
-            loadedScripts[scriptInfo.name] = nil
-            scriptCleanupHandlers[scriptInfo.name] = nil
-            warn("[RAVEN HUB] Failed to load '" .. scriptInfo.name .. "': " .. tostring(result))
-            setModuleStatus("FAILED - " .. scriptInfo.name .. ": " .. tostring(result))
-            pcall(function()
-                HubUI:Notify({
-                    Title = "RAVEN HUB - Module failed",
-                    Content = scriptInfo.name .. ": " .. tostring(result),
-                    Duration = 10,
-                })
-            end)
-        else
-            setModuleStatus("Loaded " .. scriptInfo.name)
         end
-        pendingModuleLoads = math.max(0, pendingModuleLoads-1)
+
+        moduleFunc(Window, runtimeInfo)
     end)
+    if not ok then
+        loadedScripts[scriptInfo.name] = nil
+        scriptCleanupHandlers[scriptInfo.name] = nil
+        warn("[RAVEN HUB] Failed to load '" .. scriptInfo.name .. "': " .. tostring(result))
+        setModuleStatus("FAILED - " .. scriptInfo.name .. ": " .. tostring(result))
+        pcall(function()
+            HubUI:Notify({
+                Title = "RAVEN HUB - Module failed",
+                Content = scriptInfo.name .. ": " .. tostring(result),
+                Duration = 10,
+            })
+        end)
+    else
+        setModuleStatus("Loaded " .. scriptInfo.name)
+    end
 end
 
 local matchedAnyScript = false
@@ -428,11 +423,6 @@ HubSettingsTab:CreateButton({
 
 HubSettingsTab:InsertConfigSection("Right")
 
--- Module controls register asynchronously. Loading config before they exist
--- silently skips their flags, which made Save/Auto Load appear intermittent.
-local configLoadDeadline = os.clock()+15
-repeat task.wait(0.05)
-until pendingModuleLoads==0 or os.clock()>=configLoadDeadline
 pcall(function()
     HubUI:LoadAutoLoadConfig()
 end)
