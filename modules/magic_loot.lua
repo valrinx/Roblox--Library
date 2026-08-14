@@ -516,24 +516,34 @@ return function(Window, scriptInfo)
         stage = math.max(1, math.floor(tonumber(stage) or 1))
         local saved = safeSpots[tostring(stage)]
         local battleArea = findStageArea(stage, "BattleArea")
-        if not saved or not battleArea or not isPointInsidePart(battleArea, saved.Position, 2) then
+        -- The next stage is often not streamed until the player crosses the
+        -- current stage's exit. A persisted safe spot is still valid while its
+        -- BattleArea part is absent; validate it once that part has streamed.
+        if not saved or (battleArea and not isPointInsidePart(battleArea, saved.Position, 2)) then
             return false, "missing-safe-spot"
         end
         -- Enter through the next stage's official safe trigger first. Jumping
         -- straight from one BattleArea to another can race the server's door
         -- unlock and leaves the next monster wave unspawned.
         local safeArea = findStageArea(stage, "SafeArea")
+            or findStageArea(stage-1, "SafeArea")
         if safeArea then
             local safeDestination = CFrame.new(safeArea.Position) * saved.Rotation
             if not teleportTo(safeDestination, false) then return false, "safe-entry-failed" end
             local officialSafe = player:FindFirstChild("InStageSafeArea")
-            local safeDeadline = os.clock()+1.5
+            local safeDeadline = os.clock()+4
             repeat task.wait(0.1)
-            until not running or os.clock()>=safeDeadline or (officialSafe and officialSafe.Value>0)
+                battleArea = battleArea or findStageArea(stage, "BattleArea")
+            until not running or os.clock()>=safeDeadline
+                or (officialSafe and officialSafe.Value>0) or battleArea
+        end
+        battleArea = battleArea or findStageArea(stage, "BattleArea")
+        if battleArea and not isPointInsidePart(battleArea, saved.Position, 2) then
+            return false, "missing-safe-spot"
         end
         if not teleportTo(saved, false) then return false, "battle-entry-failed" end
         local dungeon = player:FindFirstChild("InDungeonChallenge")
-        local deadline = os.clock()+2
+        local deadline = os.clock()+6
         repeat task.wait(0.1)
         until not running or os.clock()>=deadline or (dungeon and dungeon.Value==stage)
         return dungeon and dungeon.Value==stage, "stage-not-activated"
@@ -645,8 +655,10 @@ return function(Window, scriptInfo)
             local materialType = utilities.EnumMgr.ItemType.Material
             if type(bag) == "table" then
                 for _, item in pairs(bag) do
-                    if type(item) == "table" and tonumber(item.tp) == materialType
-                        and item.lock ~= true and item.lock ~= 1 then
+                    -- Locked and recipe-protected materials still occupy bag
+                    -- slots. Excluding them prevented the sell threshold from
+                    -- ever being reached even when the real bag was full.
+                    if type(item) == "table" and tonumber(item.tp) == materialType then
                         count += 1
                     end
                 end
