@@ -114,6 +114,79 @@ return function(MacLib)
         return tostring(flag)
     end
 
+    local function installExactConfigLoader()
+        local HttpService = game:GetService("HttpService")
+
+        -- MacLib's bundled loader skips Toggle values when the saved state is
+        -- false. Replaying every supported value explicitly also makes loading
+        -- deterministic once all module flags have been registered.
+        function MacLib:LoadConfig(path)
+            if type(isfile) ~= "function" or type(readfile) ~= "function" then
+                return false, "Config system unavailable."
+            end
+            if path == nil or tostring(path) == "" then
+                return false, "Please select a config file."
+            end
+
+            local file = self.Folder .. "/settings/" .. tostring(path) .. ".json"
+            if not isfile(file) then
+                return false, "Invalid file"
+            end
+
+            local decodedOk, decoded = pcall(HttpService.JSONDecode, HttpService, readfile(file))
+            if not decodedOk or type(decoded) ~= "table" or type(decoded.objects) ~= "table" then
+                return false, "Unable to decode JSON data."
+            end
+
+            for _, saved in ipairs(decoded.objects) do
+                local option = self.Options[tostring(saved.flag or "")]
+                if option then
+                    local applied, applyError = pcall(function()
+                        if saved.type == "Toggle" then
+                            option:UpdateState(saved.state == true)
+                        elseif saved.type == "Slider" and saved.value ~= nil then
+                            option:UpdateValue(tonumber(saved.value) or saved.value)
+                            -- MacLib updates the slider display/value without
+                            -- replaying its callback during config loads. Keep
+                            -- the game module's runtime settings in sync too.
+                            local callback = option.Settings and option.Settings.Callback
+                            if type(callback) == "function" then
+                                callback(option:GetValue())
+                            end
+                        elseif saved.type == "Input" and saved.text ~= nil then
+                            option:UpdateText(tostring(saved.text))
+                        elseif saved.type == "Keybind" and saved.bind then
+                            local keyCode = Enum.KeyCode[tostring(saved.bind)]
+                            if keyCode then
+                                option:Bind(keyCode)
+                            end
+                        elseif saved.type == "Dropdown" and saved.value ~= nil then
+                            option:UpdateSelection(saved.value)
+                        elseif saved.type == "Colorpicker" and saved.color then
+                            local hex = tostring(saved.color):gsub("#", "")
+                            if #hex == 6 then
+                                option:SetColor(Color3.fromRGB(
+                                    tonumber(hex:sub(1, 2), 16) or 255,
+                                    tonumber(hex:sub(3, 4), 16) or 255,
+                                    tonumber(hex:sub(5, 6), 16) or 255
+                                ))
+                            end
+                            if saved.alpha ~= nil then
+                                option:SetAlpha(saved.alpha)
+                            end
+                        end
+                    end)
+                    if not applied then
+                        warn("[RAVEN HUB / MacLib] config flag '" .. tostring(saved.flag)
+                            .. "' failed: " .. tostring(applyError))
+                    end
+                end
+            end
+
+            return true
+        end
+    end
+
     local TabMethods = {}
     local WindowMethods = {}
 
