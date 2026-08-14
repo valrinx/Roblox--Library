@@ -130,8 +130,16 @@ return function(Window, scriptInfo)
 
     local function saveCurrentSafeSpot()
         local _, _, root = getCharacter()
+        local dungeon = player:FindFirstChild("InDungeonChallenge")
+        local officialSafe = player:FindFirstChild("InStageSafeArea")
         local stage = currentCombatStage()
-        if not root or stage <= 0 then return false, stage end
+        if not root or stage <= 0 then return false, stage, "Unable to detect the current stage" end
+        if not dungeon or dungeon.Value <= 0 then
+            return false, stage, "Enter the stage before saving its combat safe spot"
+        end
+        if officialSafe and officialSafe.Value > 0 then
+            return false, stage, "Walk out of the official safe area before saving (skills are disabled there)"
+        end
         safeSpots[tostring(stage)] = root.CFrame
         persistSafeSpots()
         return true, stage
@@ -594,9 +602,12 @@ return function(Window, scriptInfo)
 
     local function isMoneyBagFull()
         local serverLimit = player:FindFirstChild("LimitBagUsed")
-        local used = materialBagCount()
-        return (serverLimit and tonumber(serverLimit.Value) and serverLimit.Value > 0)
-            or used >= math.max(1, tonumber(settings.moneyBagSlots) or 20), used
+        local materialSlots = materialBagCount()
+        -- LimitBagUsed is a used-slot counter, not a boolean full flag. Treating
+        -- its first increment as "full" made Money mode return safe instantly.
+        local usedSlots = math.max(materialSlots, math.floor(tonumber(serverLimit and serverLimit.Value) or 0))
+        local threshold = math.max(1, tonumber(settings.moneyBagSlots) or 20)
+        return usedSlots >= threshold, materialSlots, usedSlots
     end
 
     local function claimOnlineRewards()
@@ -942,8 +953,8 @@ return function(Window, scriptInfo)
     CombatTab:CreateToggle({Name="Dungeon Farm Mode (Auto Stage)",CurrentValue=false,Flag="MagicLootDungeonFarm",Callback=function(v) settings.autoDungeon=v end})
     CombatTab:CreateToggle({Name="Use Per-Stage Safe Spots",CurrentValue=true,Flag="MagicLootUseSafeSpots",Callback=function(v) settings.useSafeSpots=v end})
     CombatTab:CreateButton({Name="Save Current Position For This Stage",Callback=function()
-        local ok, stage = saveCurrentSafeSpot()
-        notify("Magic Loot", ok and ("Saved safe spot for Stage " .. stage) or "Unable to detect the current stage")
+        local ok, stage, reason = saveCurrentSafeSpot()
+        notify("Magic Loot", ok and ("Saved safe spot for Stage " .. stage) or reason or "Unable to save this position")
     end})
     CombatTab:CreateButton({Name="Clear Safe Spot For This Stage",Callback=function()
         local ok, stage = clearCurrentSafeSpot()
@@ -1070,7 +1081,7 @@ return function(Window, scriptInfo)
                 local dungeonState=player:FindFirstChild("InDungeonChallenge")
                 local aggroStage=player:FindFirstChild("DungeonAggroStage")
                 local dungeonValue=dungeonState and dungeonState.Value or 0
-                local bagFull, materialSlots = isMoneyBagFull()
+                local bagFull, materialSlots, usedSlots = isMoneyBagFull()
                 local preferredStage=settings.autoMoney and settings.moneyStage or settings.autoDungeon and math.max(
                     dungeonValue,
                     aggroStage and aggroStage.Value or 0
@@ -1084,7 +1095,7 @@ return function(Window, scriptInfo)
                 if settings.autoMoney and bagFull then
                     dungeonEmptySince = 0
                     if dungeonValue > 0 then
-                        combatStatus:Set("Money: bag full ("..materialSlots..") | returning safe")
+                        combatStatus:Set("Money: bag full ("..usedSlots.." slots) | returning safe")
                         if now-travelAt > 3 then travelAt=now returnFromDungeon() end
                     else
                         combatStatus:Set(materialSlots > 0
@@ -1116,6 +1127,10 @@ return function(Window, scriptInfo)
                         local safeCFrame = safeSpots[tostring(stage)]
                         if settings.useSafeSpots and not safeCFrame then
                             combatStatus:Set("Stage "..tostring(stage)..": save a safe spot first")
+                        elseif settings.useSafeSpots and player:FindFirstChild("InStageSafeArea")
+                            and player.InStageSafeArea.Value > 0
+                            and safeCFrame and (root.Position-safeCFrame.Position).Magnitude < 8 then
+                            combatStatus:Set("Stage "..tostring(stage)..": saved spot is inside the official safe area")
                         else
                             if safeCFrame then
                                 root.AssemblyLinearVelocity = Vector3.zero
