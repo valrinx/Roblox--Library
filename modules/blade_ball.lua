@@ -86,19 +86,14 @@ return function(Window, scriptInfo)
             return timeToReach <= (0.3 + getPingMs() / 2000)
         end
     end
-    local VirtualInputManager = game:GetService("VirtualInputManager")
     local function doParry()
         local now = tick()
         if now - lastParryTick < 0.4 then return end
         lastParryTick = now
         parryCount += 1
-        -- Simulate real mouse click to trigger parry naturally (avoids BAC detection)
-        pcall(function()
-            VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
-            task.delay(0.05 + math.random() * 0.03, function()
-                VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
-            end)
-        end)
+        if parryRemote then
+            pcall(function() parryRemote:FireServer() end)
+        end
     end
 
     local function createBallEsp(ball)
