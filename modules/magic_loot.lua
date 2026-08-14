@@ -110,6 +110,27 @@ return function(Window, scriptInfo)
         return math.max(0, math.floor(tonumber(stage) or 0))
     end
 
+    local function findStageArea(stage, attribute)
+        stage = math.max(0, math.floor(tonumber(stage) or 0))
+        for _, object in ipairs(workspace:GetDescendants()) do
+            if object:IsA("BasePart") and object:GetAttribute(attribute) == true
+                and tonumber(object:GetAttribute("Stage")) == stage then
+                return object
+            end
+        end
+        return nil
+    end
+
+    local function isPointInsidePart(part, position, margin)
+        if not part or typeof(position) ~= "Vector3" then return false end
+        local point = part.CFrame:PointToObjectSpace(position)
+        local half = part.Size * 0.5
+        margin = math.max(0, tonumber(margin) or 0)
+        return math.abs(point.X) <= math.max(0, half.X-margin)
+            and math.abs(point.Y) <= half.Y+8
+            and math.abs(point.Z) <= math.max(0, half.Z-margin)
+    end
+
     local function persistSafeSpots()
         if type(writefile) ~= "function" then return false end
         if next(safeSpots) == nil and type(isfile) == "function" and type(delfile) == "function"
@@ -139,6 +160,10 @@ return function(Window, scriptInfo)
         end
         if officialSafe and officialSafe.Value > 0 then
             return false, stage, "Walk out of the official safe area before saving (skills are disabled there)"
+        end
+        local battleArea = findStageArea(stage, "BattleArea")
+        if battleArea and not isPointInsidePart(battleArea, root.Position, 2) then
+            return false, stage, "Move inside the Stage "..stage.." battle area before saving"
         end
         safeSpots[tostring(stage)] = root.CFrame
         persistSafeSpots()
@@ -465,9 +490,11 @@ return function(Window, scriptInfo)
                         node = node.Parent
                     end
                     if stage and isActuallyVisible(object) then
-                        if wantedStage > 0 and stage == wantedStage then
+                        if wantedStage > 0 and stage <= wantedStage and (not bestStage or stage > bestStage) then
+                            -- Stage Jump exposes checkpoints only. Start at the
+                            -- closest checkpoint below the requested stage and
+                            -- let the farm unlock each following stage in order.
                             best, bestStage = object, stage
-                            break
                         elseif wantedStage <= 0 and (not bestStage or stage > bestStage) then
                             best, bestStage = object, stage
                         end
@@ -482,6 +509,16 @@ return function(Window, scriptInfo)
 
     local function teleportHighestStage()
         return teleportStage(0)
+    end
+
+    local function advanceMoneyStage(stage)
+        stage = math.max(1, math.floor(tonumber(stage) or 1))
+        local saved = safeSpots[tostring(stage)]
+        local battleArea = findStageArea(stage, "BattleArea")
+        if not saved or not battleArea or not isPointInsidePart(battleArea, saved.Position, 2) then
+            return false
+        end
+        return teleportTo(saved, false)
     end
 
     local function useTrainingPotion()
@@ -1082,7 +1119,8 @@ return function(Window, scriptInfo)
                 local aggroStage=player:FindFirstChild("DungeonAggroStage")
                 local dungeonValue=dungeonState and dungeonState.Value or 0
                 local bagFull, materialSlots, usedSlots = isMoneyBagFull()
-                local preferredStage=settings.autoMoney and settings.moneyStage or settings.autoDungeon and math.max(
+                local preferredStage=settings.autoMoney and (dungeonValue > 0 and dungeonValue or settings.moneyStage)
+                    or settings.autoDungeon and math.max(
                     dungeonValue,
                     aggroStage and aggroStage.Value or 0
                 ) or nil
@@ -1116,7 +1154,15 @@ return function(Window, scriptInfo)
                         or "Dungeon: entering highest available stage")
                     if now-travelAt > 5 then
                         travelAt = now
-                        if settings.autoMoney then teleportStage(settings.moneyStage) else teleportHighestStage() end
+                        if settings.autoMoney then
+                            local entered = teleportStage(settings.moneyStage)
+                            if not entered then
+                                combatStatus:Set("Money: Stage "..settings.moneyStage
+                                    .." needs a safe spot saved inside its battle area")
+                            end
+                        else
+                            teleportHighestStage()
+                        end
                     end
                 else
                     local target=nearestMonster(preferredStage)
@@ -1147,7 +1193,24 @@ return function(Window, scriptInfo)
                         end
                     else
                         combatStatus:Set("Combat: waiting for monsters")
-                        if settings.autoDungeon and not settings.autoMoney then
+                        if settings.autoMoney then
+                            if dungeonEmptySince == 0 then dungeonEmptySince = now end
+                            if now-dungeonEmptySince >= 4 and now-travelAt > 3 then
+                                travelAt = now
+                                dungeonEmptySince = now
+                                if dungeonValue < settings.moneyStage then
+                                    local nextStage = dungeonValue + 1
+                                    if advanceMoneyStage(nextStage) then
+                                        combatStatus:Set("Money: advancing "..dungeonValue.." > "..nextStage)
+                                    else
+                                        combatStatus:Set("Money: save a battle-area spot for Stage "..nextStage)
+                                    end
+                                else
+                                    combatStatus:Set("Money: Stage "..settings.moneyStage.." cleared | restarting run")
+                                    returnFromDungeon()
+                                end
+                            end
+                        elseif settings.autoDungeon then
                             if dungeonEmptySince == 0 then dungeonEmptySince = now end
                             -- Once a cleared stage has no targets for a short
                             -- grace period, leave it and jump to the newly
