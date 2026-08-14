@@ -525,8 +525,10 @@ return function(Window, scriptInfo)
         -- Enter through the next stage's official safe trigger first. Jumping
         -- straight from one BattleArea to another can race the server's door
         -- unlock and leaves the next monster wave unspawned.
-        local safeArea = findStageArea(stage, "SafeArea")
-            or findStageArea(stage-1, "SafeArea")
+        -- SafeArea belongs to the exit of its own stage. To enter Stage N, cross
+        -- Stage N-1's exit first; using Stage N's SafeArea skips the spawn gate.
+        local safeArea = findStageArea(stage-1, "SafeArea")
+            or findStageArea(stage, "SafeArea")
         if safeArea then
             local safeDestination = CFrame.new(safeArea.Position) * saved.Rotation
             if not teleportTo(safeDestination, false) then return false, "safe-entry-failed" end
@@ -543,10 +545,13 @@ return function(Window, scriptInfo)
         end
         if not teleportTo(saved, false) then return false, "battle-entry-failed" end
         local dungeon = player:FindFirstChild("InDungeonChallenge")
+        local aggro = player:FindFirstChild("DungeonAggroStage")
         local deadline = os.clock()+6
         repeat task.wait(0.1)
-        until not running or os.clock()>=deadline or (dungeon and dungeon.Value==stage)
-        return dungeon and dungeon.Value==stage, "stage-not-activated"
+        until not running or os.clock()>=deadline
+            or math.max(dungeon and dungeon.Value or 0, aggro and aggro.Value or 0)>=stage
+        return math.max(dungeon and dungeon.Value or 0, aggro and aggro.Value or 0)>=stage,
+            "stage-not-activated"
     end
 
     local function useTrainingPotion()
@@ -1217,7 +1222,7 @@ return function(Window, scriptInfo)
 
     task.spawn(function()
         while running do
-            local iterationOk, iterationError = pcall(function()
+            local iterationOk, iterationError = xpcall(function()
             local now = os.clock()
             if settings.autoTrain then
                 local ground = selectTrainingGround()
@@ -1253,8 +1258,11 @@ return function(Window, scriptInfo)
             if settings.autoAlchemy and now-alchemyAt>=20 then alchemyAt=now collectAlchemy() end
             if settings.autoEventRewards and now-eventAt>=20 then eventAt=now claimEventRewards() end
             local dropDungeonState = player:FindFirstChild("InDungeonChallenge")
-            local moneyAtTargetStage = not settings.autoMoney or (dropDungeonState
-                and dropDungeonState.Value == settings.moneyStage)
+            local dropAggroState = player:FindFirstChild("DungeonAggroStage")
+            local moneyDropStage = math.max(dropDungeonState and dropDungeonState.Value or 0,
+                dropAggroState and dropAggroState.Value or 0)
+            local moneyAtTargetStage = not settings.autoMoney
+                or moneyDropStage == settings.moneyStage
             -- Intermediate stages are traversal only for Money mode. Suppress
             -- collection there even if the standalone Auto Drops toggle was
             -- left enabled, so bag capacity is reserved for the chosen stage.
@@ -1266,8 +1274,10 @@ return function(Window, scriptInfo)
                 local dungeonState=player:FindFirstChild("InDungeonChallenge")
                 local aggroStage=player:FindFirstChild("DungeonAggroStage")
                 local dungeonValue=dungeonState and dungeonState.Value or 0
+                local aggroValue=aggroStage and aggroStage.Value or 0
+                local moneyProgress=math.max(dungeonValue,aggroValue)
                 local bagFull, materialSlots, usedSlots = isMoneyBagFull()
-                local preferredStage=settings.autoMoney and (dungeonValue > 0 and dungeonValue or settings.moneyStage)
+                local preferredStage=settings.autoMoney and (moneyProgress > 0 and moneyProgress or settings.moneyStage)
                     or settings.autoDungeon and math.max(
                     dungeonValue,
                     aggroStage and aggroStage.Value or 0
@@ -1353,11 +1363,11 @@ return function(Window, scriptInfo)
                             if now-dungeonEmptySince >= 4 and now-travelAt > 3 then
                                 travelAt = now
                                 dungeonEmptySince = now
-                                if dungeonValue < settings.moneyStage then
-                                    local nextStage = dungeonValue + 1
+                                if moneyProgress < settings.moneyStage then
+                                    local nextStage = moneyProgress + 1
                                     local advanced, advanceReason = advanceMoneyStage(nextStage)
                                     if advanced then
-                                        combatStatus:Set("Money: advancing "..dungeonValue.." > "..nextStage)
+                                        combatStatus:Set("Money: advancing "..moneyProgress.." > "..nextStage)
                                     elseif advanceReason == "missing-safe-spot" then
                                         combatStatus:Set("Money: save a battle-area spot for Stage "..nextStage)
                                     else
@@ -1385,6 +1395,8 @@ return function(Window, scriptInfo)
             else combatStatus:Set("Combat: idle") end
 
             if (settings.monsterEsp or settings.dropEsp) and now-espAt>=0.75 then espAt=now refreshEsp() end
+            end, function(message)
+                return debug.traceback(tostring(message), 2)
             end)
             if not iterationOk then
                 warn("[RAVEN HUB][Magic Loot] loop error: " .. tostring(iterationError))
@@ -1447,6 +1459,7 @@ return function(Window, scriptInfo)
         ReturnFromDungeon = returnFromDungeon,
         TeleportStage = teleportStage,
         TeleportHighestStage = teleportHighestStage,
+        AdvanceMoneyStage = advanceMoneyStage,
     }
 
     if scriptInfo and type(scriptInfo.registerCleanup)=="function" then
