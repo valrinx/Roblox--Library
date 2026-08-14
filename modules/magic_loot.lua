@@ -642,14 +642,51 @@ return function(Window, scriptInfo)
         local options, seen = {}, {}
         pcall(function()
             local utilities = require(ReplicatedFirst.AllSideCode.UtilsSystem)
-            local bag = utilities.PlayerData.GetPlrDataByKey(player, "Bag")
             local materialType = utilities.EnumMgr.ItemType.Material
-            for _, item in pairs(type(bag)=="table" and bag or {}) do
-                local id = type(item)=="table" and tonumber(item.id) or nil
-                if id and tonumber(item.tp)==materialType and not seen[id] then
+            local configs = {}
+            -- FindCfgByID closes over each complete item-type config table.
+            -- Select the table whose rows are Material configs so the dropdown
+            -- includes every material, not only items currently in the bag.
+            if debug and type(debug.getupvalues)=="function" then
+                for _, candidate in pairs(debug.getupvalues(utilities.CfgFind.FindCfgByID)) do
+                    if type(candidate)=="table" then
+                        local matches = {}
+                        for id, config in pairs(candidate) do
+                            if type(config)=="table" and tonumber(config.tp)==materialType
+                                and tonumber(id) then
+                                matches[tonumber(id)] = config
+                            end
+                        end
+                        if (function() local n=0 for _ in pairs(matches) do n+=1 end return n end)()
+                            > (function() local n=0 for _ in pairs(configs) do n+=1 end return n end)() then
+                            configs = matches
+                        end
+                    end
+                end
+            end
+            -- Compatibility fallback for executors without debug upvalues.
+            if next(configs)==nil then
+                local bag = utilities.PlayerData.GetPlrDataByKey(player, "Bag")
+                for _, item in pairs(type(bag)=="table" and bag or {}) do
+                    local id=type(item)=="table" and tonumber(item.id) or nil
+                    if id and tonumber(item.tp)==materialType then
+                        configs[id]=utilities.CfgFind.FindCfgByID(id,materialType)
+                    end
+                end
+            end
+            for id, config in pairs(configs) do
+                if id and config and not seen[id] then
                     seen[id] = true
-                    local config = utilities.CfgFind.FindCfgByID(id, materialType)
                     local name = config and (config.ZhName or config.Model or config.Name) or "Material"
+                    if config and config.ZhName and utilities.TranslationHelper
+                        and type(utilities.TranslationHelper.TranslateByKey)=="function" then
+                        local translatedOk, translated = pcall(
+                            utilities.TranslationHelper.TranslateByKey, config.ZhName
+                        )
+                        if translatedOk and type(translated)=="string" and translated~="" then
+                            name = translated
+                        end
+                    end
                     table.insert(options, tostring(id).." | "..tostring(name))
                 end
             end
