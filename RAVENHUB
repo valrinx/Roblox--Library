@@ -172,14 +172,6 @@ local SCRIPTS = {
         version     = "v2.4",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/b50e6d758e0e15b3e0481dc9a0ce70c2c913fbf4/modules/magic_loot.lua",
     },
-    {
-        name        = "Blade Ball",
-        description = "Auto Parry | Ball ESP | Player ESP",
-        placeIds    = {16281300371, 13772394625},
-        gameIds     = {4777817887},
-        version     = "v1.0",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/blade_ball.lua",
-    },
     --[[
     {
         name      = "Another Game",
