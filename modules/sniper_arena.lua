@@ -19,7 +19,7 @@ return function(Window, scriptInfo)
     local settings = {
         aimlock = false,
         aimPart = "Head",
-        fov = 800,
+        fov = 200,
         smoothness = 1,
         triggerBot = false,
         triggerDelay = 0.03,
@@ -149,7 +149,7 @@ return function(Window, scriptInfo)
         if not target or not modelAlive(target.model) then return nil end
         target.part = getAimPart(target.model)
         local _, onScreen, screenDistance = projectPart(target.part)
-        if not onScreen or screenDistance > settings.fov * 1.5 then return nil end
+        if not onScreen or screenDistance > settings.fov then return nil end
         target.screenDistance = screenDistance
         return target
     end
@@ -395,11 +395,11 @@ return function(Window, scriptInfo)
         end,
     })
     CombatTab:CreateSlider({
-        Name = "FOV",
-        Range = {80, 1200},
+        Name = "Lock FOV",
+        Range = {40, 500},
         Increment = 10,
         Suffix = " px",
-        CurrentValue = 800,
+        CurrentValue = 200,
         Flag = "SAFOV",
         Callback = function(value) settings.fov = value end,
     })

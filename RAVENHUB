@@ -177,8 +177,8 @@ local SCRIPTS = {
         description = "Auto Lock | Trigger Bot | Entity ESP",
         placeIds    = {126042865144779, 122446657157717},
         gameIds     = {9534705677},
-        version     = "v1.1",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/sniper_arena.lua?v=sniper-arena-1.1",
+        version     = "v1.2",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/sniper_arena.lua?v=sniper-arena-1.2",
     },
     --[[
     {
