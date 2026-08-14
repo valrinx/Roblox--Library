@@ -53,6 +53,7 @@ return function(Window, scriptInfo)
         end
     end
     local ballsFolder = workspace:WaitForChild("Balls", 5)
+    local trainingBallsFolder = workspace:FindFirstChild("TrainingBalls")
     local remotes = ReplicatedStorage:FindFirstChild("Remotes")
     local parryRemote = remotes and remotes:FindFirstChild("ParryAttempt")
     local function getRealBalls()
