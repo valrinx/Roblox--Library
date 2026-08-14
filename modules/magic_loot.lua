@@ -1496,9 +1496,11 @@ return function(Window, scriptInfo)
                                         setStatus(combatStatus,"Money: Stage "..nextStage.." did not activate; retrying")
                                     end
                                 else
-                                    moneySellRequested=true
-                                    setStatus(combatStatus,"Money: drops drained | returning safe to sell")
-                                    returnFromDungeon()
+                                    -- Never leave the target stage with a partial
+                                    -- bag. Stay here for the next wave/drop cycle;
+                                    -- only the bag-full branch may return safe.
+                                    dungeonEmptySince=now
+                                    setStatus(combatStatus,"Money: bag not full | waiting at target stage")
                                 end
                             end
                         elseif settings.autoDungeon then
