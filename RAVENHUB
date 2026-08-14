@@ -169,8 +169,8 @@ local SCRIPTS = {
         description = "Train | Rebirth | Combat | Dungeon | Rewards | Utility",
         placeIds    = {133188236593503},
         gameIds     = {10506207587},
-        version     = "v2.3",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/8002fb63f57c9a974e24645aafd901ee75014974/modules/magic_loot.lua",
+        version     = "v2.4",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/b50e6d758e0e15b3e0481dc9a0ce70c2c913fbf4/modules/magic_loot.lua",
     },
     --[[
     {
