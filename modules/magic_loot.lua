@@ -148,6 +148,16 @@ return function(Window, scriptInfo)
         return nil
     end
 
+    local function isPointNearPart(part,position,distance)
+        if not part or typeof(position)~="Vector3" then return false end
+        local point=part.CFrame:PointToObjectSpace(position)
+        local half=part.Size*0.5
+        distance=math.max(0,tonumber(distance) or 0)
+        return math.abs(point.X)<=half.X+distance
+            and math.abs(point.Y)<=half.Y+distance
+            and math.abs(point.Z)<=half.Z+distance
+    end
+
     local function persistSafeSpots()
         if type(writefile) ~= "function" then return false end
         if next(safeSpots) == nil and type(isfile) == "function" and type(delfile) == "function"
@@ -173,7 +183,7 @@ return function(Window, scriptInfo)
         -- DungeonAggroStage can remain on the old stage after automation is
         -- disabled. Prefer the BattleArea physically containing the player so
         -- Save writes to the stage the player is actually standing in.
-        local stage = stageAtPosition(root.Position) or currentCombatStage()
+        local stage = root and (stageAtPosition(root.Position) or currentCombatStage()) or 0
         if not root or stage <= 0 then return false, stage, "Unable to detect the current stage" end
         if not dungeon or dungeon.Value <= 0 then
             return false, stage, "Enter the stage before saving its combat safe spot"
@@ -182,8 +192,8 @@ return function(Window, scriptInfo)
             return false, stage, "Walk out of the official safe area before saving (skills are disabled there)"
         end
         local battleArea = findStageArea(stage, "BattleArea")
-        if battleArea and not isPointInsidePart(battleArea, root.Position, 2) then
-            return false, stage, "Move inside the Stage "..stage.." battle area before saving"
+        if battleArea and not isPointNearPart(battleArea,root.Position,15) then
+            return false,stage,"Move closer to the Stage "..stage.." battle area before saving"
         end
         safeSpots[tostring(stage)] = root.CFrame
         persistSafeSpots()
@@ -576,24 +586,6 @@ return function(Window, scriptInfo)
         stage = math.max(1, math.floor(tonumber(stage) or 1))
         local saved = safeSpots[tostring(stage)]
         local battleArea = findStageArea(stage, "BattleArea")
-        -- The next stage is often not streamed until the player crosses the
-        -- current stage's exit. A persisted safe spot is still valid while its
-        -- BattleArea part is absent; validate it once that part has streamed.
-        if saved and battleArea and not isPointInsidePart(battleArea, saved.Position, 2) then
-            -- Older saved positions may sit a few studs outside the server's
-            -- BattleArea (Stage 15 is a known example). Move them just inside
-            -- the boundary so crossing the gate can activate the next wave.
-            local point = battleArea.CFrame:PointToObjectSpace(saved.Position)
-            local half = battleArea.Size*0.5
-            local repairedPoint = Vector3.new(
-                math.clamp(point.X,-half.X+5,half.X-5),
-                math.clamp(point.Y,-half.Y+3,half.Y+6),
-                math.clamp(point.Z,-half.Z+5,half.Z-5)
-            )
-            saved = CFrame.new(battleArea.CFrame:PointToWorldSpace(repairedPoint))*saved.Rotation
-            safeSpots[tostring(stage)] = saved
-            pcall(persistSafeSpots)
-        end
         -- Enter through the next stage's official safe trigger first. Jumping
         -- straight from one BattleArea to another can race the server's door
         -- unlock and leaves the next monster wave unspawned.
@@ -601,15 +593,6 @@ return function(Window, scriptInfo)
         -- Stage N-1's exit first; using Stage N's SafeArea skips the spawn gate.
         local safeArea = findStageArea(stage-1, "SafeArea")
             or findStageArea(stage, "SafeArea")
-        if saved and battleArea
-            and saved.Position.Y>battleArea.Position.Y+battleArea.Size.Y*0.5+3 then
-            local repaired=fallbackStageCFrame(battleArea,safeArea,saved.Rotation)
-            if repaired then
-                saved=repaired
-                safeSpots[tostring(stage)]=saved
-                pcall(persistSafeSpots)
-            end
-        end
         if safeArea then
             local _,_,root = getCharacter()
             local transitionRotation = saved and saved.Rotation
@@ -633,18 +616,35 @@ return function(Window, scriptInfo)
             end
         end
         if not saved then return false,"stage-not-streamed" end
-        if battleArea and not isPointInsidePart(battleArea, saved.Position, 2) then
-            return false, "invalid-safe-spot"
+        -- A user safe spot may intentionally sit just outside the combat box.
+        -- Use a separate internal point to activate the wave, then return to the
+        -- exact saved CFrame without overwriting it.
+        local activation=saved
+        if battleArea and not isPointInsidePart(battleArea,saved.Position,2) then
+            local point=battleArea.CFrame:PointToObjectSpace(saved.Position)
+            local half=battleArea.Size*0.5
+            local inside=Vector3.new(
+                math.clamp(point.X,-half.X+5,half.X-5),
+                math.clamp(point.Y,-half.Y+3,half.Y+2),
+                math.clamp(point.Z,-half.Z+5,half.Z-5)
+            )
+            activation=CFrame.new(battleArea.CFrame:PointToWorldSpace(inside))*saved.Rotation
         end
-        if not teleportTo(saved, false) then return false, "battle-entry-failed" end
+        if battleArea and activation.Position.Y>battleArea.Position.Y+battleArea.Size.Y*0.5+3 then
+            activation=fallbackStageCFrame(battleArea,safeArea,saved.Rotation) or activation
+        end
+        if not teleportTo(activation,false) then return false,"battle-entry-failed" end
         local dungeon = player:FindFirstChild("InDungeonChallenge")
         local aggro = player:FindFirstChild("DungeonAggroStage")
         local deadline = os.clock()+6
         repeat task.wait(0.1)
         until not running or os.clock()>=deadline
             or math.max(dungeon and dungeon.Value or 0, aggro and aggro.Value or 0)>=stage
-        return math.max(dungeon and dungeon.Value or 0, aggro and aggro.Value or 0)>=stage,
-            "stage-not-activated"
+        local activated=math.max(dungeon and dungeon.Value or 0,aggro and aggro.Value or 0)>=stage
+        if activated and (activation.Position-saved.Position).Magnitude>1 then
+            teleportTo(saved,false)
+        end
+        return activated,"stage-not-activated"
     end
 
     local function useTrainingPotion()
