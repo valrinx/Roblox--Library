@@ -77,7 +77,6 @@ return function(Window, scriptInfo)
         lowGraphics = false,
         autoRejoin = false,
     }
-    local safeSpotEditUntil = 0
 
     local function notify(title, content)
         local ui = scriptInfo and (scriptInfo.hubUI or scriptInfo.hubRayfield)
@@ -1200,14 +1199,11 @@ return function(Window, scriptInfo)
     CombatTab:CreateToggle({Name="Dungeon Farm Mode (Auto Stage)",CurrentValue=false,Flag="MagicLootDungeonFarm",Callback=function(v) settings.autoDungeon=v end})
     CombatTab:CreateToggle({Name="Use Per-Stage Safe Spots",CurrentValue=true,Flag="MagicLootUseSafeSpots",Callback=function(v) settings.useSafeSpots=v end})
     CombatTab:CreateButton({Name="Save Current Position For This Stage",Callback=function()
-        if (settings.autoFarm or settings.autoDungeon or settings.autoMoney)
-            and os.clock()>=safeSpotEditUntil then
-            safeSpotEditUntil=os.clock()+15
-            notify("Magic Loot","Position unlocked for 15 seconds. Move to the new spot, then press Save again.")
+        if settings.autoMoney then
+            notify("Magic Loot","Turn off Auto Money before saving a new safe spot.")
             return
         end
         local ok, stage, reason = saveCurrentSafeSpot()
-        if ok then safeSpotEditUntil=0 end
         notify("Magic Loot", ok and ("Saved safe spot for Stage " .. stage) or reason or "Unable to save this position")
     end})
     CombatTab:CreateButton({Name="Clear Safe Spot For This Stage",Callback=function()
@@ -1363,8 +1359,7 @@ return function(Window, scriptInfo)
                 collectDrops()
             end
 
-            if (settings.autoFarm or settings.autoDungeon or settings.autoMoney)
-                and not settings.autoTrain and now>=safeSpotEditUntil then
+            if (settings.autoFarm or settings.autoDungeon or settings.autoMoney) and not settings.autoTrain then
                 local dungeonState=player:FindFirstChild("InDungeonChallenge")
                 local aggroStage=player:FindFirstChild("DungeonAggroStage")
                 local dungeonValue=dungeonState and dungeonState.Value or 0
@@ -1486,8 +1481,6 @@ return function(Window, scriptInfo)
                         end
                     end
                 end
-            elseif now<safeSpotEditUntil then
-                combatStatus:Set("Safe spot edit: move, then press Save again")
             else combatStatus:Set("Combat: idle") end
 
             if (settings.monsterEsp or settings.dropEsp) and now-espAt>=0.75 then espAt=now refreshEsp() end
