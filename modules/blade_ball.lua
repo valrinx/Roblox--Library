@@ -12,7 +12,7 @@ return function(Window, scriptInfo)
     local parryCount = 0
     local lastParryTick = 0
     local settings = {
-        autoParry = false, parryDistance = 15, parryMode = "Distance",
+        autoParry = false, parryDistance = 20, parryMode = "Distance",
         pingCompensation = true, ballEsp = false, playerEsp = false, espShowDistance = true,
     }
     local function connect(signal, callback)
@@ -80,7 +80,7 @@ return function(Window, scriptInfo)
         local distance = getBallDistance(ball)
         local speed = getBallSpeed(ball)
         if settings.parryMode == "Distance" then
-            return distance <= (settings.parryDistance + getPingMs() / 1000 * speed + math.random() * 2)
+            return distance <= (settings.parryDistance + getPingMs() / 1000 * speed)
         else
             local timeToReach = speed > 0 and (distance / speed) or math.huge
             return timeToReach <= (0.3 + getPingMs() / 2000)
