@@ -1180,7 +1180,15 @@ return function(Window, scriptInfo)
             if settings.autoRewards and now-rewardAt>=15 then rewardAt=now claimOnlineRewards() end
             if settings.autoAlchemy and now-alchemyAt>=20 then alchemyAt=now collectAlchemy() end
             if settings.autoEventRewards and now-eventAt>=20 then eventAt=now claimEventRewards() end
-            if settings.autoDrops or settings.autoMoney then collectDrops() end
+            local dropDungeonState = player:FindFirstChild("InDungeonChallenge")
+            local moneyAtTargetStage = not settings.autoMoney or (dropDungeonState
+                and dropDungeonState.Value == settings.moneyStage)
+            -- Intermediate stages are traversal only for Money mode. Suppress
+            -- collection there even if the standalone Auto Drops toggle was
+            -- left enabled, so bag capacity is reserved for the chosen stage.
+            if (settings.autoDrops or settings.autoMoney) and moneyAtTargetStage then
+                collectDrops()
+            end
 
             if (settings.autoFarm or settings.autoDungeon or settings.autoMoney) and not settings.autoTrain then
                 local dungeonState=player:FindFirstChild("InDungeonChallenge")
