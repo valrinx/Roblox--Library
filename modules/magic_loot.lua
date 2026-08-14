@@ -517,9 +517,26 @@ return function(Window, scriptInfo)
         local saved = safeSpots[tostring(stage)]
         local battleArea = findStageArea(stage, "BattleArea")
         if not saved or not battleArea or not isPointInsidePart(battleArea, saved.Position, 2) then
-            return false
+            return false, "missing-safe-spot"
         end
-        return teleportTo(saved, false)
+        -- Enter through the next stage's official safe trigger first. Jumping
+        -- straight from one BattleArea to another can race the server's door
+        -- unlock and leaves the next monster wave unspawned.
+        local safeArea = findStageArea(stage, "SafeArea")
+        if safeArea then
+            local safeDestination = CFrame.new(safeArea.Position) * saved.Rotation
+            if not teleportTo(safeDestination, false) then return false, "safe-entry-failed" end
+            local officialSafe = player:FindFirstChild("InStageSafeArea")
+            local safeDeadline = os.clock()+1.5
+            repeat task.wait(0.1)
+            until not running or os.clock()>=safeDeadline or (officialSafe and officialSafe.Value>0)
+        end
+        if not teleportTo(saved, false) then return false, "battle-entry-failed" end
+        local dungeon = player:FindFirstChild("InDungeonChallenge")
+        local deadline = os.clock()+2
+        repeat task.wait(0.1)
+        until not running or os.clock()>=deadline or (dungeon and dungeon.Value==stage)
+        return dungeon and dungeon.Value==stage, "stage-not-activated"
     end
 
     local function useTrainingPotion()
@@ -1320,10 +1337,13 @@ return function(Window, scriptInfo)
                                 dungeonEmptySince = now
                                 if dungeonValue < settings.moneyStage then
                                     local nextStage = dungeonValue + 1
-                                    if advanceMoneyStage(nextStage) then
+                                    local advanced, advanceReason = advanceMoneyStage(nextStage)
+                                    if advanced then
                                         combatStatus:Set("Money: advancing "..dungeonValue.." > "..nextStage)
-                                    else
+                                    elseif advanceReason == "missing-safe-spot" then
                                         combatStatus:Set("Money: save a battle-area spot for Stage "..nextStage)
+                                    else
+                                        combatStatus:Set("Money: Stage "..nextStage.." did not activate; retrying")
                                     end
                                 else
                                     combatStatus:Set("Money: Stage "..settings.moneyStage.." cleared | restarting run")
