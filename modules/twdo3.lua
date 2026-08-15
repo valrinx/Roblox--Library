@@ -409,6 +409,10 @@ return function(Window, scriptInfo)
     local function getDisplayColor(record, distance)
         local color = record.color
         if settings.threatColors and record.category ~= "loot" then
+            -- Don't override friend/teammate colors with threat colors
+            if record.category == "player" and (isFriend(record.player) or isTeammate(record.player)) then
+                return color
+            end
             if distance <= settings.threatNearDistance then
                 return Color3.fromRGB(255, 55, 55)
             elseif distance <= settings.threatMediumDistance then
