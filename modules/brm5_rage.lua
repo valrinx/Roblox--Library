@@ -55,9 +55,10 @@ local Window = MacLib:Window({
 })
 
 -- Tabs
-local TabOverview = Window:Tab({ Name = "Overview", Image = "rbxassetid://7733960981" })
-local TabCombat = Window:Tab({ Name = "Combat", Image = "rbxassetid://7734053495" })
-local TabESP = Window:Tab({ Name = "ESP", Image = "rbxassetid://7734009413" })
+local TabGroup = Window:TabGroup()
+local TabOverview = TabGroup:Tab({ Name = "Overview", Image = "rbxassetid://7733960981" })
+local TabCombat = TabGroup:Tab({ Name = "Combat", Image = "rbxassetid://7734053495" })
+local TabESP = TabGroup:Tab({ Name = "ESP", Image = "rbxassetid://7734009413" })
 
 -- Overview Section
 local SectionInfo = TabOverview:Section({ Name = "Info", Side = "Left" })
@@ -172,8 +173,8 @@ SectionMovement:Toggle({
 SectionMovement:Slider({
     Name = "Walk Speed",
     Default = 24,
-    Min = 16,
-    Max = 60,
+    Minimum = 16,
+    Maximum = 60,
     Callback = function(val)
         speedValue = val
     end,
@@ -477,8 +478,8 @@ SectionESP:Toggle({
 SectionESP:Slider({
     Name = "Max Distance",
     Default = 500,
-    Min = 50,
-    Max = 1000,
+    Minimum = 50,
+    Maximum = 1000,
     Callback = function(val)
         espSettings.maxDistance = val
     end,
@@ -506,7 +507,7 @@ end)
 -- ═══════════════════════════════════════════════
 -- NOTIFICATION
 -- ═══════════════════════════════════════════════
-MacLib:Notification({
+Window:Notify({
     Title = "RAVEN HUB",
     Description = "BRM5 v3.2 loaded! All features ready.",
     Duration = 5,
