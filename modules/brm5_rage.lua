@@ -300,11 +300,21 @@ return function(Window, info)
                                     selfModel = model
                                 end
                                 if dist <= espSettings.maxDistance then
+                                    -- Detect Player vs AI:
+                                    -- AI models have children named "AI_*" (AI_AK, AI_Beanie, etc)
+                                    -- Player models have BillboardGui (nametag) and no AI_ prefixed items
+                                    local hasAI = false
+                                    for _, child in ipairs(model:GetChildren()) do
+                                        if string.sub(child.Name, 1, 3) == "AI_" then
+                                            hasAI = true
+                                            break
+                                        end
+                                    end
                                     targets[#targets + 1] = {
                                         model = model,
                                         root = desc,
                                         dist = dist,
-                                        isPlayer = false, -- all treated as targets
+                                        isPlayer = not hasAI,
                                     }
                                 end
                             end
