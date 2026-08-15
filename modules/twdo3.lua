@@ -1366,6 +1366,29 @@ return function(Window, scriptInfo)
         notify("TWDO3", "Combat suite failed: " .. tostring(combatResult))
     end
 
+    local rageController = nil
+    local rageOk, rageResult = pcall(function()
+        local rageUrl = "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/twdo3_rage.lua?v=twdo3-rage-1"
+        local rageSource = game:HttpGet(rageUrl)
+        local rageChunk, rageCompileError = loadstring(rageSource)
+        assert(rageChunk, "TWDO3 rage compile error: " .. tostring(rageCompileError))
+        local rageFactory = rageChunk()
+        assert(type(rageFactory) == "function", "TWDO3 rage did not return a factory")
+        return rageFactory({
+            Window = Window,
+            localPlayer = localPlayer,
+            settings = settings,
+            notify = notify,
+        })
+    end)
+    if rageOk then
+        rageController = rageResult
+        notify("TWDO3", "Rage suite loaded")
+    else
+        warn("[RAVEN HUB] Rage: " .. tostring(rageResult))
+        notify("TWDO3", "Rage suite failed: " .. tostring(rageResult))
+    end
+
     local PlayersTab = Window:CreateTab("Spectate", 4483362458)
     local initialOptions = collectPlayerOptions()
     playerDropdown = PlayersTab:CreateDropdown({
@@ -1517,6 +1540,10 @@ return function(Window, scriptInfo)
         end
         scriptRunning = false
         setCameraToLocalPlayer()
+        if rageController and rageController.Destroy then
+            pcall(rageController.Destroy, rageController)
+        end
+        rageController = nil
         if combatController and combatController.Destroy then
             pcall(combatController.Destroy, combatController)
         end
