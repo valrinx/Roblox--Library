@@ -126,7 +126,7 @@ local HUB_BUILD = "maclib-2"
 
 local SCRIPTS = {
     {
-        name        = "Dueling Grounds Ã¢Å¡â€Ã¯Â¸Â",
+        name        = "Dueling Grounds ?????????????",
         description = "Marker Auto Parry | Auto Face | Target Assist",
         placeIds    = {94217045453265},
         gameIds     = {9051406594},
@@ -141,7 +141,7 @@ local SCRIPTS = {
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/My_knife_farm",
     },
     {
-        name        = "Slime Seas Ã¢Å¡â€��¯Â¸Â Anime RPG",
+        name        = "Slime Seas ???????????????? Anime RPG",
         description = "Teleport | Auto Farm | Kill Aura | Infinite Stamina",
         placeIds    = {99046552174353},
         gameIds     = {99046552174353},
@@ -187,6 +187,14 @@ local SCRIPTS = {
         gameIds     = {9889811676},
         version     = "v1.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/aqp_deadzone.lua",
+    },
+    {
+        name        = "Apocalypse Rising 2",
+        description = "Player/Zombie/Vehicle/Loot ESP | Fullbright | No Fog | FOV | No Recoil",
+        placeIds    = {863266079},
+        gameIds     = {358276974},
+        version     = "v1.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/ar2.lua",
     },
     --[[
     {
@@ -342,7 +350,7 @@ local function loadScriptModule(scriptInfo)
     local ok, result = pcall(function()
         local raw = game:HttpGet(scriptInfo.moduleUrl)
         assert(type(raw) == "string" and #raw > 10,
-            "HttpGet empty Ã¢â‚¬â€ URL: " .. scriptInfo.moduleUrl)
+            "HttpGet empty ?????????? URL: " .. scriptInfo.moduleUrl)
 
         local fn, compileErr = loadstring(raw)
         assert(fn, "loadstring error: " .. tostring(compileErr))
