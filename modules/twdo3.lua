@@ -175,6 +175,7 @@ return function(Window, scriptInfo)
 
     local friendCache = {}
     local friendCacheTime = {}
+    local friendCacheRefreshing = {}
     local FRIEND_CACHE_TTL = 30
 
     local function isFriend(player)
@@ -183,17 +184,25 @@ return function(Window, scriptInfo)
         end
         local userId = player.UserId
         local now = os.clock()
+        -- Return cached value if fresh
         if friendCache[userId] ~= nil and (now - (friendCacheTime[userId] or 0)) < FRIEND_CACHE_TTL then
             return friendCache[userId]
         end
-        local ok, result = pcall(function()
-            return localPlayer:IsFriendsWith(userId)
-        end)
-        if ok then
-            friendCache[userId] = result
-            friendCacheTime[userId] = now
-            return result
+        -- If cache expired, start async refresh but return stale value (don't yield)
+        if not friendCacheRefreshing[userId] then
+            friendCacheRefreshing[userId] = true
+            task.spawn(function()
+                local ok, result = pcall(function()
+                    return localPlayer:IsFriendsWith(userId)
+                end)
+                if ok then
+                    friendCache[userId] = result
+                    friendCacheTime[userId] = os.clock()
+                end
+                friendCacheRefreshing[userId] = nil
+            end)
         end
+        -- Return stale cache or false while refreshing
         return friendCache[userId] or false
     end
 
@@ -713,6 +722,8 @@ return function(Window, scriptInfo)
                 return false
             end
         end
+
+        local position = record.staticPosition or safePosition(record.target, record.root)
         if not position then
             return false
         end
