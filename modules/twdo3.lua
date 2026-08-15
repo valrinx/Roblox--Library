@@ -334,18 +334,77 @@ return function(Window, scriptInfo)
         return string.format("%.1f", value)
     end
 
+    local BLOOD_STAGE_RATIO = {
+        Stable = 1.0,
+        Injured = 0.6,
+        Critical = 0.25,
+        Dead = 0,
+    }
+
+    local function getActualHealth(record)
+        -- Walker: use model attribute "Health" if available
+        if record.category == "walker" and record.target then
+            local attrHealth = record.target:GetAttribute("Health")
+            if attrHealth then
+                local maxHealth = record.target:GetAttribute("MaxHealth") or 100
+                return attrHealth, maxHealth
+            end
+        end
+        -- Player: use BloodStage attribute (wound-based system)
+        if record.category == "player" and record.player then
+            local bloodStage = record.player:GetAttribute("BloodStage")
+            if bloodStage then
+                local ratio = BLOOD_STAGE_RATIO[bloodStage] or 1.0
+                local woundCount = record.player:GetAttribute("WoundCount") or 0
+                -- Reduce ratio slightly per wound
+                ratio = math.max(ratio - (woundCount * 0.1), 0)
+                return ratio * 100, 100
+            end
+        end
+        -- Fallback to Humanoid.Health
+        if record.humanoid then
+            return math.max(record.humanoid.Health, 0), math.max(record.humanoid.MaxHealth, 1)
+        end
+        return 100, 100
+    end
+
+    local function getBloodStageText(record)
+        if record.category == "player" and record.player then
+            local stage = record.player:GetAttribute("BloodStage")
+            local bleeding = record.player:GetAttribute("Bleeding")
+            local wounds = record.player:GetAttribute("WoundCount") or 0
+            if stage then
+                local text = stage
+                if bleeding then
+                    text = text .. " [BLEEDING]"
+                end
+                if wounds > 0 then
+                    text = text .. " W:" .. wounds
+                end
+                return text
+            end
+        end
+        return nil
+    end
+
     local function applyHealthVisual(record)
         if not record.active or not record.humanoid or not record.healthBackground.Parent then
             return
         end
 
-        local health = math.max(record.humanoid.Health, 0)
-        local maxHealth = math.max(record.humanoid.MaxHealth, 1)
+        local health, maxHealth = getActualHealth(record)
         local ratio = math.clamp(health / maxHealth, 0, 1)
         record.healthBackground.Size = UDim2.fromOffset(settings.healthBarWidth, 4)
         record.healthFill.Size = UDim2.fromScale(ratio, 1)
         record.healthFill.BackgroundColor3 = Color3.fromHSV(ratio * 0.33, 0.85, 1)
-        record.healthText = string.format("HP %s/%s", formatHealth(health), formatHealth(maxHealth))
+
+        -- Use BloodStage text for players, HP numbers for walkers
+        local stageText = getBloodStageText(record)
+        if stageText then
+            record.healthText = stageText
+        else
+            record.healthText = string.format("HP %s/%s", formatHealth(health), formatHealth(maxHealth))
+        end
     end
 
     local function markDeath(record)
@@ -564,6 +623,36 @@ return function(Window, scriptInfo)
             table.insert(record.connections, record.humanoid.Died:Connect(removeIfDead))
             applyHealthVisual(record)
         end
+
+        -- TWDO3: Listen to attribute-based health changes
+        if record.category == "player" and record.player then
+            table.insert(record.connections, record.player:GetAttributeChangedSignal("BloodStage"):Connect(function()
+                local stage = record.player:GetAttribute("BloodStage")
+                if stage == "Dead" then
+                    markDeath(record)
+                    destroyRecord(category, key)
+                else
+                    applyHealthVisual(record)
+                end
+            end))
+            table.insert(record.connections, record.player:GetAttributeChangedSignal("WoundCount"):Connect(function()
+                applyHealthVisual(record)
+            end))
+            table.insert(record.connections, record.player:GetAttributeChangedSignal("Bleeding"):Connect(function()
+                applyHealthVisual(record)
+            end))
+        end
+        if record.category == "walker" and record.target then
+            table.insert(record.connections, record.target:GetAttributeChangedSignal("Health"):Connect(function()
+                local attrHealth = record.target:GetAttribute("Health")
+                if attrHealth and attrHealth <= 0 then
+                    markDeath(record)
+                    destroyRecord(category, key)
+                else
+                    applyHealthVisual(record)
+                end
+            end))
+        end
         table.insert(record.connections, target.AncestryChanged:Connect(function(_, parent)
             if not parent and record.active and records[category][key] == record then
                 destroyRecord(category, key)
@@ -608,8 +697,22 @@ return function(Window, scriptInfo)
             markDeath(record)
             return false
         end
-
-        local position = record.staticPosition or safePosition(record.target, record.root)
+        -- TWDO3: player dies via BloodStage attribute
+        if record.category == "player" and record.player then
+            local stage = record.player:GetAttribute("BloodStage")
+            if stage == "Dead" then
+                markDeath(record)
+                return false
+            end
+        end
+        -- TWDO3: walker dies via Health attribute
+        if record.category == "walker" and record.target then
+            local attrHealth = record.target:GetAttribute("Health")
+            if attrHealth and attrHealth <= 0 then
+                markDeath(record)
+                return false
+            end
+        end
         if not position then
             return false
         end
