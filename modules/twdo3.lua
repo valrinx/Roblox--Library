@@ -843,7 +843,9 @@ return function(Window, scriptInfo)
                 local root = walker:FindFirstChild("HumanoidRootPart")
                     or walker:FindFirstChild("Torso")
                     or findAdornee(walker)
-                if humanoid and root and humanoid.Health > 0 then
+                local attrHealth = walker:GetAttribute("Health")
+                local isDead = (attrHealth ~= nil and attrHealth <= 0) or humanoid.Health <= 0
+                if humanoid and root and not isDead then
                     local distance = (root.Position - localPosition).Magnitude
                     if distance <= settings.walkerDistance then
                         table.insert(candidates, {
