@@ -346,9 +346,15 @@ return function(Window, info)
 
         -- Render thread (lightweight, only draws cached targets)
         task.spawn(function()
+            local frameSkip = 0
             while getgenv().__RAVEN_ESP_ACTIVE do
                 local ok, err = pcall(function()
                     RunService.RenderStepped:Wait()
+
+                    -- Skip every other frame for performance
+                    frameSkip = frameSkip + 1
+                    if frameSkip < 2 then return end
+                    frameSkip = 0
 
                     if not espSettings.enabled then
                         for _, s in pairs(drawings) do hideSet(s) end
