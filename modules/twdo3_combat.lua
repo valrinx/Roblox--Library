@@ -41,6 +41,7 @@ return function(context)
     applyDefault("predictionDistanceScale", 0.08)
     applyDefault("aimWallCheck", true)
     applyDefault("ignoreTeammates", true)
+    applyDefault("ignoreFriends", true)
     applyDefault("triggerBot", false)
     applyDefault("triggerDelay", 0.08)
     applyDefault("triggerRadius", 10)
@@ -60,11 +61,48 @@ return function(context)
         end
     end
 
+    local friendCache = {}
+    local friendCacheTime = {}
+    local FRIEND_CACHE_TTL = 30 -- seconds
+
+    local function isFriend(player)
+        if not player or player == localPlayer then
+            return false
+        end
+        local userId = player.UserId
+        local now = os.clock()
+        if friendCache[userId] ~= nil and (now - (friendCacheTime[userId] or 0)) < FRIEND_CACHE_TTL then
+            return friendCache[userId]
+        end
+        local ok, result = pcall(function()
+            return localPlayer:IsFriendsWith(userId)
+        end)
+        if ok then
+            friendCache[userId] = result
+            friendCacheTime[userId] = now
+            return result
+        end
+        return friendCache[userId] or false
+    end
+
     local function isTeammate(player)
         return player
             and player ~= localPlayer
             and localPlayer.Team ~= nil
             and player.Team == localPlayer.Team
+    end
+
+    local function shouldIgnorePlayer(player)
+        if not player or player == localPlayer then
+            return true
+        end
+        if settings.ignoreTeammates and isTeammate(player) then
+            return true
+        end
+        if settings.ignoreFriends and isFriend(player) then
+            return true
+        end
+        return false
     end
 
     local function getWalkerFolder()
@@ -159,7 +197,7 @@ return function(context)
             if not settings.aimPlayers or not target.player or target.player.Parent ~= Players then
                 return false
             end
-            if settings.ignoreTeammates and isTeammate(target.player) then
+            if shouldIgnorePlayer(target.player) then
                 return false
             end
         elseif not settings.aimWalkers then
@@ -219,7 +257,7 @@ return function(context)
 
         if settings.aimPlayers then
             for _, player in ipairs(Players:GetPlayers()) do
-                if player ~= localPlayer and not (settings.ignoreTeammates and isTeammate(player)) then
+                if player ~= localPlayer and not shouldIgnorePlayer(player) then
                     local model = player.Character
                     if model and isAlive(model) and getTargetPart(model) then
                         local target = {kind = "player", player = player, model = model}
@@ -378,7 +416,7 @@ return function(context)
         local desired = {}
         if settings.bigHeadPlayers then
             for _, player in ipairs(Players:GetPlayers()) do
-                if player ~= localPlayer and not (settings.ignoreTeammates and isTeammate(player)) then
+                if player ~= localPlayer and not shouldIgnorePlayer(player) then
                     local character = player.Character
                     local head = character and character:FindFirstChild("Head")
                     if head and isAlive(character) then
@@ -581,6 +619,14 @@ return function(context)
         Flag = "TWDO3AimIgnoreTeam",
         Callback = function(value)
             settings.ignoreTeammates = value
+        end,
+    })
+    CombatTab:CreateToggle({
+        Name = "Ignore Friends",
+        CurrentValue = true,
+        Flag = "TWDO3AimIgnoreFriends",
+        Callback = function(value)
+            settings.ignoreFriends = value
         end,
     })
     CombatTab:CreateToggle({
