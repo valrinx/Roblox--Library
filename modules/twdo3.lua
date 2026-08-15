@@ -345,7 +345,8 @@ return function(Window, scriptInfo)
 
     local BLOOD_STAGE_RATIO = {
         Stable = 1.0,
-        Injured = 0.6,
+        Weak = 0.75,
+        Injured = 0.5,
         Critical = 0.25,
         Dead = 0,
     }
@@ -359,18 +360,28 @@ return function(Window, scriptInfo)
                 return attrHealth, maxHealth
             end
         end
-        -- Player: use BloodStage attribute (wound-based system)
+        -- Player: use BloodStage + WoundCount + BleedRate attributes (wound-based system)
+        -- Humanoid.Health is NEVER changed in TWDO3 — always 100
         if record.category == "player" and record.player then
             local bloodStage = record.player:GetAttribute("BloodStage")
             if bloodStage then
-                local ratio = BLOOD_STAGE_RATIO[bloodStage] or 1.0
+                local ratio = BLOOD_STAGE_RATIO[bloodStage]
+                if ratio == nil then
+                    -- Unknown stage: assume mid-range rather than full
+                    ratio = 0.5
+                end
                 local woundCount = record.player:GetAttribute("WoundCount") or 0
-                -- Reduce ratio slightly per wound
-                ratio = math.max(ratio - (woundCount * 0.1), 0)
+                local bleedRate = record.player:GetAttribute("BleedRate") or 0
+                -- Each wound reduces effective HP; bleeding further penalizes
+                ratio = ratio - (woundCount * 0.08)
+                if bleedRate > 0 then
+                    ratio = ratio - math.min(bleedRate * 0.15, 0.2)
+                end
+                ratio = math.clamp(ratio, 0, 1)
                 return ratio * 100, 100
             end
         end
-        -- Fallback to Humanoid.Health
+        -- Fallback: should not reach here for TWDO3 players
         if record.humanoid then
             return math.max(record.humanoid.Health, 0), math.max(record.humanoid.MaxHealth, 1)
         end
@@ -397,7 +408,11 @@ return function(Window, scriptInfo)
     end
 
     local function applyHealthVisual(record)
-        if not record.active or not record.humanoid or not record.healthBackground.Parent then
+        if not record.active or not record.healthBackground.Parent then
+            return
+        end
+        -- For TWDO3 players, health is attribute-driven (Humanoid.Health never changes)
+        if not record.humanoid and record.category ~= "player" then
             return
         end
 
@@ -576,7 +591,7 @@ return function(Window, scriptInfo)
         healthBackground.BorderSizePixel = 0
         healthBackground.Position = UDim2.new(0.5, 0, 0, 37)
         healthBackground.Size = UDim2.fromOffset(settings.healthBarWidth, 4)
-        healthBackground.Visible = options.humanoid ~= nil and settings.showHealth
+        healthBackground.Visible = (options.humanoid ~= nil or category == "player") and settings.showHealth
         healthBackground.Parent = billboard
 
         local healthFill = Instance.new("Frame")
@@ -648,6 +663,9 @@ return function(Window, scriptInfo)
                 applyHealthVisual(record)
             end))
             table.insert(record.connections, record.player:GetAttributeChangedSignal("Bleeding"):Connect(function()
+                applyHealthVisual(record)
+            end))
+            table.insert(record.connections, record.player:GetAttributeChangedSignal("BleedRate"):Connect(function()
                 applyHealthVisual(record)
             end))
         end
@@ -768,7 +786,7 @@ return function(Window, scriptInfo)
         if settings.showDistance then
             table.insert(detailParts, string.format("%.0f studs", distance))
         end
-        if settings.showHealth and record.humanoid then
+        if settings.showHealth and (record.humanoid or record.category == "player") then
             applyHealthVisual(record)
             table.insert(detailParts, record.healthText)
         end
@@ -789,7 +807,7 @@ return function(Window, scriptInfo)
         record.detailLabel.Text = table.concat(detailParts, "  |  ")
         record.detailLabel.Visible = #detailParts > 0 and not compact
 
-        local showHealthBar = settings.showHealth and record.humanoid ~= nil
+        local showHealthBar = settings.showHealth and (record.humanoid ~= nil or record.category == "player")
         record.healthBackground.Visible = showHealthBar and not compact
         if showHealthBar then
             applyHealthVisual(record)
