@@ -268,6 +268,81 @@ return function(Window, info)
 
     local function startESP()
         getgenv().__RAVEN_ESP_ACTIVE = true
+
+        -- Cached target list (updated every 0.5s in separate thread)
+        local cachedTargets = {}
+        local cachedSelf = nil
+
+        -- Find the character container (the "Model" instance with Male children)
+        local function findCharContainer()
+            for _, child in ipairs(workspace:GetChildren()) do
+                if child.Name == "Model" and child:IsA("Model") then
+                    for _, c in ipairs(child:GetChildren()) do
+                        if c.Name == "Male" and c:IsA("Model") then
+                            return child
+                        end
+                    end
+                end
+            end
+            return nil
+        end
+
+        -- Target scan thread (runs every 0.5s, NOT every frame)
+        task.spawn(function()
+            while getgenv().__RAVEN_ESP_ACTIVE do
+                local ok2, _ = pcall(function()
+                    if not espSettings.enabled then
+                        cachedTargets = {}
+                        cachedSelf = nil
+                        task.wait(0.5)
+                        return
+                    end
+
+                    local myPos = camera.CFrame.Position
+                    local container = findCharContainer()
+                    local closestDist = 9999
+                    local selfModel = nil
+                    local newTargets = {}
+
+                    if container then
+                        for _, model in ipairs(container:GetChildren()) do
+                            if model:IsA("Model") and (model.Name == "Male" or model.Name == "Female") then
+                                local root = model:FindFirstChild("Root")
+                                if root and root:IsA("BasePart") then
+                                    local dist = (root.Position - myPos).Magnitude
+                                    if dist < closestDist then
+                                        closestDist = dist
+                                        selfModel = model
+                                    end
+                                    if dist <= espSettings.maxDistance then
+                                        local hasAI = false
+                                        for _, child in ipairs(model:GetChildren()) do
+                                            if string.sub(child.Name, 1, 3) == "AI_" then
+                                                hasAI = true
+                                                break
+                                            end
+                                        end
+                                        newTargets[#newTargets + 1] = {
+                                            model = model,
+                                            root = root,
+                                            dist = dist,
+                                            isPlayer = not hasAI,
+                                        }
+                                    end
+                                end
+                            end
+                        end
+                    end
+
+                    cachedTargets = newTargets
+                    cachedSelf = selfModel
+                end)
+
+                task.wait(0.5)
+            end
+        end)
+
+        -- Render thread (lightweight, only draws cached targets)
         task.spawn(function()
             while getgenv().__RAVEN_ESP_ACTIVE do
                 local ok, err = pcall(function()
@@ -279,58 +354,19 @@ return function(Window, info)
                     end
 
                     local myPos = camera.CFrame.Position
-
-                    -- BRM5 Structure:
-                    --   All characters: Workspace.Model.Male (has Humanoid + Root)
-                    --   Both Players AND AI use same structure (no way to distinguish)
-                    --   StreamingEnabled=true limits visible models to stream range
-                    --   Self is determined as closest model to camera
-
-                    local closestDist = 9999
-                    local selfModel = nil
-                    local targets = {}
-
-                    for _, desc in ipairs(workspace:GetDescendants()) do
-                        if desc.Name == "Root" and desc:IsA("BasePart") then
-                            local model = desc.Parent
-                            if model and model:IsA("Model") and (model.Name == "Male" or model.Name == "Female") then
-                                local dist = (desc.Position - myPos).Magnitude
-                                if dist < closestDist then
-                                    closestDist = dist
-                                    selfModel = model
-                                end
-                                if dist <= espSettings.maxDistance then
-                                    -- Detect Player vs AI:
-                                    -- AI models have children named "AI_*" (AI_AK, AI_Beanie, etc)
-                                    -- Player models have BillboardGui (nametag) and no AI_ prefixed items
-                                    local hasAI = false
-                                    for _, child in ipairs(model:GetChildren()) do
-                                        if string.sub(child.Name, 1, 3) == "AI_" then
-                                            hasAI = true
-                                            break
-                                        end
-                                    end
-                                    targets[#targets + 1] = {
-                                        model = model,
-                                        root = desc,
-                                        dist = dist,
-                                        isPlayer = not hasAI,
-                                    }
-                                end
-                            end
-                        end
-                    end
-
                     local activeModels = {}
+                    local targets = cachedTargets
+                    local selfModel = cachedSelf
 
                     for i = 1, #targets do
                         local t = targets[i]
-                        if t.model ~= selfModel then
+                        if t.model ~= selfModel and t.root and t.root.Parent then
                             activeModels[t.model] = true
                             if not drawings[t.model] then drawings[t.model] = newDrawingSet() end
                             local s = drawings[t.model]
 
                             local espColor = t.isPlayer and COLOR_PLAYER or COLOR_NPC
+                            local dist = (t.root.Position - myPos).Magnitude
 
                             local head = t.model:FindFirstChild("Head")
                             local rootScreen, onScreen = camera:WorldToViewportPoint(t.root.Position)
@@ -344,25 +380,17 @@ return function(Window, info)
                                 local boxW = boxH * 0.55
 
                                 if boxH >= 4 then
-                                    -- Box outline
                                     s.boxO.Size = Vector2.new(boxW+2, boxH+2)
                                     s.boxO.Position = Vector2.new(rootScreen.X - boxW/2 - 1, headScreen.Y - 1)
                                     s.boxO.Visible = espSettings.showBox
 
-                                    -- Main box
                                     s.box.Size = Vector2.new(boxW, boxH)
                                     s.box.Position = Vector2.new(rootScreen.X - boxW/2, headScreen.Y)
                                     s.box.Color = espColor
                                     s.box.Visible = espSettings.showBox
 
-                                    -- Label
-                                    local label = ""
-                                    if t.isPlayer then
-                                        label = "[P] "
-                                    else
-                                        label = "[AI] "
-                                    end
-                                    label = label .. math.floor(t.dist) .. "m"
+                                    local label = t.isPlayer and "[P] " or "[AI] "
+                                    label = label .. math.floor(dist) .. "m"
 
                                     local hum = t.model:FindFirstChildOfClass("Humanoid")
                                     if hum then
@@ -374,7 +402,6 @@ return function(Window, info)
                                     s.txt.Color = espColor
                                     s.txt.Visible = espSettings.showName
 
-                                    -- Health bar
                                     if hum and espSettings.showHealth then
                                         local pct = math.clamp(hum.Health / hum.MaxHealth, 0, 1)
                                         local barX = rootScreen.X - boxW/2 - 6
