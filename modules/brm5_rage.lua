@@ -325,6 +325,8 @@ return function(Window, info)
                                         newTargets[#newTargets + 1] = {
                                             model = model,
                                             root = root,
+                                            head = model:FindFirstChild("Head"),
+                                            hum = model:FindFirstChildOfClass("Humanoid"),
                                             dist = dist,
                                             isPlayer = not hasAI,
                                         }
@@ -368,11 +370,10 @@ return function(Window, info)
                             local espColor = t.isPlayer and COLOR_PLAYER or COLOR_NPC
                             local dist = (t.root.Position - myPos).Magnitude
 
-                            local head = t.model:FindFirstChild("Head")
                             local rootScreen, onScreen = camera:WorldToViewportPoint(t.root.Position)
 
                             if onScreen and rootScreen.Z > 0 then
-                                local headPos = head and (head.Position + Vector3.new(0, 1.5, 0)) or (t.root.Position + Vector3.new(0, 3, 0))
+                                local headPos = t.head and (t.head.Position + Vector3.new(0, 1.5, 0)) or (t.root.Position + Vector3.new(0, 3, 0))
                                 local feetPos = t.root.Position - Vector3.new(0, 3, 0)
                                 local headScreen = camera:WorldToViewportPoint(headPos)
                                 local feetScreen = camera:WorldToViewportPoint(feetPos)
@@ -392,9 +393,8 @@ return function(Window, info)
                                     local label = t.isPlayer and "[P] " or "[AI] "
                                     label = label .. math.floor(dist) .. "m"
 
-                                    local hum = t.model:FindFirstChildOfClass("Humanoid")
-                                    if hum then
-                                        label = label .. " | " .. math.floor(hum.Health) .. "HP"
+                                    if t.hum then
+                                        label = label .. " | " .. math.floor(t.hum.Health) .. "HP"
                                     end
 
                                     s.txt.Position = Vector2.new(rootScreen.X, headScreen.Y - 18)
@@ -402,8 +402,8 @@ return function(Window, info)
                                     s.txt.Color = espColor
                                     s.txt.Visible = espSettings.showName
 
-                                    if hum and espSettings.showHealth then
-                                        local pct = math.clamp(hum.Health / hum.MaxHealth, 0, 1)
+                                    if t.hum and espSettings.showHealth then
+                                        local pct = math.clamp(t.hum.Health / t.hum.MaxHealth, 0, 1)
                                         local barX = rootScreen.X - boxW/2 - 6
                                         s.hpBg.Size = Vector2.new(3, boxH)
                                         s.hpBg.Position = Vector2.new(barX, headScreen.Y)
