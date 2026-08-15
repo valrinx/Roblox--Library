@@ -44,13 +44,14 @@ local camera = workspace.CurrentCamera
 -- ═══════════════════════════════════════════════
 local MacLib = loadstring(game:HttpGet("https://github.com/biggaboy212/Maclib/releases/latest/download/maclib.txt"))()
 
-local Window = MacLib.Window({
+local Window = MacLib:Window({
     Title = "RAVEN HUB",
     Subtitle = "BRM5 v3.2",
     Author = "valrinx",
     Size = UDim2.fromOffset(580, 460),
     DragStyle = 1,
     DisableMinimize = false,
+    AcrylicBlur = false,
 })
 
 -- Tabs
@@ -505,7 +506,7 @@ end)
 -- ═══════════════════════════════════════════════
 -- NOTIFICATION
 -- ═══════════════════════════════════════════════
-MacLib.Notification({
+MacLib:Notification({
     Title = "RAVEN HUB",
     Description = "BRM5 v3.2 loaded! All features ready.",
     Duration = 5,
