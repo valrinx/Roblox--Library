@@ -214,10 +214,10 @@ local SCRIPTS = {
     },
     {
         name        = "Blackhawk Rescue Mission 5",
-        description = "No Recoil | Fullbright | NoClip",
+        description = "No Recoil | Speed | NoClip | Fullbright | ESP v8",
         placeIds    = {2916899287, 3701546109},
         gameIds     = {1054526971},
-        version     = "v0.1",
+        version     = "v3.2",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/brm5_rage.lua",
     },
     --[[
