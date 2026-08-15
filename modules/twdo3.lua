@@ -36,6 +36,7 @@ return function(Window, scriptInfo)
         throughWalls = true,
         useTeamColor = true,
         teammateEsp = true,
+        friendEsp = false,
         fillTransparency = 0.78,
         textSize = 12,
         healthBarWidth = 120,
@@ -65,6 +66,7 @@ return function(Window, scriptInfo)
     local COLORS = {
         player = Color3.fromRGB(235, 72, 72),
         teammate = Color3.fromRGB(72, 205, 255),
+        friend = Color3.fromRGB(60, 130, 255),
         walker = Color3.fromRGB(255, 151, 46),
         military = Color3.fromRGB(255, 74, 74),
         medical = Color3.fromRGB(78, 220, 130),
@@ -171,6 +173,30 @@ return function(Window, scriptInfo)
             and player.Team == localPlayer.Team
     end
 
+    local friendCache = {}
+    local friendCacheTime = {}
+    local FRIEND_CACHE_TTL = 30
+
+    local function isFriend(player)
+        if not player or player == localPlayer then
+            return false
+        end
+        local userId = player.UserId
+        local now = os.clock()
+        if friendCache[userId] ~= nil and (now - (friendCacheTime[userId] or 0)) < FRIEND_CACHE_TTL then
+            return friendCache[userId]
+        end
+        local ok, result = pcall(function()
+            return localPlayer:IsFriendsWith(userId)
+        end)
+        if ok then
+            friendCache[userId] = result
+            friendCacheTime[userId] = now
+            return result
+        end
+        return friendCache[userId] or false
+    end
+
     local function cleanLootName(name)
         local cleaned = tostring(name or "Loot")
         cleaned = cleaned:gsub("^Loot_", "")
@@ -219,6 +245,9 @@ return function(Window, scriptInfo)
     end
 
     local function getPlayerColor(player)
+        if isFriend(player) then
+            return COLORS.friend
+        end
         if isTeammate(player) then
             return COLORS.teammate
         end
@@ -592,6 +621,9 @@ return function(Window, scriptInfo)
         if record.category == "player" and isTeammate(record.player) and not settings.teammateEsp then
             visible = false
         end
+        if record.category == "player" and isFriend(record.player) and not settings.friendEsp then
+            visible = false
+        end
         local color = getDisplayColor(record, distance)
         record.distance = distance
         record.displayColor = color
@@ -626,9 +658,15 @@ return function(Window, scriptInfo)
             table.insert(detailParts, blocked and "[WALL]" or "[VISIBLE]")
         end
         record.label = record.category == "player" and playerLabel(record.player) or record.label
-        record.nameLabel.Text = record.category == "player" and isTeammate(record.player)
-            and ("[TEAM] " .. record.label)
-            or record.label
+        local displayLabel = record.label
+        if record.category == "player" then
+            if isFriend(record.player) then
+                displayLabel = "[FRIEND] " .. record.label
+            elseif isTeammate(record.player) then
+                displayLabel = "[TEAM] " .. record.label
+            end
+        end
+        record.nameLabel.Text = displayLabel
         record.nameLabel.Visible = settings.showNames
         record.detailLabel.Text = table.concat(detailParts, "  |  ")
         record.detailLabel.Visible = #detailParts > 0 and not compact
@@ -914,6 +952,22 @@ return function(Window, scriptInfo)
         Flag = "TWDO3ESPTeamColor",
         Callback = function(value)
             settings.useTeamColor = value
+        end,
+    })
+    EspTab:CreateToggle({
+        Name = "Show Teammates in ESP",
+        CurrentValue = true,
+        Flag = "TWDO3ESPTeammates",
+        Callback = function(value)
+            settings.teammateEsp = value
+        end,
+    })
+    EspTab:CreateToggle({
+        Name = "Show Friends in ESP",
+        CurrentValue = false,
+        Flag = "TWDO3ESPFriends",
+        Callback = function(value)
+            settings.friendEsp = value
         end,
     })
     EspTab:CreateSlider({
