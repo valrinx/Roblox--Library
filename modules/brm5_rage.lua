@@ -26,17 +26,30 @@
 --   ❌ Item/weapon spawning
 -- ============================================================
 
-return function(context)
+return function(Window, runtimeInfo)
     local Players = game:GetService("Players")
     local RunService = game:GetService("RunService")
     local Lighting = game:GetService("Lighting")
 
-    local Window = context.Window
-    local localPlayer = context.localPlayer or Players.LocalPlayer
-    local notify = context.notify or function() end
+    local localPlayer = Players.LocalPlayer
+    local notify = function(title, msg)
+        pcall(function()
+            if runtimeInfo and runtimeInfo.hubUI then
+                runtimeInfo.hubUI:Notify({Title = title, Content = msg, Duration = 5})
+            end
+        end)
+    end
     local scriptRunning = true
     local connections = {}
     local originalValues = {}
+
+    -- Register cleanup with hub
+    if runtimeInfo and runtimeInfo.registerCleanup then
+        runtimeInfo.registerCleanup(function()
+            scriptRunning = false
+            -- cleanup will be handled below
+        end)
+    end
 
     local function disconnect(con)
         if con then pcall(function() con:Disconnect() end) end
@@ -263,19 +276,18 @@ return function(context)
     --   CLEANUP
     -- ============================================================
 
-    local controller = {}
+    -- Register cleanup with hub system
+    if runtimeInfo and runtimeInfo.registerCleanup then
+        runtimeInfo.registerCleanup(function()
+            scriptRunning = false
+            disableNoRecoil()
+            disableFullbright()
+            disableNoclip()
 
-    function controller:Destroy()
-        scriptRunning = false
-        disableNoRecoil()
-        disableFullbright()
-        disableNoclip()
-
-        for _, con in ipairs(connections) do
-            disconnect(con)
-        end
-        table.clear(connections)
+            for _, con in ipairs(connections) do
+                disconnect(con)
+            end
+            table.clear(connections)
+        end)
     end
-
-    return controller
 end
