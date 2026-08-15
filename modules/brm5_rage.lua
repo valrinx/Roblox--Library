@@ -241,7 +241,7 @@ return function(Window, info)
         showName = true,
         showDistance = true,
         showHealth = true,
-        maxDistance = 500,
+        maxDistance = 1500,
     }
     getgenv().__RAVEN_ESP_DRAWINGS = {}
 
@@ -281,13 +281,40 @@ return function(Window, info)
                     local myPos = camera.CFrame.Position
 
                     -- BRM5 Structure:
-                    --   Workspace.Model.Male = Players (has Humanoid)
-                    --   Workspace.Male = NPCs (no Humanoid, has AnimationController)
+                    --   All characters: inside Players.LocalPlayer.WorldModel
+                    --   WorldModel contains ALL entities (players + AI) regardless of streaming
+                    --   Both Players AND AI use same structure: Male model with Root + Humanoid
 
                     local closestDist = 9999
                     local selfModel = nil
                     local targets = {}
 
+                    -- Scan WorldModel (contains all entities, bypasses StreamingEnabled)
+                    local worldModel = lp:FindFirstChild("WorldModel")
+                    if worldModel then
+                        for _, child in ipairs(worldModel:GetChildren()) do
+                            if child:IsA("Model") and (child.Name == "Male" or child.Name == "Female") then
+                                local root = child:FindFirstChild("Root")
+                                if root and root:IsA("BasePart") then
+                                    local dist = (root.Position - myPos).Magnitude
+                                    if dist < closestDist then
+                                        closestDist = dist
+                                        selfModel = child
+                                    end
+                                    if dist <= espSettings.maxDistance then
+                                        targets[#targets + 1] = {
+                                            model = child,
+                                            root = root,
+                                            dist = dist,
+                                            isPlayer = false, -- will determine below
+                                        }
+                                    end
+                                end
+                            end
+                        end
+                    end
+
+                    -- Also scan workspace for streamed-in models (backup)
                     for _, desc in ipairs(workspace:GetDescendants()) do
                         if desc.Name == "Root" and desc:IsA("BasePart") then
                             local model = desc.Parent
@@ -298,13 +325,22 @@ return function(Window, info)
                                     selfModel = model
                                 end
                                 if dist <= espSettings.maxDistance then
-                                    local isPlayer = (model:FindFirstChildOfClass("Humanoid") ~= nil)
-                                    targets[#targets + 1] = {
-                                        model = model,
-                                        root = desc,
-                                        dist = dist,
-                                        isPlayer = isPlayer,
-                                    }
+                                    -- Check if already added from WorldModel
+                                    local alreadyAdded = false
+                                    for i = 1, #targets do
+                                        if targets[i].model == model then
+                                            alreadyAdded = true
+                                            break
+                                        end
+                                    end
+                                    if not alreadyAdded then
+                                        targets[#targets + 1] = {
+                                            model = model,
+                                            root = desc,
+                                            dist = dist,
+                                            isPlayer = false,
+                                        }
+                                    end
                                 end
                             end
                         end
@@ -441,9 +477,9 @@ return function(Window, info)
 
     TabESP:CreateSlider({
         Name = "Max Distance",
-        Range = {50, 1000},
-        Increment = 10,
-        CurrentValue = 500,
+        Range = {50, 2000},
+        Increment = 50,
+        CurrentValue = 1500,
         Callback = function(val)
             espSettings.maxDistance = val
         end,
