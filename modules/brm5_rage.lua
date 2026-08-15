@@ -57,31 +57,55 @@ return function(Window, info)
     local function startNoRecoil()
         getgenv().__RAVEN_NORECOIL_ACTIVE = true
         recoilThread = task.spawn(function()
+            local cachedSprings = {}
+            local cachedTables = {}
+            local lastFullScan = 0
+
             while getgenv().__RAVEN_NORECOIL_ACTIVE do
                 pcall(function()
-                    for _, obj in ipairs(getgc(true)) do
-                        if type(obj) == "table" and rawget(obj, "_recoilSpring") then
-                            local rs = rawget(obj, "_recoilSpring")
-                            if type(rs) == "table" then
-                                for k, _ in pairs(rs) do
-                                    if type(rs[k]) == "number" then
-                                        rawset(rs, k, 0)
-                                    end
+                    local now = tick()
+                    -- Full GC scan every 10s to find new tables, quick patch every 0.1s
+                    if now - lastFullScan > 10 or #cachedSprings == 0 then
+                        lastFullScan = now
+                        cachedSprings = {}
+                        cachedTables = {}
+                        for _, obj in ipairs(getgc(true)) do
+                            if type(obj) == "table" then
+                                if rawget(obj, "_recoilSpring") then
+                                    cachedSprings[#cachedSprings + 1] = obj
+                                end
+                                if rawget(obj, "_doSway") ~= nil or rawget(obj, "_recoilAmount") ~= nil or rawget(obj, "_swayAmount") ~= nil then
+                                    cachedTables[#cachedTables + 1] = obj
                                 end
                             end
                         end
-                        if type(obj) == "table" and rawget(obj, "_doSway") ~= nil then
+                    end
+
+                    -- Quick patch cached refs (very fast, no GC walk)
+                    for i = 1, #cachedSprings do
+                        local rs = rawget(cachedSprings[i], "_recoilSpring")
+                        if type(rs) == "table" then
+                            for k, v in pairs(rs) do
+                                if type(v) == "number" then
+                                    rawset(rs, k, 0)
+                                end
+                            end
+                        end
+                    end
+                    for i = 1, #cachedTables do
+                        local obj = cachedTables[i]
+                        if rawget(obj, "_doSway") ~= nil then
                             rawset(obj, "_doSway", false)
                         end
-                        if type(obj) == "table" and rawget(obj, "_recoilAmount") ~= nil then
+                        if rawget(obj, "_recoilAmount") ~= nil then
                             rawset(obj, "_recoilAmount", 0)
                         end
-                        if type(obj) == "table" and rawget(obj, "_swayAmount") ~= nil then
+                        if rawget(obj, "_swayAmount") ~= nil then
                             rawset(obj, "_swayAmount", 0)
                         end
                     end
                 end)
-                task.wait(3)
+                task.wait(0.1)
             end
         end)
     end
