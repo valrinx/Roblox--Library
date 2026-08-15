@@ -105,12 +105,22 @@ return function(Window, runtimeInfo)
         highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
         highlight.Parent = inst
 
+        -- BillboardGui must be parented to a BasePart (not Model)
+        -- Models without Humanoid won't auto-adornee BillboardGui
+        local billboardParent = inst
+        if inst:IsA("Model") then
+            billboardParent = inst:FindFirstChild("Head")
+                or inst:FindFirstChild("HumanoidRootPart")
+                or inst.PrimaryPart
+                or inst
+        end
+
         local billboard = Instance.new("BillboardGui")
         billboard.Name = "RAVEN_ESP"
         billboard.Size = UDim2.new(0, 160, 0, 36)
-        billboard.StudsOffset = Vector3.new(0, 4, 0)
+        billboard.StudsOffset = Vector3.new(0, 3, 0)
         billboard.AlwaysOnTop = true
-        billboard.Parent = inst
+        billboard.Parent = billboardParent
 
         local nameLabel = Instance.new("TextLabel")
         nameLabel.Name = "NameLabel"
@@ -352,12 +362,22 @@ return function(Window, runtimeInfo)
     end
 
     ---------------------------------------------------------------------------
-    -- FOV Changer
+    -- FOV Changer (uses BindToRenderStep for priority over game camera)
     ---------------------------------------------------------------------------
-    local function updateFOV()
-        if State.FOVEnabled then
-            Camera.FieldOfView = State.FOVValue
-        end
+    local FOV_BIND_NAME = "__RAVEN_FOV_ENFORCE"
+    
+    local function enableFOV()
+        pcall(function() RunService:UnbindFromRenderStep(FOV_BIND_NAME) end)
+        RunService:BindToRenderStep(FOV_BIND_NAME, Enum.RenderPriority.Camera.Value + 1, function()
+            if State.FOVEnabled then
+                Camera.FieldOfView = State.FOVValue
+            end
+        end)
+    end
+    
+    local function disableFOV()
+        pcall(function() RunService:UnbindFromRenderStep(FOV_BIND_NAME) end)
+        Camera.FieldOfView = OriginalFOV
     end
 
     ---------------------------------------------------------------------------
@@ -423,11 +443,6 @@ return function(Window, runtimeInfo)
         -- Distance updates (every 15 frames)
         if tickCounter % 15 == 0 then
             updateDistances()
-        end
-        
-        -- FOV enforcement
-        if State.FOVEnabled then
-            updateFOV()
         end
     end)
 
@@ -513,8 +528,10 @@ return function(Window, runtimeInfo)
         Flag = "AR2_FOVEnabled",
         Callback = function(value)
             State.FOVEnabled = value
-            if not value then
-                Camera.FieldOfView = OriginalFOV
+            if value then
+                enableFOV()
+            else
+                disableFOV()
             end
         end,
     })
@@ -527,7 +544,6 @@ return function(Window, runtimeInfo)
         Flag = "AR2_FOVValue",
         Callback = function(value)
             State.FOVValue = value
-            if State.FOVEnabled then updateFOV() end
         end,
     })
 
@@ -575,7 +591,7 @@ return function(Window, runtimeInfo)
         setNoFog(false)
 
         -- Restore FOV
-        Camera.FieldOfView = OriginalFOV
+        disableFOV()
 
         -- Disable no recoil
         disableNoRecoil()
