@@ -116,7 +116,23 @@ do
 end
 
 local player    = Players.LocalPlayer
-local character = player.Character or player.CharacterAdded:Wait()
+local character = player.Character
+if not character then
+    -- Some games (e.g. BRM5) use custom character systems without standard
+    -- Roblox Characters. Wait briefly with timeout so the hub boots regardless.
+    local done = false
+    local conn; conn = player.CharacterAdded:Connect(function(c)
+        character = c
+        done = true
+        if conn then conn:Disconnect() end
+    end)
+    local waited = 0
+    while not done and waited < 5 do
+        task.wait(0.5)
+        waited = waited + 0.5
+    end
+    if conn then pcall(function() conn:Disconnect() end) end
+end
 local camera    = game.Workspace.CurrentCamera
 local HUB_BUILD = "maclib-2"
 
@@ -195,6 +211,14 @@ local SCRIPTS = {
         gameIds     = {358276974},
         version     = "v1.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/ar2.lua",
+    },
+    {
+        name        = "Blackhawk Rescue Mission 5",
+        description = "No Recoil | Fullbright | NoClip",
+        placeIds    = {2916899287, 3701546109},
+        gameIds     = {1054526971},
+        version     = "v0.1",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/brm5_rage.lua",
     },
     --[[
     {
