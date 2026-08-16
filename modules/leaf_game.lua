@@ -30,25 +30,34 @@ return function(Window, scriptInfo)
         "Rooftop", "Backyard", "Pool", "Maze", "Farm", "Basement"
     }
 
-    -- Dumpster positions (sell locations)
+    -- Dumpster positions (sell locations) - calculated safe spots OUTSIDE the prop
     local DUMPSTER_POSITIONS = {}
     pcall(function()
         local dumpsterFolder = workspace.Map.Dumpsters
+        local params = RaycastParams.new()
+        params.FilterType = Enum.RaycastFilterType.Exclude
+        params.FilterDescendantsInstances = {player.Character or Instance.new("Folder")}
+
         for _, d in ipairs(dumpsterFolder:GetChildren()) do
             if d:IsA("Model") then
-                local primary = d.PrimaryPart or d:FindFirstChildWhichIsA("BasePart")
-                if primary then
-                    table.insert(DUMPSTER_POSITIONS, primary.Position + Vector3.new(0, 3, 0))
-                end
+                local cf, size = d:GetBoundingBox()
+                local center = cf.Position
+                -- Stand outside the bounding box (+X side) with floor raycast
+                local standOffset = size.X / 2 + 3.5
+                local testPos = center + Vector3.new(standOffset, 5, 0)
+                params.FilterDescendantsInstances = {player.Character or Instance.new("Folder"), d}
+                local hit = workspace:Raycast(testPos, Vector3.new(0, -20, 0), params)
+                local safeY = hit and (hit.Position.Y + 3) or (center.Y + 1)
+                table.insert(DUMPSTER_POSITIONS, Vector3.new(center.X + standOffset, safeY, center.Z))
             end
         end
     end)
-    -- Hardcoded fallback if streaming hasn't loaded them
+    -- Hardcoded fallback (safe positions confirmed via raycast)
     if #DUMPSTER_POSITIONS == 0 then
         DUMPSTER_POSITIONS = {
-            Vector3.new(124, 67, -52),
-            Vector3.new(151, 65, -118),
-            Vector3.new(51, 65, -50),
+            Vector3.new(128, 65.3, -52.7),
+            Vector3.new(154.8, 65.3, -118),
+            Vector3.new(55.2, 65.3, -50.3),
         }
     end
 
@@ -155,9 +164,10 @@ return function(Window, scriptInfo)
     end
 
     -- Collect leaves by simulating the Hand tool click.
-    -- The game's LeafSim client script handles the full pipeline:
-    -- click → grab nearby leaves via physics → fly to player → fire CollectLeaf remote
-    -- We cannot raw-fire the remote because the server validates client grab state.
+    -- The game requires HoveringLeaf=true (mouse over a leaf) before the click triggers collection.
+    -- VirtualInputManager mouse click then activates the hand grab animation.
+    local VIM = game:GetService("VirtualInputManager")
+
     local function collectLeaves()
         if isBagFull() then return 0 end
 
@@ -171,73 +181,74 @@ return function(Window, scriptInfo)
         -- Check Hand cooldown
         if player:GetAttribute("HandCooldown") then return -1 end
 
-        -- Simulate the Hand tool click via the toolbar button
-        local gui = player:FindFirstChildOfClass("PlayerGui")
-        local gameGui = gui and gui:FindFirstChild("Gui")
-        local toolbar = gameGui and gameGui:FindFirstChild("Toolbar")
-        local handFrame = toolbar and toolbar:FindFirstChild("Hand")
-        local clickBtn = handFrame and handFrame:FindFirstChild("Click")
+        -- Set HoveringLeaf so the game accepts the click as a collection action
+        player:SetAttribute("HoveringLeaf", true)
+        task.wait(0.05)
 
-        if clickBtn and clickBtn:IsA("GuiButton") then
-            local fired = false
-            if type(firesignal) == "function" then
-                pcall(firesignal, clickBtn.MouseButton1Click)
-                fired = true
-            elseif type(getconnections) == "function" then
-                for _, conn in ipairs(getconnections(clickBtn.MouseButton1Click)) do
-                    pcall(function()
-                        if conn.Function then conn.Function() else conn:Fire() end
-                    end)
-                    fired = true
-                end
-            end
-            if not fired then
-                -- Fallback: VirtualInputManager click
-                local VIM = game:GetService("VirtualInputManager")
-                pcall(function()
-                    VIM:SendMouseButtonEvent(0, 0, 0, true, game, 0)
-                    task.wait(0.05)
-                    VIM:SendMouseButtonEvent(0, 0, 0, false, game, 0)
-                end)
-                fired = true
-            end
-            return fired and #leaves or 0
-        end
-
-        return 0
+        -- Simulate mouse click to trigger Hand tool collection
+        pcall(function()
+            VIM:SendMouseButtonEvent(960, 475, 0, true, game, 0)
+            task.wait(0.05)
+            VIM:SendMouseButtonEvent(960, 475, 0, false, game, 0)
+        end)
+        return #leaves
     end
 
     -- Sell leaves at nearest dumpster
     local function sellLeaves()
-        if not EmptyBackpackRemote then return false end
         if getCurrentLeaves() <= 0 then return false end
 
-        -- Find nearest dumpster
+        -- Find nearest dumpster model center
         local _, _, root = getCharacter()
         if not root then return false end
 
-        local nearest, nearestDist
-        for _, pos in ipairs(DUMPSTER_POSITIONS) do
-            local dist = (pos - root.Position).Magnitude
-            if not nearestDist or dist < nearestDist then
-                nearest = pos
-                nearestDist = dist
+        local nearestCenter, nearestDist
+        pcall(function()
+            local dumpsterFolder = workspace.Map.Dumpsters
+            for _, d in ipairs(dumpsterFolder:GetChildren()) do
+                if d:IsA("Model") then
+                    local cf = d:GetBoundingBox()
+                    local dist = (cf.Position - root.Position).Magnitude
+                    if not nearestDist or dist < nearestDist then
+                        nearestCenter = cf.Position
+                        nearestDist = dist
+                    end
+                end
+            end
+        end)
+
+        -- Fallback to hardcoded positions
+        if not nearestCenter then
+            for _, pos in ipairs(DUMPSTER_POSITIONS) do
+                local dist = (pos - root.Position).Magnitude
+                if not nearestDist or dist < nearestDist then
+                    nearestCenter = pos
+                    nearestDist = dist
+                end
             end
         end
 
-        if not nearest then return false end
+        if not nearestCenter then return false end
 
-        -- Teleport to dumpster if too far
-        if nearestDist > 15 then
-            teleportTo(nearest)
-            task.wait(0.3)
+        -- Teleport close to dumpster (offset 2 studs on X to avoid getting stuck inside)
+        -- Server requires close proximity for EmptyBackpack to work
+        local sellPos = nearestCenter + Vector3.new(2, 2, 0)
+        teleportTo(sellPos)
+        task.wait(0.2)
+
+        -- Fire EmptyBackpack (server validates proximity)
+        if EmptyBackpackRemote then
+            pcall(function()
+                EmptyBackpackRemote:FireServer()
+            end)
         end
+        task.wait(0.3)
 
-        -- Fire sell remote
-        pcall(function()
-            EmptyBackpackRemote:FireServer()
-        end)
-        return true
+        -- Teleport back to safe standing position (outside the prop)
+        local safePos = nearestCenter + Vector3.new(5, 1, 0)
+        teleportTo(safePos)
+
+        return getCurrentLeaves() == 0
     end
 
     -- Equip a tool
