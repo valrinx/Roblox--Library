@@ -228,6 +228,14 @@ local SCRIPTS = {
         version     = "v3.2",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/brm5_rage.lua",
     },
+    {
+        name        = "\xF0\x9F\x8D\x82 Game",
+        description = "Auto Collect | Auto Sell | Farm Loop | Zone TP | ESP",
+        placeIds    = {100068273119174, 92637789841354},
+        gameIds     = {10539411000},
+        version     = "v1.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/leaf_game.lua",
+    },
     --[[
     {
         name      = "Another Game",
