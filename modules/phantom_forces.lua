@@ -32,6 +32,8 @@ return function(Window, runtimeInfo)
         ESPWallCheck = true,
         ESPHealthBar = true,
         MaxDistance = 1500,
+        AutoSpot = false,
+        AutoSpotInterval = 0.8,
     }
     local Connections = {}
     local Drawings = {}
@@ -400,11 +402,75 @@ return function(Window, runtimeInfo)
     Tab:CreateLabel("Team auto-detected on first enable")
 
     ---------------------------------------------------------------------------
+    -- Auto Spot
+    ---------------------------------------------------------------------------
+
+    local VIM = game:GetService("VirtualInputManager")
+    local UIS = game:GetService("UserInputService")
+    local AutoSpotThread = nil
+
+    local function startAutoSpot()
+        if AutoSpotThread then return end
+        AutoSpotThread = task.spawn(function()
+            while State.AutoSpot do
+                -- Only spot when not shooting and not ADS
+                local shooting = UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
+                local aiming = UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
+
+                if not shooting and not aiming then
+                    VIM:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+                    VIM:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+                end
+
+                task.wait(State.AutoSpotInterval)
+            end
+        end)
+    end
+
+    local function stopAutoSpot()
+        State.AutoSpot = false
+        if AutoSpotThread then
+            pcall(function() task.cancel(AutoSpotThread) end)
+            AutoSpotThread = nil
+        end
+    end
+
+    Tab:CreateSection("Auto Spot")
+
+    Tab:CreateToggle({
+        Name = "Auto Spot (E key)",
+        CurrentValue = State.AutoSpot,
+        Callback = function(value)
+            State.AutoSpot = value
+            if value then
+                startAutoSpot()
+            else
+                stopAutoSpot()
+            end
+        end,
+    })
+
+    Tab:CreateSlider({
+        Name = "Spot Interval",
+        Range = {0.3, 3},
+        Increment = 0.1,
+        CurrentValue = State.AutoSpotInterval,
+        Suffix = "s",
+        Callback = function(value)
+            State.AutoSpotInterval = value
+        end,
+    })
+
+    Tab:CreateLabel("⚠️ Spots only when not shooting/ADS")
+    Tab:CreateLabel("⚠️ Has brief arm animation (PF limitation)")
+
+    ---------------------------------------------------------------------------
     -- Cleanup
     ---------------------------------------------------------------------------
 
     local function cleanup()
         stopESP()
+        stopAutoSpot()
         for _, conn in pairs(Connections) do
             pcall(function() conn:Disconnect() end)
         end
