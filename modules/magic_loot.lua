@@ -1297,39 +1297,20 @@ return function(Window, scriptInfo)
     CombatTab:CreateSection("Money Loop")
     local moneyStageOptions = {}
     local careerStage = player:FindFirstChild("CareerMaxStage")
+    local aggroStage = player:FindFirstChild("DungeonAggroStage")
     local highestUnlockedStage = math.max(1, math.floor(careerStage and careerStage.Value or 1))
     local highestMoneyStage = highestUnlockedStage
+    -- Include DungeonAggroStage which can exceed CareerMaxStage during runs.
+    highestMoneyStage = math.max(highestMoneyStage, math.floor(aggroStage and aggroStage.Value or 0))
     for _, object in ipairs(workspace:GetDescendants()) do
         if object:IsA("BasePart") and object:GetAttribute("BattleArea")==true then
             highestMoneyStage=math.max(highestMoneyStage,math.floor(tonumber(object:GetAttribute("Stage")) or 0))
         end
     end
-    -- StageJump checkpoints reveal stages beyond the currently streamed area.
-    -- Scan the panel briefly to discover the true maximum.
-    pcall(function()
-        local stageJumpModule = guiModules() and guiModules():FindFirstChild("StageJump")
-        local sjMod = stageJumpModule and require(stageJumpModule)
-        if sjMod and type(sjMod.openUi)=="function" then pcall(sjMod.openUi) end
-        task.wait(0.15)
-        local gui = screenGui()
-        local sjPanel = gui and gui:FindFirstChild("StageJump")
-        if sjPanel then
-            for _, obj in ipairs(sjPanel:GetDescendants()) do
-                if obj:IsA("GuiButton") and obj.Name=="Button" then
-                    local node = obj
-                    while node and node ~= sjPanel do
-                        local s = tonumber(node.Name)
-                        if s then highestMoneyStage = math.max(highestMoneyStage, s) break end
-                        node = node.Parent
-                    end
-                end
-            end
-        end
-        if sjMod and type(sjMod.closeUi)=="function" then pcall(sjMod.closeUi) end
-    end)
-    -- Add a buffer beyond the highest known checkpoint so newly added stages
-    -- are selectable without a script update.
-    highestMoneyStage = math.max(highestMoneyStage, highestUnlockedStage + 10)
+    -- The game streams only nearby stages; the dropdown must list stages far
+    -- beyond the currently loaded area. Use a generous fixed minimum so every
+    -- reachable stage is always selectable.
+    highestMoneyStage = math.max(highestMoneyStage, 50)
     settings.moneyStage = highestUnlockedStage
     for stage = 1, highestMoneyStage do table.insert(moneyStageOptions, "Stage " .. stage) end
     CombatTab:CreateDropdown({
