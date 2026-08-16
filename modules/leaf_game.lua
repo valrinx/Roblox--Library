@@ -534,19 +534,25 @@ return function(Window, scriptInfo)
 
     ToolTab:CreateSection("Tool Select")
     ToolTab:CreateButton({
-        Name = "🔓 Unlock All Tools + Infinite Bag",
+        Name = "🔓 Unlock All Tools + Max Bag",
         Callback = function()
+            -- These tools work without server ownership check:
             player:SetAttribute("OwnsRake", true)
             player:SetAttribute("OwnsLeafBlower", true)
             player:SetAttribute("OwnsLeafVacuum", true)
-            player:SetAttribute("OwnsMolotov", true)
             player:SetAttribute("PermRake", true)
             player:SetAttribute("PermLeafBlower", true)
             player:SetAttribute("PermLeafVacuum", true)
-            player:SetAttribute("PermMolotov", true)
-            player:SetAttribute("InfiniteBag", true)
-            player:SetAttribute("PermInfiniteBag", true)
-            notify("🍂 Game", "All tools + Infinite Bag unlocked!")
+            -- Note: Molotov requires real purchase (server-validated)
+            -- Buy bag upgrades to max (server-validated, costs $45 total)
+            local buyBag = Remotes and Remotes:FindFirstChild("BuyBagUpgrade")
+            if buyBag then
+                for i = 1, 3 do
+                    pcall(function() buyBag:FireServer() end)
+                    task.wait(0.3)
+                end
+            end
+            notify("🍂 Game", "Tools unlocked! Bag: " .. tostring(player:GetAttribute("LeafCapacity")) .. " cap (Molotov needs real purchase)")
         end,
     })
     ToolTab:CreateButton({
