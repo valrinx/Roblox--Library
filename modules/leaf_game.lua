@@ -393,8 +393,9 @@ return function(Window, scriptInfo)
         Flag = "LeafGameCollectInterval",
         Callback = function(v) settings.collectInterval = v end,
     })
+    FarmTab:CreateLabel("Collects 1-3 leaves per grab (Hand Grasp upgrade)")
     FarmTab:CreateSlider({
-        Name = "Collect Radius (TP to leaves)",
+        Name = "Collect Radius (Aura)",
         Range = {10, 200},
         Increment = 5,
         CurrentValue = 30,
