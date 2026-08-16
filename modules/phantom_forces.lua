@@ -160,8 +160,8 @@ return function(Window, runtimeInfo)
         local esp = {
             box = Drawing.new("Square"),
             dist = Drawing.new("Text"),
-            healthBar = Drawing.new("Line"),
             healthBg = Drawing.new("Line"),
+            healthBar = Drawing.new("Line"),
         }
         esp.box.Thickness = 1.5
         esp.box.Filled = false
@@ -174,13 +174,13 @@ return function(Window, runtimeInfo)
         esp.dist.Color = Color3.fromRGB(255, 255, 255)
         esp.dist.Visible = false
 
-        esp.healthBar.Thickness = 2
-        esp.healthBar.Color = Color3.fromRGB(50, 255, 50)
-        esp.healthBar.Visible = false
-
         esp.healthBg.Thickness = 4
         esp.healthBg.Color = Color3.fromRGB(30, 30, 30)
         esp.healthBg.Visible = false
+
+        esp.healthBar.Thickness = 2
+        esp.healthBar.Color = Color3.fromRGB(50, 255, 50)
+        esp.healthBar.Visible = false
 
         return esp
     end
@@ -212,9 +212,6 @@ return function(Window, runtimeInfo)
             MyTeamName = detectMyTeam()
         end
 
-        -- Build raycast filter
-        buildRayFilter()
-
         Connections.espLoop = RunService.RenderStepped:Connect(function()
             if not State.ESP then
                 for _, esp in pairs(Drawings) do hideDrawing(esp) end
@@ -228,6 +225,11 @@ return function(Window, runtimeInfo)
             if not MyTeamName then
                 MyTeamName = detectMyTeam()
                 if not MyTeamName then return end
+            end
+
+            -- Rebuild ray filter every frame (cheap — just table refs)
+            if State.ESPWallCheck then
+                buildRayFilter()
             end
 
             -- Hide all first
