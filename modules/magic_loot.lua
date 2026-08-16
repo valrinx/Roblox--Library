@@ -1304,6 +1304,32 @@ return function(Window, scriptInfo)
             highestMoneyStage=math.max(highestMoneyStage,math.floor(tonumber(object:GetAttribute("Stage")) or 0))
         end
     end
+    -- StageJump checkpoints reveal stages beyond the currently streamed area.
+    -- Scan the panel briefly to discover the true maximum.
+    pcall(function()
+        local stageJumpModule = guiModules() and guiModules():FindFirstChild("StageJump")
+        local sjMod = stageJumpModule and require(stageJumpModule)
+        if sjMod and type(sjMod.openUi)=="function" then pcall(sjMod.openUi) end
+        task.wait(0.15)
+        local gui = screenGui()
+        local sjPanel = gui and gui:FindFirstChild("StageJump")
+        if sjPanel then
+            for _, obj in ipairs(sjPanel:GetDescendants()) do
+                if obj:IsA("GuiButton") and obj.Name=="Button" then
+                    local node = obj
+                    while node and node ~= sjPanel do
+                        local s = tonumber(node.Name)
+                        if s then highestMoneyStage = math.max(highestMoneyStage, s) break end
+                        node = node.Parent
+                    end
+                end
+            end
+        end
+        if sjMod and type(sjMod.closeUi)=="function" then pcall(sjMod.closeUi) end
+    end)
+    -- Add a buffer beyond the highest known checkpoint so newly added stages
+    -- are selectable without a script update.
+    highestMoneyStage = math.max(highestMoneyStage, highestUnlockedStage + 10)
     settings.moneyStage = highestUnlockedStage
     for stage = 1, highestMoneyStage do table.insert(moneyStageOptions, "Stage " .. stage) end
     CombatTab:CreateDropdown({
