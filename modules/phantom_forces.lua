@@ -29,11 +29,27 @@ return function(Window, runtimeInfo)
         ESP = false,
         ESPDistance = true,
         ESPBoxes = true,
+        ESPWallCheck = true,
+        ESPHealthBar = true,
         MaxDistance = 1500,
     }
     local Connections = {}
     local Drawings = {}
     local MyTeamName = nil -- locked on first enable
+
+    -- Raycast params for wall check
+    local RayParams = RaycastParams.new()
+    RayParams.FilterType = Enum.RaycastFilterType.Exclude
+    local function buildRayFilter()
+        local ignore = {}
+        local pf = getPlayersFolder()
+        if pf then table.insert(ignore, pf) end
+        local ig = workspace:FindFirstChild("Ignore")
+        if ig then table.insert(ignore, ig) end
+        local roots = workspace:FindFirstChild("Roots")
+        if roots then table.insert(ignore, roots) end
+        RayParams.FilterDescendantsInstances = ignore
+    end
 
     ---------------------------------------------------------------------------
     -- Utility
@@ -124,6 +140,15 @@ return function(Window, runtimeInfo)
         }
     end
 
+    local function isVisible(targetPos)
+        local origin = Camera.CFrame.Position
+        local direction = targetPos - origin
+        local dist = direction.Magnitude
+        if dist < 1 then return true end
+        local result = workspace:Raycast(origin, direction.Unit * (dist - 1), RayParams)
+        return result == nil
+    end
+
     ---------------------------------------------------------------------------
     -- Drawing ESP
     ---------------------------------------------------------------------------
@@ -132,6 +157,8 @@ return function(Window, runtimeInfo)
         local esp = {
             box = Drawing.new("Square"),
             dist = Drawing.new("Text"),
+            healthBar = Drawing.new("Line"),
+            healthBg = Drawing.new("Line"),
         }
         esp.box.Thickness = 1.5
         esp.box.Filled = false
@@ -143,6 +170,14 @@ return function(Window, runtimeInfo)
         esp.dist.Outline = true
         esp.dist.Color = Color3.fromRGB(255, 255, 255)
         esp.dist.Visible = false
+
+        esp.healthBar.Thickness = 2
+        esp.healthBar.Color = Color3.fromRGB(50, 255, 50)
+        esp.healthBar.Visible = false
+
+        esp.healthBg.Thickness = 4
+        esp.healthBg.Color = Color3.fromRGB(30, 30, 30)
+        esp.healthBg.Visible = false
 
         return esp
     end
@@ -173,6 +208,9 @@ return function(Window, runtimeInfo)
         if not MyTeamName then
             MyTeamName = detectMyTeam()
         end
+
+        -- Build raycast filter
+        buildRayFilter()
 
         Connections.espLoop = RunService.RenderStepped:Connect(function()
             if not State.ESP then
@@ -222,11 +260,20 @@ return function(Window, runtimeInfo)
                     local boxWidth = boxHeight * 0.45
                     if boxHeight < 4 then continue end
 
+                    -- Wall check: green = visible, red = behind wall
+                    local visible = true
+                    if State.ESPWallCheck then
+                        visible = isVisible(bounds.center)
+                    end
+                    local boxColor = visible
+                        and Color3.fromRGB(50, 255, 50)
+                        or Color3.fromRGB(255, 50, 50)
+
                     -- Box
                     if State.ESPBoxes then
                         esp.box.Size = Vector2.new(boxWidth, boxHeight)
                         esp.box.Position = Vector2.new(headScreen.X - boxWidth / 2, headScreen.Y)
-                        esp.box.Color = Color3.fromRGB(255, 50, 50)
+                        esp.box.Color = boxColor
                         esp.box.Visible = true
                     end
 
@@ -235,6 +282,19 @@ return function(Window, runtimeInfo)
                         esp.dist.Text = math.floor(dist) .. "m"
                         esp.dist.Position = Vector2.new(headScreen.X, feetScreen.Y + 2)
                         esp.dist.Visible = true
+                    end
+
+                    -- Health bar (visual only — PF does not expose HP to client)
+                    if State.ESPHealthBar then
+                        local barX = headScreen.X - boxWidth / 2 - 5
+                        esp.healthBg.From = Vector2.new(barX, feetScreen.Y)
+                        esp.healthBg.To = Vector2.new(barX, headScreen.Y)
+                        esp.healthBg.Visible = true
+
+                        esp.healthBar.From = Vector2.new(barX, feetScreen.Y)
+                        esp.healthBar.To = Vector2.new(barX, headScreen.Y)
+                        esp.healthBar.Color = Color3.fromRGB(50, 255, 50)
+                        esp.healthBar.Visible = true
                     end
                 end
             end
@@ -284,6 +344,22 @@ return function(Window, runtimeInfo)
         CurrentValue = State.ESPDistance,
         Callback = function(value)
             State.ESPDistance = value
+        end,
+    })
+
+    Tab:CreateToggle({
+        Name = "Wall Check (Green/Red)",
+        CurrentValue = State.ESPWallCheck,
+        Callback = function(value)
+            State.ESPWallCheck = value
+        end,
+    })
+
+    Tab:CreateToggle({
+        Name = "Health Bar",
+        CurrentValue = State.ESPHealthBar,
+        Callback = function(value)
+            State.ESPHealthBar = value
         end,
     })
 
