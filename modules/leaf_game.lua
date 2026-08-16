@@ -533,6 +533,22 @@ return function(Window, scriptInfo)
     local ToolTab = Window:CreateTab("Tools & Travel", 4483362458)
 
     ToolTab:CreateSection("Tool Select")
+    ToolTab:CreateButton({
+        Name = "🔓 Unlock All Tools + Infinite Bag",
+        Callback = function()
+            player:SetAttribute("OwnsRake", true)
+            player:SetAttribute("OwnsLeafBlower", true)
+            player:SetAttribute("OwnsLeafVacuum", true)
+            player:SetAttribute("OwnsMolotov", true)
+            player:SetAttribute("PermRake", true)
+            player:SetAttribute("PermLeafBlower", true)
+            player:SetAttribute("PermLeafVacuum", true)
+            player:SetAttribute("PermMolotov", true)
+            player:SetAttribute("InfiniteBag", true)
+            player:SetAttribute("PermInfiniteBag", true)
+            notify("🍂 Game", "All tools + Infinite Bag unlocked!")
+        end,
+    })
     local toolOptions = {"Hand", "Rake", "LeafBlower", "LeafVacuum", "Molotov", "LeafMower"}
     ToolTab:CreateDropdown({
         Name = "Equip Tool",
