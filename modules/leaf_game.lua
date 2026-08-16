@@ -163,9 +163,9 @@ return function(Window, scriptInfo)
         return indices, leaves
     end
 
-    -- Collect leaves by simulating the Hand tool click.
-    -- The game requires HoveringLeaf=true (mouse over a leaf) before the click triggers collection.
-    -- VirtualInputManager mouse click then activates the hand grab animation.
+    -- Collect and sell use the game's full input pipeline via VirtualInputManager.
+    -- SetAttribute("HoveringLeaf/Dumpster", true) tells the LeafHover script what to do on click.
+    -- Character MUST be physically near leaves/dumpster for the server to validate.
     local VIM = game:GetService("VirtualInputManager")
 
     local function collectLeaves()
@@ -174,18 +174,16 @@ return function(Window, scriptInfo)
         local _, _, root = getCharacter()
         if not root then return 0 end
 
-        -- Check if there are leaves nearby
-        local indices, leaves = getNearbyLeaves(settings.collectRadius, 10)
-        if #leaves == 0 then return 0 end
-
         -- Check Hand cooldown
         if player:GetAttribute("HandCooldown") then return -1 end
 
-        -- Set HoveringLeaf so the game accepts the click as a collection action
+        -- Check if there are leaves nearby
+        local _, leaves = getNearbyLeaves(settings.collectRadius, 10)
+        if #leaves == 0 then return 0 end
+
+        -- Trigger collection: set HoveringLeaf + click
         player:SetAttribute("HoveringLeaf", true)
         task.wait(0.05)
-
-        -- Simulate mouse click to trigger Hand tool collection
         pcall(function()
             VIM:SendMouseButtonEvent(960, 475, 0, true, game, 0)
             task.wait(0.05)
@@ -194,61 +192,53 @@ return function(Window, scriptInfo)
         return #leaves
     end
 
-    -- Sell leaves at nearest dumpster
+    -- Sell leaves at nearest dumpster.
+    -- The game's LeafHover script fires EmptyBackpack when clicking while HoveringDumpster=true.
+    -- We TP close to dumpster, set the hover attribute, then simulate a click.
     local function sellLeaves()
         if getCurrentLeaves() <= 0 then return false end
 
-        -- Find nearest dumpster model center
         local _, _, root = getCharacter()
         if not root then return false end
 
-        local nearestCenter, nearestDist
+        -- Find nearest dumpster model
+        local nearestModel, nearestDist
         pcall(function()
             local dumpsterFolder = workspace.Map.Dumpsters
             for _, d in ipairs(dumpsterFolder:GetChildren()) do
                 if d:IsA("Model") then
-                    local cf = d:GetBoundingBox()
-                    local dist = (cf.Position - root.Position).Magnitude
+                    local dist = (d:GetPivot().Position - root.Position).Magnitude
                     if not nearestDist or dist < nearestDist then
-                        nearestCenter = cf.Position
+                        nearestModel = d
                         nearestDist = dist
                     end
                 end
             end
         end)
 
-        -- Fallback to hardcoded positions
-        if not nearestCenter then
-            for _, pos in ipairs(DUMPSTER_POSITIONS) do
-                local dist = (pos - root.Position).Magnitude
-                if not nearestDist or dist < nearestDist then
-                    nearestCenter = pos
-                    nearestDist = dist
-                end
-            end
-        end
+        if not nearestModel then return false end
 
-        if not nearestCenter then return false end
-
-        -- Teleport close to dumpster (offset 2 studs on X to avoid getting stuck inside)
-        -- Server requires close proximity for EmptyBackpack to work
-        local sellPos = nearestCenter + Vector3.new(2, 2, 0)
+        -- Teleport close to dumpster (inside proximity range)
+        local cf = nearestModel:GetPivot()
+        local sellPos = cf.Position + Vector3.new(2, 1.5, 0)
         teleportTo(sellPos)
-        task.wait(0.2)
-
-        -- Fire EmptyBackpack (server validates proximity)
-        if EmptyBackpackRemote then
-            pcall(function()
-                EmptyBackpackRemote:FireServer()
-            end)
-        end
         task.wait(0.3)
 
-        -- Teleport back to safe standing position (outside the prop)
-        local safePos = nearestCenter + Vector3.new(5, 1, 0)
+        -- Set HoveringDumpster and simulate click to trigger the game's tryEmpty
+        player:SetAttribute("HoveringDumpster", true)
+        task.wait(0.05)
+        pcall(function()
+            VIM:SendMouseButtonEvent(960, 475, 0, true, game, 0)
+            task.wait(0.05)
+            VIM:SendMouseButtonEvent(960, 475, 0, false, game, 0)
+        end)
+        task.wait(0.5)
+
+        -- Move away from dumpster
+        local safePos = cf.Position + Vector3.new(6, 2, 0)
         teleportTo(safePos)
 
-        return getCurrentLeaves() == 0
+        return getCurrentLeaves() < getLeafCapacity()
     end
 
     -- Equip a tool
