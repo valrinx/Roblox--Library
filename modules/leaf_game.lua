@@ -163,39 +163,65 @@ return function(Window, scriptInfo)
         return indices, leaves
     end
 
-    -- Aura-style collection: rapidly teleport between leaf clusters and collect.
-    -- Uses game's validated pipeline: HoveringLeaf + VIM click triggers tryCollect
-    -- which calls collectMany with proper server-validated leaf IDs.
+    -- TRUE AURA COLLECT: directly calls the game's tryCollect function
+    -- by setting its internal "hovered leaf" upvalue to the nearest leaf.
+    -- No mouse hover, no click, no VIM needed. Works while AFK.
     local VIM = game:GetService("VirtualInputManager")
+    local tryCollectFunc = nil
+    local U16_INDEX = 1 -- upvalue index for the "hovered leaf" in tryCollect
+
+    -- Find tryCollect from LeafHover in GC
+    pcall(function()
+        for _, obj in ipairs(getgc(true)) do
+            if type(obj) == "function" and not isexecutorclosure(obj) then
+                local ok, constants = pcall(debug.getconstants, obj)
+                if ok then
+                    local has1, has2 = false, false
+                    for _, c in pairs(constants) do
+                        if c == "HandCooldown" then has1 = true end
+                        if c == "collectMany" then has2 = true end
+                    end
+                    if has1 and has2 then
+                        local info = debug.getinfo(obj)
+                        if info and info.source and info.source:find("LeafHover") then
+                            tryCollectFunc = obj
+                            break
+                        end
+                    end
+                end
+            end
+        end
+    end)
 
     local function collectLeaves()
+        if not tryCollectFunc then return 0 end
         if isBagFull() then return 0 end
+        if player:GetAttribute("HandCooldown") then return -1 end
 
         local _, _, root = getCharacter()
         if not root then return 0 end
 
-        -- Check Hand cooldown
-        if player:GetAttribute("HandCooldown") then return -1 end
+        -- Find nearest leaf
+        local leavesFolder = workspace:FindFirstChild("Leaves")
+        if not leavesFolder then return 0 end
 
-        -- Find nearest leaves
-        local _, leaves = getNearbyLeaves(settings.collectRadius, 5)
-        if #leaves == 0 then return 0 end
+        local nearest, nearestDist
+        for _, leaf in ipairs(leavesFolder:GetChildren()) do
+            if leaf:IsA("BasePart") and leaf.Parent then
+                local dist = (leaf.Position - root.Position).Magnitude
+                if dist <= settings.collectRadius and (not nearestDist or dist < nearestDist) then
+                    nearest = leaf
+                    nearestDist = dist
+                end
+            end
+        end
 
-        -- TP to the nearest leaf (puts us on top of a cluster)
-        local targetLeaf = leaves[1]
-        root.CFrame = CFrame.new(targetLeaf.Position + Vector3.new(0, 3, 0))
-        root.AssemblyLinearVelocity = Vector3.zero
+        if not nearest then return 0 end
 
-        -- Set hover + click to trigger the game's tryCollect pipeline
-        player:SetAttribute("HoveringLeaf", true)
-        task.wait(0.05)
-        pcall(function()
-            VIM:SendMouseButtonEvent(960, 475, 0, true, game, 0)
-            task.wait(0.05)
-            VIM:SendMouseButtonEvent(960, 475, 0, false, game, 0)
-        end)
-
-        return #leaves
+        -- Set the hovered leaf upvalue and call tryCollect
+        debug.setupvalue(tryCollectFunc, U16_INDEX, nearest)
+        tryCollectFunc()
+        return 1
     end
 
     -- Sell leaves at the nearest UNLOCKED dumpster.
