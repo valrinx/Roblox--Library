@@ -64,7 +64,7 @@ return function(Window, scriptInfo)
     -- Settings
     local settings = {
         autoCollect = false,
-        collectInterval = 0.5,
+        collectInterval = 0.2,
         collectRadius = 30,
         noCooldown = false,
         autoSell = false,
@@ -76,7 +76,7 @@ return function(Window, scriptInfo)
         dumpsterEsp = false,
         antiAfk = true,
         autoRejoin = false,
-        autoEquipTool = "Hand",
+        autoEquipTool = "LeafVacuum",
     }
 
     -- Utility functions
@@ -435,8 +435,8 @@ return function(Window, scriptInfo)
 
     FarmTab:CreateDropdown({
         Name = "Collect Method",
-        Options = {"Hand (1-3/grab)", "LeafVacuum (FAST 30+/s)", "Rake (pile+grab)"},
-        CurrentOption = {"Hand (1-3/grab)"},
+        Options = {"LeafVacuum (FAST 30+/s)", "Hand (1-3/grab)", "Rake (pile+grab)"},
+        CurrentOption = {"LeafVacuum (FAST 30+/s)"},
         Flag = "LeafGameCollectMethod",
         Callback = function(v)
             local val = type(v) == "table" and v[1] or v
@@ -540,9 +540,11 @@ return function(Window, scriptInfo)
             player:SetAttribute("OwnsRake", true)
             player:SetAttribute("OwnsLeafBlower", true)
             player:SetAttribute("OwnsLeafVacuum", true)
+            player:SetAttribute("OwnsLeafMower", true)
             player:SetAttribute("PermRake", true)
             player:SetAttribute("PermLeafBlower", true)
             player:SetAttribute("PermLeafVacuum", true)
+            player:SetAttribute("PermLeafMower", true)
             -- Note: Molotov requires real purchase (server-validated)
             -- Buy bag upgrades to max (server-validated, costs $45 total)
             local buyBag = Remotes and Remotes:FindFirstChild("BuyBagUpgrade")
