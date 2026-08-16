@@ -213,6 +213,14 @@ local SCRIPTS = {
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/ar2.lua",
     },
     {
+        name        = "Phantom Forces",
+        description = "Enemy ESP | Box | Distance | Auto Team Detect",
+        placeIds    = {292439477},
+        gameIds     = {113491250},
+        version     = "v1.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/phantom_forces.lua",
+    },
+    {
         name        = "Blackhawk Rescue Mission 5",
         description = "No Recoil | Speed | NoClip | Fullbright | ESP v8",
         placeIds    = {2916899287, 3701546109},
