@@ -163,9 +163,9 @@ return function(Window, scriptInfo)
         return indices, leaves
     end
 
-    -- Collect and sell use the game's full input pipeline via VirtualInputManager.
-    -- SetAttribute("HoveringLeaf/Dumpster", true) tells the LeafHover script what to do on click.
-    -- Character MUST be physically near leaves/dumpster for the server to validate.
+    -- Aura-style collection: rapidly teleport between leaf clusters and collect.
+    -- Uses game's validated pipeline: HoveringLeaf + VIM click triggers tryCollect
+    -- which calls collectMany with proper server-validated leaf IDs.
     local VIM = game:GetService("VirtualInputManager")
 
     local function collectLeaves()
@@ -177,11 +177,16 @@ return function(Window, scriptInfo)
         -- Check Hand cooldown
         if player:GetAttribute("HandCooldown") then return -1 end
 
-        -- Check if there are leaves nearby
-        local _, leaves = getNearbyLeaves(settings.collectRadius, 10)
+        -- Find nearest leaves
+        local _, leaves = getNearbyLeaves(settings.collectRadius, 5)
         if #leaves == 0 then return 0 end
 
-        -- Trigger collection: set HoveringLeaf + click
+        -- TP to the nearest leaf (puts us on top of a cluster)
+        local targetLeaf = leaves[1]
+        root.CFrame = CFrame.new(targetLeaf.Position + Vector3.new(0, 3, 0))
+        root.AssemblyLinearVelocity = Vector3.zero
+
+        -- Set hover + click to trigger the game's tryCollect pipeline
         player:SetAttribute("HoveringLeaf", true)
         task.wait(0.05)
         pcall(function()
@@ -189,25 +194,30 @@ return function(Window, scriptInfo)
             task.wait(0.05)
             VIM:SendMouseButtonEvent(960, 475, 0, false, game, 0)
         end)
+
         return #leaves
     end
 
-    -- Sell leaves at nearest dumpster.
-    -- The game's LeafHover script fires EmptyBackpack when clicking while HoveringDumpster=true.
-    -- We TP close to dumpster, set the hover attribute, then simulate a click.
+    -- Sell leaves at the nearest UNLOCKED dumpster.
+    -- The Frontyard dumpster (near spawn) is always available.
+    -- Uses game's pipeline: HoveringDumpster + VIM click triggers tryEmpty in LeafHover.
     local function sellLeaves()
         if getCurrentLeaves() <= 0 then return false end
 
         local _, _, root = getCharacter()
         if not root then return false end
 
-        -- Find nearest dumpster model
+        -- Find dumpster closest to SPAWN (always unlocked)
+        -- Sort dumpsters by distance to SpawnLocation
+        local spawnLoc = workspace.Map:FindFirstChild("SpawnLocation")
+        local spawnPos = spawnLoc and spawnLoc.Position or Vector3.new(58, 62, -74)
+
         local nearestModel, nearestDist
         pcall(function()
             local dumpsterFolder = workspace.Map.Dumpsters
             for _, d in ipairs(dumpsterFolder:GetChildren()) do
                 if d:IsA("Model") then
-                    local dist = (d:GetPivot().Position - root.Position).Magnitude
+                    local dist = (d:GetPivot().Position - spawnPos).Magnitude
                     if not nearestDist or dist < nearestDist then
                         nearestModel = d
                         nearestDist = dist
@@ -218,13 +228,13 @@ return function(Window, scriptInfo)
 
         if not nearestModel then return false end
 
-        -- Teleport close to dumpster (inside proximity range)
+        -- Teleport near the dumpster (3 studs offset, not inside)
         local cf = nearestModel:GetPivot()
-        local sellPos = cf.Position + Vector3.new(2, 1.5, 0)
+        local sellPos = cf.Position + Vector3.new(3, 1.5, 0)
         teleportTo(sellPos)
         task.wait(0.3)
 
-        -- Set HoveringDumpster and simulate click to trigger the game's tryEmpty
+        -- Trigger sell via game's input system
         player:SetAttribute("HoveringDumpster", true)
         task.wait(0.05)
         pcall(function()
@@ -234,11 +244,15 @@ return function(Window, scriptInfo)
         end)
         task.wait(0.5)
 
-        -- Move away from dumpster
-        local safePos = cf.Position + Vector3.new(6, 2, 0)
-        teleportTo(safePos)
+        -- If that didn't work, fire remote directly as backup
+        if getCurrentLeaves() > 0 and EmptyBackpackRemote then
+            pcall(function() EmptyBackpackRemote:FireServer() end)
+            task.wait(0.5)
+        end
 
-        return getCurrentLeaves() < getLeafCapacity()
+        -- Move slightly away from dumpster
+        teleportTo(cf.Position + Vector3.new(5, 1.5, 0))
+        return getCurrentLeaves() == 0
     end
 
     -- Equip a tool
