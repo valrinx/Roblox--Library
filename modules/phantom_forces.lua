@@ -44,32 +44,60 @@ return function(Window, runtimeInfo)
     end
 
     local function detectMyTeam()
+        -- PF uses obfuscated team folder names.
+        -- Strategy: Check multiple close models. The team with the MOST
+        -- models within 50 studs of camera is our team (we see teammates nearby).
+        -- Fallback: single closest model.
         local pf = getPlayersFolder()
         if not pf then return nil end
 
         local myPos = Camera.CFrame.Position
-        local closestDist = math.huge
-        local myTeam = nil
+        local NEARBY_RADIUS = 80
+        local teamScores = {}
 
         for _, teamFolder in ipairs(pf:GetChildren()) do
             if not teamFolder:IsA("Folder") then continue end
+            local nearbyCount = 0
+            local closestInTeam = math.huge
+
             for _, model in ipairs(teamFolder:GetChildren()) do
                 if model:IsA("Model") then
                     for _, part in ipairs(model:GetChildren()) do
                         if part:IsA("BasePart") then
                             local d = (part.Position - myPos).Magnitude
-                            if d < closestDist then
-                                closestDist = d
-                                myTeam = teamFolder.Name
+                            if d < NEARBY_RADIUS then
+                                nearbyCount += 1
+                            end
+                            if d < closestInTeam then
+                                closestInTeam = d
                             end
                             break
                         end
                     end
                 end
             end
+
+            teamScores[teamFolder.Name] = {
+                nearby = nearbyCount,
+                closest = closestInTeam,
+            }
         end
 
-        return myTeam
+        -- Pick team with most nearby models (teammates tend to be around us)
+        local bestTeam, bestScore = nil, -1
+        for name, score in pairs(teamScores) do
+            if score.nearby > bestScore then
+                bestScore = score.nearby
+                bestTeam = name
+            elseif score.nearby == bestScore then
+                -- Tiebreak: closest model
+                if score.closest < teamScores[bestTeam].closest then
+                    bestTeam = name
+                end
+            end
+        end
+
+        return bestTeam
     end
 
     local function getModelBounds(model)
