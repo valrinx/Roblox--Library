@@ -549,6 +549,24 @@ return function(Window, scriptInfo)
             notify("🍂 Game", "All tools + Infinite Bag unlocked!")
         end,
     })
+    ToolTab:CreateButton({
+        Name = "⚡ Max All Upgrades",
+        Callback = function()
+            pcall(function()
+                local cfg = require(ReplicatedStorage:WaitForChild("UpgradeConfig"))
+                for toolName, toolData in pairs(cfg.tools) do
+                    if toolData.upgrades then
+                        for upgName, upgData in pairs(toolData.upgrades) do
+                            local key = "Upg_" .. toolName .. "_" .. upgName
+                            local maxLevel = upgData.effects and (#upgData.effects - 1) or 0
+                            player:SetAttribute(key, maxLevel)
+                        end
+                    end
+                end
+            end)
+            notify("🍂 Game", "All upgrades maxed!")
+        end,
+    })
     local toolOptions = {"Hand", "Rake", "LeafBlower", "LeafVacuum", "Molotov", "LeafMower"}
     ToolTab:CreateDropdown({
         Name = "Equip Tool",
