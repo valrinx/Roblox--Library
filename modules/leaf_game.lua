@@ -224,24 +224,19 @@ return function(Window, scriptInfo)
         return 1
     end
 
-    -- Sell leaves at the nearest UNLOCKED dumpster.
-    -- The Frontyard dumpster (near spawn) is always available.
-    -- Uses game's pipeline: HoveringDumpster + VIM click triggers tryEmpty in LeafHover.
+    -- Sell leaves: TP within 15 studs of unlocked dumpster and fire EmptyBackpack.
+    -- Server proximity check is ~15 studs. No need to enter the dumpster or click.
     local function sellLeaves()
         if getCurrentLeaves() <= 0 then return false end
 
         local _, _, root = getCharacter()
         if not root then return false end
 
-        -- Find dumpster closest to SPAWN (always unlocked)
-        -- Sort dumpsters by distance to SpawnLocation
-        local spawnLoc = workspace.Map:FindFirstChild("SpawnLocation")
-        local spawnPos = spawnLoc and spawnLoc.Position or Vector3.new(58, 62, -74)
-
+        -- Find Frontyard dumpster (nearest to spawn, always unlocked)
+        local spawnPos = Vector3.new(58, 62, -74)
         local nearestModel, nearestDist
         pcall(function()
-            local dumpsterFolder = workspace.Map.Dumpsters
-            for _, d in ipairs(dumpsterFolder:GetChildren()) do
+            for _, d in ipairs(workspace.Map.Dumpsters:GetChildren()) do
                 if d:IsA("Model") then
                     local dist = (d:GetPivot().Position - spawnPos).Magnitude
                     if not nearestDist or dist < nearestDist then
@@ -254,30 +249,28 @@ return function(Window, scriptInfo)
 
         if not nearestModel then return false end
 
-        -- Teleport near the dumpster (3 studs offset, not inside)
-        local cf = nearestModel:GetPivot()
-        local sellPos = cf.Position + Vector3.new(3, 1.5, 0)
-        teleportTo(sellPos)
-        task.wait(0.3)
+        local center = nearestModel:GetPivot().Position
+        local distToPlayer = (center - root.Position).Magnitude
 
-        -- Trigger sell via game's input system
-        player:SetAttribute("HoveringDumpster", true)
-        task.wait(0.05)
-        pcall(function()
-            VIM:SendMouseButtonEvent(960, 475, 0, true, game, 0)
-            task.wait(0.05)
-            VIM:SendMouseButtonEvent(960, 475, 0, false, game, 0)
-        end)
-        task.wait(0.5)
-
-        -- If that didn't work, fire remote directly as backup
-        if getCurrentLeaves() > 0 and EmptyBackpackRemote then
-            pcall(function() EmptyBackpackRemote:FireServer() end)
-            task.wait(0.5)
+        -- Only TP if too far (>14 studs from dumpster)
+        local savedPos
+        if distToPlayer > 14 then
+            savedPos = root.CFrame
+            teleportTo(center + Vector3.new(10, 1.5, 0)) -- 10 studs away, safe
+            task.wait(0.3)
         end
 
-        -- Move slightly away from dumpster
-        teleportTo(cf.Position + Vector3.new(5, 1.5, 0))
+        -- Fire sell remote
+        pcall(function()
+            EmptyBackpackRemote:FireServer()
+        end)
+        task.wait(0.3)
+
+        -- TP back to original position if we moved
+        if savedPos then
+            teleportTo(savedPos)
+        end
+
         return getCurrentLeaves() == 0
     end
 
