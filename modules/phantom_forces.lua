@@ -42,6 +42,15 @@ return function(Window, runtimeInfo)
     -- Raycast params for wall check
     local RayParams = RaycastParams.new()
     RayParams.FilterType = Enum.RaycastFilterType.Exclude
+
+    ---------------------------------------------------------------------------
+    -- Utility
+    ---------------------------------------------------------------------------
+
+    local function getPlayersFolder()
+        return workspace:FindFirstChild("Players")
+    end
+
     local function buildRayFilter()
         local ignore = {}
         local pf = getPlayersFolder()
@@ -51,14 +60,6 @@ return function(Window, runtimeInfo)
         local roots = workspace:FindFirstChild("Roots")
         if roots then table.insert(ignore, roots) end
         RayParams.FilterDescendantsInstances = ignore
-    end
-
-    ---------------------------------------------------------------------------
-    -- Utility
-    ---------------------------------------------------------------------------
-
-    local function getPlayersFolder()
-        return workspace:FindFirstChild("Players")
     end
 
     local function detectMyTeam()
