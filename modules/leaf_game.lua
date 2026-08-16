@@ -66,6 +66,7 @@ return function(Window, scriptInfo)
         autoCollect = false,
         collectInterval = 0.5,
         collectRadius = 30,
+        noCooldown = false,
         autoSell = false,
         sellThreshold = 0.9, -- sell at 90% capacity
         autoFarmLoop = false,
@@ -163,12 +164,14 @@ return function(Window, scriptInfo)
         return indices, leaves
     end
 
-    -- TRUE AURA COLLECT: directly calls the game's tryCollect function
-    -- by setting its internal "hovered leaf" upvalue to the nearest leaf.
-    -- No mouse hover, no click, no VIM needed. Works while AFK.
+    -- TRUE AURA COLLECT: supports multiple tools
+    -- Hand: calls tryCollect (1-3 per grab, 0.5s cooldown)
+    -- Vacuum: calls LeafSim.vacuumAim (30+ per second, fastest)
+    -- Rake: calls LeafSim.rake to pile leaves then Hand collects
     local VIM = game:GetService("VirtualInputManager")
     local tryCollectFunc = nil
     local U16_INDEX = 1 -- upvalue index for the "hovered leaf" in tryCollect
+    local LeafSimModule = nil
 
     -- Find tryCollect from LeafHover in GC
     pcall(function()
@@ -193,35 +196,94 @@ return function(Window, scriptInfo)
         end
     end)
 
+    pcall(function()
+        LeafSimModule = require(player.PlayerScripts:WaitForChild("LeafSim", 5))
+    end)
+
     local function collectLeaves()
-        if not tryCollectFunc then return 0 end
         if isBagFull() then return 0 end
-        if player:GetAttribute("HandCooldown") then return -1 end
 
         local _, _, root = getCharacter()
         if not root then return 0 end
 
-        -- Find nearest leaf
         local leavesFolder = workspace:FindFirstChild("Leaves")
         if not leavesFolder then return 0 end
 
-        local nearest, nearestDist
-        for _, leaf in ipairs(leavesFolder:GetChildren()) do
-            if leaf:IsA("BasePart") and leaf.Parent then
-                local dist = (leaf.Position - root.Position).Magnitude
-                if dist <= settings.collectRadius and (not nearestDist or dist < nearestDist) then
-                    nearest = leaf
-                    nearestDist = dist
+        local collectMethod = settings.autoEquipTool
+
+        -- VACUUM METHOD: fastest (30+ leaves/sec)
+        if collectMethod == "LeafVacuum" and LeafSimModule and LeafSimModule.vacuumAim then
+            player:SetAttribute("SelectedTool", "LeafVacuum")
+            player:SetAttribute("OwnsLeafVacuum", true)
+            LeafSimModule.vacuumAim(root.Position + root.CFrame.LookVector * 5)
+            task.wait(0.3)
+            LeafSimModule.vacuumStop()
+            return 10
+
+        -- RAKE METHOD: pile leaves then hand-collect
+        elseif collectMethod == "Rake" and LeafSimModule and LeafSimModule.rake then
+            player:SetAttribute("SelectedTool", "Rake")
+            LeafSimModule.rake(root.Position)
+            task.wait(0.2)
+            -- After raking, do a hand collect on the pile
+            if tryCollectFunc then
+                local nearest
+                for _, leaf in ipairs(leavesFolder:GetChildren()) do
+                    if leaf:IsA("BasePart") and leaf.Parent and (leaf.Position - root.Position).Magnitude <= 5 then
+                        nearest = leaf
+                        break
+                    end
+                end
+                if nearest then
+                    local orig = player:GetAttribute("SelectedTool")
+                    player:SetAttribute("SelectedTool", "Hand")
+                    debug.setupvalue(tryCollectFunc, U16_INDEX, nearest)
+                    tryCollectFunc()
+                    player:SetAttribute("SelectedTool", orig or "Rake")
                 end
             end
+            return 5
+
+        -- HAND METHOD: aura via tryCollect (1-3 per grab)
+        else
+            if not tryCollectFunc then return 0 end
+            if player:GetAttribute("HandCooldown") then
+                if settings.noCooldown then
+                    player:SetAttribute("HandCooldown", false)
+                else
+                    return -1
+                end
+            end
+
+            local nearest, nearestDist
+            for _, leaf in ipairs(leavesFolder:GetChildren()) do
+                if leaf:IsA("BasePart") and leaf.Parent then
+                    local dist = (leaf.Position - root.Position).Magnitude
+                    if dist <= settings.collectRadius and (not nearestDist or dist < nearestDist) then
+                        nearest = leaf
+                        nearestDist = dist
+                    end
+                end
+            end
+            if not nearest then return 0 end
+
+            local originalTool = player:GetAttribute("SelectedTool") or "Hand"
+            if originalTool ~= "Hand" then
+                player:SetAttribute("SelectedTool", "Hand")
+            end
+
+            debug.setupvalue(tryCollectFunc, U16_INDEX, nearest)
+            tryCollectFunc()
+
+            if originalTool ~= "Hand" then
+                player:SetAttribute("SelectedTool", originalTool)
+            end
+
+            if settings.noCooldown then
+                player:SetAttribute("HandCooldown", false)
+            end
+            return 1
         end
-
-        if not nearest then return 0 end
-
-        -- Set the hovered leaf upvalue and call tryCollect
-        debug.setupvalue(tryCollectFunc, U16_INDEX, nearest)
-        tryCollectFunc()
-        return 1
     end
 
     -- Sell leaves: TP within 15 studs of unlocked dumpster and fire EmptyBackpack.
@@ -371,6 +433,22 @@ return function(Window, scriptInfo)
     FarmTab:CreateSection("Auto Collect")
     local collectStatus = FarmTab:CreateLabel("Collect: idle")
 
+    FarmTab:CreateDropdown({
+        Name = "Collect Method",
+        Options = {"Hand (1-3/grab)", "LeafVacuum (FAST 30+/s)", "Rake (pile+grab)"},
+        CurrentOption = {"Hand (1-3/grab)"},
+        Flag = "LeafGameCollectMethod",
+        Callback = function(v)
+            local val = type(v) == "table" and v[1] or v
+            if val:find("Vacuum") then
+                settings.autoEquipTool = "LeafVacuum"
+            elseif val:find("Rake") then
+                settings.autoEquipTool = "Rake"
+            else
+                settings.autoEquipTool = "Hand"
+            end
+        end,
+    })
     FarmTab:CreateToggle({
         Name = "Auto Collect Leaves",
         CurrentValue = false,
@@ -379,12 +457,18 @@ return function(Window, scriptInfo)
     })
     FarmTab:CreateSlider({
         Name = "Collect Interval",
-        Range = {0.3, 3},
-        Increment = 0.1,
+        Range = {0.1, 3},
+        Increment = 0.05,
         CurrentValue = 0.5,
         Suffix = " s",
         Flag = "LeafGameCollectInterval",
         Callback = function(v) settings.collectInterval = v end,
+    })
+    FarmTab:CreateToggle({
+        Name = "No Cooldown (Instant Grab)",
+        CurrentValue = false,
+        Flag = "LeafGameNoCooldown",
+        Callback = function(v) settings.noCooldown = v end,
     })
     FarmTab:CreateLabel("Collects 1-3 leaves per grab (Hand Grasp upgrade)")
     FarmTab:CreateSlider({
