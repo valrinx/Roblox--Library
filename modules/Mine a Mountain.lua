@@ -42,6 +42,7 @@ return function(Window, scriptInfo)
         {name = "Epic",      color = Color3.fromRGB(170, 100, 255)},
         {name = "Legendary", color = Color3.fromRGB(255, 80, 180)},
         {name = "Mythic",    color = Color3.fromRGB(190, 70, 255)},
+        {name = "Celestial", color = Color3.fromRGB(255, 225, 150)},
     }
 
     local MUTATIONS = {
@@ -248,7 +249,7 @@ return function(Window, scriptInfo)
     local function scanCrystals()
         if not settings.espEnabled then return end
 
-        -- Scan DroppedCrystals
+        -- Scan DroppedCrystals (ที่ถูกขุดแล้วตกพื้น)
         if settings.espShowDropped then
             local dc = workspace:FindFirstChild("DroppedCrystals")
             if dc then
@@ -263,14 +264,16 @@ return function(Window, scriptInfo)
             end
         end
 
-        -- Scan Map crystals
+        -- Scan Things/Crystals (แร่หลักบนภูเขา — 2000+ ชิ้น)
         if settings.espShowMap then
-            local map = workspace:FindFirstChild("Map")
-            if map then
-                for _, c in ipairs(map:GetChildren()) do
-                    if c:IsA("BasePart") and c.Name:match("^T%d") and not espObjects[c] then
+            local things = workspace:FindFirstChild("Things")
+            local crystalsFolder = things and things:FindFirstChild("Crystals")
+            if crystalsFolder then
+                for _, c in ipairs(crystalsFolder:GetChildren()) do
+                    if c:IsA("BasePart") and not espObjects[c] then
                         local data = readCrystalAttribs(c)
-                        if (tonumber(data.tier) or 0) >= settings.espMinTier then
+                        if (tonumber(data.tier) or 0) >= settings.espMinTier
+                            and (tonumber(data.value) or 0) >= settings.espMinValue then
                             createESP(c, data)
                         end
                     end
@@ -298,6 +301,10 @@ return function(Window, scriptInfo)
 
     local dcFolder = workspace:FindFirstChild("DroppedCrystals")
     if dcFolder then watchFolder(dcFolder) end
+    -- Watch mountain crystals folder
+    local thingsFolder = workspace:FindFirstChild("Things")
+    local crystalsFolder = thingsFolder and thingsFolder:FindFirstChild("Crystals")
+    if crystalsFolder then watchFolder(crystalsFolder) end
     connect(workspace.ChildAdded, function(child)
         if child.Name == "DroppedCrystals" then watchFolder(child) end
     end)
@@ -546,7 +553,7 @@ return function(Window, scriptInfo)
     })
     MineTab:CreateSlider({
         Name = "Pickup Min Tier",
-        Range = {1, 6},
+        Range = {1, 7},
         Increment = 1,
         CurrentValue = 3,
         Suffix = "",
@@ -578,7 +585,7 @@ return function(Window, scriptInfo)
     })
     EspTab:CreateSlider({
         Name = "Min Tier Filter",
-        Range = {1, 6},
+        Range = {1, 7},
         Increment = 1,
         CurrentValue = 1,
         Suffix = "",
@@ -601,7 +608,7 @@ return function(Window, scriptInfo)
         Callback = function(v) settings.espShowDropped = v end,
     })
     EspTab:CreateToggle({
-        Name = "Show Map Crystals",
+        Name = "Show Mountain Crystals (2000+)",
         CurrentValue = true,
         Flag = "MaMEspMap",
         Callback = function(v) settings.espShowMap = v end,
@@ -627,7 +634,7 @@ return function(Window, scriptInfo)
     })
     TpTab:CreateSlider({
         Name = "TP Min Tier",
-        Range = {1, 6},
+        Range = {1, 7},
         Increment = 1,
         CurrentValue = 4,
         Suffix = "",
