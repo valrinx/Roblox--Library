@@ -244,6 +244,14 @@ local SCRIPTS = {
         version     = "v1.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/cold_war.lua",
     },
+    {
+        name        = "DON'T LOOK BACK",
+        description = "Entity/Scrap ESP | Fullbright | No Fog | Speed | Alerts",
+        placeIds    = {127332613700317},
+        gameIds     = {10493730706},
+        version     = "v1.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/dont_look_back.lua",
+    },
     --[[
     {
         name      = "Another Game",
