@@ -38,7 +38,6 @@ return function(Window, runtimeInfo)
         AimPrediction = false,
         PredictDotSize = 6,
         PredictTargetPart = "Head",
-<<<<<<< HEAD
         -- Weapon
         ReducedRecoil = false,
         RecoilReduction = 60,
@@ -64,8 +63,6 @@ return function(Window, runtimeInfo)
         ESPColorHidden = Color3.fromRGB(0, 255, 80),
         ThirdPersonFOV = false,
         ThirdPersonFOVValue = 90,
-=======
->>>>>>> fc2643ec8a9e557b67369b8f0792c20911009566
     }
     local Connections = {}
     local ESPObjects = {}
@@ -606,7 +603,6 @@ return function(Window, runtimeInfo)
     end
 
     ---------------------------------------------------------------------------
-<<<<<<< HEAD
     -- Weapon System (Recoil, Sway, Camera Shake)
     ---------------------------------------------------------------------------
 
@@ -1146,8 +1142,6 @@ return function(Window, runtimeInfo)
     end
 
     ---------------------------------------------------------------------------
-=======
->>>>>>> fc2643ec8a9e557b67369b8f0792c20911009566
     -- Connections
     ---------------------------------------------------------------------------
 
@@ -1168,7 +1162,6 @@ return function(Window, runtimeInfo)
     Connections.render = RunService.RenderStepped:Connect(function()
         updateESP()
         updateAimPrediction()
-<<<<<<< HEAD
         updateRadar()
         updateSoundESP()
         updateProximityWarning()
@@ -1176,8 +1169,6 @@ return function(Window, runtimeInfo)
         updateCrosshair()
         updateWeaponStats()
         onWeaponChanged()
-=======
->>>>>>> fc2643ec8a9e557b67369b8f0792c20911009566
         if State.FOVEnabled then
             Camera.FieldOfView = State.FOVValue
         end
@@ -1597,14 +1588,11 @@ return function(Window, runtimeInfo)
             end
             clearAllESP()
             destroyPredictionDot()
-<<<<<<< HEAD
             destroyRadar()
             destroyProximityWarning()
             destroyCrosshair()
             destroyWeaponStats()
             for _, line in pairs(snaplineDrawings) do pcall(function() line:Remove() end) end
-=======
->>>>>>> fc2643ec8a9e557b67369b8f0792c20911009566
             espFolder:Destroy()
             applyFullbright(false)
             applyNoFog(false)
