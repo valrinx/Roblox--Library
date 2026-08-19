@@ -27,6 +27,7 @@ return function(Window, runtimeInfo)
         ESP = false,
         ESPDistance = true,
         ESPNames = true,
+        ESPWallCheck = true,
         Fullbright = false,
         NoFog = false,
         FOVEnabled = false,
@@ -97,6 +98,39 @@ return function(Window, runtimeInfo)
             return char:FindFirstChild("HumanoidRootPart")
         end
         return nil
+    end
+
+    ---------------------------------------------------------------------------
+    -- Visibility Check (Raycast)
+    ---------------------------------------------------------------------------
+
+    local RayParams = RaycastParams.new()
+    RayParams.FilterType = Enum.RaycastFilterType.Exclude
+
+    local COLOR_VISIBLE = Color3.fromRGB(255, 30, 30)     -- Red = visible
+    local COLOR_HIDDEN  = Color3.fromRGB(0, 255, 80)      -- Green = behind wall
+    local COLOR_TEXT_VISIBLE = Color3.fromRGB(255, 60, 60)
+    local COLOR_TEXT_HIDDEN  = Color3.fromRGB(0, 255, 100)
+
+    local function buildRayFilter()
+        local ignore = {}
+        local chars = workspace:FindFirstChild("Characters")
+        if chars then table.insert(ignore, chars) end
+        local myChar = getCharacter(LP)
+        if myChar then table.insert(ignore, myChar) end
+        -- Common ignore folders
+        for _, name in ipairs({"Ignore", "Effects", "Debris"}) do
+            local folder = workspace:FindFirstChild(name)
+            if folder then table.insert(ignore, folder) end
+        end
+        RayParams.FilterDescendantsInstances = ignore
+    end
+
+    local function isVisible(fromPos, toPos)
+        buildRayFilter()
+        local direction = toPos - fromPos
+        local result = workspace:Raycast(fromPos, direction, RayParams)
+        return result == nil -- nil = nothing blocking = visible
     end
 
     ---------------------------------------------------------------------------
@@ -212,6 +246,25 @@ return function(Window, runtimeInfo)
                     esp.highlight.Enabled = true
                     esp.billboard.Adornee = hrp
                     esp.billboard.Enabled = true
+
+                    -- Wall check: change color based on visibility
+                    if State.ESPWallCheck and myHRP then
+                        local camPos = Camera.CFrame.Position
+                        local visible = isVisible(camPos, hrp.Position)
+                        if visible then
+                            esp.highlight.FillColor = COLOR_VISIBLE
+                            esp.highlight.OutlineColor = COLOR_VISIBLE
+                            esp.nameLabel.TextColor3 = COLOR_TEXT_VISIBLE
+                        else
+                            esp.highlight.FillColor = COLOR_HIDDEN
+                            esp.highlight.OutlineColor = COLOR_HIDDEN
+                            esp.nameLabel.TextColor3 = COLOR_TEXT_HIDDEN
+                        end
+                    else
+                        esp.highlight.FillColor = COLOR_VISIBLE
+                        esp.highlight.OutlineColor = COLOR_VISIBLE
+                        esp.nameLabel.TextColor3 = COLOR_TEXT_VISIBLE
+                    end
 
                     esp.nameLabel.Visible = State.ESPNames
                     esp.distLabel.Visible = State.ESPDistance
@@ -331,6 +384,14 @@ return function(Window, runtimeInfo)
         CurrentValue = true,
         Callback = function(v)
             State.ESPDistance = v
+        end,
+    })
+
+    VisualsTab:CreateToggle({
+        Name = "Wall Check (Red=Visible, Green=Hidden)",
+        CurrentValue = true,
+        Callback = function(v)
+            State.ESPWallCheck = v
         end,
     })
 
