@@ -236,6 +236,14 @@ local SCRIPTS = {
         version     = "v1.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/leaf_game.lua",
     },
+    {
+        name        = "Cold War [MOUNTED MGs]",
+        description = "Enemy ESP | Fullbright | No Fog | FOV Changer",
+        placeIds    = {13687899540},
+        gameIds     = {4750561026},
+        version     = "v1.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/cold_war.lua",
+    },
     --[[
     {
         name      = "Another Game",
