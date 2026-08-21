@@ -1,7 +1,7 @@
 --[[
     RAVEN HUB | Build and Crush
     PlaceId: 123581964009368 | GameId: 8723526551
-    Version: v0.3
+    Version: v0.3.1
 
     Vehicle-contact-aware Objective Aura, chest/objective/vehicle awareness,
     progression telemetry, performance controls, and anti-AFK.
@@ -334,6 +334,15 @@ return function(Window, scriptInfo)
             or instance:FindFirstChildWhichIsA("BasePart", true)
     end
 
+    local auraCache = {
+        vehicle = nil,
+        sources = {},
+        objectives = {},
+        targets = {},
+        structuresAt = 0,
+        targetsAt = 0,
+    }
+
     local function collectDamageSources()
         local vehicle = getOwnedVehicle()
         if not vehicle then return {} end
@@ -361,7 +370,7 @@ return function(Window, scriptInfo)
     end
 
     local function findDamageSource()
-        local sources = collectDamageSources()
+        local sources = auraCache.sources
         return sources[1] and sources[1].id or nil
     end
 
@@ -372,7 +381,7 @@ return function(Window, scriptInfo)
             local part = sourcePartFor(instance)
             if type(id) == "number" and part and not seen[id] then
                 seen[id] = true
-                table.insert(parts, {id = id, part = part, position = part.Position})
+                table.insert(parts, {id = id, part = part})
             end
         end
         return parts
@@ -382,53 +391,88 @@ return function(Window, scriptInfo)
         return settings.auraMode == "Fast" and 360 or 250
     end
 
+    local function refreshAuraStructures(force)
+        local now = os.clock()
+        local vehicle = getOwnedVehicle()
+        if not force and vehicle == auraCache.vehicle and now - auraCache.structuresAt < 0.75 then
+            return
+        end
+        auraCache.vehicle = vehicle
+        auraCache.sources = collectDamageSources()
+        auraCache.objectives = {}
+        for _, objective in ipairs(candidatesForCategory("objective")) do
+            local parts = collectObjectiveParts(objective)
+            if #parts > 0 then
+                table.insert(auraCache.objectives, {instance = objective, parts = parts})
+            end
+        end
+        auraCache.structuresAt = now
+        auraCache.targetsAt = 0
+    end
+
+    local function refreshAuraTargets(force)
+        local now = os.clock()
+        refreshAuraStructures(false)
+        if not force and now - auraCache.targetsAt < 0.15 then return end
+
+        local targets = {}
+        for _, objectiveEntry in ipairs(auraCache.objectives) do
+            local objective = objectiveEntry.instance
+            if objective.Parent and objectiveMatchesFilters(objective) then
+                local nearestDistance, nearestSource = math.huge, nil
+                for _, source in ipairs(auraCache.sources) do
+                    if source.part.Parent then
+                        local sourcePosition = source.part.Position
+                        for _, targetPart in ipairs(objectiveEntry.parts) do
+                            if targetPart.part.Parent then
+                                local distance = (sourcePosition - targetPart.part.Position).Magnitude
+                                if distance < nearestDistance then
+                                    nearestDistance, nearestSource = distance, source
+                                end
+                            end
+                        end
+                    end
+                end
+                if nearestSource and nearestDistance <= settings.auraRange then
+                    local sourcePosition = nearestSource.part.Position
+                    table.sort(objectiveEntry.parts, function(a, b)
+                        return (sourcePosition - a.part.Position).Magnitude
+                            < (sourcePosition - b.part.Position).Magnitude
+                    end)
+                    local partIds = {}
+                    for partIndex = 1, math.min(settings.auraMaxParts, #objectiveEntry.parts) do
+                        local targetPart = objectiveEntry.parts[partIndex]
+                        if targetPart.part.Parent then table.insert(partIds, targetPart.id) end
+                    end
+                    if #partIds > 0 then
+                        table.insert(targets, {
+                            source = nearestSource,
+                            partIds = partIds,
+                            hitPart = objectiveEntry.parts[1].part,
+                            distance = nearestDistance,
+                        })
+                    end
+                end
+            end
+        end
+        table.sort(targets, function(a, b) return a.distance < b.distance end)
+        auraCache.targets = targets
+        auraCache.targetsAt = now
+    end
+
     local function runObjectiveAura()
         if not settings.auraEnabled or not crushNet or not crushNet.reportDamage
             or type(crushNet.reportDamage.fire) ~= "function" then
             return 0
         end
-        local sources = collectDamageSources()
-        if #sources == 0 then return 0 end
-
-        local targets = {}
-        for _, objective in ipairs(candidatesForCategory("objective")) do
-            if objectiveMatchesFilters(objective) then
-                local objectiveParts = collectObjectiveParts(objective)
-                local nearestDistance, nearestSource = math.huge, nil
-                for _, source in ipairs(sources) do
-                    for _, targetPart in ipairs(objectiveParts) do
-                        local distance = (source.part.Position - targetPart.position).Magnitude
-                        if distance < nearestDistance then
-                            nearestDistance, nearestSource = distance, source
-                        end
-                    end
-                end
-                if nearestSource and nearestDistance <= settings.auraRange then
-                    table.sort(objectiveParts, function(a, b)
-                        return (nearestSource.part.Position - a.position).Magnitude
-                            < (nearestSource.part.Position - b.position).Magnitude
-                    end)
-                    table.insert(targets, {
-                        instance = objective,
-                        parts = objectiveParts,
-                        source = nearestSource,
-                        distance = nearestDistance,
-                    })
-                end
-            end
-        end
-        table.sort(targets, function(a, b) return a.distance < b.distance end)
+        refreshAuraTargets(false)
 
         local attacked = 0
-        for index = 1, math.min(settings.auraMaxTargets, #targets) do
-            local target = targets[index]
-            local partIds = {}
-            for partIndex = 1, math.min(settings.auraMaxParts, #target.parts) do
-                table.insert(partIds, target.parts[partIndex].id)
-            end
-            if #partIds > 0 then
+        for index = 1, math.min(settings.auraMaxTargets, #auraCache.targets) do
+            local target = auraCache.targets[index]
+            if target.source.part.Parent and target.hitPart.Parent then
                 local ok = pcall(crushNet.reportDamage.fire,
-                    target.source.id, partIds, damageValueForMode(), target.parts[1].position)
+                    target.source.id, target.partIds, damageValueForMode(), target.hitPart.Position)
                 if ok then attacked = attacked + 1 end
             end
         end
@@ -670,6 +714,7 @@ return function(Window, scriptInfo)
         local espAt = 0
         local statusAt = 0
         local auraAt = 0
+        local auraUiAt = 0
         while running do
             local now = os.clock()
             if now - espAt >= 1 then
@@ -683,14 +728,17 @@ return function(Window, scriptInfo)
             if settings.auraEnabled and now - auraAt >= settings.auraInterval then
                 auraAt = now
                 local attacked = runObjectiveAura()
+                if now - auraUiAt >= 0.5 then
+                    auraUiAt = now
+                    pcall(function()
+                        auraStatus:Set(string.format("Aura: %s | Targets: %d | Contacts: %d",
+                            settings.auraMode, attacked, #auraCache.sources))
+                    end)
+                end
+            elseif not settings.auraEnabled and now - auraUiAt >= 0.5 then
+                auraUiAt = now
                 pcall(function()
-                    local sources = collectDamageSources()
-                    auraStatus:Set(string.format("Aura: %s | Targets: %d | Contacts: %d",
-                        settings.auraMode, attacked, #sources))
-                end)
-            elseif not settings.auraEnabled then
-                pcall(function()
-                    auraStatus:Set("Aura: idle | Contacts: " .. tostring(#collectDamageSources()))
+                    auraStatus:Set("Aura: idle | Contacts: " .. tostring(#auraCache.sources))
                 end)
             end
 
@@ -785,5 +833,5 @@ return function(Window, scriptInfo)
         scriptInfo.registerCleanup(destroy)
     end
 
-    notify("Build and Crush", "v0.3 loaded — contact-aware Objective Aura is ready")
+    notify("Build and Crush", "v0.3.1 loaded — cached Objective Aura is ready")
 end
