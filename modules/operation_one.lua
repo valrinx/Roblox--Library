@@ -1,7 +1,7 @@
 --[[
     RAVEN HUB | [SEASON 3] Operation One
     PlaceId: 72920620366355 | GameId: 8307114974
-    Version: v1.1
+    Version: v1.2
 
     Cleanup-safe tactical awareness using replicated player, gadget, and HUD state.
     No gameplay remotes are fired.
@@ -71,6 +71,29 @@ return function(Window, scriptInfo)
         return player.Character and player.Character:FindFirstChildOfClass("Humanoid")
     end
 
+    local function playerFromOwnerValue(owner)
+        if owner and owner:IsA("Player") then return owner end
+        if owner and owner:IsA("Model") then
+            return Players:GetPlayerFromCharacter(owner) or Players:FindFirstChild(owner.Name)
+        end
+        return nil
+    end
+
+    local function playerViewmodel(player)
+        local viewmodels = workspace:FindFirstChild("Viewmodels")
+        if not viewmodels then return nil end
+        for _, model in ipairs(viewmodels:GetChildren()) do
+            if model:IsA("Model") and model.Name ~= "LocalViewmodel" then
+                local ownerValue = model:FindFirstChild("owner", true)
+                local owner = ownerValue and ownerValue:IsA("ObjectValue")
+                    and playerFromOwnerValue(ownerValue.Value)
+                    or nil
+                if owner == player then return model end
+            end
+        end
+        return nil
+    end
+
     local function isEnemy(player)
         if not player or player == localPlayer then return false end
         if localPlayer.Team == nil or player.Team == nil then return true end
@@ -93,6 +116,7 @@ return function(Window, scriptInfo)
         local visual = store[key]
         if not visual then return end
         if visual.highlight then visual.highlight:Destroy() end
+        if visual.box then visual.box:Destroy() end
         if visual.billboard then visual.billboard:Destroy() end
         store[key] = nil
     end
@@ -114,6 +138,25 @@ return function(Window, scriptInfo)
             or Enum.HighlightDepthMode.Occluded
         highlight.Parent = folder
 
+        local box = Instance.new("BoxHandleAdornment")
+        box.Name = "RavenOperationOneBox"
+        box.Adornee = part
+        box.AlwaysOnTop = settings.throughWalls
+        box.ZIndex = 9
+        box.Color3 = color
+        box.Transparency = 0.55
+        box.Size = Vector3.new(4, 6, 2)
+        local boundsOk, boundsCFrame, boundsSize = pcall(function() return model:GetBoundingBox() end)
+        if boundsOk then
+            box.CFrame = part.CFrame:ToObjectSpace(boundsCFrame)
+            box.Size = Vector3.new(
+                math.clamp(boundsSize.X, 2, 8),
+                math.clamp(boundsSize.Y, 4, 8),
+                math.clamp(boundsSize.Z, 1.5, 8)
+            )
+        end
+        box.Parent = folder
+
         local billboard = Instance.new("BillboardGui")
         billboard.Name = "RavenOperationOneLabel"
         billboard.Adornee = part
@@ -133,7 +176,7 @@ return function(Window, scriptInfo)
         label.Text = name
         label.Parent = billboard
 
-        local visual = {model = model, highlight = highlight, billboard = billboard, label = label}
+        local visual = {model = model, highlight = highlight, box = box, billboard = billboard, label = label}
         store[key] = visual
         return visual
     end
@@ -144,26 +187,30 @@ return function(Window, scriptInfo)
         for _, player in ipairs(Players:GetPlayers()) do
             if settings.enemyEsp and isEnemy(player) then
                 local character = player.Character
-                local root = characterRoot(character)
+                local renderModel = playerViewmodel(player) or character
+                local root = modelRoot(renderModel) or characterRoot(character)
                 local humanoid = humanoidOf(player)
-                if character and root and humanoid and humanoid.Health > 0 then
+                if character and renderModel and root and humanoid and humanoid.Health > 0 then
                     active[player] = true
                     local visual = createVisual(
                         playerVisuals,
                         player,
-                        character,
+                        renderModel,
                         root,
                         Color3.fromRGB(255, 75, 85),
                         player.DisplayName or player.Name
                     )
-                    local visible = isVisible(character, root)
+                    local visible = isVisible(renderModel, root)
                     local color = settings.visibleCheck and visible
                         and Color3.fromRGB(80, 255, 135)
                         or Color3.fromRGB(255, 75, 85)
                     visual.highlight.Enabled = true
+                    visual.box.Visible = true
                     visual.billboard.Enabled = true
                     visual.highlight.FillColor = color
                     visual.highlight.OutlineColor = color
+                    visual.box.Color3 = color
+                    visual.box.AlwaysOnTop = settings.throughWalls
                     visual.label.TextColor3 = color
                     visual.highlight.DepthMode = settings.throughWalls
                         and Enum.HighlightDepthMode.AlwaysOnTop
@@ -193,11 +240,7 @@ return function(Window, scriptInfo)
         local state = model:FindFirstChild("StateObject")
         local ownerValue = state and state:FindFirstChild("owner")
         local owner = ownerValue and ownerValue:IsA("ObjectValue") and ownerValue.Value or nil
-        if owner and owner:IsA("Player") then return owner end
-        if owner and owner:IsA("Model") then
-            return Players:GetPlayerFromCharacter(owner) or Players:FindFirstChild(owner.Name)
-        end
-        return nil
+        return playerFromOwnerValue(owner)
     end
 
     local function gadgetAllowed(model)
@@ -233,11 +276,13 @@ return function(Window, scriptInfo)
                     active[model] = true
                     local visual = createVisual(gadgetVisuals, model, model, root, style.color, style.label)
                     visual.highlight.Enabled = true
+                    visual.box.Visible = true
                     visual.billboard.Enabled = true
                     visual.highlight.DepthMode = settings.throughWalls
                         and Enum.HighlightDepthMode.AlwaysOnTop
                         or Enum.HighlightDepthMode.Occluded
                     visual.billboard.AlwaysOnTop = settings.throughWalls
+                    visual.box.AlwaysOnTop = settings.throughWalls
                     visual.billboard.MaxDistance = settings.maxDistance
                     local rows = {style.label}
                     local owner = gadgetOwner(model)
