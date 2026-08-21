@@ -265,7 +265,7 @@ local SCRIPTS = {
         description = "Objective Aura | Smart ESP | Research/Quest/Crate Trackers | Travel",
         placeIds    = {123581964009368},
         gameIds     = {8723526551},
-        version     = "v0.2",
+        version     = "v0.3",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/build_and_crush.lua",
     },
     --[[

@@ -1,11 +1,10 @@
 --[[
     RAVEN HUB | Build and Crush
     PlaceId: 123581964009368 | GameId: 8723526551
-    Version: v0.2
+    Version: v0.3
 
-    Read-only first release: chest/objective/vehicle awareness, manual travel,
-    lightweight progression telemetry, performance controls, and anti-AFK.
-    ZAP remotes are intentionally not fired until their schemas are verified.
+    Vehicle-contact-aware Objective Aura, chest/objective/vehicle awareness,
+    progression telemetry, performance controls, and anti-AFK.
 ]]
 return function(Window, scriptInfo)
     local Players = game:GetService("Players")
@@ -54,9 +53,9 @@ return function(Window, scriptInfo)
         auraEnabled = false,
         auraMode = "Safe",
         auraRange = 75,
-        auraInterval = 0.15,
-        auraMaxTargets = 2,
-        auraMaxParts = 8,
+        auraInterval = 0.04,
+        auraMaxTargets = 3,
+        auraMaxParts = 12,
         auraGoldOnly = false,
         auraFlyingOnly = false,
         auraQuestOnly = false,
@@ -323,37 +322,60 @@ return function(Window, scriptInfo)
         return true
     end
 
-    local function findDamageSource()
+    local function getOwnedVehicle()
         local vehicleId = player:GetAttribute("ownVehicleState") or player:GetAttribute("driving")
         local vehicles = workspace:FindFirstChild("vehicles")
-        local vehicle = vehicles and vehicleId and vehicles:FindFirstChild(tostring(vehicleId))
-        if not vehicle then return nil end
-
-        local fallback
-        for _, instance in ipairs(vehicle:GetDescendants()) do
-            local id = instance:GetAttribute("contactId") or instance:GetAttribute("id")
-            if type(id) == "number" then
-                fallback = fallback or id
-                local itemId = string.lower(tostring(instance:GetAttribute("taggedItemId") or instance.Name))
-                if itemId:find("saw") or itemId:find("spike") or itemId:find("bumper")
-                    or itemId:find("weapon") or itemId:find("wrecker") then
-                    return id
-                end
-            end
-        end
-        return fallback
+        return vehicles and vehicleId and vehicles:FindFirstChild(tostring(vehicleId))
     end
 
-    local function collectObjectivePartIds(objective, limit)
-        local ids = {}
-        for _, instance in ipairs(objective:GetDescendants()) do
-            local id = instance:GetAttribute("id")
-            if type(id) == "number" then
-                table.insert(ids, id)
-                if #ids >= limit then break end
+    local function sourcePartFor(instance)
+        if instance:IsA("BasePart") then return instance end
+        return instance:FindFirstAncestorWhichIsA("BasePart")
+            or instance:FindFirstChildWhichIsA("BasePart", true)
+    end
+
+    local function collectDamageSources()
+        local vehicle = getOwnedVehicle()
+        if not vehicle then return {} end
+
+        local contacts, fallbacks, seen = {}, {}, {}
+        for _, instance in ipairs(vehicle:GetDescendants()) do
+            local contactId = instance:GetAttribute("contactId")
+            local id = contactId or instance:GetAttribute("id")
+            local part = sourcePartFor(instance)
+            if type(id) == "number" and part and not seen[id] then
+                seen[id] = true
+                local itemId = string.lower(tostring(instance:GetAttribute("taggedItemId") or instance.Name))
+                local weapon = itemId:find("saw") or itemId:find("spike") or itemId:find("bumper")
+                    or itemId:find("weapon") or itemId:find("wrecker")
+                local entry = {id = id, part = part, weapon = weapon and true or false}
+                table.insert(contactId and contacts or fallbacks, entry)
             end
         end
-        return ids
+        local sources = #contacts > 0 and contacts or fallbacks
+        table.sort(sources, function(a, b)
+            if a.weapon ~= b.weapon then return a.weapon end
+            return a.id < b.id
+        end)
+        return sources
+    end
+
+    local function findDamageSource()
+        local sources = collectDamageSources()
+        return sources[1] and sources[1].id or nil
+    end
+
+    local function collectObjectiveParts(objective)
+        local parts, seen = {}, {}
+        for _, instance in ipairs(objective:GetDescendants()) do
+            local id = instance:GetAttribute("id")
+            local part = sourcePartFor(instance)
+            if type(id) == "number" and part and not seen[id] then
+                seen[id] = true
+                table.insert(parts, {id = id, part = part, position = part.Position})
+            end
+        end
+        return parts
     end
 
     local function damageValueForMode()
@@ -365,17 +387,33 @@ return function(Window, scriptInfo)
             or type(crushNet.reportDamage.fire) ~= "function" then
             return 0
         end
-        local root = getRoot()
-        local sourceId = findDamageSource()
-        if not root or not sourceId then return 0 end
+        local sources = collectDamageSources()
+        if #sources == 0 then return 0 end
 
         local targets = {}
         for _, objective in ipairs(candidatesForCategory("objective")) do
-            local position = getPosition(objective)
-            if position and objectiveMatchesFilters(objective) then
-                local distance = (root.Position - position).Magnitude
-                if distance <= settings.auraRange then
-                    table.insert(targets, {instance = objective, position = position, distance = distance})
+            if objectiveMatchesFilters(objective) then
+                local objectiveParts = collectObjectiveParts(objective)
+                local nearestDistance, nearestSource = math.huge, nil
+                for _, source in ipairs(sources) do
+                    for _, targetPart in ipairs(objectiveParts) do
+                        local distance = (source.part.Position - targetPart.position).Magnitude
+                        if distance < nearestDistance then
+                            nearestDistance, nearestSource = distance, source
+                        end
+                    end
+                end
+                if nearestSource and nearestDistance <= settings.auraRange then
+                    table.sort(objectiveParts, function(a, b)
+                        return (nearestSource.part.Position - a.position).Magnitude
+                            < (nearestSource.part.Position - b.position).Magnitude
+                    end)
+                    table.insert(targets, {
+                        instance = objective,
+                        parts = objectiveParts,
+                        source = nearestSource,
+                        distance = nearestDistance,
+                    })
                 end
             end
         end
@@ -384,10 +422,13 @@ return function(Window, scriptInfo)
         local attacked = 0
         for index = 1, math.min(settings.auraMaxTargets, #targets) do
             local target = targets[index]
-            local partIds = collectObjectivePartIds(target.instance, settings.auraMaxParts)
+            local partIds = {}
+            for partIndex = 1, math.min(settings.auraMaxParts, #target.parts) do
+                table.insert(partIds, target.parts[partIndex].id)
+            end
             if #partIds > 0 then
                 local ok = pcall(crushNet.reportDamage.fire,
-                    sourceId, partIds, damageValueForMode(), target.position)
+                    target.source.id, partIds, damageValueForMode(), target.parts[1].position)
                 if ok then attacked = attacked + 1 end
             end
         end
@@ -531,9 +572,9 @@ return function(Window, scriptInfo)
     })
     AuraTab:CreateSlider({
         Name = "Attack Interval",
-        Range = {0.05, 1},
-        Increment = 0.05,
-        CurrentValue = 0.15,
+        Range = {0.02, 1},
+        Increment = 0.01,
+        CurrentValue = 0.04,
         Suffix = " s",
         Flag = "BuildCrushAuraInterval",
         Callback = function(value) settings.auraInterval = value end,
@@ -643,12 +684,13 @@ return function(Window, scriptInfo)
                 auraAt = now
                 local attacked = runObjectiveAura()
                 pcall(function()
-                    auraStatus:Set(string.format("Aura: %s | Targets: %d | Source: %s",
-                        settings.auraMode, attacked, tostring(findDamageSource() or "not detected")))
+                    local sources = collectDamageSources()
+                    auraStatus:Set(string.format("Aura: %s | Targets: %d | Contacts: %d",
+                        settings.auraMode, attacked, #sources))
                 end)
             elseif not settings.auraEnabled then
                 pcall(function()
-                    auraStatus:Set("Aura: idle | Source: " .. tostring(findDamageSource() or "not detected"))
+                    auraStatus:Set("Aura: idle | Contacts: " .. tostring(#collectDamageSources()))
                 end)
             end
 
@@ -743,5 +785,5 @@ return function(Window, scriptInfo)
         scriptInfo.registerCleanup(destroy)
     end
 
-    notify("Build and Crush", "v0.2 loaded — trackers and Objective Aura are ready")
+    notify("Build and Crush", "v0.3 loaded — contact-aware Objective Aura is ready")
 end
