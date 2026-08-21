@@ -1,7 +1,7 @@
 --[[
     RAVEN HUB | [SEASON 3] Operation One
     PlaceId: 72920620366355 | GameId: 8307114974
-    Version: v1.0
+    Version: v1.1
 
     Cleanup-safe tactical awareness using replicated player, gadget, and HUD state.
     No gameplay remotes are fired.
@@ -156,24 +156,31 @@ return function(Window, scriptInfo)
                         Color3.fromRGB(255, 75, 85),
                         player.DisplayName or player.Name
                     )
-                    local visible = not settings.visibleCheck or isVisible(character, root)
-                    visual.highlight.Enabled = visible
-                    visual.billboard.Enabled = visible
+                    local visible = isVisible(character, root)
+                    local color = settings.visibleCheck and visible
+                        and Color3.fromRGB(80, 255, 135)
+                        or Color3.fromRGB(255, 75, 85)
+                    visual.highlight.Enabled = true
+                    visual.billboard.Enabled = true
+                    visual.highlight.FillColor = color
+                    visual.highlight.OutlineColor = color
+                    visual.label.TextColor3 = color
                     visual.highlight.DepthMode = settings.throughWalls
                         and Enum.HighlightDepthMode.AlwaysOnTop
                         or Enum.HighlightDepthMode.Occluded
                     visual.billboard.AlwaysOnTop = settings.throughWalls
                     visual.billboard.MaxDistance = settings.maxDistance
-                    if visible then
-                        local rows = {player.DisplayName or player.Name}
-                        if settings.showHealth then
-                            table.insert(rows, string.format("HP %d", math.floor(humanoid.Health)))
-                        end
-                        if settings.showDistance and myRoot then
-                            table.insert(rows, string.format("%dm", math.floor((root.Position - myRoot.Position).Magnitude)))
-                        end
-                        visual.label.Text = table.concat(rows, " | ")
+                    local rows = {player.DisplayName or player.Name}
+                    if settings.visibleCheck then
+                        table.insert(rows, visible and "VISIBLE" or "COVER")
                     end
+                    if settings.showHealth then
+                        table.insert(rows, string.format("HP %d", math.floor(humanoid.Health)))
+                    end
+                    if settings.showDistance and myRoot then
+                        table.insert(rows, string.format("%dm", math.floor((root.Position - myRoot.Position).Magnitude)))
+                    end
+                    visual.label.Text = table.concat(rows, " | ")
                 end
             end
         end
@@ -185,7 +192,12 @@ return function(Window, scriptInfo)
     local function gadgetOwner(model)
         local state = model:FindFirstChild("StateObject")
         local ownerValue = state and state:FindFirstChild("owner")
-        return ownerValue and ownerValue:IsA("ObjectValue") and ownerValue.Value or nil
+        local owner = ownerValue and ownerValue:IsA("ObjectValue") and ownerValue.Value or nil
+        if owner and owner:IsA("Player") then return owner end
+        if owner and owner:IsA("Model") then
+            return Players:GetPlayerFromCharacter(owner) or Players:FindFirstChild(owner.Name)
+        end
+        return nil
     end
 
     local function gadgetAllowed(model)
@@ -264,7 +276,7 @@ return function(Window, scriptInfo)
     local EspTab = Window:CreateTab("ESP", "eye")
     EspTab:CreateSection("Enemy ESP")
     EspTab:CreateToggle({Name="Enemy ESP",CurrentValue=true,Flag="OperationOneEnemyESP",Callback=function(v) settings.enemyEsp=v end})
-    EspTab:CreateToggle({Name="Visible Check",CurrentValue=true,Flag="OperationOneVisibleCheck",Callback=function(v) settings.visibleCheck=v end})
+    EspTab:CreateToggle({Name="Visible Check Colors",CurrentValue=true,Flag="OperationOneVisibleCheck",Callback=function(v) settings.visibleCheck=v end})
     EspTab:CreateToggle({Name="Through Walls",CurrentValue=true,Flag="OperationOneThroughWalls",Callback=function(v) settings.throughWalls=v end})
     EspTab:CreateToggle({Name="Show Health",CurrentValue=true,Flag="OperationOneShowHealth",Callback=function(v) settings.showHealth=v end})
     EspTab:CreateToggle({Name="Show Distance",CurrentValue=true,Flag="OperationOneShowDistance",Callback=function(v) settings.showDistance=v end})
@@ -279,6 +291,7 @@ return function(Window, scriptInfo)
     Visuals:CreateToggle({Name="Custom FOV",CurrentValue=false,Flag="OperationOneCustomFOV",Callback=function(v) settings.customFov=v end})
     Visuals:CreateSlider({Name="Field of View",Range={60,120},Increment=1,CurrentValue=85,Suffix="°",Flag="OperationOneFOV",Callback=function(v) settings.fov=v end})
     Visuals:CreateToggle({Name="Flash Reduction",CurrentValue=false,Flag="OperationOneFlashReduction",Callback=function(v) settings.flashReduction=v end})
+    Visuals:CreateLabel("Visible enemies are green; enemies behind cover remain red when Through Walls is enabled.")
     Visuals:CreateLabel("Flash Reduction only changes the local full-screen flash overlay.")
 
     pcall(function() RunService:UnbindFromRenderStep(fovBinding) end)
