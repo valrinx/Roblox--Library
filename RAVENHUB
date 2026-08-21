@@ -262,10 +262,10 @@ local SCRIPTS = {
     },
     {
         name        = "Build and Crush",
-        description = "Chest/Objective/Vehicle ESP | Travel | Progress | Performance",
+        description = "Objective Aura | Smart ESP | Research/Quest/Crate Trackers | Travel",
         placeIds    = {123581964009368},
         gameIds     = {8723526551},
-        version     = "v0.1",
+        version     = "v0.2",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/build_and_crush.lua",
     },
     --[[
