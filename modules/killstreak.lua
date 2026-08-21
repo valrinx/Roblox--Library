@@ -1,7 +1,7 @@
 --[[
     RAVEN HUB | KILLSTREAK!
     PlaceId: 104856666707760 | GameId: 9705384247
-    Version: v1.3
+    Version: v1.4
 
     Read-only match awareness for the live KILLSTREAK! experience:
     Hill HUD tracking, player/team ESP, party status, equipment overview,
@@ -166,6 +166,15 @@ return function(Window, scriptInfo)
         local camera = workspace.CurrentCamera
         local part = getAimPart(player)
         if not camera or not part then return end
+        local point, onScreen = camera:WorldToViewportPoint(part.Position)
+        if onScreen and point.Z > 0 and type(mousemoverel) == "function" then
+            local center = Vector2.new(camera.ViewportSize.X * 0.5, camera.ViewportSize.Y * 0.5)
+            local offset = Vector2.new(point.X, point.Y) - center
+            local strength = math.clamp(settings.aimSmoothness, 0.03, 1)
+            local alpha = 1 - math.pow(1 - strength, math.max(deltaTime * 60, 0.01))
+            pcall(mousemoverel, offset.X * alpha, offset.Y * alpha)
+            return
+        end
         local origin = camera.CFrame.Position
         if (part.Position - origin).Magnitude <= 0.01 then return end
         local goal = CFrame.lookAt(origin, part.Position)
@@ -445,7 +454,7 @@ return function(Window, scriptInfo)
             lockedTarget = nil
         end,
     })
-    CombatTab:CreateLabel("Targets enemies only and keeps the current target while it remains inside the FOV.")
+    CombatTab:CreateLabel("Uses smooth relative mouse aim for this FPS camera; Camera.CFrame is used only as fallback.")
 
     local InfoTab = Window:CreateTab("Match Info", "activity")
     InfoTab:CreateSection("Match Dashboard")
