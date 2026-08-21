@@ -2,6 +2,7 @@
 
 ## 2026-08-21
 
+- Fixed Operation One player silhouettes by resolving each Player to the game's visible `Workspace.Viewmodels` model; character collision models are fully transparent, so a through-wall 3D box remains as fallback whenever a render model is unavailable.
 - Fixed Operation One ESP being completely hidden while dead, spectating, or behind cover: Visible Check now color-codes visible enemies green and covered enemies red instead of disabling their overlays; gadget character-owner references are also resolved back to Players before team filtering.
 - Added the first Operation One v1.0 module with enemy-only visible-check ESP, Bomb/Claymore/Drone/Reinforcement intelligence, live match and player telemetry, flash reduction, custom FOV, and cleanup-safe local overlays.
 - Fixed KILLSTREAK! Auto Lock for its FPS camera by using executor relative-mouse aiming, with Camera.CFrame retained as a compatibility fallback.
