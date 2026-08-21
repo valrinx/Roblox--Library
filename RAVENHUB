@@ -270,11 +270,19 @@ local SCRIPTS = {
     },
     {
         name        = "KILLSTREAK!",
-        description = "Hill Tracker | Player/Team ESP | Match Dashboard | Equipment Monitor",
+        description = "Hill Tracker | Enemy ESP | Smooth Auto Lock | Match Dashboard",
         placeIds    = {104856666707760},
         gameIds     = {9705384247},
-        version     = "v1.0",
+        version     = "v1.4",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/killstreak.lua",
+    },
+    {
+        name        = "[SEASON 3] Operation One",
+        description = "Enemy ESP | Bomb/Gadget Intel | Match Dashboard | Flash/FOV Controls",
+        placeIds    = {72920620366355},
+        gameIds     = {8307114974},
+        version     = "v1.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/operation_one.lua",
     },
     --[[
     {
