@@ -114,6 +114,11 @@ return function(Window, scriptInfo)
     local function teleportTo(position)
         local _, _, root = getCharacter()
         if not root then return false end
+        -- Set TrustedTeleport to bypass anti-TP check
+        pcall(function()
+            player:SetAttribute("TrustedTeleport", workspace:GetServerTimeNow())
+        end)
+        task.wait(0.05)
         if typeof(position) == "CFrame" then
             root.CFrame = position
         else
