@@ -1,7 +1,7 @@
 --[[
     RAVEN HUB | KILLSTREAK!
     PlaceId: 104856666707760 | GameId: 9705384247
-    Version: v1.0
+    Version: v1.3
 
     Read-only match awareness for the live KILLSTREAK! experience:
     Hill HUD tracking, player/team ESP, party status, equipment overview,
@@ -12,11 +12,14 @@ return function(Window, scriptInfo)
     local RunService = game:GetService("RunService")
     local Stats = game:GetService("Stats")
     local CoreGui = game:GetService("CoreGui")
+    local UserInputService = game:GetService("UserInputService")
 
     local localPlayer = Players.LocalPlayer
     local running = true
     local connections = {}
     local espObjects = {}
+    local lockedTarget = nil
+    local aimBindingName = "RavenKillstreakAim_" .. tostring(localPlayer.UserId)
     local espFolder = Instance.new("Folder")
     espFolder.Name = "RavenKillstreakESP"
     espFolder.Parent = (type(gethui) == "function" and gethui()) or CoreGui
@@ -27,9 +30,16 @@ return function(Window, scriptInfo)
         showHealth = true,
         showDistance = true,
         throughWalls = true,
+        espVisibleCheck = true,
         maxDistance = 1000,
         showHill = true,
         showEquipment = true,
+        autoLock = false,
+        aimPart = "Head",
+        aimFov = 180,
+        aimSmoothness = 0.2,
+        aimWallCheck = true,
+        aimActivation = "Right Mouse",
     }
 
     local function connect(signal, callback)
@@ -74,6 +84,96 @@ return function(Window, scriptInfo)
         return settings.showTeam and (player.Team and player.Team.Name or "Neutral") or nil
     end
 
+    local function isTeammate(player)
+        return player ~= nil
+            and player ~= localPlayer
+            and localPlayer.Team ~= nil
+            and player.Team == localPlayer.Team
+    end
+
+    local function getAimPart(player)
+        local character = getCharacter(player)
+        if not character then return nil end
+        if settings.aimPart == "Head" then
+            return character:FindFirstChild("Head") or getRoot(player)
+        end
+        return character:FindFirstChild("HumanoidRootPart") or getRoot(player)
+    end
+
+    local function isAimTargetValid(player)
+        local humanoid = getHumanoid(player)
+        return player ~= localPlayer
+            and not isTeammate(player)
+            and humanoid ~= nil
+            and humanoid.Health > 0
+            and getAimPart(player) ~= nil
+    end
+
+    local function traceVisible(player, part)
+        local camera = workspace.CurrentCamera
+        if not camera or not part then return false end
+        local params = RaycastParams.new()
+        params.FilterType = Enum.RaycastFilterType.Exclude
+        local filter = {camera}
+        if localPlayer.Character then table.insert(filter, localPlayer.Character) end
+        params.FilterDescendantsInstances = filter
+        local result = workspace:Raycast(camera.CFrame.Position, part.Position - camera.CFrame.Position, params)
+        return result == nil or result.Instance:IsDescendantOf(player.Character)
+    end
+
+    local function targetVisible(player, part)
+        return not settings.aimWallCheck or traceVisible(player, part)
+    end
+
+    local function aimActivationHeld()
+        if settings.aimActivation == "Always" then return true end
+        local inputType = settings.aimActivation == "Left Mouse"
+            and Enum.UserInputType.MouseButton1
+            or Enum.UserInputType.MouseButton2
+        return UserInputService:IsMouseButtonPressed(inputType)
+    end
+
+    local function targetScreenDistance(player)
+        local camera = workspace.CurrentCamera
+        local part = getAimPart(player)
+        if not camera or not part then return nil end
+        local point, onScreen = camera:WorldToViewportPoint(part.Position)
+        if not onScreen or point.Z <= 0 or not targetVisible(player, part) then return nil end
+        local center = Vector2.new(camera.ViewportSize.X * 0.5, camera.ViewportSize.Y * 0.5)
+        return (Vector2.new(point.X, point.Y) - center).Magnitude
+    end
+
+    local function getBestAimTarget()
+        local best, bestDistance = nil, settings.aimFov
+        for _, player in ipairs(Players:GetPlayers()) do
+            if isAimTargetValid(player) then
+                local distance = targetScreenDistance(player)
+                if distance and distance < bestDistance then
+                    best, bestDistance = player, distance
+                end
+            end
+        end
+        return best
+    end
+
+    local function refreshAimTarget(player)
+        if not isAimTargetValid(player) then return nil end
+        local distance = targetScreenDistance(player)
+        return distance and distance <= settings.aimFov and player or nil
+    end
+
+    local function aimAt(player, deltaTime)
+        local camera = workspace.CurrentCamera
+        local part = getAimPart(player)
+        if not camera or not part then return end
+        local origin = camera.CFrame.Position
+        if (part.Position - origin).Magnitude <= 0.01 then return end
+        local goal = CFrame.lookAt(origin, part.Position)
+        local strength = math.clamp(settings.aimSmoothness, 0.03, 1)
+        local alpha = 1 - math.pow(1 - strength, math.max(deltaTime * 60, 0.01))
+        camera.CFrame = camera.CFrame:Lerp(goal, math.clamp(alpha, 0, 1))
+    end
+
     local function clearPlayerEsp(player)
         local entry = espObjects[player]
         if not entry then return end
@@ -84,6 +184,10 @@ return function(Window, scriptInfo)
 
     local function ensurePlayerEsp(player)
         if player == localPlayer then return end
+        if isTeammate(player) then
+            clearPlayerEsp(player)
+            return
+        end
         if not settings.playerEsp then
             clearPlayerEsp(player)
             return
@@ -144,6 +248,11 @@ return function(Window, scriptInfo)
             clearPlayerEsp(player)
             return false
         end
+
+        local visible = not settings.espVisibleCheck or traceVisible(player, root)
+        entry.highlight.Enabled = visible
+        entry.billboard.Enabled = visible
+        if not visible then return false end
 
         local distance = localRoot and (localRoot.Position - root.Position).Magnitude or nil
         entry.highlight.FillColor = getTeamColor(player)
@@ -243,6 +352,12 @@ return function(Window, scriptInfo)
         Callback = function(value) settings.throughWalls = value end,
     })
     PlayersTab:CreateToggle({
+        Name = "Visible Check",
+        CurrentValue = true,
+        Flag = "KillstreakESPVisibleCheck",
+        Callback = function(value) settings.espVisibleCheck = value end,
+    })
+    PlayersTab:CreateToggle({
         Name = "Show Team",
         CurrentValue = true,
         Flag = "KillstreakShowTeam",
@@ -270,6 +385,68 @@ return function(Window, scriptInfo)
         Callback = function(value) settings.maxDistance = value end,
     })
 
+    local CombatTab = Window:CreateTab("Combat", "target")
+    CombatTab:CreateSection("Smooth Auto Lock")
+    CombatTab:CreateToggle({
+        Name = "Auto Lock",
+        CurrentValue = false,
+        Flag = "KillstreakAutoLock",
+        Callback = function(value)
+            settings.autoLock = value
+            lockedTarget = value and getBestAimTarget() or nil
+        end,
+    })
+    CombatTab:CreateDropdown({
+        Name = "Aim Part",
+        Options = {"Head", "HumanoidRootPart"},
+        CurrentOption = {"Head"},
+        MultipleOptions = false,
+        Flag = "KillstreakAimPart",
+        Callback = function(value)
+            settings.aimPart = type(value) == "table" and value[1] or tostring(value)
+            lockedTarget = nil
+        end,
+    })
+    CombatTab:CreateDropdown({
+        Name = "Lock Button",
+        Options = {"Left Mouse", "Right Mouse", "Always"},
+        CurrentOption = {"Right Mouse"},
+        MultipleOptions = false,
+        Flag = "KillstreakAimActivation",
+        Callback = function(value)
+            settings.aimActivation = type(value) == "table" and value[1] or tostring(value)
+            lockedTarget = nil
+        end,
+    })
+    CombatTab:CreateSlider({
+        Name = "Lock FOV",
+        Range = {40, 500},
+        Increment = 10,
+        CurrentValue = 180,
+        Suffix = " px",
+        Flag = "KillstreakAimFOV",
+        Callback = function(value) settings.aimFov = value end,
+    })
+    CombatTab:CreateSlider({
+        Name = "Aim Speed",
+        Range = {3, 100},
+        Increment = 1,
+        CurrentValue = 20,
+        Suffix = "%",
+        Flag = "KillstreakAimSpeed",
+        Callback = function(value) settings.aimSmoothness = value / 100 end,
+    })
+    CombatTab:CreateToggle({
+        Name = "Visible Check",
+        CurrentValue = true,
+        Flag = "KillstreakAimWallCheck",
+        Callback = function(value)
+            settings.aimWallCheck = value
+            lockedTarget = nil
+        end,
+    })
+    CombatTab:CreateLabel("Targets enemies only and keeps the current target while it remains inside the FOV.")
+
     local InfoTab = Window:CreateTab("Match Info", "activity")
     InfoTab:CreateSection("Match Dashboard")
     local matchStatus = InfoTab:CreateLabel("Match: loading...")
@@ -285,6 +462,17 @@ return function(Window, scriptInfo)
 
     local scanAt = 0
     local statusAt = 0
+    pcall(function() RunService:UnbindFromRenderStep(aimBindingName) end)
+    RunService:BindToRenderStep(aimBindingName, 10000, function(deltaTime)
+        if not running then return end
+        if not settings.autoLock or not aimActivationHeld() then
+            lockedTarget = nil
+            return
+        end
+        lockedTarget = refreshAimTarget(lockedTarget) or getBestAimTarget()
+        if lockedTarget then aimAt(lockedTarget, deltaTime) end
+    end)
+
     connect(RunService.Heartbeat, function()
         if not running then return end
         local now = os.clock()
@@ -343,6 +531,8 @@ return function(Window, scriptInfo)
     local function destroy()
         if not running then return end
         running = false
+        pcall(function() RunService:UnbindFromRenderStep(aimBindingName) end)
+        lockedTarget = nil
         for _, connection in ipairs(connections) do
             pcall(function() connection:Disconnect() end)
         end
