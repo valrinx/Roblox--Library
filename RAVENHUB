@@ -281,7 +281,7 @@ local SCRIPTS = {
         description = "Enemy ESP | Bomb/Gadget Intel | Match Dashboard | Flash/FOV Controls",
         placeIds    = {72920620366355},
         gameIds     = {8307114974},
-        version     = "v1.0",
+        version     = "v1.1",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/operation_one.lua",
     },
     --[[
