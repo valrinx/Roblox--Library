@@ -2,6 +2,8 @@
 
 ## 2026-08-21
 
+- Added the first Operation One v1.0 module with enemy-only visible-check ESP, Bomb/Claymore/Drone/Reinforcement intelligence, live match and player telemetry, flash reduction, custom FOV, and cleanup-safe local overlays.
+- Fixed KILLSTREAK! Auto Lock for its FPS camera by using executor relative-mouse aiming, with Camera.CFrame retained as a compatibility fallback.
 - Added selectable left-click, right-click, or always-on activation for KILLSTREAK! Smooth Auto Lock, plus independent raycast Visible Checks for both player ESP and Auto Lock.
 - Added configurable smooth enemy-only Auto Lock to KILLSTREAK! with sticky FOV targeting, head/root selection, and an enabled-by-default wall check.
 - Updated KILLSTREAK! player ESP to exclude the local player's teammates and immediately clear existing teammate overlays after team changes.
