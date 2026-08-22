@@ -66,6 +66,10 @@ return function(Window, scriptInfo)
     -- Aura remotes
     local AuraFolder = EventFolder and EventFolder:WaitForChild("Aura", 5)
 
+    -- Rebirth remote
+    local RebirthFolder = EventFolder and EventFolder:WaitForChild("Rebirth", 5)
+    local TryRebirth = RebirthFolder and RebirthFolder:FindFirstChild("[C - S]TryRebirth")
+
     -- ============================================================
     --  SETTINGS
     -- ============================================================
@@ -82,6 +86,9 @@ return function(Window, scriptInfo)
         -- Auto Buy Upgrade
         autoBuyUpgrade = false,
         upgradeInterval = 3,
+        -- Auto Rebirth
+        autoRebirth = false,
+        rebirthDelay = 1,
         -- ESP
         fishEsp = false,
         petEsp = false,
@@ -410,6 +417,32 @@ return function(Window, scriptInfo)
     end
 
     -- ============================================================
+    --  AUTO REBIRTH
+    -- ============================================================
+    local lastRebirthTick = 0
+    local totalRebirths = 0
+
+    local function performAutoRebirth()
+        if not running or not settings.autoRebirth then return end
+        local now = os.clock()
+        if now - lastRebirthTick < settings.rebirthDelay then return end
+        lastRebirthTick = now
+
+        local level = getLevel()
+        local rebirthNeed = getFolderValue("Rebirth", "rebirthNeed", 999999)
+
+        if level >= rebirthNeed and TryRebirth then
+            local rebirthBefore = getRebirth()
+            pcall(function() TryRebirth:FireServer() end)
+            task.wait(0.5)
+            local rebirthAfter = getRebirth()
+            if rebirthAfter > rebirthBefore then
+                totalRebirths = totalRebirths + 1
+            end
+        end
+    end
+
+    -- ============================================================
     --  FISH ESP
     -- ============================================================
     local function refreshFishEsp()
@@ -617,6 +650,24 @@ return function(Window, scriptInfo)
         Suffix = " s",
         Flag = "DrainWaterUpgradeInterval",
         Callback = function(v) settings.upgradeInterval = v end,
+    })
+
+    FarmTab:CreateSection("Auto Rebirth")
+    local rebirthStatus = FarmTab:CreateLabel("Rebirth: 0 | Need: Level 0")
+    FarmTab:CreateToggle({
+        Name = "Auto Rebirth",
+        CurrentValue = false,
+        Flag = "DrainWaterAutoRebirth",
+        Callback = function(v) settings.autoRebirth = v end,
+    })
+    FarmTab:CreateSlider({
+        Name = "Rebirth Check Interval",
+        Range = {1, 10},
+        Increment = 1,
+        CurrentValue = 1,
+        Suffix = " s",
+        Flag = "DrainWaterRebirthDelay",
+        Callback = function(v) settings.rebirthDelay = v end,
     })
 
     -- Tab 2: Fish
@@ -839,6 +890,7 @@ return function(Window, scriptInfo)
         local sellAt = 0
         local upgradeAt = 0
         local pumpAt = 0
+        local rebirthAt = 0
         local espAt = 0
         local statusAt = 0
 
@@ -868,6 +920,12 @@ return function(Window, scriptInfo)
                 if settings.autoBuyUpgrade and now - upgradeAt >= settings.upgradeInterval then
                     upgradeAt = now
                     performAutoUpgrade()
+                end
+
+                -- Auto Rebirth
+                if settings.autoRebirth and now - rebirthAt >= settings.rebirthDelay then
+                    rebirthAt = now
+                    performAutoRebirth()
                 end
 
                 -- ESP Refresh
@@ -914,6 +972,15 @@ return function(Window, scriptInfo)
                         stageLabel:Set(string.format(
                             "Stage: %d/18 | Rebirth: %d | Pump #%s",
                             completed, rebirth, pumpId
+                        ))
+                    end)
+
+                    -- Rebirth status
+                    local rebirthNeed = getFolderValue("Rebirth", "rebirthNeed", 999999)
+                    pcall(function()
+                        rebirthStatus:Set(string.format(
+                            "Rebirth: %d | Need: Level %d | Auto: %s",
+                            rebirth, rebirthNeed, settings.autoRebirth and "ON" or "OFF"
                         ))
                     end)
 
