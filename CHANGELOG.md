@@ -2,6 +2,7 @@
 
 ## 2026-08-22
 
+- Updated Cold War to v1.1 with ballistic smooth Auto Aim, configurable FOV/activation/sticky visibility targeting, a live match ticket/death/spawn dashboard, and a team-aware tactical radar.
 - Fixed The Sea Kill Aura by sending the same primary-input path consumed by weapon LocalScripts instead of calling Tool:Activate, exempting Machete from ranged visibility filtering, and raising its default aura radius to 16 studs.
 - Fixed The Sea Auto Collect repeatedly selecting the first pulled item by temporarily marking processed models and skipping resources already resting at the character drop point.
 - Updated The Sea to v1.2.3 so Auto Collect requests temporary item ownership directly and moves items to the character without opening the game's cursor-bound drag state or cloning drag constraints.
