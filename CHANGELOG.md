@@ -63,6 +63,7 @@
 - Added a The Walking Dead Online 3 module with player ESP, configurable labels and distance, a live player picker, spectate controls, respawn handling, and cleanup on hub destruction.
 # Iron Soul v1.3.0
 
+- v1.3.6 changes the default vertical dodge to `Air` at `50 studs`.
 - v1.3.5 reacts immediately to `RedShow.DescendantAdded`, preventing short-lived telegraphs from being missed between scans.
 - v1.3.4 adds vertical Auto Dodge modes (`Underground`/`Air`) and a `Below Target` Autofarm position.
 - v1.3.3 adds a configurable Dodge Hold window that keeps Autofarm from immediately walking back into an active attack.
