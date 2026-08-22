@@ -11,15 +11,21 @@
     - No Fog
     - FOV Changer
     - Characters folder support (game uses workspace.Characters)
+    - v1.1 Smooth Auto Aim, Match Dashboard, Tactical Radar
 
     Module format: returns function(Window, runtimeInfo) for RAVENHUB loader
 ]]
 
 return function(Window, runtimeInfo)
+    pcall(function()
+        local previous = getgenv().__RAVEN_COLD_WAR
+        if previous and type(previous.Destroy) == "function" then previous.Destroy() end
+    end)
     -- Services
     local Players = game:GetService("Players")
     local RunService = game:GetService("RunService")
     local Lighting = game:GetService("Lighting")
+    local UserInputService = game:GetService("UserInputService")
     local LP = Players.LocalPlayer
     local Camera = workspace.CurrentCamera
 
@@ -38,9 +44,20 @@ return function(Window, runtimeInfo)
         AimPrediction = false,
         PredictDotSize = 6,
         PredictTargetPart = "Head",
+        AutoAim = false,
+        AimFOV = 180,
+        AimSmoothness = 0.18,
+        AimVisibleCheck = true,
+        AimActivation = "Right Mouse",
+        StickyTarget = true,
+        Radar = false,
+        RadarRange = 700,
+        RadarSize = 150,
     }
     local Connections = {}
     local ESPObjects = {}
+    local rightMouseDown = false
+    local lockedTarget = nil
 
     -- Original lighting values
     local OriginalLighting = {
@@ -467,7 +484,7 @@ return function(Window, runtimeInfo)
     end
 
     -- Find closest enemy to crosshair
-    local function getClosestEnemyToCrosshair()
+    local function getClosestEnemyToCrosshair(maxPixels, requireVisible)
         local closestPlayer = nil
         local closestDist = math.huge
         local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
@@ -483,12 +500,109 @@ return function(Window, runtimeInfo)
             if not onScreen then continue end
 
             local dist2D = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
-            if dist2D < closestDist then
+            if (not maxPixels or dist2D <= maxPixels) and dist2D < closestDist
+                and (not requireVisible or isVisible(Camera.CFrame.Position, targetPart.Position)) then
                 closestDist = dist2D
                 closestPlayer = player
             end
         end
         return closestPlayer
+    end
+
+    local function aimActive()
+        return State.AutoAim and (State.AimActivation == "Always" or rightMouseDown)
+    end
+
+    local function validAimTarget(player)
+        if not player or not isEnemy(player) then return false end
+        local char = getCharacter(player)
+        local part = char and (char:FindFirstChild(State.PredictTargetPart) or char:FindFirstChild("Head"))
+        if not part then return false end
+        local point, onScreen = Camera:WorldToViewportPoint(part.Position)
+        if not onScreen or point.Z <= 0 then return false end
+        local center = Camera.ViewportSize * 0.5
+        if (Vector2.new(point.X, point.Y) - center).Magnitude > State.AimFOV then return false end
+        return not State.AimVisibleCheck or isVisible(Camera.CFrame.Position, part.Position)
+    end
+
+    local function updateAutoAim()
+        if not aimActive() then lockedTarget = nil return end
+        if not State.StickyTarget or not validAimTarget(lockedTarget) then
+            lockedTarget = getClosestEnemyToCrosshair(State.AimFOV, State.AimVisibleCheck)
+        end
+        if not lockedTarget then return end
+        local char = getCharacter(lockedTarget)
+        local part = char and (char:FindFirstChild(State.PredictTargetPart) or char:FindFirstChild("Head"))
+        if not part then return end
+        local cfg = getCurrentWeaponConfig()
+        local predicted = getPredictedPosition(part.Position, getTargetVelocity(lockedTarget), cfg, Camera.CFrame.Position)
+        local point, onScreen = Camera:WorldToViewportPoint(predicted)
+        if not onScreen then return end
+        local center = Camera.ViewportSize * 0.5
+        local delta = Vector2.new(point.X, point.Y) - center
+        if type(mousemoverel) == "function" then
+            pcall(mousemoverel, delta.X * State.AimSmoothness, delta.Y * State.AimSmoothness)
+        else
+            Camera.CFrame = Camera.CFrame:Lerp(CFrame.lookAt(Camera.CFrame.Position, predicted), State.AimSmoothness)
+        end
+    end
+
+    local aimFovCircle = Drawing.new("Circle")
+    aimFovCircle.Filled = false
+    aimFovCircle.Thickness = 1.5
+    aimFovCircle.Color = Color3.fromRGB(255, 90, 90)
+    aimFovCircle.Transparency = 0.65
+    aimFovCircle.Visible = false
+
+    local radarCircle = Drawing.new("Circle")
+    radarCircle.Filled = true
+    radarCircle.Color = Color3.fromRGB(12, 16, 22)
+    radarCircle.Transparency = 0.65
+    radarCircle.Visible = false
+    local radarOutline = Drawing.new("Circle")
+    radarOutline.Filled = false
+    radarOutline.Thickness = 2
+    radarOutline.Color = Color3.fromRGB(120, 180, 255)
+    radarOutline.Visible = false
+    local radarBlips = {}
+
+    local function hideRadarBlips()
+        for _, blip in pairs(radarBlips) do blip.Visible = false end
+    end
+
+    local function updateRadar()
+        local center = Vector2.new(State.RadarSize + 24, Camera.ViewportSize.Y - State.RadarSize - 44)
+        radarCircle.Position, radarOutline.Position = center, center
+        radarCircle.Radius, radarOutline.Radius = State.RadarSize, State.RadarSize
+        radarCircle.Visible, radarOutline.Visible = State.Radar, State.Radar
+        if not State.Radar then hideRadarBlips() return end
+        local myRoot = getMyHRP()
+        if not myRoot then hideRadarBlips() return end
+        local active = {}
+        for _, player in ipairs(Players:GetPlayers()) do
+            if isEnemy(player) then
+                local root = getHRP(player)
+                if root then
+                    local relative = myRoot.CFrame:VectorToObjectSpace(root.Position - myRoot.Position)
+                    local planar = Vector2.new(relative.X, relative.Z)
+                    if planar.Magnitude <= State.RadarRange then
+                        local blip = radarBlips[player]
+                        if not blip then
+                            blip = Drawing.new("Circle")
+                            blip.Filled, blip.Radius = true, 3.5
+                            radarBlips[player] = blip
+                        end
+                        local scaled = planar / State.RadarRange * (State.RadarSize - 6)
+                        blip.Position = center + Vector2.new(scaled.X, scaled.Y)
+                        blip.Color = isVisible(Camera.CFrame.Position, root.Position)
+                            and Color3.fromRGB(255, 70, 70) or Color3.fromRGB(255, 190, 60)
+                        blip.Visible = true
+                        active[player] = true
+                    end
+                end
+            end
+        end
+        for player, blip in pairs(radarBlips) do if not active[player] then blip.Visible = false end end
     end
 
     -- Update prediction dot each frame
@@ -510,7 +624,7 @@ return function(Window, runtimeInfo)
             return
         end
 
-        local target = getClosestEnemyToCrosshair()
+        local target = getClosestEnemyToCrosshair(nil, false)
         if not target then
             predictionDot.Visible = false
             predictionCircle.Visible = false
@@ -593,11 +707,24 @@ return function(Window, runtimeInfo)
 
     Connections.playerRemoving = Players.PlayerRemoving:Connect(function(p)
         removeESP(p)
+        if radarBlips[p] then radarBlips[p]:Remove(); radarBlips[p] = nil end
+    end)
+
+    Connections.inputBegan = UserInputService.InputBegan:Connect(function(input, processed)
+        if not processed and input.UserInputType == Enum.UserInputType.MouseButton2 then rightMouseDown = true end
+    end)
+    Connections.inputEnded = UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton2 then rightMouseDown = false end
     end)
 
     Connections.render = RunService.RenderStepped:Connect(function()
         updateESP()
         updateAimPrediction()
+        updateAutoAim()
+        updateRadar()
+        aimFovCircle.Position = Camera.ViewportSize * 0.5
+        aimFovCircle.Radius = State.AimFOV
+        aimFovCircle.Visible = State.AutoAim
         if State.FOVEnabled then
             Camera.FieldOfView = State.FOVValue
         end
@@ -742,6 +869,41 @@ return function(Window, runtimeInfo)
     AimTab:CreateLabel("Green=accurate | Yellow=medium | Orange=spread")
     AimTab:CreateLabel("Targets closest enemy to crosshair")
 
+    AimTab:CreateSection("Smooth Auto Aim")
+    AimTab:CreateToggle({Name="Enable Auto Aim",CurrentValue=false,Callback=function(v) State.AutoAim=v if not v then lockedTarget=nil end end})
+    AimTab:CreateDropdown({Name="Activation",Options={"Right Mouse","Always"},CurrentOption={"Right Mouse"},MultipleOptions=false,Callback=function(v) State.AimActivation=type(v)=="table"and v[1]or v end})
+    AimTab:CreateToggle({Name="Sticky Target",CurrentValue=true,Callback=function(v) State.StickyTarget=v end})
+    AimTab:CreateToggle({Name="Aim Visible Check",CurrentValue=true,Callback=function(v) State.AimVisibleCheck=v end})
+    AimTab:CreateSlider({Name="Aim FOV",Range={40,500},Increment=10,CurrentValue=180,Suffix=" px",Callback=function(v) State.AimFOV=v end})
+    AimTab:CreateSlider({Name="Smoothness",Range={0.05,0.6},Increment=0.01,CurrentValue=0.18,Callback=function(v) State.AimSmoothness=v end})
+
+    local TacticalTab = Window:CreateTab("Tactical", "radar")
+    TacticalTab:CreateSection("Match Dashboard")
+    local matchModeLabel = TacticalTab:CreateLabel("Mode: loading...")
+    local matchTicketsLabel = TacticalTab:CreateLabel("Tickets: loading...")
+    local matchDeathsLabel = TacticalTab:CreateLabel("Deaths: loading...")
+    local spawnLabel = TacticalTab:CreateLabel("Spawn: loading...")
+    TacticalTab:CreateSection("Radar")
+    TacticalTab:CreateToggle({Name="Tactical Radar",CurrentValue=false,Callback=function(v) State.Radar=v end})
+    TacticalTab:CreateSlider({Name="Radar Range",Range={100,2000},Increment=50,CurrentValue=700,Suffix=" studs",Callback=function(v) State.RadarRange=v end})
+    TacticalTab:CreateSlider({Name="Radar Size",Range={80,240},Increment=10,CurrentValue=150,Suffix=" px",Callback=function(v) State.RadarSize=v end})
+
+    local matchFolder = workspace:FindFirstChild("Match")
+    local function updateMatchDashboard()
+        if not matchFolder then return end
+        local function value(name, fallback) local item=matchFolder:FindFirstChild(name) return item and item.Value or fallback end
+        pcall(function()
+            matchModeLabel:Set("Mode: " .. tostring(value("CurrentMode", "?")))
+            matchTicketsLabel:Set(string.format("Tickets | PACT %s : NATO %s", tostring(value("PACT_Tickets", "?")), tostring(value("NATO_Tickets", "?"))))
+            matchDeathsLabel:Set(string.format("Deaths | PACT %s : NATO %s", tostring(value("PACT_Deaths", "?")), tostring(value("NATO_Deaths", "?"))))
+            spawnLabel:Set("Can Spawn: " .. tostring(value("CanSpawn", false)))
+        end)
+    end
+    updateMatchDashboard()
+    Connections.matchDashboard = RunService.Heartbeat:Connect(function()
+        if math.floor(os.clock()*2) ~= math.floor((os.clock()-1/60)*2) then updateMatchDashboard() end
+    end)
+
     -- Info Tab
     local InfoTab = Window:CreateTab("Info", "info")
 
@@ -754,17 +916,29 @@ return function(Window, runtimeInfo)
     -- Cleanup
     ---------------------------------------------------------------------------
 
-    if runtimeInfo.registerCleanup then
-        runtimeInfo.registerCleanup(function()
+    local destroyed = false
+    local function destroy()
+            if destroyed then return end
+            destroyed = true
             for _, conn in pairs(Connections) do
                 pcall(function() conn:Disconnect() end)
             end
             clearAllESP()
             destroyPredictionDot()
+            pcall(function() aimFovCircle:Remove() end)
+            pcall(function() radarCircle:Remove() end)
+            pcall(function() radarOutline:Remove() end)
+            for _, blip in pairs(radarBlips) do pcall(function() blip:Remove() end) end
             espFolder:Destroy()
             applyFullbright(false)
             applyNoFog(false)
             applyFOV(false)
-        end)
+            if getgenv().__RAVEN_COLD_WAR and getgenv().__RAVEN_COLD_WAR.State == State then
+                getgenv().__RAVEN_COLD_WAR = nil
+            end
+    end
+    getgenv().__RAVEN_COLD_WAR = {Version="v1.1",State=State,Destroy=destroy}
+    if runtimeInfo.registerCleanup then
+        runtimeInfo.registerCleanup(destroy)
     end
 end
