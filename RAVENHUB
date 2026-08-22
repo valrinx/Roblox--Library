@@ -286,10 +286,10 @@ local SCRIPTS = {
     },
     {
         name        = "The Sea",
-        description = "Treasure/Item ESP | Island Navigator | Merchant Tracker | Survival Dashboard",
+        description = "Creature/Loot ESP | Machete Aura | Ranged Assist | Survival Dashboard",
         placeIds    = {139802517550914},
         gameIds     = {9167377564},
-        version     = "v1.1",
+        version     = "v1.2",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/the_sea.lua",
     },
     --[[
