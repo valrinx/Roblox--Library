@@ -8,18 +8,6 @@ local VirtualUser = game:GetService("VirtualUser")
 local StarterGui  = game:GetService("StarterGui")
 local MarketplaceService = game:GetService("MarketplaceService")
 
-local TELEPORT_LOADER = 'task.wait(2); loadstring(game:HttpGet("https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/RAVENHUB?v=teleport-persistence-1"))()'
-local function armTeleportPersistence()
-    local queue = queue_on_teleport or queueonteleport or (syn and syn.queue_on_teleport)
-    if type(queue) ~= "function" then return false end
-    local sessionKey = tostring(game.JobId) .. ":" .. tostring(game.PlaceId)
-    if getgenv().__RAVEN_TELEPORT_QUEUE_SESSION == sessionKey then return true end
-    local ok = pcall(queue, TELEPORT_LOADER)
-    if ok then getgenv().__RAVEN_TELEPORT_QUEUE_SESSION = sessionKey end
-    return ok
-end
-local TELEPORT_PERSISTENCE_ARMED = armTeleportPersistence()
-
 local function getExperienceName()
     local fallback = tostring(game.Name or "Roblox Experience")
     local ok, info = pcall(function()
@@ -146,7 +134,7 @@ if not character then
     if conn then pcall(function() conn:Disconnect() end) end
 end
 local camera    = game.Workspace.CurrentCamera
-local HUB_BUILD = "maclib-3"
+local HUB_BUILD = "maclib-4"
 
 -- ============================================================
 --   SCRIPT REGISTRY
@@ -388,7 +376,6 @@ local ModuleStatusLabel = HomeTab:CreateStatus({
 HomeTab:CreateLabel("PlaceId: " .. tostring(game.PlaceId))
 HomeTab:CreateLabel("Experience: " .. EXPERIENCE_NAME)
 HomeTab:CreateLabel("RAVEN HUB build: " .. HUB_BUILD)
-HomeTab:CreateLabel("Teleport persistence: " .. (TELEPORT_PERSISTENCE_ARMED and "armed" or "unsupported"))
 HomeTab:CreateLabel("Config scope: " .. tostring(CONFIG_SCOPE_ID))
 
 local function setModuleStatus(text)
