@@ -2,6 +2,7 @@
 
 ## 2026-08-23
 
+- **RAVEN HUB maclib-3** — Added JobId-scoped queue_on_teleport persistence so the hub reloads and re-arms itself after dungeon/lobby server transitions without duplicate queues in the same session.
 - **Iron Soul: Dungeon v1.2.11** — Added a guarded Door-to-Portal chain recovery: after an open door, an empty between-round player within 35 studs of a real portal is teleported into it and touched automatically.
 - **Iron Soul: Dungeon v1.2.10** — Added open-door entry recovery: an empty player standing beside a disabled/open door is moved to the active GameRound respawn so the next room's wave trigger can start.
 - **Iron Soul: Dungeon v1.2.9** — Door automation now crosses 18 studs beyond the doorway toward the next area after opening, and completed-route handling prevents repeated or backward actions while the next room loads.
