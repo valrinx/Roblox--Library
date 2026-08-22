@@ -1,7 +1,7 @@
 --[[
     RAVEN HUB | Iron Soul: Dungeon
     Lobby PlaceId: 117533937949084 | Starless Forest: 116456628154258
-    GameId: 9910245722 | Version: v1.3.5
+    GameId: 9910245722 | Version: v1.3.6
 ]]
 return function(Window, runtimeInfo)
     local Players = game:GetService("Players")
@@ -29,7 +29,7 @@ return function(Window, runtimeInfo)
         targetMode = "Nearest", stickyTarget = true,
         autoFarm = false, autoAttack = true, autoSkills = false,
         farmMode = "Approach", farmDistance = 7, heightAbove = 8, actionDelay = 0.18,
-        autoDodge = false, dodgeMode = "Underground", dodgeMargin = 3, dodgeDistance = 16, dodgeVertical = 35, dodgeCooldown = 0.55, dodgeHold = 1.4,
+        autoDodge = false, dodgeMode = "Air", dodgeMargin = 3, dodgeDistance = 16, dodgeVertical = 50, dodgeCooldown = 0.55, dodgeHold = 1.4,
         portalEsp = true, portalDistance = 2500,
         autoOpenDoor = false, autoNextPortal = false, progressOnlyWhenClear = true, progressCooldown = 2,
         progressMovement = "Teleport", progressOffset = 3, clearDelay = 2.5,
@@ -237,7 +237,7 @@ return function(Window, runtimeInfo)
     end
 
     local Dashboard=Window:CreateTab("Dungeon", "activity")
-    Dashboard:CreateSection("Iron Soul v1.3.5")
+    Dashboard:CreateSection("Iron Soul v1.3.6")
     local roundLabel=Dashboard:CreateLabel("Round: scanning...")
     local enemyCountLabel=Dashboard:CreateLabel("Enemies: scanning...")
     local targetLabel=Dashboard:CreateLabel("Target: none")
@@ -267,10 +267,10 @@ return function(Window, runtimeInfo)
     local Dodge=Window:CreateTab("Dodge", "shield")
     Dodge:CreateSection("RedShow Avoidance")
     Dodge:CreateToggle({Name="Auto Dodge Redzone",CurrentValue=false,Flag="IronSoulAutoDodge",Callback=function(v) settings.autoDodge=v end})
-    Dodge:CreateDropdown({Name="Escape Mode",Options={"Underground","Air","Nearest Edge"},CurrentOption={"Underground"},MultipleOptions=false,Flag="IronSoulDodgeMode",Callback=function(v) settings.dodgeMode=type(v)=="table"and v[1]or v end})
+    Dodge:CreateDropdown({Name="Escape Mode",Options={"Underground","Air","Nearest Edge"},CurrentOption={"Air"},MultipleOptions=false,Flag="IronSoulDodgeMode",Callback=function(v) settings.dodgeMode=type(v)=="table"and v[1]or v end})
     Dodge:CreateSlider({Name="Safety Margin",Range={0,12},Increment=1,CurrentValue=3,Suffix=" studs",Flag="IronSoulDodgeMargin",Callback=function(v) settings.dodgeMargin=v end})
     Dodge:CreateSlider({Name="Dodge Distance",Range={6,30},Increment=1,CurrentValue=16,Suffix=" studs",Flag="IronSoulDodgeDistance",Callback=function(v) settings.dodgeDistance=v end})
-    Dodge:CreateSlider({Name="Vertical Escape",Range={15,80},Increment=5,CurrentValue=35,Suffix=" studs",Flag="IronSoulDodgeVertical",Callback=function(v) settings.dodgeVertical=v end})
+    Dodge:CreateSlider({Name="Vertical Escape",Range={15,80},Increment=5,CurrentValue=50,Suffix=" studs",Flag="IronSoulDodgeVertical",Callback=function(v) settings.dodgeVertical=v end})
     Dodge:CreateSlider({Name="Dodge Cooldown",Range={0.2,1.5},Increment=.05,CurrentValue=.55,Suffix="s",Flag="IronSoulDodgeCooldown",Callback=function(v) settings.dodgeCooldown=v end})
     Dodge:CreateSlider({Name="Dodge Hold",Range={0.5,3},Increment=.1,CurrentValue=1.4,Suffix="s",Flag="IronSoulDodgeHold",Callback=function(v) settings.dodgeHold=v end})
 
@@ -637,6 +637,6 @@ return function(Window, runtimeInfo)
         local camera=workspace.CurrentCamera; if camera and LP.Character then camera.CameraSubject=LP.Character:FindFirstChildOfClass("Humanoid") end
         if getgenv().__RAVEN_IRON_SOUL and getgenv().__RAVEN_IRON_SOUL.Settings==settings then getgenv().__RAVEN_IRON_SOUL=nil end
     end
-    getgenv().__RAVEN_IRON_SOUL={Version="v1.3.5",Settings=settings,Destroy=destroy}
+    getgenv().__RAVEN_IRON_SOUL={Version="v1.3.6",Settings=settings,Destroy=destroy}
     if runtimeInfo and type(runtimeInfo.registerCleanup)=="function" then runtimeInfo.registerCleanup(destroy) end
 end
