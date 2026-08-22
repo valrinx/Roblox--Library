@@ -1,7 +1,7 @@
 --[[
     RAVEN HUB | Iron Soul: Dungeon
     Lobby PlaceId: 117533937949084 | Starless Forest: 116456628154258
-    GameId: 9910245722 | Version: v1.2.5
+    GameId: 9910245722 | Version: v1.2.6
 ]]
 return function(Window, runtimeInfo)
     local Players = game:GetService("Players")
@@ -15,6 +15,7 @@ return function(Window, runtimeInfo)
     local usedDoors = setmetatable({}, {__mode="k"})
     local controllerCache = nil
     local lastKnownRound, doorHandledRound = nil, nil
+    local clearObservedAt, clearObservedRound = nil, nil
 
     pcall(function()
         local old = getgenv().__RAVEN_IRON_SOUL
@@ -29,7 +30,7 @@ return function(Window, runtimeInfo)
         autoDodge = false, dodgeMargin = 3, dodgeDistance = 16, dodgeCooldown = 0.55,
         portalEsp = true, portalDistance = 2500,
         autoOpenDoor = false, autoNextPortal = false, progressOnlyWhenClear = true, progressCooldown = 2,
-        progressMovement = "Teleport", progressOffset = 3,
+        progressMovement = "Teleport", progressOffset = 3, clearDelay = 2.5,
     }
 
     local guiRoot = (type(gethui) == "function" and gethui()) or CoreGui
@@ -158,7 +159,7 @@ return function(Window, runtimeInfo)
     end
 
     local Dashboard=Window:CreateTab("Dungeon", "activity")
-    Dashboard:CreateSection("Iron Soul v1.2.5")
+    Dashboard:CreateSection("Iron Soul v1.2.6")
     local roundLabel=Dashboard:CreateLabel("Round: scanning...")
     local enemyCountLabel=Dashboard:CreateLabel("Enemies: scanning...")
     local targetLabel=Dashboard:CreateLabel("Target: none")
@@ -204,6 +205,7 @@ return function(Window, runtimeInfo)
     Progress:CreateToggle({Name="Only When Enemies Clear",CurrentValue=true,Flag="IronSoulProgressClear",Callback=function(v) settings.progressOnlyWhenClear=v end})
     Progress:CreateDropdown({Name="Movement Mode",Options={"Teleport","Walk"},CurrentOption={"Teleport"},MultipleOptions=false,Flag="IronSoulProgressMovement",Callback=function(v) settings.progressMovement=type(v)=="table"and v[1]or v end})
     Progress:CreateSlider({Name="Teleport Offset",Range={1,8},Increment=.5,CurrentValue=3,Suffix=" studs",Flag="IronSoulProgressOffset",Callback=function(v) settings.progressOffset=v end})
+    Progress:CreateSlider({Name="Clear Confirmation Delay",Range={0.5,6},Increment=.5,CurrentValue=2.5,Suffix="s",Flag="IronSoulClearDelay",Callback=function(v) settings.clearDelay=v end})
     Progress:CreateSlider({Name="Progress Cooldown",Range={1,8},Increment=.5,CurrentValue=2,Suffix="s",Flag="IronSoulProgressCooldown",Callback=function(v) settings.progressCooldown=v end})
 
     local lastDodge,lastAction,lastProgress,scanAt,statusAt=0,0,0,0,0
@@ -265,8 +267,17 @@ return function(Window, runtimeInfo)
         end
 
         local officiallyClear,officialRound,completedRound=officialRoundClear()
-        local canProgress=not settings.progressOnlyWhenClear or officiallyClear
-        local progressState=canProgress and "official round clear" or string.format("waiting for game clear | round %s, completed %s",tostring(officialRound or "?"),tostring(completedRound or "?"))
+        if officiallyClear then
+            if clearObservedRound~=officialRound then clearObservedRound=officialRound; clearObservedAt=now end
+        else
+            clearObservedRound=nil; clearObservedAt=nil
+        end
+        local clearConfirmed=officiallyClear and clearObservedAt and now-clearObservedAt>=settings.clearDelay
+        local canProgress=not settings.progressOnlyWhenClear or clearConfirmed
+        local progressState
+        if clearConfirmed then progressState="official clear confirmed"
+        elseif officiallyClear then progressState=string.format("confirming game clear | %.1fs",math.max(0,settings.clearDelay-(now-(clearObservedAt or now))))
+        else progressState=string.format("waiting for game clear | round %s, completed %s",tostring(officialRound or "?"),tostring(completedRound or "?")) end
         if canProgress and root and now-lastProgress>=settings.progressCooldown then
             local currentRound,roundSpawn=currentRoundInfo()
             if currentRound~=lastKnownRound then lastKnownRound=currentRound; doorHandledRound=nil; table.clear(usedDoors) end
@@ -295,7 +306,9 @@ return function(Window, runtimeInfo)
                     if playerDistance>10 and part and part:IsA("BasePart") then
                         if settings.progressMovement=="Teleport" then
                             root.CFrame=part.CFrame*CFrame.new(0,0,-settings.progressOffset)
-                            progressState="teleported to round door"
+                            usedDoors[bestPrompt]=true; doorHandledRound=currentRound; used=true; lastProgress=now
+                            task.delay(.15,function() if running and bestPrompt.Parent and type(fireproximityprompt)=="function" then pcall(fireproximityprompt,bestPrompt) end end)
+                            progressState="teleported and opening Round"..tostring(currentRound).." door"
                         else
                             local humanoid=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
                             if humanoid then humanoid:MoveTo(part.Position) end
@@ -318,7 +331,14 @@ return function(Window, runtimeInfo)
                     if bestDistance>8 then
                         if settings.progressMovement=="Teleport" then
                             root.CFrame=bestPortal.CFrame*CFrame.new(0,2,-settings.progressOffset)
-                            progressState="teleported to portal R"..tostring(bestPortal:GetAttribute("RoundNum") or "?")
+                            used=true; lastProgress=now
+                            local portalRoot,boundRoot=bestPortal,root
+                            task.delay(.15,function()
+                                if running and portalRoot.Parent and boundRoot.Parent and type(firetouchinterest)=="function" then
+                                    pcall(firetouchinterest,boundRoot,portalRoot,0); pcall(firetouchinterest,boundRoot,portalRoot,1)
+                                end
+                            end)
+                            progressState="teleported and entering portal R"..tostring(bestPortal:GetAttribute("RoundNum") or "?")
                         else
                             local humanoid=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
                             if humanoid then humanoid:MoveTo(bestPortal.Position) end
@@ -383,6 +403,6 @@ return function(Window, runtimeInfo)
         local camera=workspace.CurrentCamera; if camera and LP.Character then camera.CameraSubject=LP.Character:FindFirstChildOfClass("Humanoid") end
         if getgenv().__RAVEN_IRON_SOUL and getgenv().__RAVEN_IRON_SOUL.Settings==settings then getgenv().__RAVEN_IRON_SOUL=nil end
     end
-    getgenv().__RAVEN_IRON_SOUL={Version="v1.2.5",Settings=settings,Destroy=destroy}
+    getgenv().__RAVEN_IRON_SOUL={Version="v1.2.6",Settings=settings,Destroy=destroy}
     if runtimeInfo and type(runtimeInfo.registerCleanup)=="function" then runtimeInfo.registerCleanup(destroy) end
 end
