@@ -1,7 +1,7 @@
 --[[
     RAVEN HUB | The Sea
     PlaceId: 139802517550914 | GameId: 9167377564
-    Version: v1.2
+    Version: v1.2.5
 
     Read-only survival awareness: treasure, debris, islands, merchant,
     objectives, survival telemetry, and reversible local visuals.
@@ -64,6 +64,23 @@ return function(Window, scriptInfo)
     compassText.Visible = false
     compassText.Parent = compassGui
 
+    local fovCircle = Instance.new("Frame")
+    fovCircle.Name = "CombatFOV"
+    fovCircle.AnchorPoint = Vector2.new(0.5, 0.5)
+    fovCircle.Position = UDim2.fromScale(0.5, 0.5)
+    fovCircle.Size = UDim2.fromOffset(280, 280)
+    fovCircle.BackgroundTransparency = 1
+    fovCircle.Visible = false
+    fovCircle.Parent = compassGui
+    local fovCorner = Instance.new("UICorner")
+    fovCorner.CornerRadius = UDim.new(1, 0)
+    fovCorner.Parent = fovCircle
+    local fovStroke = Instance.new("UIStroke")
+    fovStroke.Color = Color3.fromRGB(255, 110, 110)
+    fovStroke.Transparency = 0.25
+    fovStroke.Thickness = 1.5
+    fovStroke.Parent = fovCircle
+
     local settings = {
         chestEsp = true,
         itemEsp = true,
@@ -89,13 +106,23 @@ return function(Window, scriptInfo)
         creatureVisibleOnly = false,
         creatureDistance = 600,
         maxCreatures = 30,
-        meleeAura = false,
-        auraRadius = 12,
+        weaponAura = false,
+        auraRadius = 16,
         auraCooldown = 0.45,
         aimAssist = false,
         autoTrigger = false,
         aimSmoothness = 0.18,
         combatVisibleCheck = true,
+        aimFov = 140,
+        showFov = true,
+        aimPrediction = true,
+        predictionStrength = 1,
+        maxPredictionTime = 1.25,
+        autoCollect = false,
+        collectCategory = "Wood",
+        collectRadius = 80,
+        collectInterval = 0.8,
+        collectOffset = 5,
     }
 
     local COLORS = {
@@ -153,6 +180,65 @@ return function(Window, scriptInfo)
         local humanoid = model:FindFirstChildOfClass("Humanoid") or model:FindFirstChildWhichIsA("Humanoid", true)
         if humanoid then return humanoid.Health, humanoid.MaxHealth end
         return tonumber(model:GetAttribute("Health")), tonumber(model:GetAttribute("MaxHealth"))
+    end
+
+    local function screenDistance(part)
+        local camera = workspace.CurrentCamera
+        if not camera or not part then return math.huge, false end
+        local point, onScreen = camera:WorldToViewportPoint(part.Position)
+        if point.Z <= 0 then return math.huge, false end
+        local center = camera.ViewportSize * 0.5
+        return (Vector2.new(point.X, point.Y) - center).Magnitude, onScreen
+    end
+
+    local WEAPON_PROFILES = {
+        Flintlock = {speed = 10000, gravity = false},
+        Raygun = {speed = 10000, gravity = false},
+        Harpoon = {speed = 150, gravity = true},
+        Riptide = {speed = 150, gravity = true},
+        ["Angler Flare"] = {speed = 120, gravity = true},
+    }
+
+    local function predictedPosition(tool, targetPart)
+        if not settings.aimPrediction or not tool or not targetPart then return targetPart.Position, 0 end
+        local profile = WEAPON_PROFILES[tool.Name] or {speed = 10000, gravity = false}
+        local speed = tonumber(tool:GetAttribute("ProjectileSpeed"))
+            or tonumber(tool:GetAttribute("LaunchSpeed")) or profile.speed
+        if speed <= 0 then speed = profile.speed end
+        local origin = workspace.CurrentCamera and workspace.CurrentCamera.CFrame.Position or localRoot().Position
+        local travelTime = math.clamp((targetPart.Position - origin).Magnitude / speed, 0, settings.maxPredictionTime)
+        travelTime = travelTime * settings.predictionStrength
+        local velocity = targetPart.AssemblyLinearVelocity or Vector3.zero
+        local predicted = targetPart.Position + velocity * travelTime
+        if profile.gravity then predicted += Vector3.new(0, 0.5 * workspace.Gravity * travelTime * travelTime, 0) end
+        return predicted, travelTime
+    end
+
+    local function fireEquippedInput()
+        if type(mouse1click) == "function" then
+            mouse1click()
+            return true
+        end
+        local camera = workspace.CurrentCamera
+        local ok, input = pcall(function() return game:GetService("VirtualInputManager") end)
+        if ok and input and camera then
+            local center = camera.ViewportSize * 0.5
+            input:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 0)
+            task.defer(function() input:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 0) end)
+            return true
+        end
+        return false
+    end
+
+    local function itemMatchesCategory(model, category)
+        if category == "Any Resource" then
+            return model:GetAttribute("Resource") ~= nil or model:GetAttribute("Food") ~= nil
+                or model:GetAttribute("Fuel") ~= nil or model:GetAttribute("BonfireFuel") ~= nil
+        end
+        if category == "Wood" or category == "Metal" then return model:GetAttribute("Resource") == category end
+        if category == "Food" then return model:GetAttribute("Food") ~= nil end
+        if category == "Fuel" then return model:GetAttribute("Fuel") ~= nil or model:GetAttribute("BonfireFuel") ~= nil end
+        return false
     end
 
     local function removeVisual(key)
@@ -363,7 +449,7 @@ return function(Window, scriptInfo)
 
     local Dashboard = Window:CreateTab("Survival", "activity")
     Dashboard:CreateSection("Module")
-    Dashboard:CreateLabel("The Sea v1.2 | Combat & Diagnostics")
+    Dashboard:CreateLabel("The Sea v1.2.5 | Real-input Weapon Aura")
     Dashboard:CreateSection("Live Status")
     local survivalLabel = Dashboard:CreateLabel("Survival: loading...")
     local currencyLabel = Dashboard:CreateLabel("Currency: loading...")
@@ -409,19 +495,34 @@ return function(Window, scriptInfo)
     Combat:CreateSlider({Name="Creature Distance",Range={50,1500},Increment=25,CurrentValue=600,Suffix=" studs",Flag="TheSeaCreatureDistance",Callback=function(v) settings.creatureDistance=v end})
     Combat:CreateSlider({Name="Max Creatures",Range={5,60},Increment=5,CurrentValue=30,Flag="TheSeaMaxCreatures",Callback=function(v) settings.maxCreatures=v end})
     Combat:CreateSection("Machete")
-    Combat:CreateToggle({Name="Machete Aura",CurrentValue=false,Flag="TheSeaMeleeAura",Callback=function(v) settings.meleeAura=v end})
-    Combat:CreateSlider({Name="Aura Radius",Range={5,25},Increment=1,CurrentValue=12,Suffix=" studs",Flag="TheSeaAuraRadius",Callback=function(v) settings.auraRadius=v end})
+    Combat:CreateToggle({Name="Weapon Kill Aura",CurrentValue=false,Flag="TheSeaWeaponAura",Callback=function(v) settings.weaponAura=v end})
+    Combat:CreateSlider({Name="Aura Radius",Range={5,25},Increment=1,CurrentValue=16,Suffix=" studs",Flag="TheSeaAuraRadius",Callback=function(v) settings.auraRadius=v end})
     Combat:CreateSlider({Name="Aura Cooldown",Range={0.2,1.5},Increment=0.05,CurrentValue=0.45,Suffix="s",Flag="TheSeaAuraCooldown",Callback=function(v) settings.auraCooldown=v end})
     Combat:CreateSection("Ranged Assist")
     Combat:CreateToggle({Name="Aim Assist (Flintlock / Raygun)",CurrentValue=false,Flag="TheSeaAimAssist",Callback=function(v) settings.aimAssist=v end})
     Combat:CreateToggle({Name="Auto Trigger",CurrentValue=false,Flag="TheSeaAutoTrigger",Callback=function(v) settings.autoTrigger=v end})
     Combat:CreateToggle({Name="Combat Visible Check",CurrentValue=true,Flag="TheSeaCombatVisible",Callback=function(v) settings.combatVisibleCheck=v end})
+    Combat:CreateToggle({Name="Show Aim FOV",CurrentValue=true,Flag="TheSeaShowAimFOV",Callback=function(v) settings.showFov=v end})
+    Combat:CreateSlider({Name="Aim FOV",Range={40,500},Increment=10,CurrentValue=140,Suffix=" px",Flag="TheSeaAimFOV",Callback=function(v) settings.aimFov=v end})
+    Combat:CreateToggle({Name="Weapon Aim Prediction",CurrentValue=true,Flag="TheSeaAimPrediction",Callback=function(v) settings.aimPrediction=v end})
+    Combat:CreateSlider({Name="Prediction Strength",Range={0.5,1.8},Increment=0.05,CurrentValue=1,Flag="TheSeaPredictionStrength",Callback=function(v) settings.predictionStrength=v end})
+    Combat:CreateSlider({Name="Max Prediction Time",Range={0.25,2},Increment=0.05,CurrentValue=1.25,Suffix="s",Flag="TheSeaPredictionTime",Callback=function(v) settings.maxPredictionTime=v end})
     Combat:CreateSlider({Name="Aim Smoothness",Range={0.05,0.5},Increment=0.01,CurrentValue=0.18,Flag="TheSeaAimSmooth",Callback=function(v) settings.aimSmoothness=v end})
     Combat:CreateLabel("Harpoon remains target-information only in v1.2; its Fire/Retract state machine is not bypassed.")
 
     Combat:CreateSection("Diagnostics")
     local combatStatusLabel = Combat:CreateLabel("Weapon: none | Target: none")
     local combatReasonLabel = Combat:CreateLabel("Combat assist: disabled")
+
+    local Collect = Window:CreateTab("Auto Collect", "package")
+    Collect:CreateSection("Direct Ownership Collect")
+    Collect:CreateToggle({Name="Auto Collect",CurrentValue=false,Flag="TheSeaAutoCollect",Callback=function(v) settings.autoCollect=v end})
+    Collect:CreateDropdown({Name="Category",Options={"Wood","Metal","Food","Fuel","Any Resource"},CurrentOption={"Wood"},MultipleOptions=false,Flag="TheSeaCollectCategory",Callback=function(v) settings.collectCategory=type(v)=="table"and v[1]or tostring(v) end})
+    Collect:CreateSlider({Name="Collect Radius",Range={15,250},Increment=5,CurrentValue=80,Suffix=" studs",Flag="TheSeaCollectRadius",Callback=function(v) settings.collectRadius=v end})
+    Collect:CreateSlider({Name="Interval",Range={0.4,3},Increment=0.1,CurrentValue=0.8,Suffix="s",Flag="TheSeaCollectInterval",Callback=function(v) settings.collectInterval=v end})
+    Collect:CreateSlider({Name="Drop Offset",Range={3,12},Increment=1,CurrentValue=5,Suffix=" studs",Flag="TheSeaCollectOffset",Callback=function(v) settings.collectOffset=v end})
+    local collectStatusLabel = Collect:CreateLabel("Collector: disabled")
+    Collect:CreateLabel("No cursor drag state is opened. Items are moved only after the server grants temporary ownership.")
 
     pcall(function() RunService:UnbindFromRenderStep(fovBinding) end)
     RunService:BindToRenderStep(fovBinding, Enum.RenderPriority.Camera.Value + 2, function()
@@ -430,7 +531,11 @@ return function(Window, scriptInfo)
         if camera and settings.customFov then camera.FieldOfView = settings.fov end
     end)
 
-    local scanAt, statusAt, lastAttackAt = 0, 0, 0
+    local scanAt, statusAt, lastAttackAt, lastCollectAt, cycleIndex = 0, 0, 0, 0, 0
+    local collectBusy = false
+    local collectedUntil = setmetatable({}, {__mode = "k"})
+    local dragSystem = nil
+    pcall(function() dragSystem = require(game.ReplicatedStorage.Modules.Systems.DragSystem) end)
     local lastCandidates = {}
     local lastRoute = {}
     local fullbrightApplied = false
@@ -445,41 +550,105 @@ return function(Window, scriptInfo)
         local character = localPlayer.Character
         local equipped = character and character:FindFirstChildOfClass("Tool")
         local nearestCreature = nil
+        local combatCandidates = {}
         for _, candidate in ipairs(lastCandidates) do
             if candidate.category == "creature" and candidate.part and candidate.part.Parent then
                 if not nearestCreature or candidate.distance < nearestCreature.distance then nearestCreature = candidate end
+                local pixels, onScreen = screenDistance(candidate.part)
+                if onScreen and pixels <= settings.aimFov and (not settings.combatVisibleCheck or isVisible(candidate.part)) then
+                    candidate.screenDistance = pixels
+                    table.insert(combatCandidates, candidate)
+                end
             end
         end
+        table.sort(combatCandidates, function(a, b) return a.screenDistance < b.screenDistance end)
+        local fovTarget = combatCandidates[1]
         local weaponName = equipped and equipped.Name or "none"
-        local targetOkay = nearestCreature and (not settings.combatVisibleCheck or isVisible(nearestCreature.part))
+        local targetOkay = fovTarget ~= nil
         local reason = "disabled"
-        if equipped and weaponName == "Machete" and settings.meleeAura then
-            if targetOkay and nearestCreature.distance <= settings.auraRadius then
-                reason = "attacking"
+        local combatWeapons = {Machete=true, Flintlock=true, Raygun=true, Harpoon=true, Riptide=true, ["Angler Flare"]=true}
+        if equipped and combatWeapons[weaponName] and settings.weaponAura then
+            local nearby = {}
+            for _, candidate in ipairs(lastCandidates) do
+                local melee = weaponName == "Machete"
+                if candidate.category == "creature" and candidate.distance <= settings.auraRadius
+                    and (melee or not settings.combatVisibleCheck or isVisible(candidate.part)) then
+                    table.insert(nearby, candidate)
+                end
+            end
+            if #nearby > 0 then
+                cycleIndex = cycleIndex % #nearby + 1
+                local cycleTarget = nearby[cycleIndex]
+                reason = "cycling " .. tostring(cycleIndex) .. "/" .. tostring(#nearby)
                 if now - lastAttackAt >= settings.auraCooldown and equipped.Enabled then
                     lastAttackAt = now
-                    pcall(function() equipped:Activate() end)
+                    local root = localRoot()
+                    if root and cycleTarget.part then
+                        local look = Vector3.new(cycleTarget.part.Position.X, root.Position.Y, cycleTarget.part.Position.Z)
+                        if (look - root.Position).Magnitude > 0.1 then root.CFrame = CFrame.lookAt(root.Position, look) end
+                    end
+                    pcall(fireEquippedInput)
                 end
             else
-                reason = nearestCreature and "target out of range/covered" or "no creature"
+                reason = nearestCreature and "targets out of aura range/covered" or "no creature"
             end
-        elseif equipped and (weaponName == "Flintlock" or weaponName == "Raygun") and (settings.aimAssist or settings.autoTrigger) then
+        elseif equipped and WEAPON_PROFILES[weaponName] and (settings.aimAssist or settings.autoTrigger) then
             if targetOkay then
-                reason = "tracking"
+                local predicted, travelTime = predictedPosition(equipped, fovTarget.part)
+                reason = string.format("tracking +%.2fs", travelTime)
                 if settings.aimAssist and workspace.CurrentCamera then
                     local camera = workspace.CurrentCamera
-                    local desired = CFrame.lookAt(camera.CFrame.Position, nearestCreature.part.Position)
+                    local desired = CFrame.lookAt(camera.CFrame.Position, predicted)
                     camera.CFrame = camera.CFrame:Lerp(desired, settings.aimSmoothness)
                 end
                 if settings.autoTrigger and now - lastAttackAt >= 0.3 and equipped.Enabled then
                     lastAttackAt = now
-                    pcall(function() equipped:Activate() end)
+                    pcall(fireEquippedInput)
                 end
             else
                 reason = nearestCreature and "target covered" or "no creature"
             end
         elseif equipped and weaponName == "Harpoon" then
-            reason = nearestCreature and "target info only" or "no creature"
+            reason = fovTarget and "target info only" or "no target in FOV"
+        end
+
+        if settings.autoCollect and not collectBusy and now - lastCollectAt >= settings.collectInterval then
+            lastCollectAt = now
+            local debris = workspace:FindFirstChild("DebrisField")
+            local root = localRoot()
+            local best, bestPart, bestDistance
+            if debris and root then
+                for _, model in ipairs(debris:GetChildren()) do
+                    local part = getRoot(model)
+                    local distance = part and (part.Position - root.Position).Magnitude or math.huge
+                    local alreadyAtCharacter = distance <= settings.collectOffset + 4
+                    local recentlyProcessed = (collectedUntil[model] or 0) > now
+                    if distance <= settings.collectRadius and not alreadyAtCharacter and not recentlyProcessed
+                        and itemMatchesCategory(model, settings.collectCategory)
+                        and (not bestDistance or distance < bestDistance) then
+                        best, bestPart, bestDistance = model, part, distance
+                    end
+                end
+            end
+            if best and bestPart and dragSystem and dragSystem.Network then
+                collectBusy = true
+                collectedUntil[best] = now + 12
+                task.spawn(function()
+                    local granted = false
+                    pcall(function() granted = dragSystem.Network:InvokeServer("AttemptDrag", bestPart) == true end)
+                    if granted and bestPart.Parent and root and root.Parent then
+                        local pullUntil = os.clock() + 0.35
+                        while os.clock() < pullUntil and bestPart.Parent and root.Parent do
+                            RunService.RenderStepped:Wait()
+                            local destination = (root.CFrame * CFrame.new(0, 1, -settings.collectOffset)).Position
+                            bestPart.CFrame = CFrame.new(destination) * (bestPart.CFrame - bestPart.Position)
+                            bestPart.AssemblyLinearVelocity = Vector3.zero
+                        end
+                        pcall(function() dragSystem.Network:FireServer("GiveUpOwnership", bestPart) end)
+                    end
+                    collectBusy = false
+                end)
+            end
         end
 
         if settings.fullbright then
@@ -548,11 +717,14 @@ return function(Window, scriptInfo)
                 combatStatusLabel:Set(string.format("Weapon: %s | Target: %s", weaponName,
                     nearestCreature and string.format("%s (%dm)", nearestCreature.label, math.floor(nearestCreature.distance)) or "none"))
                 combatReasonLabel:Set("Combat assist: " .. reason)
+                collectStatusLabel:Set(settings.autoCollect and string.format("Collector: %s | %s", collectBusy and "moving" or "searching", settings.collectCategory) or "Collector: disabled")
             end)
         end
     end)
 
     connect(RunService.RenderStepped, function()
+        fovCircle.Visible = running and settings.showFov and (settings.aimAssist or settings.autoTrigger) or false
+        fovCircle.Size = UDim2.fromOffset(settings.aimFov * 2, settings.aimFov * 2)
         local target = lastRoute[1]
         local camera = workspace.CurrentCamera
         local valid = running and settings.compass and target and target.part and target.part.Parent and camera
@@ -590,6 +762,7 @@ return function(Window, scriptInfo)
     end
 
     getgenv().__RAVEN_THE_SEA = {
+        Version = "v1.2.5",
         Settings = settings,
         Refresh = scanWorld,
         Destroy = destroy,
