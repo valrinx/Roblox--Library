@@ -2,6 +2,7 @@
 
 ## 2026-08-23
 
+- **Iron Soul: Dungeon v1.2.6** — Added a configurable post-clear confirmation delay and made teleport-mode Door/Portal interactions fire after a short replication pause in the same scheduled action.
 - **Iron Soul: Dungeon v1.2.5** — Replaced transient EnemyNpc-count progression with the game's authoritative GameRoundCfg state; Door/Portal automation now waits until GameRoundComplete reaches the active GameRound.
 - **Iron Soul: Dungeon v1.2.4** — Added round-scoped Door/Portal state: matching doors always take priority, handled doors block portals until the player's current round actually changes, and portals run only for rounds without a matching door.
 
