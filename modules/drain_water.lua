@@ -140,12 +140,13 @@ return function(Window, scriptInfo)
     end
 
     local function fireRemote(remote, ...)
+        local args = {...}
         if remote and typeof(remote) == "Instance" then
             if remote:IsA("RemoteEvent") then
-                pcall(function() remote:FireServer(...) end)
+                pcall(function() remote:FireServer(unpack(args)) end)
                 return true
             elseif remote:IsA("RemoteFunction") then
-                local ok, result = pcall(function() return remote:InvokeServer(...) end)
+                local ok, result = pcall(function() return remote:InvokeServer(unpack(args)) end)
                 return ok and result or nil
             end
         end
