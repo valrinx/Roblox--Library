@@ -249,7 +249,7 @@ local SCRIPTS = {
         description = "Enemy ESP | Target HP | Auto Dodge Redzone | Round/Portal Tracker",
         placeIds    = {117533937949084, 116456628154258},
         gameIds     = {9910245722},
-        version     = "v1.2.3",
+        version     = "v1.2.5",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/iron_soul.lua",
     },
     {
