@@ -99,6 +99,13 @@ return function(Window, scriptInfo)
     -- ============================================================
     --  UTILITIES
     -- ============================================================
+    local function formatNumber(n)
+        if n >= 1e9 then return string.format("%.1fB", n / 1e9)
+        elseif n >= 1e6 then return string.format("%.1fM", n / 1e6)
+        elseif n >= 1e3 then return string.format("%.1fK", n / 1e3)
+        else return tostring(math.floor(n)) end
+    end
+
     local function notify(title, content)
         local ui = scriptInfo and (scriptInfo.hubUI or scriptInfo.hubRayfield)
         if ui and type(ui.Notify) == "function" then
@@ -137,6 +144,14 @@ return function(Window, scriptInfo)
     local function getAttribute(name, default)
         local value = player:GetAttribute(name)
         return value ~= nil and value or default
+    end
+
+    -- Safe folder value reader
+    local function getFolderValue(folderName, valueName, default)
+        local folder = player:FindFirstChild(folderName)
+        local value = folder and folder:FindFirstChild(valueName)
+        if value and value:IsA("ValueBase") then return value.Value end
+        return default
     end
 
     local function fireRemote(remote, ...)
@@ -248,16 +263,29 @@ return function(Window, scriptInfo)
     -- ============================================================
     --  GAME STATE READERS
     -- ============================================================
+    -- Game data readers (using actual game structure)
     local function getWaterLevel()
-        return getAttribute("WaterLevel", 0)
+        return getFolderValue("Level", "water", 0)
     end
 
     local function getCrackRate()
-        return getAttribute("CrackRate", 1)
+        return getFolderValue("Level", "clickAmount", 1)
+    end
+
+    local function getLevel()
+        return getFolderValue("Level", "level", 1)
+    end
+
+    local function getExperience()
+        return getFolderValue("Level", "experience", 0)
+    end
+
+    local function getNeedExperience()
+        return getFolderValue("Level", "needExperience", 1)
     end
 
     local function getStage()
-        return getAttribute("CurrentStage", 1)
+        return getFolderValue("Stage", "stage", 1)
     end
 
     local function isStageCompleted(stageNum)
@@ -265,6 +293,13 @@ return function(Window, scriptInfo)
     end
 
     local function getEquippedPumpId()
+        -- Try GetPumpData remote first
+        if GetPumpData then
+            local ok, data = pcall(function() return GetPumpData:InvokeServer() end)
+            if ok and type(data) == "table" and data.Equipped then
+                return data.Equipped
+            end
+        end
         return getAttribute("EquippedPumpId", 0)
     end
 
@@ -276,17 +311,16 @@ return function(Window, scriptInfo)
         return getAttribute("AutoClickOwned", false)
     end
 
-    local function getCoins()
-        local leaderstats = player:FindFirstChild("leaderstats")
-        if leaderstats then
-            local coins = leaderstats:FindFirstChild("Coins") or leaderstats:FindFirstChild("Cash")
-            if coins and coins:IsA("ValueBase") then return coins.Value end
-        end
-        return getAttribute("Coins", 0)
+    local function getCash()
+        return getFolderValue("Cash", "cash", 0)
     end
 
-    local function getWins()
-        return getAttribute("Wins", 0)
+    local function getRebirth()
+        return getFolderValue("Rebirth", "rebirth", 0)
+    end
+
+    local function getWaterMultiplier()
+        return getFolderValue("Level", "waterMultiplier", 1)
     end
 
     -- ============================================================
@@ -294,6 +328,11 @@ return function(Window, scriptInfo)
     -- ============================================================
     local lastCrackTick = 0
     local totalCracked = 0
+    local clickCounter = 0
+
+    -- Level/[C-S]Click remote reference
+    local LevelFolder = EventFolder and EventFolder:WaitForChild("Level", 5)
+    local ClickRemote = LevelFolder and LevelFolder:FindFirstChild("[C-S]Click")
 
     local function performCrack()
         if not running then return end
@@ -301,13 +340,22 @@ return function(Window, scriptInfo)
         if now - lastCrackTick < settings.crackInterval then return end
         lastCrackTick = now
 
-        -- Fire the StandingWater remote to drain water
+        -- Fire Click remote (primary water drain mechanism)
+        if ClickRemote then
+            clickCounter = clickCounter + 1
+            pcall(function()
+                ClickRemote:FireServer(clickCounter)
+            end)
+        end
+
+        -- Also fire StandingWater for visual sync
         if StandingWater then
             pcall(function()
-                StandingWater:FireServer(settings.crackSpeed)
+                StandingWater:FireServer(1)
             end)
-            totalCracked = totalCracked + settings.crackSpeed
         end
+
+        totalCracked = totalCracked + 1
     end
 
     -- ============================================================
@@ -838,18 +886,22 @@ return function(Window, scriptInfo)
                     local water = getWaterLevel()
                     local rate = getCrackRate()
                     local stage = getStage()
-                    local coins = getCoins()
-                    local wins = getWins()
+                    local cash = getCash()
+                    local rebirth = getRebirth()
                     local pumpId = getEquippedPumpId()
                     local speed = getSpeedUpgrade()
+                    local lvl = getLevel()
+                    local xp = getExperience()
+                    local needXp = getNeedExperience()
+                    local mult = getWaterMultiplier()
 
                     pcall(function()
                         statusLabel:Set(string.format(
-                            "Crack: %s | Rate: %s | Pump #%s | Speed Lv.%s",
-                            settings.autoCrack and "ON" or "OFF",
-                            tostring(rate),
-                            tostring(pumpId),
-                            tostring(speed)
+                            "Water: %s | Click: %s | Lv.%s | x%s",
+                            formatNumber(water),
+                            formatNumber(rate),
+                            tostring(lvl),
+                            tostring(mult)
                         ))
                     end)
 
@@ -860,16 +912,17 @@ return function(Window, scriptInfo)
                     end
                     pcall(function()
                         stageLabel:Set(string.format(
-                            "Stage: %d/18 completed | Current: %d",
-                            completed, stage
+                            "Stage: %d/18 | Rebirth: %d | Pump #%s",
+                            completed, rebirth, pumpId
                         ))
                     end)
 
                     pcall(function()
                         coinLabel:Set(string.format(
-                            "Coins: %s | Wins: %s",
-                            tostring(coins),
-                            tostring(wins)
+                            "Cash: $%s | XP: %s/%s",
+                            formatNumber(math.floor(cash)),
+                            formatNumber(math.floor(xp)),
+                            formatNumber(math.floor(needXp))
                         ))
                     end)
 
@@ -930,9 +983,11 @@ return function(Window, scriptInfo)
         TeleportTo = teleportTo,
         GetWaterLevel = getWaterLevel,
         GetCrackRate = getCrackRate,
+        GetLevel = getLevel,
         GetStage = getStage,
         IsStageCompleted = isStageCompleted,
-        GetCoins = getCoins,
+        GetCash = getCash,
+        GetRebirth = getRebirth,
         RefreshESP = function()
             refreshFishEsp()
             refreshPetEsp()
