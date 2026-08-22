@@ -245,6 +245,14 @@ local SCRIPTS = {
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/cold_war.lua",
     },
     {
+        name        = "Iron Soul: Dungeon",
+        description = "Enemy ESP | Target HP | Auto Dodge Redzone | Round/Portal Tracker",
+        placeIds    = {117533937949084, 116456628154258},
+        gameIds     = {9910245722},
+        version     = "v1.1",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/iron_soul.lua",
+    },
+    {
         name        = "DON'T LOOK BACK",
         description = "Entity/Scrap ESP | Fullbright | No Fog | Speed | Alerts",
         placeIds    = {127332613700317},
