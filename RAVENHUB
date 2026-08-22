@@ -286,10 +286,10 @@ local SCRIPTS = {
     },
     {
         name        = "The Sea",
-        description = "Creature/Loot ESP | Machete Aura | Ranged Assist | Survival Dashboard",
+        description = "Weapon Prediction | FOV Aim | Direct Auto Collect | Creature ESP",
         placeIds    = {139802517550914},
         gameIds     = {9167377564},
-        version     = "v1.2",
+        version     = "v1.2.5",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/the_sea.lua",
     },
     --[[
