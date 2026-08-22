@@ -161,8 +161,8 @@ return function(Window, scriptInfo)
         return default
     end
 
-    local function fireRemote(remote, ...)
-        local args = {...}
+    local function fireRemote(remote, args)
+        args = args or {}
         if remote and typeof(remote) == "Instance" then
             if remote:IsA("RemoteEvent") then
                 pcall(function() remote:FireServer(unpack(args)) end)
