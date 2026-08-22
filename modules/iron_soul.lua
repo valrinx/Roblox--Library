@@ -1,7 +1,7 @@
 --[[
     RAVEN HUB | Iron Soul: Dungeon
     Lobby PlaceId: 117533937949084 | Starless Forest: 116456628154258
-    GameId: 9910245722 | Version: v1.2.6
+    GameId: 9910245722 | Version: v1.2.8
 ]]
 return function(Window, runtimeInfo)
     local Players = game:GetService("Players")
@@ -15,7 +15,7 @@ return function(Window, runtimeInfo)
     local usedDoors = setmetatable({}, {__mode="k"})
     local controllerCache = nil
     local lastKnownRound, doorHandledRound = nil, nil
-    local clearObservedAt, clearObservedRound = nil, nil
+    local clearObservedAt, lastCompletedRound, pendingProgressRound = nil, nil, nil
 
     pcall(function()
         local old = getgenv().__RAVEN_IRON_SOUL
@@ -60,21 +60,23 @@ return function(Window, runtimeInfo)
     end
     local function currentRoundInfo()
         local root=myRoot(); local respawns=workspace:FindFirstChild("PlayerRespawn")
-        local cfg=game:GetService("ReplicatedStorage"):FindFirstChild("GameRoundCfg")
-        local officialRound=cfg and tonumber(cfg:GetAttribute("GameRound"))
         local bestPart,bestRound,bestDistance=nil,nil,math.huge
         if root and respawns then
             for _,part in ipairs(respawns:GetChildren()) do
                 local round=part:IsA("BasePart") and tonumber(part.Name:match("%d+"))
-                if round and (not officialRound or round==officialRound) then local d=(part.Position-root.Position).Magnitude; if d<bestDistance then bestPart,bestRound,bestDistance=part,round,d end end
+                if round then local d=(part.Position-root.Position).Magnitude; if d<bestDistance then bestPart,bestRound,bestDistance=part,round,d end end
             end
         end
-        return officialRound or bestRound,bestPart
+        return bestRound,bestPart
     end
-    local function officialRoundClear()
+    local function roundState()
         local cfg=game:GetService("ReplicatedStorage"):FindFirstChild("GameRoundCfg")
         local round=cfg and tonumber(cfg:GetAttribute("GameRound")); local complete=cfg and tonumber(cfg:GetAttribute("GameRoundComplete"))
-        return round~=nil and complete~=nil and complete>=round,round,complete
+        return round,complete
+    end
+    local function spawnForRound(round)
+        local respawns=workspace:FindFirstChild("PlayerRespawn")
+        return respawns and respawns:FindFirstChild("Round"..tostring(round)) or nil
     end
     local function progressPortals()
         local out={}; local holder=workspace:FindFirstChild("RoundDoor")
@@ -98,10 +100,17 @@ return function(Window, runtimeInfo)
     end
     local function tapAttack()
         local controller=getController()
-        if controller and pcall(function() controller:PerformAction("BaseAttack") end) then return end
+        if controller and pcall(function() controller:PerformAction("BaseAttack") end) then
+            task.delay(.08,function() if running and controller==controllerCache then pcall(function() controller:StopAction("BaseAttack") end) end end)
+            return
+        end
         local camera=workspace.CurrentCamera; local size=camera and camera.ViewportSize or Vector2.new(960,540)
         VirtualInputManager:SendMouseButtonEvent(size.X/2,size.Y/2,0,true,game,0)
         task.delay(.03,function() pcall(function() VirtualInputManager:SendMouseButtonEvent(size.X/2,size.Y/2,0,false,game,0) end) end)
+    end
+    local function stopAttack()
+        local controller=getController()
+        if controller then pcall(function() controller:StopAction("BaseAttack") end) end
     end
     local function useReadySkills()
         local gui=LP:FindFirstChild("PlayerGui"); local input=gui and gui:FindFirstChild("ScreenInput")
@@ -159,7 +168,7 @@ return function(Window, runtimeInfo)
     end
 
     local Dashboard=Window:CreateTab("Dungeon", "activity")
-    Dashboard:CreateSection("Iron Soul v1.2.6")
+    Dashboard:CreateSection("Iron Soul v1.2.8")
     local roundLabel=Dashboard:CreateLabel("Round: scanning...")
     local enemyCountLabel=Dashboard:CreateLabel("Enemies: scanning...")
     local targetLabel=Dashboard:CreateLabel("Target: none")
@@ -264,22 +273,32 @@ return function(Window, runtimeInfo)
                 if settings.autoAttack then tapAttack() end
                 if settings.autoSkills then useReadySkills() end
             end
+        elseif not farmPart or not settings.autoFarm then
+            stopAttack()
         end
 
-        local officiallyClear,officialRound,completedRound=officialRoundClear()
-        if officiallyClear then
-            if clearObservedRound~=officialRound then clearObservedRound=officialRound; clearObservedAt=now end
-        else
-            clearObservedRound=nil; clearObservedAt=nil
+        local officialRound,completedRound=roundState()
+        local locationRound=currentRoundInfo()
+        if completedRound then
+            if lastCompletedRound==nil then lastCompletedRound=completedRound end
+            if completedRound>lastCompletedRound then
+                lastCompletedRound=completedRound; pendingProgressRound=completedRound; clearObservedAt=now
+            elseif not pendingProgressRound and #cachedEnemies==0 and locationRound==completedRound and officialRound and completedRound<officialRound then
+                pendingProgressRound=completedRound; clearObservedAt=now
+            end
         end
-        local clearConfirmed=officiallyClear and clearObservedAt and now-clearObservedAt>=settings.clearDelay
+        if pendingProgressRound and locationRound and locationRound~=pendingProgressRound and #cachedEnemies>0 then
+            pendingProgressRound=nil; clearObservedAt=nil
+        end
+        local clearConfirmed=pendingProgressRound~=nil and clearObservedAt~=nil and now-clearObservedAt>=settings.clearDelay
         local canProgress=not settings.progressOnlyWhenClear or clearConfirmed
         local progressState
-        if clearConfirmed then progressState="official clear confirmed"
-        elseif officiallyClear then progressState=string.format("confirming game clear | %.1fs",math.max(0,settings.clearDelay-(now-(clearObservedAt or now))))
+        if clearConfirmed then progressState="Round"..tostring(pendingProgressRound).." clear confirmed"
+        elseif pendingProgressRound then progressState=string.format("confirming Round%s clear | %.1fs",tostring(pendingProgressRound),math.max(0,settings.clearDelay-(now-(clearObservedAt or now))))
         else progressState=string.format("waiting for game clear | round %s, completed %s",tostring(officialRound or "?"),tostring(completedRound or "?")) end
         if canProgress and root and now-lastProgress>=settings.progressCooldown then
-            local currentRound,roundSpawn=currentRoundInfo()
+            local currentRound=pendingProgressRound or locationRound or officialRound
+            local roundSpawn=spawnForRound(currentRound)
             if currentRound~=lastKnownRound then lastKnownRound=currentRound; doorHandledRound=nil; table.clear(usedDoors) end
             local used=false
             local matchingDoorExists=false
@@ -323,10 +342,13 @@ return function(Window, runtimeInfo)
             end
             if not used and not matchingDoorExists and doorHandledRound~=currentRound and settings.autoNextPortal and type(firetouchinterest)=="function" then
                 local bestPortal,bestDistance=nil,math.huge
+                local fallbackPortal,fallbackDistance=nil,math.huge; local reference=roundSpawn and roundSpawn.Position or root.Position
                 for _,portal in ipairs(progressPortals()) do
                     local pp=getPart(portal); local round=pp and (pp:GetAttribute("RoundNum") or portal:GetAttribute("RoundNum")); local d=distance(pp)
                     if pp and pp:FindFirstChildOfClass("TouchTransmitter") and round==currentRound and d<bestDistance then bestPortal,bestDistance=pp,d end
+                    if pp and pp:FindFirstChildOfClass("TouchTransmitter") then local rd=(pp.Position-reference).Magnitude; if rd<fallbackDistance then fallbackPortal,fallbackDistance=pp,rd end end
                 end
+                if not bestPortal and fallbackPortal then bestPortal= fallbackPortal; bestDistance=distance(fallbackPortal); progressState="using nearest real portal fallback" end
                 if bestPortal then
                     if bestDistance>8 then
                         if settings.progressMovement=="Teleport" then
@@ -375,9 +397,9 @@ return function(Window, runtimeInfo)
             for key in pairs(visuals) do
                 if typeof(key)=="Instance" and key.Name=="Portal" and not activePortals[key] and key.Parent==workspace:FindFirstChild("RoundDoor") then removeVisual(key) end
             end
-            local doors=workspace:FindFirstChild("RoundDoor"); local officialClear,gameRound,gameRoundComplete=officialRoundClear()
+            local doors=workspace:FindFirstChild("RoundDoor"); local gameRound,gameRoundComplete=roundState()
             pcall(function()
-                roundLabel:Set(string.format("Game round: %s | completed: %s%s",tostring(gameRound or "?"),tostring(gameRoundComplete or "?"),officialClear and " | CLEAR" or ""))
+                roundLabel:Set(string.format("Game round: %s | completed: %s%s",tostring(gameRound or "?"),tostring(gameRoundComplete or "?"),pendingProgressRound and " | MOVE R"..tostring(pendingProgressRound) or ""))
                 enemyCountLabel:Set("Enemies alive: "..tostring(#cachedEnemies))
                 targetLabel:Set(selectedTarget and string.format("Target: %s | HP %d/%d | %dm",enemyName(selectedTarget),math.floor(targetHum.Health),math.floor(targetHum.MaxHealth),math.floor(distance(targetPart))) or "Target: none")
                 dodgeLabel:Set(danger and "Redzone: DANGER" or "Redzone: clear")
@@ -397,12 +419,13 @@ return function(Window, runtimeInfo)
 
     local function destroy()
         if not running then return end; running=false
+        stopAttack()
         for _,c in ipairs(connections) do pcall(function() c:Disconnect() end) end
         for key in pairs(visuals) do removeVisual(key) end
         pcall(function() folder:Destroy() end)
         local camera=workspace.CurrentCamera; if camera and LP.Character then camera.CameraSubject=LP.Character:FindFirstChildOfClass("Humanoid") end
         if getgenv().__RAVEN_IRON_SOUL and getgenv().__RAVEN_IRON_SOUL.Settings==settings then getgenv().__RAVEN_IRON_SOUL=nil end
     end
-    getgenv().__RAVEN_IRON_SOUL={Version="v1.2.6",Settings=settings,Destroy=destroy}
+    getgenv().__RAVEN_IRON_SOUL={Version="v1.2.8",Settings=settings,Destroy=destroy}
     if runtimeInfo and type(runtimeInfo.registerCleanup)=="function" then runtimeInfo.registerCleanup(destroy) end
 end
