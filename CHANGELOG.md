@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-08-22
+
+- Added The Sea v1.0 with bounded treasure/resource/food/fuel ESP, island and merchant navigation, survival/currency/objective telemetry, Food/O2 warnings, and reversible Fullbright/FOV controls.
+
 ## 2026-08-21
 
 - Fixed Operation One player silhouettes by resolving each Player to the game's visible `Workspace.Viewmodels` model; character collision models are fully transparent, so a through-wall 3D box remains as fallback whenever a render model is unavailable.
