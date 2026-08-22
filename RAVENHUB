@@ -289,6 +289,14 @@ local SCRIPTS = {
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/build_and_crush.lua",
     },
     {
+        name        = "+1 Drain Water Per Click",
+        description = "Auto Crack | Fish/Pet/Egg ESP | Auto Sell | Stage Tracker | Teleport",
+        placeIds    = {103883942725157},
+        gameIds     = {10561352230},
+        version     = "v1.0.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/drain_water.lua",
+    },
+    {
         name        = "KILLSTREAK!",
         description = "Hill Tracker | Enemy ESP | Smooth Auto Lock | Match Dashboard",
         placeIds    = {104856666707760},
