@@ -2,6 +2,7 @@
 
 ## 2026-08-22
 
+- Updated The Sea to v1.2 with bounded Creature ESP, health/visibility labels, configurable Machete Aura, optional Flintlock/Raygun aim and trigger assistance, Harpoon target diagnostics, and an explicit in-module version/status display.
 - Updated The Sea to v1.1 with a selectable nearest-target compass, bounded multi-stop loot routes, and live inventory/sack capacity summaries.
 - Added The Sea v1.0 with bounded treasure/resource/food/fuel ESP, island and merchant navigation, survival/currency/objective telemetry, Food/O2 warnings, and reversible Fullbright/FOV controls.
 
