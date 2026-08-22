@@ -289,7 +289,7 @@ local SCRIPTS = {
         description = "Treasure/Item ESP | Island Navigator | Merchant Tracker | Survival Dashboard",
         placeIds    = {139802517550914},
         gameIds     = {9167377564},
-        version     = "v1.0",
+        version     = "v1.1",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/the_sea.lua",
     },
     --[[
