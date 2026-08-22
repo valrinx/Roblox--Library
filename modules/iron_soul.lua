@@ -1,12 +1,13 @@
 --[[
     RAVEN HUB | Iron Soul: Dungeon
     Lobby PlaceId: 117533937949084 | Starless Forest: 116456628154258
-    GameId: 9910245722 | Version: v1.2.11
+    GameId: 9910245722 | Version: v1.3.0
 ]]
 return function(Window, runtimeInfo)
     local Players = game:GetService("Players")
     local RunService = game:GetService("RunService")
     local CoreGui = game:GetService("CoreGui")
+    local GuiService = game:GetService("GuiService")
     local VirtualInputManager = game:GetService("VirtualInputManager")
     local LP = Players.LocalPlayer
     local running = true
@@ -16,6 +17,7 @@ return function(Window, runtimeInfo)
     local controllerCache = nil
     local lastKnownRound, doorHandledRound = nil, nil
     local clearObservedAt, lastCompletedRound, pendingProgressRound, handledCompletedRound = nil, nil, nil, nil
+    local lastEndAction, endActionState = 0, "waiting for dungeon result"
 
     pcall(function()
         local old = getgenv().__RAVEN_IRON_SOUL
@@ -31,6 +33,7 @@ return function(Window, runtimeInfo)
         portalEsp = true, portalDistance = 2500,
         autoOpenDoor = false, autoNextPortal = false, progressOnlyWhenClear = true, progressCooldown = 2,
         progressMovement = "Teleport", progressOffset = 3, clearDelay = 2.5,
+        endAction = "Off", endActionDelay = 3,
     }
 
     local guiRoot = (type(gethui) == "function" and gethui()) or CoreGui
@@ -128,6 +131,58 @@ return function(Window, runtimeInfo)
         end
     end
 
+    local function normalizedGuiText(button)
+        local values={button.Name}
+        if button:IsA("TextButton") then table.insert(values,button.Text) end
+        for _,child in ipairs(button:GetDescendants()) do
+            if child:IsA("TextLabel") or child:IsA("TextButton") then table.insert(values,child.Text) end
+        end
+        return string.lower(table.concat(values," ")):gsub("[%p%s]+","")
+    end
+    local function guiIsVisible(gui)
+        if not gui:IsA("GuiObject") or not gui.Visible or gui.AbsoluteSize.X<2 or gui.AbsoluteSize.Y<2 then return false end
+        local parent=gui.Parent
+        while parent do
+            if parent:IsA("GuiObject") and not parent.Visible then return false end
+            if parent:IsA("ScreenGui") then return parent.Enabled end
+            parent=parent.Parent
+        end
+        return true
+    end
+    local function endActionButton(mode)
+        local playerGui=LP:FindFirstChildOfClass("PlayerGui"); if not playerGui then return nil end
+        local replayWords={"replay","retry","playagain","again","rechallenge"}
+        local lobbyWords={"returnlobby","backtolobby","lobby","returnhome","backhome"}
+        local words=mode=="Replay" and replayWords or lobbyWords
+        local best,bestScore=nil,-math.huge
+        for _,button in ipairs(playerGui:GetDescendants()) do
+            if button:IsA("GuiButton") and guiIsVisible(button) then
+                local text=normalizedGuiText(button)
+                for index,word in ipairs(words) do
+                    if text:find(word,1,true) then
+                        local score=100-index*5+button.AbsoluteSize.X*button.AbsoluteSize.Y/10000
+                        if score>bestScore then best,bestScore=button,score end
+                        break
+                    end
+                end
+            end
+        end
+        return best
+    end
+    local function activateGuiButton(button)
+        if not button or not button.Parent then return false end
+        if type(firesignal)=="function" then
+            local ok=pcall(firesignal,button.Activated)
+            if ok then return true end
+        end
+        local ok=pcall(function() button:Activate() end)
+        if ok then return true end
+        local inset=GuiService:GetGuiInset(); local pos=button.AbsolutePosition+button.AbsoluteSize/2+inset
+        VirtualInputManager:SendMouseButtonEvent(pos.X,pos.Y,0,true,game,0)
+        VirtualInputManager:SendMouseButtonEvent(pos.X,pos.Y,0,false,game,0)
+        return true
+    end
+
     local function removeVisual(key)
         local v=visuals[key]; if not v then return end
         pcall(function() v.highlight:Destroy() end); pcall(function() v.billboard:Destroy() end); visuals[key]=nil
@@ -136,12 +191,16 @@ return function(Window, runtimeInfo)
         local v=visuals[key]
         if v and v.adornee==adornee and v.part==part then return v end
         removeVisual(key)
-        local h=Instance.new("Highlight"); h.Adornee=adornee; h.FillTransparency=.78; h.OutlineTransparency=.05
-        h.FillColor=color; h.OutlineColor=color; h.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop; h.Parent=folder
-        local b=Instance.new("BillboardGui"); b.Adornee=part; b.AlwaysOnTop=true; b.Size=UDim2.fromOffset(240,44); b.StudsOffset=Vector3.new(0,3,0); b.Parent=folder
-        local l=Instance.new("TextLabel"); l.BackgroundTransparency=1; l.Size=UDim2.fromScale(1,1); l.Font=Enum.Font.GothamSemibold
-        l.TextSize=13; l.TextStrokeTransparency=.2; l.TextColor3=color; l.Parent=b
-        v={adornee=adornee,part=part,highlight=h,billboard=b,label=l}; visuals[key]=v; return v
+        local ok,result=pcall(function()
+            local h=Instance.new("Highlight"); h.Adornee=adornee; h.FillTransparency=.78; h.OutlineTransparency=.05
+            h.FillColor=color; h.OutlineColor=color; h.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop; h.Parent=folder
+            local b=Instance.new("BillboardGui"); b.Adornee=part; b.AlwaysOnTop=true; b.Size=UDim2.fromOffset(240,44); b.StudsOffset=Vector3.new(0,3,0); b.Parent=folder
+            local l=Instance.new("TextLabel"); l.BackgroundTransparency=1; l.Size=UDim2.fromScale(1,1); l.Font=Enum.Font.GothamSemibold
+            l.TextSize=13; l.TextStrokeTransparency=.2; l.TextColor3=color; l.Parent=b
+            return {adornee=adornee,part=part,highlight=h,billboard=b,label=l}
+        end)
+        if not ok then return nil end
+        visuals[key]=result; return result
     end
 
     local function collectEnemies()
@@ -168,11 +227,12 @@ return function(Window, runtimeInfo)
     end
 
     local Dashboard=Window:CreateTab("Dungeon", "activity")
-    Dashboard:CreateSection("Iron Soul v1.2.11")
+    Dashboard:CreateSection("Iron Soul v1.3.0")
     local roundLabel=Dashboard:CreateLabel("Round: scanning...")
     local enemyCountLabel=Dashboard:CreateLabel("Enemies: scanning...")
     local targetLabel=Dashboard:CreateLabel("Target: none")
     local dodgeLabel=Dashboard:CreateLabel("Redzone: clear")
+    local endActionLabel=Dashboard:CreateLabel("End action: waiting for dungeon result")
 
     local Combat=Window:CreateTab("Combat Intel", "crosshair")
     Combat:CreateSection("Enemy ESP")
@@ -216,6 +276,9 @@ return function(Window, runtimeInfo)
     Progress:CreateSlider({Name="Teleport Offset",Range={1,8},Increment=.5,CurrentValue=3,Suffix=" studs",Flag="IronSoulProgressOffset",Callback=function(v) settings.progressOffset=v end})
     Progress:CreateSlider({Name="Clear Confirmation Delay",Range={0.5,6},Increment=.5,CurrentValue=2.5,Suffix="s",Flag="IronSoulClearDelay",Callback=function(v) settings.clearDelay=v end})
     Progress:CreateSlider({Name="Progress Cooldown",Range={1,8},Increment=.5,CurrentValue=2,Suffix="s",Flag="IronSoulProgressCooldown",Callback=function(v) settings.progressCooldown=v end})
+    Progress:CreateSection("Dungeon End v1.3")
+    Progress:CreateDropdown({Name="After Dungeon",Options={"Off","Replay","Return Lobby"},CurrentOption={"Off"},MultipleOptions=false,Flag="IronSoulEndAction",Callback=function(v) settings.endAction=type(v)=="table"and v[1]or v end})
+    Progress:CreateSlider({Name="End Screen Delay",Range={1,12},Increment=.5,CurrentValue=3,Suffix="s",Flag="IronSoulEndActionDelay",Callback=function(v) settings.endActionDelay=v end})
 
     local lastDodge,lastAction,lastProgress,lastEntryRecovery,scanAt,statusAt=0,0,0,0,0,0
     local cachedEnemies={}
@@ -231,8 +294,10 @@ return function(Window, runtimeInfo)
                     local color=e.model==selectedTarget and Color3.fromRGB(255,215,70) or Color3.fromRGB(255,75,75)
                     local v=ensureVisual(e.model,e.model,e.part,color)
                     local hp=settings.showHp and string.format(" | HP %d/%d",math.floor(e.humanoid.Health),math.floor(e.humanoid.MaxHealth)) or ""
-                    v.label.Text=string.format("%s%s | %dm",enemyName(e.model),hp,math.floor(e.distance)); v.label.TextColor3=color
-                    v.highlight.FillColor=color; v.highlight.OutlineColor=color
+                    if v then
+                        v.label.Text=string.format("%s%s | %dm",enemyName(e.model),hp,math.floor(e.distance)); v.label.TextColor3=color
+                        v.highlight.FillColor=color; v.highlight.OutlineColor=color
+                    end
                 end
             end
             for key in pairs(visuals) do if typeof(key)=="Instance" and key.Parent==workspace:FindFirstChild("EnemyNpc") and not active[key] then removeVisual(key) end end
@@ -279,6 +344,22 @@ return function(Window, runtimeInfo)
 
         local officialRound,completedRound=roundState()
         local locationRound=currentRoundInfo()
+        if settings.endAction~="Off" and now-lastEndAction>=math.max(settings.endActionDelay,1) then
+            local button=endActionButton(settings.endAction)
+            if button then
+                lastEndAction=now
+                local description=normalizedGuiText(button)
+                if activateGuiButton(button) then
+                    endActionState="activated "..settings.endAction.." ("..button.Name..")"
+                else
+                    endActionState="found result button but activation failed: "..description
+                end
+            else
+                endActionState="waiting for "..settings.endAction.." result button"
+            end
+        elseif settings.endAction=="Off" then
+            endActionState="off"
+        end
         if settings.autoNextPortal and #cachedEnemies==0 and root and officialRound and completedRound and completedRound==officialRound-1 and now-lastProgress>=settings.progressCooldown then
             local nearestPortal,portalDistance=nil,math.huge
             for _,portal in ipairs(progressPortals()) do local pp=getPart(portal); local d=distance(pp); if pp and pp:FindFirstChildOfClass("TouchTransmitter") and d<portalDistance then nearestPortal,portalDistance=pp,d end end
@@ -422,8 +503,10 @@ return function(Window, runtimeInfo)
                             local color=Color3.fromRGB(95,190,255)
                             local v=ensureVisual(p,p,pp,color)
                             local round=pp:GetAttribute("RoundNum") or p:GetAttribute("RoundNum")
-                            v.label.Text=string.format("Portal%s | %dm",round~=nil and " R"..tostring(round) or "",math.floor(d))
-                            v.label.TextColor3=color; v.highlight.FillColor=color; v.highlight.OutlineColor=color
+                            if v then
+                                v.label.Text=string.format("Portal%s | %dm",round~=nil and " R"..tostring(round) or "",math.floor(d))
+                                v.label.TextColor3=color; v.highlight.FillColor=color; v.highlight.OutlineColor=color
+                            end
                         end
                     end
             end
@@ -439,6 +522,7 @@ return function(Window, runtimeInfo)
                 portalLabel:Set(nearestPortal and string.format("Nearest portal: %dm | %d in range",math.floor(nearestDistance),portalCount) or "Nearest portal: none")
                 doorLabel:Set("Round doors: "..tostring(doors and #doors:GetChildren() or 0))
                 progressStateLabel:Set("Automation: "..progressState)
+                endActionLabel:Set("End action: "..endActionState)
             end)
         end
     end)
@@ -459,6 +543,6 @@ return function(Window, runtimeInfo)
         local camera=workspace.CurrentCamera; if camera and LP.Character then camera.CameraSubject=LP.Character:FindFirstChildOfClass("Humanoid") end
         if getgenv().__RAVEN_IRON_SOUL and getgenv().__RAVEN_IRON_SOUL.Settings==settings then getgenv().__RAVEN_IRON_SOUL=nil end
     end
-    getgenv().__RAVEN_IRON_SOUL={Version="v1.2.11",Settings=settings,Destroy=destroy}
+    getgenv().__RAVEN_IRON_SOUL={Version="v1.3.0",Settings=settings,Destroy=destroy}
     if runtimeInfo and type(runtimeInfo.registerCleanup)=="function" then runtimeInfo.registerCleanup(destroy) end
 end
