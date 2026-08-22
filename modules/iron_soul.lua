@@ -1,13 +1,12 @@
 --[[
     RAVEN HUB | Iron Soul: Dungeon
     Lobby PlaceId: 117533937949084 | Starless Forest: 116456628154258
-    GameId: 9910245722 | Version: v1.3.0
+    GameId: 9910245722 | Version: v1.3.5
 ]]
 return function(Window, runtimeInfo)
     local Players = game:GetService("Players")
     local RunService = game:GetService("RunService")
     local CoreGui = game:GetService("CoreGui")
-    local GuiService = game:GetService("GuiService")
     local VirtualInputManager = game:GetService("VirtualInputManager")
     local LP = Players.LocalPlayer
     local running = true
@@ -18,6 +17,7 @@ return function(Window, runtimeInfo)
     local lastKnownRound, doorHandledRound = nil, nil
     local clearObservedAt, lastCompletedRound, pendingProgressRound, handledCompletedRound = nil, nil, nil, nil
     local lastEndAction, endActionState = 0, "waiting for dungeon result"
+    local dodgeLockUntil, dodgeSafePosition = 0, nil
 
     pcall(function()
         local old = getgenv().__RAVEN_IRON_SOUL
@@ -29,7 +29,7 @@ return function(Window, runtimeInfo)
         targetMode = "Nearest", stickyTarget = true,
         autoFarm = false, autoAttack = true, autoSkills = false,
         farmMode = "Approach", farmDistance = 7, heightAbove = 8, actionDelay = 0.18,
-        autoDodge = false, dodgeMargin = 3, dodgeDistance = 16, dodgeCooldown = 0.55,
+        autoDodge = false, dodgeMode = "Underground", dodgeMargin = 3, dodgeDistance = 16, dodgeVertical = 35, dodgeCooldown = 0.55, dodgeHold = 1.4,
         portalEsp = true, portalDistance = 2500,
         autoOpenDoor = false, autoNextPortal = false, progressOnlyWhenClear = true, progressCooldown = 2,
         progressMovement = "Teleport", progressOffset = 3, clearDelay = 2.5,
@@ -151,6 +151,11 @@ return function(Window, runtimeInfo)
     end
     local function endActionButton(mode)
         local playerGui=LP:FindFirstChildOfClass("PlayerGui"); if not playerGui then return nil end
+        local resultGui=playerGui:FindFirstChild("ResultGui")
+        local settlement=resultGui and resultGui:FindFirstChild("ScreenSettlement")
+        local group=settlement and settlement:FindFirstChild("BtnGroup")
+        local exact=group and group:FindFirstChild(mode=="Replay" and "PlayAgainBtn" or "ReturnToLobbyBtn")
+        if exact and exact:IsA("GuiButton") and guiIsVisible(exact) then return exact end
         local replayWords={"replay","retry","playagain","again","rechallenge"}
         local lobbyWords={"returnlobby","backtolobby","lobby","returnhome","backhome"}
         local words=mode=="Replay" and replayWords or lobbyWords
@@ -171,16 +176,21 @@ return function(Window, runtimeInfo)
     end
     local function activateGuiButton(button)
         if not button or not button.Parent then return false end
+        local activated=false
         if type(firesignal)=="function" then
-            local ok=pcall(firesignal,button.Activated)
-            if ok then return true end
+            for _,signal in ipairs({button.MouseButton1Down,button.MouseButton1Click,button.MouseButton1Up,button.Activated}) do
+                if pcall(firesignal,signal) then activated=true end
+            end
         end
-        local ok=pcall(function() button:Activate() end)
-        if ok then return true end
-        local inset=GuiService:GetGuiInset(); local pos=button.AbsolutePosition+button.AbsoluteSize/2+inset
-        VirtualInputManager:SendMouseButtonEvent(pos.X,pos.Y,0,true,game,0)
-        VirtualInputManager:SendMouseButtonEvent(pos.X,pos.Y,0,false,game,0)
-        return true
+        if pcall(function() button:Activate() end) then activated=true end
+        local pos=button.AbsolutePosition+button.AbsoluteSize/2
+        if pcall(function()
+            VirtualInputManager:SendMouseMoveEvent(pos.X,pos.Y,game)
+            VirtualInputManager:SendMouseButtonEvent(pos.X,pos.Y,0,true,game,0)
+            task.wait(.04)
+            VirtualInputManager:SendMouseButtonEvent(pos.X,pos.Y,0,false,game,0)
+        end) then activated=true end
+        return activated
     end
 
     local function removeVisual(key)
@@ -227,7 +237,7 @@ return function(Window, runtimeInfo)
     end
 
     local Dashboard=Window:CreateTab("Dungeon", "activity")
-    Dashboard:CreateSection("Iron Soul v1.3.0")
+    Dashboard:CreateSection("Iron Soul v1.3.5")
     local roundLabel=Dashboard:CreateLabel("Round: scanning...")
     local enemyCountLabel=Dashboard:CreateLabel("Enemies: scanning...")
     local targetLabel=Dashboard:CreateLabel("Target: none")
@@ -249,7 +259,7 @@ return function(Window, runtimeInfo)
     Farm:CreateToggle({Name="Auto Farm Target",CurrentValue=false,Flag="IronSoulAutoFarm",Callback=function(v) settings.autoFarm=v end})
     Farm:CreateToggle({Name="Auto Base Attack",CurrentValue=true,Flag="IronSoulAutoAttack",Callback=function(v) settings.autoAttack=v end})
     Farm:CreateToggle({Name="Auto Skills (Ready Only)",CurrentValue=false,Flag="IronSoulAutoSkills",Callback=function(v) settings.autoSkills=v end})
-    Farm:CreateDropdown({Name="Farm Position",Options={"Approach","Above Target"},CurrentOption={"Approach"},MultipleOptions=false,Flag="IronSoulFarmMode",Callback=function(v) settings.farmMode=type(v)=="table"and v[1]or v end})
+    Farm:CreateDropdown({Name="Farm Position",Options={"Approach","Above Target","Below Target"},CurrentOption={"Approach"},MultipleOptions=false,Flag="IronSoulFarmMode",Callback=function(v) settings.farmMode=type(v)=="table"and v[1]or v end})
     Farm:CreateSlider({Name="Attack Distance",Range={3,30},Increment=1,CurrentValue=7,Suffix=" studs",Flag="IronSoulFarmDistance",Callback=function(v) settings.farmDistance=v end})
     Farm:CreateSlider({Name="Height Above Target",Range={3,30},Increment=1,CurrentValue=8,Suffix=" studs",Flag="IronSoulFarmHeight",Callback=function(v) settings.heightAbove=v end})
     Farm:CreateSlider({Name="Action Delay",Range={0.1,0.8},Increment=.02,CurrentValue=.18,Suffix="s",Flag="IronSoulActionDelay",Callback=function(v) settings.actionDelay=v end})
@@ -257,9 +267,12 @@ return function(Window, runtimeInfo)
     local Dodge=Window:CreateTab("Dodge", "shield")
     Dodge:CreateSection("RedShow Avoidance")
     Dodge:CreateToggle({Name="Auto Dodge Redzone",CurrentValue=false,Flag="IronSoulAutoDodge",Callback=function(v) settings.autoDodge=v end})
+    Dodge:CreateDropdown({Name="Escape Mode",Options={"Underground","Air","Nearest Edge"},CurrentOption={"Underground"},MultipleOptions=false,Flag="IronSoulDodgeMode",Callback=function(v) settings.dodgeMode=type(v)=="table"and v[1]or v end})
     Dodge:CreateSlider({Name="Safety Margin",Range={0,12},Increment=1,CurrentValue=3,Suffix=" studs",Flag="IronSoulDodgeMargin",Callback=function(v) settings.dodgeMargin=v end})
     Dodge:CreateSlider({Name="Dodge Distance",Range={6,30},Increment=1,CurrentValue=16,Suffix=" studs",Flag="IronSoulDodgeDistance",Callback=function(v) settings.dodgeDistance=v end})
+    Dodge:CreateSlider({Name="Vertical Escape",Range={15,80},Increment=5,CurrentValue=35,Suffix=" studs",Flag="IronSoulDodgeVertical",Callback=function(v) settings.dodgeVertical=v end})
     Dodge:CreateSlider({Name="Dodge Cooldown",Range={0.2,1.5},Increment=.05,CurrentValue=.55,Suffix="s",Flag="IronSoulDodgeCooldown",Callback=function(v) settings.dodgeCooldown=v end})
+    Dodge:CreateSlider({Name="Dodge Hold",Range={0.5,3},Increment=.1,CurrentValue=1.4,Suffix="s",Flag="IronSoulDodgeHold",Callback=function(v) settings.dodgeHold=v end})
 
     local Progress=Window:CreateTab("Progress", "map")
     Progress:CreateSection("Round / Portal")
@@ -282,6 +295,26 @@ return function(Window, runtimeInfo)
 
     local lastDodge,lastAction,lastProgress,lastEntryRecovery,scanAt,statusAt=0,0,0,0,0,0
     local cachedEnemies={}
+    local redFolder=workspace:FindFirstChild("RedShow")
+    if redFolder then
+        connect(redFolder.DescendantAdded,function(instance)
+            if not running or not settings.autoDodge or not instance:IsA("BasePart") then return end
+            task.defer(function()
+                if not running or not settings.autoDodge or not instance.Parent then return end
+                local root=myRoot(); if not root then return end
+                local now=os.clock()
+                local direction=settings.dodgeMode=="Air" and 1 or -1
+                if settings.dodgeMode=="Nearest Edge" then direction=-1 end
+                local safe=root.Position+Vector3.new(0,direction*settings.dodgeVertical,0)
+                local rotation=root.CFrame-root.Position
+                root.CFrame=CFrame.new(safe)*rotation
+                dodgeSafePosition=safe
+                dodgeLockUntil=now+settings.dodgeHold
+                lastDodge=now
+                stopAttack()
+            end)
+        end)
+    end
     connect(RunService.Heartbeat,function()
         if not running then return end
         local now=os.clock()
@@ -300,31 +333,89 @@ return function(Window, runtimeInfo)
                     end
                 end
             end
-            for key in pairs(visuals) do if typeof(key)=="Instance" and key.Parent==workspace:FindFirstChild("EnemyNpc") and not active[key] then removeVisual(key) end end
+            for key in pairs(visuals) do
+                local ok,isOld=pcall(function() return key.Parent==workspace:FindFirstChild("EnemyNpc") and not active[key] end)
+                if ok and isOld then removeVisual(key) end
+            end
         end
 
-        local root=myRoot(); local red=workspace:FindFirstChild("RedShow"); local danger=nil
+        local root=myRoot(); local red=workspace:FindFirstChild("RedShow"); local danger,dodgePosition=nil,nil
         if root and red then
+            local zones={}
             for _,zone in ipairs(red:GetDescendants()) do
-                if zone:IsA("BasePart") and zone.Transparency<1 then
+                if zone:IsA("BasePart") then
                     local localPos=zone.CFrame:PointToObjectSpace(root.Position)
-                    if math.abs(localPos.X)<=zone.Size.X/2+settings.dodgeMargin and math.abs(localPos.Z)<=zone.Size.Z/2+settings.dodgeMargin then danger=zone break end
+                    local halfX=zone.Size.X/2+settings.dodgeMargin
+                    local halfZ=zone.Size.Z/2+settings.dodgeMargin
+                    local verticalRange=math.max(zone.Size.Y/2+8,10)
+                    if math.abs(localPos.X)<=halfX and math.abs(localPos.Z)<=halfZ and math.abs(localPos.Y)<=verticalRange then
+                        danger=zone
+                    end
+                    table.insert(zones,zone)
+                end
+            end
+            if danger then
+                if settings.dodgeMode=="Underground" then
+                    dodgePosition=root.Position-Vector3.new(0,settings.dodgeVertical,0)
+                elseif settings.dodgeMode=="Air" then
+                    dodgePosition=root.Position+Vector3.new(0,settings.dodgeVertical,0)
+                else
+                    dodgePosition=root.Position
+                    -- Resolve overlapping telegraphs repeatedly so the final point is
+                    -- outside every active rectangle, not merely the first one found.
+                    for _=1,3 do
+                        for _,zone in ipairs(zones) do
+                            local localPos=zone.CFrame:PointToObjectSpace(dodgePosition)
+                            local halfX=zone.Size.X/2+settings.dodgeMargin
+                            local halfZ=zone.Size.Z/2+settings.dodgeMargin
+                            local verticalRange=math.max(zone.Size.Y/2+8,10)
+                            if math.abs(localPos.X)<=halfX and math.abs(localPos.Z)<=halfZ and math.abs(localPos.Y)<=verticalRange then
+                                local exitX=halfX-math.abs(localPos.X)
+                                local exitZ=halfZ-math.abs(localPos.Z)
+                                if exitX<=exitZ then
+                                    local direction=localPos.X>=0 and 1 or -1
+                                    localPos=Vector3.new(direction*(halfX+settings.dodgeDistance),localPos.Y,localPos.Z)
+                                else
+                                    local direction=localPos.Z>=0 and 1 or -1
+                                    localPos=Vector3.new(localPos.X,localPos.Y,direction*(halfZ+settings.dodgeDistance))
+                                end
+                                dodgePosition=zone.CFrame:PointToWorldSpace(localPos)
+                            end
+                        end
+                    end
                 end
             end
         end
-        if danger and settings.autoDodge and now-lastDodge>=settings.dodgeCooldown and root then
+        if danger and dodgePosition and settings.autoDodge and now-lastDodge>=settings.dodgeCooldown and root then
             lastDodge=now
-            local away=Vector3.new(root.Position.X-danger.Position.X,0,root.Position.Z-danger.Position.Z)
-            if away.Magnitude<.1 then away=root.CFrame.RightVector end
             local humanoid=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
-            if humanoid then humanoid:MoveTo(root.Position+away.Unit*settings.dodgeDistance) end
+            local rotation=root.CFrame-root.Position
+            root.CFrame=CFrame.new(dodgePosition)*rotation
+            if humanoid then humanoid:MoveTo(dodgePosition) end
+            dodgeSafePosition=dodgePosition
+            dodgeLockUntil=now+settings.dodgeHold
+        end
+
+        local dodgeLocked=settings.autoDodge and dodgeSafePosition~=nil and now<dodgeLockUntil
+        if dodgeLocked and root then
+            if (root.Position-dodgeSafePosition).Magnitude>2.5 then
+                local rotation=root.CFrame-root.Position
+                root.CFrame=CFrame.new(dodgeSafePosition)*rotation
+            end
+            local humanoid=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+            if humanoid then humanoid:MoveTo(dodgeSafePosition) end
+        elseif now>=dodgeLockUntil then
+            dodgeSafePosition=nil
         end
 
         local farmPart=getPart(selectedTarget)
-        if settings.autoFarm and not danger and root and farmPart then
+        if settings.autoFarm and not danger and not dodgeLocked and root and farmPart then
             local humanoid=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
             if settings.farmMode=="Above Target" then
                 local desired=farmPart.Position+Vector3.new(0,settings.heightAbove,0)
+                root.CFrame=CFrame.lookAt(desired,farmPart.Position)
+            elseif settings.farmMode=="Below Target" then
+                local desired=farmPart.Position-Vector3.new(0,settings.heightAbove,0)
                 root.CFrame=CFrame.lookAt(desired,farmPart.Position)
             else
                 local flat=Vector3.new(root.Position.X-farmPart.Position.X,0,root.Position.Z-farmPart.Position.Z)
@@ -338,13 +429,13 @@ return function(Window, runtimeInfo)
                 if settings.autoAttack then tapAttack() end
                 if settings.autoSkills then useReadySkills() end
             end
-        elseif not farmPart or not settings.autoFarm then
+        else
             stopAttack()
         end
 
         local officialRound,completedRound=roundState()
         local locationRound=currentRoundInfo()
-        if settings.endAction~="Off" and now-lastEndAction>=math.max(settings.endActionDelay,1) then
+        if settings.endAction~="Off" and #cachedEnemies==0 and now-lastEndAction>=math.max(settings.endActionDelay,1) then
             local button=endActionButton(settings.endAction)
             if button then
                 lastEndAction=now
@@ -359,6 +450,8 @@ return function(Window, runtimeInfo)
             end
         elseif settings.endAction=="Off" then
             endActionState="off"
+        elseif #cachedEnemies>0 then
+            endActionState="dungeon active; waiting for victory"
         end
         if settings.autoNextPortal and #cachedEnemies==0 and root and officialRound and completedRound and completedRound==officialRound-1 and now-lastProgress>=settings.progressCooldown then
             local nearestPortal,portalDistance=nil,math.huge
@@ -511,14 +604,15 @@ return function(Window, runtimeInfo)
                     end
             end
             for key in pairs(visuals) do
-                if typeof(key)=="Instance" and key.Name=="Portal" and not activePortals[key] and key.Parent==workspace:FindFirstChild("RoundDoor") then removeVisual(key) end
+                local ok,isOld=pcall(function() return key.Name=="Portal" and not activePortals[key] and key.Parent==workspace:FindFirstChild("RoundDoor") end)
+                if ok and isOld then removeVisual(key) end
             end
             local doors=workspace:FindFirstChild("RoundDoor"); local gameRound,gameRoundComplete=roundState()
             pcall(function()
                 roundLabel:Set(string.format("Game round: %s | completed: %s%s",tostring(gameRound or "?"),tostring(gameRoundComplete or "?"),pendingProgressRound and " | MOVE R"..tostring(pendingProgressRound) or ""))
                 enemyCountLabel:Set("Enemies alive: "..tostring(#cachedEnemies))
                 targetLabel:Set(selectedTarget and string.format("Target: %s | HP %d/%d | %dm",enemyName(selectedTarget),math.floor(targetHum.Health),math.floor(targetHum.MaxHealth),math.floor(distance(targetPart))) or "Target: none")
-                dodgeLabel:Set(danger and "Redzone: DANGER" or "Redzone: clear")
+                dodgeLabel:Set(danger and "Redzone: DODGING" or dodgeLocked and string.format("Redzone: holding safe %.1fs",math.max(0,dodgeLockUntil-now)) or "Redzone: clear")
                 portalLabel:Set(nearestPortal and string.format("Nearest portal: %dm | %d in range",math.floor(nearestDistance),portalCount) or "Nearest portal: none")
                 doorLabel:Set("Round doors: "..tostring(doors and #doors:GetChildren() or 0))
                 progressStateLabel:Set("Automation: "..progressState)
@@ -543,6 +637,6 @@ return function(Window, runtimeInfo)
         local camera=workspace.CurrentCamera; if camera and LP.Character then camera.CameraSubject=LP.Character:FindFirstChildOfClass("Humanoid") end
         if getgenv().__RAVEN_IRON_SOUL and getgenv().__RAVEN_IRON_SOUL.Settings==settings then getgenv().__RAVEN_IRON_SOUL=nil end
     end
-    getgenv().__RAVEN_IRON_SOUL={Version="v1.3.0",Settings=settings,Destroy=destroy}
+    getgenv().__RAVEN_IRON_SOUL={Version="v1.3.5",Settings=settings,Destroy=destroy}
     if runtimeInfo and type(runtimeInfo.registerCleanup)=="function" then runtimeInfo.registerCleanup(destroy) end
 end
