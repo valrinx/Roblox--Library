@@ -1,7 +1,7 @@
 --[[
     RAVEN HUB | Iron Soul: Dungeon
     Lobby PlaceId: 117533937949084 | Starless Forest: 116456628154258
-    GameId: 9910245722 | Version: v1.1
+    GameId: 9910245722 | Version: v1.2.1
 ]]
 return function(Window, runtimeInfo)
     local Players = game:GetService("Players")
@@ -12,6 +12,8 @@ return function(Window, runtimeInfo)
     local running = true
     local connections, visuals = {}, {}
     local selectedTarget, spectating = nil, false
+    local usedDoors = setmetatable({}, {__mode="k"})
+    local controllerCache = nil
 
     pcall(function()
         local old = getgenv().__RAVEN_IRON_SOUL
@@ -25,6 +27,7 @@ return function(Window, runtimeInfo)
         farmMode = "Approach", farmDistance = 7, heightAbove = 8, actionDelay = 0.18,
         autoDodge = false, dodgeMargin = 3, dodgeDistance = 16, dodgeCooldown = 0.55,
         portalEsp = true, portalDistance = 2500,
+        autoOpenDoor = false, autoNextPortal = false, progressOnlyWhenClear = true, progressCooldown = 2,
     }
 
     local guiRoot = (type(gethui) == "function" and gethui()) or CoreGui
@@ -56,7 +59,20 @@ return function(Window, runtimeInfo)
         VirtualInputManager:SendKeyEvent(true,keyCode,false,game)
         task.delay(.03,function() pcall(function() VirtualInputManager:SendKeyEvent(false,keyCode,false,game) end) end)
     end
+    local function getController()
+        if controllerCache and rawget(controllerCache,"Character")==LP.Character then return controllerCache end
+        controllerCache=nil
+        if type(getgc)~="function" then return nil end
+        for _,value in ipairs(getgc(true)) do
+            if type(value)=="table" and rawget(value,"Character")==LP.Character and type(rawget(value,"ActionModules"))=="table" and type(value.PerformAction)=="function" then
+                controllerCache=value; break
+            end
+        end
+        return controllerCache
+    end
     local function tapAttack()
+        local controller=getController()
+        if controller and pcall(function() controller:PerformAction("BaseAttack") end) then return end
         local camera=workspace.CurrentCamera; local size=camera and camera.ViewportSize or Vector2.new(960,540)
         VirtualInputManager:SendMouseButtonEvent(size.X/2,size.Y/2,0,true,game,0)
         task.delay(.03,function() pcall(function() VirtualInputManager:SendMouseButtonEvent(size.X/2,size.Y/2,0,false,game,0) end) end)
@@ -65,11 +81,15 @@ return function(Window, runtimeInfo)
         local gui=LP:FindFirstChild("PlayerGui"); local input=gui and gui:FindFirstChild("ScreenInput")
         local pc=input and input:FindFirstChild("PCInput"); local skills=pc and pc:FindFirstChild("Skills")
         if not skills then return end
+        local controller=getController()
         for _,name in ipairs({"Skill1","Skill2","SkillU","SkillAW"}) do
             local button=skills:FindFirstChild(name); local cool=button and button:FindFirstChild("Cool")
             local key=button and button:FindFirstChild("Key",true); local text=key and key:FindFirstChildWhichIsA("TextLabel",true)
             local keyCode=text and Enum.KeyCode[text.Text]
-            if button and button.Visible and button:GetAttribute("OnCD")~=true and not (cool and cool.Visible) and keyCode then tapKey(keyCode) end
+            if button and button.Visible and button:GetAttribute("OnCD")~=true and not (cool and cool.Visible) and keyCode then
+                local performed=controller and pcall(function() controller:PerformAction(name) end)
+                if not performed then pcall(function() button:Activate() end); tapKey(keyCode) end
+            end
         end
     end
 
@@ -113,7 +133,7 @@ return function(Window, runtimeInfo)
     end
 
     local Dashboard=Window:CreateTab("Dungeon", "activity")
-    Dashboard:CreateSection("Iron Soul v1.1")
+    Dashboard:CreateSection("Iron Soul v1.2.1")
     local roundLabel=Dashboard:CreateLabel("Round: scanning...")
     local enemyCountLabel=Dashboard:CreateLabel("Enemies: scanning...")
     local targetLabel=Dashboard:CreateLabel("Target: none")
@@ -152,8 +172,14 @@ return function(Window, runtimeInfo)
     Progress:CreateSlider({Name="Portal Distance",Range={250,6000},Increment=250,CurrentValue=2500,Suffix=" studs",Flag="IronSoulPortalDistance",Callback=function(v) settings.portalDistance=v end})
     local portalLabel=Progress:CreateLabel("Nearest portal: scanning...")
     local doorLabel=Progress:CreateLabel("Round doors: scanning...")
+    local progressStateLabel=Progress:CreateLabel("Automation: idle")
+    Progress:CreateSection("Progress Automation")
+    Progress:CreateToggle({Name="Auto Open Round Door",CurrentValue=false,Flag="IronSoulAutoDoor",Callback=function(v) settings.autoOpenDoor=v end})
+    Progress:CreateToggle({Name="Auto Next Round Portal",CurrentValue=false,Flag="IronSoulAutoPortal",Callback=function(v) settings.autoNextPortal=v end})
+    Progress:CreateToggle({Name="Only When Enemies Clear",CurrentValue=true,Flag="IronSoulProgressClear",Callback=function(v) settings.progressOnlyWhenClear=v end})
+    Progress:CreateSlider({Name="Progress Cooldown",Range={1,8},Increment=.5,CurrentValue=2,Suffix="s",Flag="IronSoulProgressCooldown",Callback=function(v) settings.progressCooldown=v end})
 
-    local lastDodge,lastAction,scanAt,statusAt=0,0,0,0
+    local lastDodge,lastAction,lastProgress,scanAt,statusAt=0,0,0,0,0
     local cachedEnemies={}
     connect(RunService.Heartbeat,function()
         if not running then return end
@@ -211,6 +237,51 @@ return function(Window, runtimeInfo)
             end
         end
 
+        local canProgress=not settings.progressOnlyWhenClear or #cachedEnemies==0
+        local progressState=canProgress and "ready" or ("waiting for "..tostring(#cachedEnemies).." enemies")
+        if canProgress and root and now-lastProgress>=settings.progressCooldown then
+            local used=false
+            if settings.autoOpenDoor then
+                local doors=workspace:FindFirstChild("RoundDoor"); local bestPrompt,bestDistance=nil,math.huge
+                if doors then
+                    for _,prompt in ipairs(doors:GetDescendants()) do
+                        if prompt:IsA("ProximityPrompt") and prompt.Enabled and not usedDoors[prompt] then
+                            local parent=prompt.Parent; local part=parent and (parent:IsA("BasePart") and parent or parent.Parent)
+                            if part and part:IsA("BasePart") then local d=distance(part); if d<bestDistance then bestPrompt,bestDistance=prompt,d end end
+                        end
+                    end
+                end
+                if bestPrompt then
+                    local parent=bestPrompt.Parent; local part=parent and (parent:IsA("BasePart") and parent or parent.Parent)
+                    if bestDistance>10 and part and part:IsA("BasePart") then
+                        local humanoid=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+                        if humanoid then humanoid:MoveTo(part.Position) end
+                        progressState=string.format("moving to door | %dm",math.floor(bestDistance))
+                    elseif type(fireproximityprompt)=="function" then
+                        pcall(fireproximityprompt,bestPrompt); usedDoors[bestPrompt]=true; used=true; progressState="opened round door"
+                    end
+                end
+            end
+            local hasPendingDoor=false
+            if settings.autoOpenDoor then for prompt in pairs(usedDoors) do if prompt and prompt.Parent then hasPendingDoor=true break end end end
+            if not used and (not settings.autoOpenDoor or hasPendingDoor) and settings.autoNextPortal and type(firetouchinterest)=="function" then
+                local bestPortal,bestDistance=nil,math.huge
+                for _,portal in ipairs(workspace:GetChildren()) do
+                    if portal.Name=="Portal" then local pp=getPart(portal); local d=distance(pp); if pp and pp:FindFirstChildOfClass("TouchTransmitter") and d<bestDistance then bestPortal,bestDistance=pp,d end end
+                end
+                if bestPortal then
+                    if bestDistance>8 then
+                        local humanoid=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+                        if humanoid then humanoid:MoveTo(bestPortal.Position) end
+                        progressState=string.format("moving to portal R%s | %dm",tostring(bestPortal:GetAttribute("RoundNum") or "?"),math.floor(bestDistance))
+                    else
+                        pcall(firetouchinterest,root,bestPortal,0); pcall(firetouchinterest,root,bestPortal,1); used=true; progressState="entered next portal"
+                    end
+                end
+            end
+            if used then lastProgress=now end
+        end
+
         if now-statusAt>=.35 then
             statusAt=now
             local targetPart=getPart(selectedTarget); local targetHum=getHumanoid(selectedTarget)
@@ -226,7 +297,7 @@ return function(Window, runtimeInfo)
                             activePortals[p]=true
                             local color=Color3.fromRGB(95,190,255)
                             local v=ensureVisual(p,p,pp,color)
-                            local round=p:GetAttribute("RoundNum")
+                            local round=pp:GetAttribute("RoundNum") or p:GetAttribute("RoundNum")
                             v.label.Text=string.format("Portal%s | %dm",round~=nil and " R"..tostring(round) or "",math.floor(d))
                             v.label.TextColor3=color; v.highlight.FillColor=color; v.highlight.OutlineColor=color
                         end
@@ -245,6 +316,7 @@ return function(Window, runtimeInfo)
                 dodgeLabel:Set(danger and "Redzone: DANGER" or "Redzone: clear")
                 portalLabel:Set(nearestPortal and string.format("Nearest portal: %dm | %d in range",math.floor(nearestDistance),portalCount) or "Nearest portal: none")
                 doorLabel:Set("Round doors: "..tostring(doors and #doors:GetChildren() or 0))
+                progressStateLabel:Set("Automation: "..progressState)
             end)
         end
     end)
@@ -264,6 +336,6 @@ return function(Window, runtimeInfo)
         local camera=workspace.CurrentCamera; if camera and LP.Character then camera.CameraSubject=LP.Character:FindFirstChildOfClass("Humanoid") end
         if getgenv().__RAVEN_IRON_SOUL and getgenv().__RAVEN_IRON_SOUL.Settings==settings then getgenv().__RAVEN_IRON_SOUL=nil end
     end
-    getgenv().__RAVEN_IRON_SOUL={Version="v1.1",Settings=settings,Destroy=destroy}
+    getgenv().__RAVEN_IRON_SOUL={Version="v1.2.1",Settings=settings,Destroy=destroy}
     if runtimeInfo and type(runtimeInfo.registerCleanup)=="function" then runtimeInfo.registerCleanup(destroy) end
 end
