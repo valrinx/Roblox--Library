@@ -1,7 +1,7 @@
 --[[
     RAVEN HUB | The Sea
     PlaceId: 139802517550914 | GameId: 9167377564
-    Version: v1.1
+    Version: v1.2
 
     Read-only survival awareness: treasure, debris, islands, merchant,
     objectives, survival telemetry, and reversible local visuals.
@@ -85,6 +85,17 @@ return function(Window, scriptInfo)
         compass = true,
         routeCategory = "Treasure",
         routeCount = 5,
+        creatureEsp = true,
+        creatureVisibleOnly = false,
+        creatureDistance = 600,
+        maxCreatures = 30,
+        meleeAura = false,
+        auraRadius = 12,
+        auraCooldown = 0.45,
+        aimAssist = false,
+        autoTrigger = false,
+        aimSmoothness = 0.18,
+        combatVisibleCheck = true,
     }
 
     local COLORS = {
@@ -96,6 +107,8 @@ return function(Window, scriptInfo)
         island = Color3.fromRGB(115, 205, 255),
         specialIsland = Color3.fromRGB(205, 125, 255),
         merchant = Color3.fromRGB(255, 235, 120),
+        creature = Color3.fromRGB(255, 90, 90),
+        visibleCreature = Color3.fromRGB(100, 255, 145),
     }
 
     local function connect(signal, callback)
@@ -121,6 +134,25 @@ return function(Window, scriptInfo)
     local function distanceTo(part)
         local root = localRoot()
         return root and part and (part.Position - root.Position).Magnitude or math.huge
+    end
+
+    local function isVisible(part)
+        local camera = workspace.CurrentCamera
+        local character = localPlayer.Character
+        if not camera or not part or not character then return false end
+        local params = RaycastParams.new()
+        params.FilterType = Enum.RaycastFilterType.Exclude
+        params.FilterDescendantsInstances = {character, espFolder}
+        params.IgnoreWater = true
+        local origin = camera.CFrame.Position
+        local result = workspace:Raycast(origin, part.Position - origin, params)
+        return not result or result.Instance:IsDescendantOf(part.Parent)
+    end
+
+    local function creatureHealth(model)
+        local humanoid = model:FindFirstChildOfClass("Humanoid") or model:FindFirstChildWhichIsA("Humanoid", true)
+        if humanoid then return humanoid.Health, humanoid.MaxHealth end
+        return tonumber(model:GetAttribute("Health")), tonumber(model:GetAttribute("MaxHealth"))
     end
 
     local function removeVisual(key)
@@ -245,6 +277,29 @@ return function(Window, scriptInfo)
             addCandidate(candidates, merchant, "merchant", "MERCHANT BOAT", COLORS.merchant, true)
         end
 
+        local creatures = workspace:FindFirstChild("CreatureContainer")
+        if settings.creatureEsp and creatures then
+            local found = {}
+            for _, creature in ipairs(creatures:GetChildren()) do
+                local part = getRoot(creature)
+                local distance = distanceTo(part)
+                if part and distance <= settings.creatureDistance then
+                    local visible = isVisible(part)
+                    if visible or not settings.creatureVisibleOnly then
+                        local health, maxHealth = creatureHealth(creature)
+                        local label = creature.Name
+                        if health and maxHealth then
+                            label = string.format("%s | HP %d/%d", label, math.max(0, math.floor(health)), math.floor(maxHealth))
+                        end
+                        addCandidate(found, creature, "creature", label,
+                            visible and COLORS.visibleCreature or COLORS.creature, true)
+                    end
+                end
+            end
+            table.sort(found, function(a, b) return a.distance < b.distance end)
+            for i = 1, math.min(#found, settings.maxCreatures) do table.insert(candidates, found[i]) end
+        end
+
         local active = {}
         for _, candidate in ipairs(candidates) do
             local key = candidate.instance
@@ -266,7 +321,7 @@ return function(Window, scriptInfo)
         local routeCategory = settings.routeCategory
         for _, candidate in ipairs(candidates) do
             local matches = routeCategory == "Any Loot"
-                and candidate.category ~= "island" and candidate.category ~= "merchant"
+                and candidate.category ~= "island" and candidate.category ~= "merchant" and candidate.category ~= "creature"
                 or routeCategory == "Treasure" and candidate.category == "chest"
                 or routeCategory == "Wood" and candidate.category == "wood"
                 or routeCategory == "Metal" and candidate.category == "metal"
@@ -307,6 +362,8 @@ return function(Window, scriptInfo)
     end
 
     local Dashboard = Window:CreateTab("Survival", "activity")
+    Dashboard:CreateSection("Module")
+    Dashboard:CreateLabel("The Sea v1.2 | Combat & Diagnostics")
     Dashboard:CreateSection("Live Status")
     local survivalLabel = Dashboard:CreateLabel("Survival: loading...")
     local currencyLabel = Dashboard:CreateLabel("Currency: loading...")
@@ -345,6 +402,27 @@ return function(Window, scriptInfo)
     Visuals:CreateSlider({Name="Field of View",Range={60,120},Increment=1,CurrentValue=85,Suffix="°",Flag="TheSeaFOV",Callback=function(v) settings.fov=v end})
     Visuals:CreateLabel("All lighting and camera changes are restored when the module closes.")
 
+    local Combat = Window:CreateTab("Combat", "crosshair")
+    Combat:CreateSection("Creature ESP")
+    Combat:CreateToggle({Name="Creature ESP",CurrentValue=true,Flag="TheSeaCreatureESP",Callback=function(v) settings.creatureEsp=v end})
+    Combat:CreateToggle({Name="Visible Creatures Only",CurrentValue=false,Flag="TheSeaCreatureVisibleOnly",Callback=function(v) settings.creatureVisibleOnly=v end})
+    Combat:CreateSlider({Name="Creature Distance",Range={50,1500},Increment=25,CurrentValue=600,Suffix=" studs",Flag="TheSeaCreatureDistance",Callback=function(v) settings.creatureDistance=v end})
+    Combat:CreateSlider({Name="Max Creatures",Range={5,60},Increment=5,CurrentValue=30,Flag="TheSeaMaxCreatures",Callback=function(v) settings.maxCreatures=v end})
+    Combat:CreateSection("Machete")
+    Combat:CreateToggle({Name="Machete Aura",CurrentValue=false,Flag="TheSeaMeleeAura",Callback=function(v) settings.meleeAura=v end})
+    Combat:CreateSlider({Name="Aura Radius",Range={5,25},Increment=1,CurrentValue=12,Suffix=" studs",Flag="TheSeaAuraRadius",Callback=function(v) settings.auraRadius=v end})
+    Combat:CreateSlider({Name="Aura Cooldown",Range={0.2,1.5},Increment=0.05,CurrentValue=0.45,Suffix="s",Flag="TheSeaAuraCooldown",Callback=function(v) settings.auraCooldown=v end})
+    Combat:CreateSection("Ranged Assist")
+    Combat:CreateToggle({Name="Aim Assist (Flintlock / Raygun)",CurrentValue=false,Flag="TheSeaAimAssist",Callback=function(v) settings.aimAssist=v end})
+    Combat:CreateToggle({Name="Auto Trigger",CurrentValue=false,Flag="TheSeaAutoTrigger",Callback=function(v) settings.autoTrigger=v end})
+    Combat:CreateToggle({Name="Combat Visible Check",CurrentValue=true,Flag="TheSeaCombatVisible",Callback=function(v) settings.combatVisibleCheck=v end})
+    Combat:CreateSlider({Name="Aim Smoothness",Range={0.05,0.5},Increment=0.01,CurrentValue=0.18,Flag="TheSeaAimSmooth",Callback=function(v) settings.aimSmoothness=v end})
+    Combat:CreateLabel("Harpoon remains target-information only in v1.2; its Fire/Retract state machine is not bypassed.")
+
+    Combat:CreateSection("Diagnostics")
+    local combatStatusLabel = Combat:CreateLabel("Weapon: none | Target: none")
+    local combatReasonLabel = Combat:CreateLabel("Combat assist: disabled")
+
     pcall(function() RunService:UnbindFromRenderStep(fovBinding) end)
     RunService:BindToRenderStep(fovBinding, Enum.RenderPriority.Camera.Value + 2, function()
         if not running then return end
@@ -352,7 +430,7 @@ return function(Window, scriptInfo)
         if camera and settings.customFov then camera.FieldOfView = settings.fov end
     end)
 
-    local scanAt, statusAt = 0, 0
+    local scanAt, statusAt, lastAttackAt = 0, 0, 0
     local lastCandidates = {}
     local lastRoute = {}
     local fullbrightApplied = false
@@ -362,6 +440,46 @@ return function(Window, scriptInfo)
         if now - scanAt >= 0.75 then
             scanAt = now
             lastCandidates, lastRoute = scanWorld()
+        end
+
+        local character = localPlayer.Character
+        local equipped = character and character:FindFirstChildOfClass("Tool")
+        local nearestCreature = nil
+        for _, candidate in ipairs(lastCandidates) do
+            if candidate.category == "creature" and candidate.part and candidate.part.Parent then
+                if not nearestCreature or candidate.distance < nearestCreature.distance then nearestCreature = candidate end
+            end
+        end
+        local weaponName = equipped and equipped.Name or "none"
+        local targetOkay = nearestCreature and (not settings.combatVisibleCheck or isVisible(nearestCreature.part))
+        local reason = "disabled"
+        if equipped and weaponName == "Machete" and settings.meleeAura then
+            if targetOkay and nearestCreature.distance <= settings.auraRadius then
+                reason = "attacking"
+                if now - lastAttackAt >= settings.auraCooldown and equipped.Enabled then
+                    lastAttackAt = now
+                    pcall(function() equipped:Activate() end)
+                end
+            else
+                reason = nearestCreature and "target out of range/covered" or "no creature"
+            end
+        elseif equipped and (weaponName == "Flintlock" or weaponName == "Raygun") and (settings.aimAssist or settings.autoTrigger) then
+            if targetOkay then
+                reason = "tracking"
+                if settings.aimAssist and workspace.CurrentCamera then
+                    local camera = workspace.CurrentCamera
+                    local desired = CFrame.lookAt(camera.CFrame.Position, nearestCreature.part.Position)
+                    camera.CFrame = camera.CFrame:Lerp(desired, settings.aimSmoothness)
+                end
+                if settings.autoTrigger and now - lastAttackAt >= 0.3 and equipped.Enabled then
+                    lastAttackAt = now
+                    pcall(function() equipped:Activate() end)
+                end
+            else
+                reason = nearestCreature and "target covered" or "no creature"
+            end
+        elseif equipped and weaponName == "Harpoon" then
+            reason = nearestCreature and "target info only" or "no creature"
         end
 
         if settings.fullbright then
@@ -427,6 +545,9 @@ return function(Window, scriptInfo)
                 routeLabel:Set(#routeParts > 0 and ("Route: " .. table.concat(routeParts, " → ")) or "Route: no matching targets")
                 inventoryLabel:Set(string.format("Inventory %s/%s | %s", tostring(localPlayer:GetAttribute("GroundItems") or "?"), sackMax > 0 and tostring(sackMax) or "?", #inventoryParts > 0 and table.concat(inventoryParts, ", ") or "empty"))
                 warningLabel:Set(#warnings > 0 and ("WARNING: " .. table.concat(warnings, " + ")) or "Warnings: none")
+                combatStatusLabel:Set(string.format("Weapon: %s | Target: %s", weaponName,
+                    nearestCreature and string.format("%s (%dm)", nearestCreature.label, math.floor(nearestCreature.distance)) or "none"))
+                combatReasonLabel:Set("Combat assist: " .. reason)
             end)
         end
     end)
