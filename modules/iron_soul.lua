@@ -1,7 +1,7 @@
 --[[
     RAVEN HUB | Iron Soul: Dungeon
     Lobby PlaceId: 117533937949084 | Starless Forest: 116456628154258
-    GameId: 9910245722 | Version: v1.2.8
+    GameId: 9910245722 | Version: v1.2.9
 ]]
 return function(Window, runtimeInfo)
     local Players = game:GetService("Players")
@@ -15,7 +15,7 @@ return function(Window, runtimeInfo)
     local usedDoors = setmetatable({}, {__mode="k"})
     local controllerCache = nil
     local lastKnownRound, doorHandledRound = nil, nil
-    local clearObservedAt, lastCompletedRound, pendingProgressRound = nil, nil, nil
+    local clearObservedAt, lastCompletedRound, pendingProgressRound, handledCompletedRound = nil, nil, nil, nil
 
     pcall(function()
         local old = getgenv().__RAVEN_IRON_SOUL
@@ -168,7 +168,7 @@ return function(Window, runtimeInfo)
     end
 
     local Dashboard=Window:CreateTab("Dungeon", "activity")
-    Dashboard:CreateSection("Iron Soul v1.2.8")
+    Dashboard:CreateSection("Iron Soul v1.2.9")
     local roundLabel=Dashboard:CreateLabel("Round: scanning...")
     local enemyCountLabel=Dashboard:CreateLabel("Enemies: scanning...")
     local targetLabel=Dashboard:CreateLabel("Target: none")
@@ -282,8 +282,8 @@ return function(Window, runtimeInfo)
         if completedRound then
             if lastCompletedRound==nil then lastCompletedRound=completedRound end
             if completedRound>lastCompletedRound then
-                lastCompletedRound=completedRound; pendingProgressRound=completedRound; clearObservedAt=now
-            elseif not pendingProgressRound and #cachedEnemies==0 and locationRound==completedRound and officialRound and completedRound<officialRound then
+                lastCompletedRound=completedRound; handledCompletedRound=nil; pendingProgressRound=completedRound; clearObservedAt=now
+            elseif not pendingProgressRound and handledCompletedRound~=completedRound and #cachedEnemies==0 and locationRound==completedRound and officialRound and completedRound<officialRound then
                 pendingProgressRound=completedRound; clearObservedAt=now
             end
         end
@@ -325,9 +325,14 @@ return function(Window, runtimeInfo)
                     if playerDistance>10 and part and part:IsA("BasePart") then
                         if settings.progressMovement=="Teleport" then
                             root.CFrame=part.CFrame*CFrame.new(0,0,-settings.progressOffset)
-                            usedDoors[bestPrompt]=true; doorHandledRound=currentRound; used=true; lastProgress=now
+                            local flat=Vector3.new(part.Position.X-reference.X,0,part.Position.Z-reference.Z)
+                            if flat.Magnitude<.1 then flat=part.CFrame.LookVector end
+                            local entryPos=part.Position+flat.Unit*18; entryPos=Vector3.new(entryPos.X,(roundSpawn and roundSpawn.Position.Y or root.Position.Y)+3,entryPos.Z)
+                            local entryCFrame=CFrame.lookAt(entryPos,entryPos+flat.Unit)
+                            usedDoors[bestPrompt]=true; doorHandledRound=currentRound; handledCompletedRound=currentRound; used=true; lastProgress=now
                             task.delay(.15,function() if running and bestPrompt.Parent and type(fireproximityprompt)=="function" then pcall(fireproximityprompt,bestPrompt) end end)
-                            progressState="teleported and opening Round"..tostring(currentRound).." door"
+                            task.delay(.45,function() if running and root.Parent then root.CFrame=entryCFrame end end)
+                            progressState="opening and entering beyond Round"..tostring(currentRound).." door"
                         else
                             local humanoid=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
                             if humanoid then humanoid:MoveTo(part.Position) end
@@ -358,6 +363,7 @@ return function(Window, runtimeInfo)
                             task.delay(.15,function()
                                 if running and portalRoot.Parent and boundRoot.Parent and type(firetouchinterest)=="function" then
                                     pcall(firetouchinterest,boundRoot,portalRoot,0); pcall(firetouchinterest,boundRoot,portalRoot,1)
+                                    handledCompletedRound=pendingProgressRound; pendingProgressRound=nil; clearObservedAt=nil
                                 end
                             end)
                             progressState="teleported and entering portal R"..tostring(bestPortal:GetAttribute("RoundNum") or "?")
@@ -426,6 +432,6 @@ return function(Window, runtimeInfo)
         local camera=workspace.CurrentCamera; if camera and LP.Character then camera.CameraSubject=LP.Character:FindFirstChildOfClass("Humanoid") end
         if getgenv().__RAVEN_IRON_SOUL and getgenv().__RAVEN_IRON_SOUL.Settings==settings then getgenv().__RAVEN_IRON_SOUL=nil end
     end
-    getgenv().__RAVEN_IRON_SOUL={Version="v1.2.8",Settings=settings,Destroy=destroy}
+    getgenv().__RAVEN_IRON_SOUL={Version="v1.2.9",Settings=settings,Destroy=destroy}
     if runtimeInfo and type(runtimeInfo.registerCleanup)=="function" then runtimeInfo.registerCleanup(destroy) end
 end
