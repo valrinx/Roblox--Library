@@ -297,6 +297,14 @@ local SCRIPTS = {
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/drain_water.lua",
     },
     {
+        name        = "Gym Star Simulator",
+        description = "Auto Training | Auto Competition | Auto Rewards | Player ESP | Teleport",
+        placeIds    = {70906625936847},
+        gameIds     = {6443367640},
+        version     = "v1.0.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/gym_simulator.lua",
+    },
+    {
         name        = "KILLSTREAK!",
         description = "Hill Tracker | Enemy ESP | Smooth Auto Lock | Match Dashboard",
         placeIds    = {104856666707760},
