@@ -11,7 +11,7 @@
     - No Fog
     - FOV Changer
     - Characters folder support (game uses workspace.Characters)
-    - v1.1.1 shared per-frame prediction for dot and Auto Aim
+    - v1.1.2 target-aware character visibility raycasts
 
     Module format: returns function(Window, runtimeInfo) for RAVENHUB loader
 ]]
@@ -138,8 +138,6 @@ return function(Window, runtimeInfo)
 
     local function buildRayFilter()
         local ignore = {}
-        local chars = workspace:FindFirstChild("Characters")
-        if chars then table.insert(ignore, chars) end
         local myChar = getCharacter(LP)
         if myChar then table.insert(ignore, myChar) end
         for _, name in ipairs({"Ignore", "Effects", "Debris"}) do
@@ -149,11 +147,12 @@ return function(Window, runtimeInfo)
         RayParams.FilterDescendantsInstances = ignore
     end
 
-    local function isVisible(fromPos, toPos)
+    local function isVisible(fromPos, toPos, targetCharacter)
         buildRayFilter()
         local direction = toPos - fromPos
         local result = workspace:Raycast(fromPos, direction, RayParams)
-        return result == nil
+        if not result then return true end
+        return targetCharacter ~= nil and result.Instance:IsDescendantOf(targetCharacter)
     end
 
     ---------------------------------------------------------------------------
@@ -271,7 +270,7 @@ return function(Window, runtimeInfo)
 
                     if State.ESPWallCheck and myHRP then
                         local camPos = Camera.CFrame.Position
-                        local visible = isVisible(camPos, hrp.Position)
+                        local visible = isVisible(camPos, hrp.Position, char)
                         if visible then
                             esp.highlight.FillColor = COLOR_VISIBLE
                             esp.highlight.OutlineColor = COLOR_VISIBLE
@@ -533,7 +532,7 @@ return function(Window, runtimeInfo)
 
             local dist2D = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
             if (not maxPixels or dist2D <= maxPixels) and dist2D < closestDist
-                and (not requireVisible or isVisible(Camera.CFrame.Position, targetPart.Position)) then
+                and (not requireVisible or isVisible(Camera.CFrame.Position, targetPart.Position, char)) then
                 closestDist = dist2D
                 closestPlayer = player
             end
@@ -554,7 +553,7 @@ return function(Window, runtimeInfo)
         if not onScreen or point.Z <= 0 then return false end
         local center = Camera.ViewportSize * 0.5
         if (Vector2.new(point.X, point.Y) - center).Magnitude > State.AimFOV then return false end
-        return not State.AimVisibleCheck or isVisible(Camera.CFrame.Position, part.Position)
+        return not State.AimVisibleCheck or isVisible(Camera.CFrame.Position, part.Position, char)
     end
 
     local function updateAutoAim()
@@ -627,7 +626,7 @@ return function(Window, runtimeInfo)
                         end
                         local scaled = planar / State.RadarRange * (State.RadarSize - 6)
                         blip.Position = center + Vector2.new(scaled.X, scaled.Y)
-                        blip.Color = isVisible(Camera.CFrame.Position, root.Position)
+                        blip.Color = isVisible(Camera.CFrame.Position, root.Position, getCharacter(player))
                             and Color3.fromRGB(255, 70, 70) or Color3.fromRGB(255, 190, 60)
                         blip.Visible = true
                         active[player] = true
@@ -971,7 +970,7 @@ return function(Window, runtimeInfo)
                 getgenv().__RAVEN_COLD_WAR = nil
             end
     end
-    getgenv().__RAVEN_COLD_WAR = {Version="v1.1.1",State=State,Destroy=destroy}
+    getgenv().__RAVEN_COLD_WAR = {Version="v1.1.2",State=State,Destroy=destroy}
     if runtimeInfo.registerCleanup then
         runtimeInfo.registerCleanup(destroy)
     end
