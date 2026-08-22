@@ -2,6 +2,8 @@
 
 ## 2026-08-22
 
+- **Iron Soul: Dungeon v1.2.1** — Fixed progress automation by navigating to distant doors/portals before interaction, preventing repeated door use, exposing live wait/movement state, and corrected the local Auto Skills test-state mismatch.
+- **Iron Soul: Dungeon v1.2** — Added enemy-clear-aware automatic round-door prompts and next-portal touch handling, progress cooldown controls, and corrected Portal ESP round metadata.
 - **Iron Soul: Dungeon v1.1** — Added target-based autofarm, multi-weapon base attack input, ready-only auto skills, approach/above-target positioning, and adjustable combat distance/height/delay.
 - Added Iron Soul: Dungeon v1.0 with bounded Enemy ESP, nearest/lowest-HP target selection, live target HP, RedShow-based Auto Dodge, spectating, and round/portal diagnostics.
 - Updated Cold War to v1.1.2 with target-aware visibility raycasts that ignore only the local character and accept direct hits on the intended target character instead of excluding the entire Characters folder.
