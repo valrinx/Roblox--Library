@@ -2,6 +2,8 @@
 
 ## 2026-08-23
 
+- **Iron Soul: Dungeon v1.2.8** — Corrected round-transition semantics: GameRoundComplete now identifies the room whose exit must be used, completion increments create a pending move state, and reload recovery uses the nearest PlayerRespawn plus an empty room.
+- **Iron Soul: Dungeon v1.2.7** — Fixed BaseAttack remaining active after targets disappear by pulsing and stopping the controller action, and added a current-room nearest real-portal fallback for randomized layouts with stale RoundNum metadata.
 - **Iron Soul: Dungeon v1.2.6** — Added a configurable post-clear confirmation delay and made teleport-mode Door/Portal interactions fire after a short replication pause in the same scheduled action.
 - **Iron Soul: Dungeon v1.2.5** — Replaced transient EnemyNpc-count progression with the game's authoritative GameRoundCfg state; Door/Portal automation now waits until GameRoundComplete reaches the active GameRound.
 - **Iron Soul: Dungeon v1.2.4** — Added round-scoped Door/Portal state: matching doors always take priority, handled doors block portals until the player's current round actually changes, and portals run only for rounds without a matching door.
