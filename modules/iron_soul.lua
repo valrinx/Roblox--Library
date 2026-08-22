@@ -1,7 +1,7 @@
 --[[
     RAVEN HUB | Iron Soul: Dungeon
     Lobby PlaceId: 117533937949084 | Starless Forest: 116456628154258
-    GameId: 9910245722 | Version: v1.2.2
+    GameId: 9910245722 | Version: v1.2.3
 ]]
 return function(Window, runtimeInfo)
     local Players = game:GetService("Players")
@@ -55,6 +55,22 @@ return function(Window, runtimeInfo)
     local function enemyName(model)
         local id = tostring(model:GetAttribute("NpcId") or "Enemy")
         return id:gsub("^NPC_", ""):gsub("_", " ")
+    end
+    local function currentRoundInfo()
+        local root=myRoot(); local respawns=workspace:FindFirstChild("PlayerRespawn")
+        local bestPart,bestRound,bestDistance=nil,nil,math.huge
+        if root and respawns then
+            for _,part in ipairs(respawns:GetChildren()) do
+                local round=part:IsA("BasePart") and tonumber(part.Name:match("%d+"))
+                if round then local d=(part.Position-root.Position).Magnitude; if d<bestDistance then bestPart,bestRound,bestDistance=part,round,d end end
+            end
+        end
+        return bestRound,bestPart
+    end
+    local function progressPortals()
+        local out={}; local holder=workspace:FindFirstChild("RoundDoor")
+        if holder then for _,model in ipairs(holder:GetChildren()) do if model.Name=="Portal" and getPart(model) then table.insert(out,model) end end end
+        return out
     end
     local function tapKey(keyCode)
         VirtualInputManager:SendKeyEvent(true,keyCode,false,game)
@@ -134,7 +150,7 @@ return function(Window, runtimeInfo)
     end
 
     local Dashboard=Window:CreateTab("Dungeon", "activity")
-    Dashboard:CreateSection("Iron Soul v1.2.2")
+    Dashboard:CreateSection("Iron Soul v1.2.3")
     local roundLabel=Dashboard:CreateLabel("Round: scanning...")
     local enemyCountLabel=Dashboard:CreateLabel("Enemies: scanning...")
     local targetLabel=Dashboard:CreateLabel("Target: none")
@@ -246,24 +262,26 @@ return function(Window, runtimeInfo)
             local used=false
             if settings.autoOpenDoor then
                 local doors=workspace:FindFirstChild("RoundDoor"); local bestPrompt,bestDistance=nil,math.huge
+                local _,roundSpawn=currentRoundInfo(); local reference=roundSpawn and roundSpawn.Position or root.Position
                 if doors then
                     for _,prompt in ipairs(doors:GetDescendants()) do
                         if prompt:IsA("ProximityPrompt") and prompt.Enabled and not usedDoors[prompt] then
                             local parent=prompt.Parent; local part=parent and (parent:IsA("BasePart") and parent or parent.Parent)
-                            if part and part:IsA("BasePart") then local d=distance(part); if d<bestDistance then bestPrompt,bestDistance=prompt,d end end
+                            if part and part:IsA("BasePart") then local d=(part.Position-reference).Magnitude; if d<bestDistance then bestPrompt,bestDistance=prompt,d end end
                         end
                     end
                 end
                 if bestPrompt then
                     local parent=bestPrompt.Parent; local part=parent and (parent:IsA("BasePart") and parent or parent.Parent)
-                    if bestDistance>10 and part and part:IsA("BasePart") then
+                    local playerDistance=part and distance(part) or math.huge
+                    if playerDistance>10 and part and part:IsA("BasePart") then
                         if settings.progressMovement=="Teleport" then
                             root.CFrame=part.CFrame*CFrame.new(0,0,-settings.progressOffset)
                             progressState="teleported to round door"
                         else
                             local humanoid=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
                             if humanoid then humanoid:MoveTo(part.Position) end
-                            progressState=string.format("walking to door | %dm",math.floor(bestDistance))
+                            progressState=string.format("walking to door | %dm",math.floor(playerDistance))
                         end
                     elseif type(fireproximityprompt)=="function" then
                         pcall(fireproximityprompt,bestPrompt); usedDoors[bestPrompt]=true; used=true; progressState="opened round door"
@@ -274,8 +292,10 @@ return function(Window, runtimeInfo)
             if settings.autoOpenDoor then for prompt in pairs(usedDoors) do if prompt and prompt.Parent then hasPendingDoor=true break end end end
             if not used and (not settings.autoOpenDoor or hasPendingDoor) and settings.autoNextPortal and type(firetouchinterest)=="function" then
                 local bestPortal,bestDistance=nil,math.huge
-                for _,portal in ipairs(workspace:GetChildren()) do
-                    if portal.Name=="Portal" then local pp=getPart(portal); local d=distance(pp); if pp and pp:FindFirstChildOfClass("TouchTransmitter") and d<bestDistance then bestPortal,bestDistance=pp,d end end
+                local currentRound=currentRoundInfo()
+                for _,portal in ipairs(progressPortals()) do
+                    local pp=getPart(portal); local round=pp and (pp:GetAttribute("RoundNum") or portal:GetAttribute("RoundNum")); local d=distance(pp)
+                    if pp and pp:FindFirstChildOfClass("TouchTransmitter") and round==currentRound and d<bestDistance then bestPortal,bestDistance=pp,d end
                 end
                 if bestPortal then
                     if bestDistance>8 then
@@ -300,8 +320,7 @@ return function(Window, runtimeInfo)
             local targetPart=getPart(selectedTarget); local targetHum=getHumanoid(selectedTarget)
             local nearestPortal,nearestDistance=nil,math.huge; local portalCount=0
             local activePortals={}
-            for _,p in ipairs(workspace:GetChildren()) do
-                if p.Name=="Portal" then
+            for _,p in ipairs(progressPortals()) do
                     local pp=getPart(p); local d=distance(pp)
                     if d<nearestDistance then nearestPortal,nearestDistance=p,d end
                     if d<=settings.portalDistance then
@@ -315,10 +334,9 @@ return function(Window, runtimeInfo)
                             v.label.TextColor3=color; v.highlight.FillColor=color; v.highlight.OutlineColor=color
                         end
                     end
-                end
             end
             for key in pairs(visuals) do
-                if typeof(key)=="Instance" and key.Name=="Portal" and key.Parent==workspace and not activePortals[key] then removeVisual(key) end
+                if typeof(key)=="Instance" and key.Name=="Portal" and not activePortals[key] and key.Parent==workspace:FindFirstChild("RoundDoor") then removeVisual(key) end
             end
             local doors=workspace:FindFirstChild("RoundDoor"); local nearestRound="?"; local respawns=workspace:FindFirstChild("PlayerRespawn")
             if respawns and root then local best=math.huge for _,r in ipairs(respawns:GetChildren()) do if r:IsA("BasePart") then local d=(r.Position-root.Position).Magnitude if d<best then best=d; nearestRound=r.Name end end end end
@@ -349,6 +367,6 @@ return function(Window, runtimeInfo)
         local camera=workspace.CurrentCamera; if camera and LP.Character then camera.CameraSubject=LP.Character:FindFirstChildOfClass("Humanoid") end
         if getgenv().__RAVEN_IRON_SOUL and getgenv().__RAVEN_IRON_SOUL.Settings==settings then getgenv().__RAVEN_IRON_SOUL=nil end
     end
-    getgenv().__RAVEN_IRON_SOUL={Version="v1.2.2",Settings=settings,Destroy=destroy}
+    getgenv().__RAVEN_IRON_SOUL={Version="v1.2.3",Settings=settings,Destroy=destroy}
     if runtimeInfo and type(runtimeInfo.registerCleanup)=="function" then runtimeInfo.registerCleanup(destroy) end
 end
