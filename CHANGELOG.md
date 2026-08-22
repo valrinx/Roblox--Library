@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-08-23
+
+- **Iron Soul: Dungeon v1.2.5** — Replaced transient EnemyNpc-count progression with the game's authoritative GameRoundCfg state; Door/Portal automation now waits until GameRoundComplete reaches the active GameRound.
+- **Iron Soul: Dungeon v1.2.4** — Added round-scoped Door/Portal state: matching doors always take priority, handled doors block portals until the player's current round actually changes, and portals run only for rounds without a matching door.
+
 ## 2026-08-22
 
 - **Iron Soul: Dungeon v1.2.3** — Fixed incorrect progress destinations by selecting enabled doors relative to the current round spawn and using only RoundDoor portals whose RoundNum matches the player's current round.
