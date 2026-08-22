@@ -258,10 +258,10 @@ local SCRIPTS = {
     },
     {
         name        = "Iron Soul: Dungeon",
-        description = "Enemy ESP | Target HP | Auto Dodge Redzone | Round/Portal Tracker",
+        description = "Enemy ESP | Autofarm | Auto Dodge | Round/Portal | Replay/Lobby",
         placeIds    = {117533937949084, 116456628154258},
         gameIds     = {9910245722},
-        version     = "v1.2.11",
+        version     = "v1.3.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/iron_soul.lua",
     },
     {
