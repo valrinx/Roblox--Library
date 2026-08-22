@@ -2,6 +2,7 @@
 
 ## 2026-08-23
 
+- **Iron Soul: Dungeon v1.2.11** — Added a guarded Door-to-Portal chain recovery: after an open door, an empty between-round player within 35 studs of a real portal is teleported into it and touched automatically.
 - **Iron Soul: Dungeon v1.2.10** — Added open-door entry recovery: an empty player standing beside a disabled/open door is moved to the active GameRound respawn so the next room's wave trigger can start.
 - **Iron Soul: Dungeon v1.2.9** — Door automation now crosses 18 studs beyond the doorway toward the next area after opening, and completed-route handling prevents repeated or backward actions while the next room loads.
 - **Iron Soul: Dungeon v1.2.8** — Corrected round-transition semantics: GameRoundComplete now identifies the room whose exit must be used, completion increments create a pending move state, and reload recovery uses the nearest PlayerRespawn plus an empty room.
