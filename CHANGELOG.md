@@ -63,6 +63,11 @@
 - Added a The Walking Dead Online 3 module with player ESP, configurable labels and distance, a live player picker, spectate controls, respawn handling, and cleanup on hub destruction.
 # Iron Soul v1.3.0
 
+- v1.3.5 reacts immediately to `RedShow.DescendantAdded`, preventing short-lived telegraphs from being missed between scans.
+- v1.3.4 adds vertical Auto Dodge modes (`Underground`/`Air`) and a `Below Target` Autofarm position.
+- v1.3.3 adds a configurable Dodge Hold window that keeps Autofarm from immediately walking back into an active attack.
+- v1.3.2 fixes Auto Dodge for transparent `RedShow` hitboxes and exits rectangular danger zones through their nearest edge.
+- v1.3.1 fixes Replay/Return Lobby activation by targeting the exact ResultGui buttons and dispatching the game's full click sequence.
 - Added configurable post-dungeon automation: `Replay`, `Return Lobby`, or `Off`.
 - Result actions only target visible dungeon-result GUI buttons and ignore the regular top-bar Exit button.
 - Added an adjustable result-screen delay and live end-action status to the Dungeon dashboard.
