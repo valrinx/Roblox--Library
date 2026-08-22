@@ -1,7 +1,7 @@
 --[[
     RAVEN HUB | Iron Soul: Dungeon
     Lobby PlaceId: 117533937949084 | Starless Forest: 116456628154258
-    GameId: 9910245722 | Version: v1.2.9
+    GameId: 9910245722 | Version: v1.2.10
 ]]
 return function(Window, runtimeInfo)
     local Players = game:GetService("Players")
@@ -168,7 +168,7 @@ return function(Window, runtimeInfo)
     end
 
     local Dashboard=Window:CreateTab("Dungeon", "activity")
-    Dashboard:CreateSection("Iron Soul v1.2.9")
+    Dashboard:CreateSection("Iron Soul v1.2.10")
     local roundLabel=Dashboard:CreateLabel("Round: scanning...")
     local enemyCountLabel=Dashboard:CreateLabel("Enemies: scanning...")
     local targetLabel=Dashboard:CreateLabel("Target: none")
@@ -217,7 +217,7 @@ return function(Window, runtimeInfo)
     Progress:CreateSlider({Name="Clear Confirmation Delay",Range={0.5,6},Increment=.5,CurrentValue=2.5,Suffix="s",Flag="IronSoulClearDelay",Callback=function(v) settings.clearDelay=v end})
     Progress:CreateSlider({Name="Progress Cooldown",Range={1,8},Increment=.5,CurrentValue=2,Suffix="s",Flag="IronSoulProgressCooldown",Callback=function(v) settings.progressCooldown=v end})
 
-    local lastDodge,lastAction,lastProgress,scanAt,statusAt=0,0,0,0,0
+    local lastDodge,lastAction,lastProgress,lastEntryRecovery,scanAt,statusAt=0,0,0,0,0,0
     local cachedEnemies={}
     connect(RunService.Heartbeat,function()
         if not running then return end
@@ -279,6 +279,21 @@ return function(Window, runtimeInfo)
 
         local officialRound,completedRound=roundState()
         local locationRound=currentRoundInfo()
+        if settings.autoOpenDoor and #cachedEnemies==0 and root and officialRound and now-lastEntryRecovery>=3 then
+            local holder=workspace:FindFirstChild("RoundDoor"); local nearestOpenDoor=math.huge
+            if holder then
+                for _,prompt in ipairs(holder:GetDescendants()) do
+                    if prompt:IsA("ProximityPrompt") and not prompt.Enabled then
+                        local parent=prompt.Parent; local part=parent and (parent:IsA("BasePart") and parent or parent.Parent)
+                        if part and part:IsA("BasePart") then nearestOpenDoor=math.min(nearestOpenDoor,distance(part)) end
+                    end
+                end
+            end
+            local destination=spawnForRound(officialRound)
+            if destination and nearestOpenDoor<=25 then
+                lastEntryRecovery=now; root.CFrame=destination.CFrame*CFrame.new(0,3,0)
+            end
+        end
         if completedRound then
             if lastCompletedRound==nil then lastCompletedRound=completedRound end
             if completedRound>lastCompletedRound then
@@ -432,6 +447,6 @@ return function(Window, runtimeInfo)
         local camera=workspace.CurrentCamera; if camera and LP.Character then camera.CameraSubject=LP.Character:FindFirstChildOfClass("Humanoid") end
         if getgenv().__RAVEN_IRON_SOUL and getgenv().__RAVEN_IRON_SOUL.Settings==settings then getgenv().__RAVEN_IRON_SOUL=nil end
     end
-    getgenv().__RAVEN_IRON_SOUL={Version="v1.2.9",Settings=settings,Destroy=destroy}
+    getgenv().__RAVEN_IRON_SOUL={Version="v1.2.10",Settings=settings,Destroy=destroy}
     if runtimeInfo and type(runtimeInfo.registerCleanup)=="function" then runtimeInfo.registerCleanup(destroy) end
 end
