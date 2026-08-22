@@ -1,7 +1,7 @@
 --[[
     RAVEN HUB | The Sea
     PlaceId: 139802517550914 | GameId: 9167377564
-    Version: v1.0
+    Version: v1.1
 
     Read-only survival awareness: treasure, debris, islands, merchant,
     objectives, survival telemetry, and reversible local visuals.
@@ -32,6 +32,38 @@ return function(Window, scriptInfo)
     espFolder.Name = "RavenTheSeaESP"
     espFolder.Parent = (type(gethui) == "function" and gethui()) or CoreGui
 
+    local compassGui = Instance.new("ScreenGui")
+    compassGui.Name = "RavenTheSeaCompass"
+    compassGui.ResetOnSpawn = false
+    compassGui.IgnoreGuiInset = true
+    compassGui.Parent = espFolder.Parent
+
+    local compassArrow = Instance.new("TextLabel")
+    compassArrow.BackgroundTransparency = 1
+    compassArrow.AnchorPoint = Vector2.new(0.5, 0.5)
+    compassArrow.Position = UDim2.fromScale(0.5, 0.18)
+    compassArrow.Size = UDim2.fromOffset(44, 44)
+    compassArrow.Font = Enum.Font.GothamBold
+    compassArrow.Text = "▲"
+    compassArrow.TextSize = 34
+    compassArrow.TextColor3 = Color3.fromRGB(255, 215, 75)
+    compassArrow.TextStrokeTransparency = 0.2
+    compassArrow.Visible = false
+    compassArrow.Parent = compassGui
+
+    local compassText = Instance.new("TextLabel")
+    compassText.BackgroundColor3 = Color3.fromRGB(15, 18, 24)
+    compassText.BackgroundTransparency = 0.25
+    compassText.AnchorPoint = Vector2.new(0.5, 0)
+    compassText.Position = UDim2.fromScale(0.5, 0.205)
+    compassText.Size = UDim2.fromOffset(300, 28)
+    compassText.Font = Enum.Font.GothamSemibold
+    compassText.TextSize = 13
+    compassText.TextColor3 = Color3.fromRGB(245, 245, 250)
+    compassText.TextStrokeTransparency = 0.35
+    compassText.Visible = false
+    compassText.Parent = compassGui
+
     local settings = {
         chestEsp = true,
         itemEsp = true,
@@ -50,6 +82,9 @@ return function(Window, scriptInfo)
         fov = 85,
         foodWarning = 30,
         o2Warning = 35,
+        compass = true,
+        routeCategory = "Treasure",
+        routeCount = 5,
     }
 
     local COLORS = {
@@ -226,7 +261,24 @@ return function(Window, scriptInfo)
         for key in pairs(visuals) do
             if not active[key] then removeVisual(key) end
         end
-        return candidates
+
+        local route = {}
+        local routeCategory = settings.routeCategory
+        for _, candidate in ipairs(candidates) do
+            local matches = routeCategory == "Any Loot"
+                and candidate.category ~= "island" and candidate.category ~= "merchant"
+                or routeCategory == "Treasure" and candidate.category == "chest"
+                or routeCategory == "Wood" and candidate.category == "wood"
+                or routeCategory == "Metal" and candidate.category == "metal"
+                or routeCategory == "Food" and candidate.category == "food"
+                or routeCategory == "Fuel" and candidate.category == "fuel"
+                or routeCategory == "Islands" and candidate.category == "island"
+                or routeCategory == "Merchant" and candidate.category == "merchant"
+            if matches then table.insert(route, candidate) end
+        end
+        table.sort(route, function(a, b) return a.distance < b.distance end)
+        while #route > settings.routeCount do table.remove(route) end
+        return candidates, route
     end
 
     local function guiText(path, fallback)
@@ -260,6 +312,8 @@ return function(Window, scriptInfo)
     local currencyLabel = Dashboard:CreateLabel("Currency: loading...")
     local objectiveLabel = Dashboard:CreateLabel("Objectives: loading...")
     local nearestLabel = Dashboard:CreateLabel("Nearest: scanning...")
+    local routeLabel = Dashboard:CreateLabel("Route: scanning...")
+    local inventoryLabel = Dashboard:CreateLabel("Inventory: scanning...")
     local warningLabel = Dashboard:CreateLabel("Warnings: none")
     Dashboard:CreateSlider({Name="Food Warning",Range={5,75},Increment=5,CurrentValue=30,Suffix="%",Flag="TheSeaFoodWarning",Callback=function(v) settings.foodWarning=v end})
     Dashboard:CreateSlider({Name="O2 Warning",Range={5,75},Increment=5,CurrentValue=35,Suffix="%",Flag="TheSeaO2Warning",Callback=function(v) settings.o2Warning=v end})
@@ -276,6 +330,10 @@ return function(Window, scriptInfo)
     Esp:CreateToggle({Name="Island Navigator",CurrentValue=true,Flag="TheSeaIslandESP",Callback=function(v) settings.islandEsp=v end})
     Esp:CreateToggle({Name="POI / Challenge Only",CurrentValue=false,Flag="TheSeaSpecialIslands",Callback=function(v) settings.specialIslandsOnly=v end})
     Esp:CreateToggle({Name="Merchant Tracker",CurrentValue=true,Flag="TheSeaMerchantESP",Callback=function(v) settings.merchantEsp=v end})
+    Esp:CreateSection("Loot Compass / Route")
+    Esp:CreateToggle({Name="Loot Compass",CurrentValue=true,Flag="TheSeaCompass",Callback=function(v) settings.compass=v end})
+    Esp:CreateDropdown({Name="Route Target",Options={"Treasure","Any Loot","Wood","Metal","Food","Fuel","Islands","Merchant"},CurrentOption={"Treasure"},MultipleOptions=false,Flag="TheSeaRouteCategory",Callback=function(v) settings.routeCategory=type(v)=="table"and v[1]or tostring(v) end})
+    Esp:CreateSlider({Name="Route Length",Range={1,10},Increment=1,CurrentValue=5,Flag="TheSeaRouteCount",Callback=function(v) settings.routeCount=v end})
     Esp:CreateSlider({Name="ESP Distance",Range={500,8000},Increment=250,CurrentValue=3500,Suffix=" studs",Flag="TheSeaESPDistance",Callback=function(v) settings.maxDistance=v end})
     Esp:CreateSlider({Name="Max Treasure",Range={5,80},Increment=5,CurrentValue=40,Flag="TheSeaMaxChests",Callback=function(v) settings.maxChests=v end})
     Esp:CreateSlider({Name="Max Items",Range={10,100},Increment=5,CurrentValue=50,Flag="TheSeaMaxItems",Callback=function(v) settings.maxItems=v end})
@@ -296,13 +354,14 @@ return function(Window, scriptInfo)
 
     local scanAt, statusAt = 0, 0
     local lastCandidates = {}
+    local lastRoute = {}
     local fullbrightApplied = false
     connect(RunService.Heartbeat, function()
         if not running then return end
         local now = os.clock()
         if now - scanAt >= 0.75 then
             scanAt = now
-            lastCandidates = scanWorld()
+            lastCandidates, lastRoute = scanWorld()
         end
 
         if settings.fullbright then
@@ -331,6 +390,31 @@ return function(Window, scriptInfo)
             if food <= settings.foodWarning then table.insert(warnings, "LOW FOOD") end
             if o2 <= settings.o2Warning then table.insert(warnings, "LOW O2") end
             local humanoid = localPlayer.Character and localPlayer.Character:FindFirstChildOfClass("Humanoid")
+            local toolCounts = {}
+            for _, container in ipairs({localPlayer.Character, localPlayer:FindFirstChildOfClass("Backpack")}) do
+                if container then
+                    for _, tool in ipairs(container:GetChildren()) do
+                        if tool:IsA("Tool") then toolCounts[tool.Name] = (toolCounts[tool.Name] or 0) + 1 end
+                    end
+                end
+            end
+            local inventoryParts = {}
+            for name, amount in pairs(toolCounts) do table.insert(inventoryParts, name .. " x" .. amount) end
+            table.sort(inventoryParts)
+            local sackMax = 0
+            for _, container in ipairs({localPlayer.Character, localPlayer:FindFirstChildOfClass("Backpack")}) do
+                if container then
+                    for _, tool in ipairs(container:GetChildren()) do
+                        if tool:IsA("Tool") and tool:GetAttribute("Max") then
+                            sackMax = math.max(sackMax, tonumber(tool:GetAttribute("Max")) or 0)
+                        end
+                    end
+                end
+            end
+            local routeParts = {}
+            for index, candidate in ipairs(lastRoute) do
+                table.insert(routeParts, string.format("%d.%s %dm", index, candidate.label, math.floor(candidate.distance)))
+            end
             pcall(function()
                 survivalLabel:Set(string.format("%s | HP %d | Food %d%% | O2 %d%% | Class %s Lv.%s",
                     day, humanoid and math.floor(humanoid.Health) or 0, math.floor(food), math.floor(o2),
@@ -340,9 +424,27 @@ return function(Window, scriptInfo)
                     tostring(localPlayer:GetAttribute("Streak") or 0), tostring(localPlayer:GetAttribute("DisplaySeed") or "?")))
                 objectiveLabel:Set("Objectives: " .. objectiveSummary())
                 nearestLabel:Set(nearest and string.format("Nearest: %s (%dm)", nearest.label, math.floor(nearest.distance)) or "Nearest: none in range")
+                routeLabel:Set(#routeParts > 0 and ("Route: " .. table.concat(routeParts, " → ")) or "Route: no matching targets")
+                inventoryLabel:Set(string.format("Inventory %s/%s | %s", tostring(localPlayer:GetAttribute("GroundItems") or "?"), sackMax > 0 and tostring(sackMax) or "?", #inventoryParts > 0 and table.concat(inventoryParts, ", ") or "empty"))
                 warningLabel:Set(#warnings > 0 and ("WARNING: " .. table.concat(warnings, " + ")) or "Warnings: none")
             end)
         end
+    end)
+
+    connect(RunService.RenderStepped, function()
+        local target = lastRoute[1]
+        local camera = workspace.CurrentCamera
+        local valid = running and settings.compass and target and target.part and target.part.Parent and camera
+        compassArrow.Visible = valid and true or false
+        compassText.Visible = valid and true or false
+        if not valid then return end
+        local point = camera:WorldToViewportPoint(target.part.Position)
+        local center = Vector2.new(camera.ViewportSize.X * 0.5, camera.ViewportSize.Y * 0.5)
+        local offset = Vector2.new(point.X, point.Y) - center
+        if point.Z < 0 then offset = -offset end
+        compassArrow.Rotation = math.deg(math.atan2(offset.X, -offset.Y))
+        compassArrow.TextColor3 = target.color
+        compassText.Text = string.format("%s | %dm", target.label, math.floor(distanceTo(target.part)))
     end)
 
     local function restoreLighting()
@@ -360,6 +462,7 @@ return function(Window, scriptInfo)
         table.clear(connections)
         for key in pairs(visuals) do removeVisual(key) end
         if espFolder.Parent then espFolder:Destroy() end
+        if compassGui.Parent then compassGui:Destroy() end
         if getgenv().__RAVEN_THE_SEA and getgenv().__RAVEN_THE_SEA.Settings == settings then
             getgenv().__RAVEN_THE_SEA = nil
         end
