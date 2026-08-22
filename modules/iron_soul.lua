@@ -1,7 +1,7 @@
 --[[
     RAVEN HUB | Iron Soul: Dungeon
     Lobby PlaceId: 117533937949084 | Starless Forest: 116456628154258
-    GameId: 9910245722 | Version: v1.2.10
+    GameId: 9910245722 | Version: v1.2.11
 ]]
 return function(Window, runtimeInfo)
     local Players = game:GetService("Players")
@@ -168,7 +168,7 @@ return function(Window, runtimeInfo)
     end
 
     local Dashboard=Window:CreateTab("Dungeon", "activity")
-    Dashboard:CreateSection("Iron Soul v1.2.10")
+    Dashboard:CreateSection("Iron Soul v1.2.11")
     local roundLabel=Dashboard:CreateLabel("Round: scanning...")
     local enemyCountLabel=Dashboard:CreateLabel("Enemies: scanning...")
     local targetLabel=Dashboard:CreateLabel("Target: none")
@@ -279,6 +279,18 @@ return function(Window, runtimeInfo)
 
         local officialRound,completedRound=roundState()
         local locationRound=currentRoundInfo()
+        if settings.autoNextPortal and #cachedEnemies==0 and root and officialRound and completedRound and completedRound==officialRound-1 and now-lastProgress>=settings.progressCooldown then
+            local nearestPortal,portalDistance=nil,math.huge
+            for _,portal in ipairs(progressPortals()) do local pp=getPart(portal); local d=distance(pp); if pp and pp:FindFirstChildOfClass("TouchTransmitter") and d<portalDistance then nearestPortal,portalDistance=pp,d end end
+            local holder=workspace:FindFirstChild("RoundDoor"); local openDoorDistance=math.huge
+            if holder then for _,prompt in ipairs(holder:GetDescendants()) do if prompt:IsA("ProximityPrompt") and not prompt.Enabled then local parent=prompt.Parent; local part=parent and (parent:IsA("BasePart") and parent or parent.Parent); if part and part:IsA("BasePart") then openDoorDistance=math.min(openDoorDistance,distance(part)) end end end end
+            if nearestPortal and portalDistance<=35 and openDoorDistance<=45 then
+                lastProgress=now; handledCompletedRound=completedRound
+                root.CFrame=nearestPortal.CFrame*CFrame.new(0,2,-math.min(settings.progressOffset,2))
+                local portalRoot,boundRoot=nearestPortal,root
+                task.delay(.15,function() if running and portalRoot.Parent and boundRoot.Parent and type(firetouchinterest)=="function" then pcall(firetouchinterest,boundRoot,portalRoot,0); pcall(firetouchinterest,boundRoot,portalRoot,1) end end)
+            end
+        end
         if settings.autoOpenDoor and #cachedEnemies==0 and root and officialRound and now-lastEntryRecovery>=3 then
             local holder=workspace:FindFirstChild("RoundDoor"); local nearestOpenDoor=math.huge
             if holder then
@@ -447,6 +459,6 @@ return function(Window, runtimeInfo)
         local camera=workspace.CurrentCamera; if camera and LP.Character then camera.CameraSubject=LP.Character:FindFirstChildOfClass("Humanoid") end
         if getgenv().__RAVEN_IRON_SOUL and getgenv().__RAVEN_IRON_SOUL.Settings==settings then getgenv().__RAVEN_IRON_SOUL=nil end
     end
-    getgenv().__RAVEN_IRON_SOUL={Version="v1.2.10",Settings=settings,Destroy=destroy}
+    getgenv().__RAVEN_IRON_SOUL={Version="v1.2.11",Settings=settings,Destroy=destroy}
     if runtimeInfo and type(runtimeInfo.registerCleanup)=="function" then runtimeInfo.registerCleanup(destroy) end
 end
