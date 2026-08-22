@@ -169,7 +169,7 @@ local SCRIPTS = {
         description = "Auto Mine | Auto Sell | Ore ESP | Remote Utility",
         placeIds    = {18680867089},
         gameIds     = {18680867089},
-        version     = "v1.1",
+        version     = "v1.1.1",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/umt/main.lua",
     },
     {
