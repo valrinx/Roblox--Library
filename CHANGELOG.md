@@ -2,6 +2,7 @@
 
 ## 2026-08-22
 
+- Updated Cold War to v1.1.1 so Prediction Dot and Auto Aim share one per-frame target-velocity and ballistic solution, eliminating divergence caused by sampling target movement twice in the same frame.
 - Updated Cold War to v1.1 with ballistic smooth Auto Aim, configurable FOV/activation/sticky visibility targeting, a live match ticket/death/spawn dashboard, and a team-aware tactical radar.
 - Fixed The Sea Kill Aura by sending the same primary-input path consumed by weapon LocalScripts instead of calling Tool:Activate, exempting Machete from ranged visibility filtering, and raising its default aura radius to 16 studs.
 - Fixed The Sea Auto Collect repeatedly selecting the first pulled item by temporarily marking processed models and skipping resources already resting at the character drop point.
