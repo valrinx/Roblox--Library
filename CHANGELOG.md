@@ -2,6 +2,11 @@
 
 ## 2026-08-22
 
+- Fixed The Sea Kill Aura by sending the same primary-input path consumed by weapon LocalScripts instead of calling Tool:Activate, exempting Machete from ranged visibility filtering, and raising its default aura radius to 16 studs.
+- Fixed The Sea Auto Collect repeatedly selecting the first pulled item by temporarily marking processed models and skipping resources already resting at the character drop point.
+- Updated The Sea to v1.2.3 so Auto Collect requests temporary item ownership directly and moves items to the character without opening the game's cursor-bound drag state or cloning drag constraints.
+- Updated The Sea to v1.2.2 with per-weapon long-range prediction (hitscan, Harpoon/Riptide, and Flare profiles) and character-anchored Auto Collect that overrides the drag cursor destination until release.
+- Updated The Sea to v1.2.1 with multi-weapon target cycling, screen-space FOV targeting, a visible FOV ring, and category-filtered server-authorized Auto Collect for wood, metal, food, and fuel.
 - Updated The Sea to v1.2 with bounded Creature ESP, health/visibility labels, configurable Machete Aura, optional Flintlock/Raygun aim and trigger assistance, Harpoon target diagnostics, and an explicit in-module version/status display.
 - Updated The Sea to v1.1 with a selectable nearest-target compass, bounded multi-stop loot routes, and live inventory/sack capacity summaries.
 - Added The Sea v1.0 with bounded treasure/resource/food/fuel ESP, island and merchant navigation, survival/currency/objective telemetry, Food/O2 warnings, and reversible Fullbright/FOV controls.
