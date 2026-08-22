@@ -11,7 +11,7 @@
     - No Fog
     - FOV Changer
     - Characters folder support (game uses workspace.Characters)
-    - v1.1 Smooth Auto Aim, Match Dashboard, Tactical Radar
+    - v1.1.1 shared per-frame prediction for dot and Auto Aim
 
     Module format: returns function(Window, runtimeInfo) for RAVENHUB loader
 ]]
@@ -58,6 +58,8 @@ return function(Window, runtimeInfo)
     local ESPObjects = {}
     local rightMouseDown = false
     local lockedTarget = nil
+    local predictionFrame = 0
+    local predictionCache = {}
 
     -- Original lighting values
     local OriginalLighting = {
@@ -444,6 +446,36 @@ return function(Window, runtimeInfo)
         return predicted, travelTime
     end
 
+    -- Prediction Dot and Auto Aim must consume the exact same ballistic sample.
+    -- Sampling target velocity twice in one frame produces a near-zero second delta
+    -- and makes the displayed point disagree with the position Auto Aim follows.
+    local function getSharedPrediction(player, weaponConfig)
+        if not player or not weaponConfig then return nil end
+        local char = getCharacter(player)
+        local targetPart = char and (char:FindFirstChild(State.PredictTargetPart) or char:FindFirstChild("Head"))
+        if not targetPart then return nil end
+        local cached = predictionCache[player]
+        if cached and cached.frame == predictionFrame and cached.part == targetPart
+            and cached.weapon == weaponConfig.Name then
+            return cached
+        end
+        local velocity = getTargetVelocity(player)
+        local predicted, travelTime = getPredictedPosition(
+            targetPart.Position, velocity, weaponConfig, Camera.CFrame.Position
+        )
+        cached = {
+            frame = predictionFrame,
+            player = player,
+            part = targetPart,
+            weapon = weaponConfig.Name,
+            velocity = velocity,
+            position = predicted,
+            travelTime = travelTime,
+        }
+        predictionCache[player] = cached
+        return cached
+    end
+
     -- Prediction dot (Drawing API)
     local predictionDot = nil
     local predictionCircle = nil
@@ -535,15 +567,16 @@ return function(Window, runtimeInfo)
         local part = char and (char:FindFirstChild(State.PredictTargetPart) or char:FindFirstChild("Head"))
         if not part then return end
         local cfg = getCurrentWeaponConfig()
-        local predicted = getPredictedPosition(part.Position, getTargetVelocity(lockedTarget), cfg, Camera.CFrame.Position)
-        local point, onScreen = Camera:WorldToViewportPoint(predicted)
+        local sample = getSharedPrediction(lockedTarget, cfg)
+        if not sample then return end
+        local point, onScreen = Camera:WorldToViewportPoint(sample.position)
         if not onScreen then return end
         local center = Camera.ViewportSize * 0.5
         local delta = Vector2.new(point.X, point.Y) - center
         if type(mousemoverel) == "function" then
             pcall(mousemoverel, delta.X * State.AimSmoothness, delta.Y * State.AimSmoothness)
         else
-            Camera.CFrame = Camera.CFrame:Lerp(CFrame.lookAt(Camera.CFrame.Position, predicted), State.AimSmoothness)
+            Camera.CFrame = Camera.CFrame:Lerp(CFrame.lookAt(Camera.CFrame.Position, sample.position), State.AimSmoothness)
         end
     end
 
@@ -650,9 +683,9 @@ return function(Window, runtimeInfo)
 
         local shooterPos = Camera.CFrame.Position
         local targetPos = targetPart.Position
-        local targetVelocity = getTargetVelocity(target)
-
-        local predictedPos, travelTime = getPredictedPosition(targetPos, targetVelocity, weaponConfig, shooterPos)
+        local sample = getSharedPrediction(target, weaponConfig)
+        if not sample then return end
+        local predictedPos, travelTime = sample.position, sample.travelTime
         local screenPos, onScreen = Camera:WorldToViewportPoint(predictedPos)
 
         if onScreen then
@@ -718,6 +751,7 @@ return function(Window, runtimeInfo)
     end)
 
     Connections.render = RunService.RenderStepped:Connect(function()
+        predictionFrame += 1
         updateESP()
         updateAimPrediction()
         updateAutoAim()
@@ -937,7 +971,7 @@ return function(Window, runtimeInfo)
                 getgenv().__RAVEN_COLD_WAR = nil
             end
     end
-    getgenv().__RAVEN_COLD_WAR = {Version="v1.1",State=State,Destroy=destroy}
+    getgenv().__RAVEN_COLD_WAR = {Version="v1.1.1",State=State,Destroy=destroy}
     if runtimeInfo.registerCleanup then
         runtimeInfo.registerCleanup(destroy)
     end
