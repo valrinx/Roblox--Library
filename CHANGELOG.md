@@ -1,7 +1,14 @@
 # Changelog
 
+## 2026-08-23 - Load The Truck v1.0.3
+
+- Fixed `WakeWorker`, `AssignWorkerZone`, conveyor/floor/parking unlock, scanner upgrade/unlock, and box-tier remote arguments to match the live game controllers.
+- Reduced remote spam by assigning each worker once per module session and rotating through one general upgrade per interval.
+- Added all upgrade keys currently exposed by the game UI and state-aware selection for the next conveyor, floor, scanner, and box tier.
+
 ## 2026-08-23
 
+- **Load The Truck v1.0.2** — Fixed Auto Wake by sending the owned worker Model instance to `WakeWorker`, matching the game's `WorkerHoverController`, instead of sending the worker-name string rejected by the server.
 - **Load The Truck v1.0.1** — Fixed shared-timer starvation across collect/deposit, workers, upgrades, and scanners; implemented Auto Assign and Auto Unlock Scanner; corrected upgrade remote arguments; rate-limited rebirth/leave rewards; restricted status and collection to owned objects; fixed ESP range cleanup/distance updates; and added Conveyor ESP.
 - **Cold War v1.1.5** — Restored visibility evaluation for every enemy each frame while rotating one body sample per enemy per frame; full character coverage is retained without burst raycasts, and hidden state is committed only after a complete missed cycle.
 - **Cold War v1.1.4** — Capped multi-part visibility work at three characters per frame, increased cache lifetime, and reduced each character to bounded centre/side samples to remove the v1.1.3 frame spikes.
