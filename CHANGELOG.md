@@ -2,6 +2,8 @@
 
 ## 2026-08-23
 
+- **Cold War v1.1.5** — Restored visibility evaluation for every enemy each frame while rotating one body sample per enemy per frame; full character coverage is retained without burst raycasts, and hidden state is committed only after a complete missed cycle.
+- **Cold War v1.1.4** — Capped multi-part visibility work at three characters per frame, increased cache lifetime, and reduced each character to bounded centre/side samples to remove the v1.1.3 frame spikes.
 - **Cold War v1.1.3** — Added cached multi-part and inset-corner visibility sampling, so ESP/radar detect enemies whose head, limbs, or body edge is exposed while the HumanoidRootPart remains behind cover.
 - **RAVEN HUB maclib-4** — Removed automatic `queue_on_teleport` persistence; script startup is now left to the executor's Auto Execute configuration.
 - **RAVEN HUB maclib-3** — Added JobId-scoped queue_on_teleport persistence so the hub reloads and re-arms itself after dungeon/lobby server transitions without duplicate queues in the same session.
