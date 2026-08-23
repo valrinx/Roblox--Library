@@ -1,8 +1,16 @@
 # Changelog
 
+## 2026-08-23 - TTK Testing v1.0.0
+
+- Added FFA player ESP with live health and distance, plus configurable range.
+- Added per-body-part chams and multi-point raycast Visible Check with green visible/red obstructed states.
+- Added match, score, weapon, timer, current-map and map-voting dashboards.
+- Added Fullbright, screen-smudge removal, FOV override and Anti AFK without combat-remote automation.
+
 ## 2026-08-23 - Fish an Anime RNG v1.0.0
 
 - Added native-controller Auto Fish, backpack capacity automation, Equip Best and guarded Sell All.
+- Added state-aware Daily/Playtime claiming, Quest/Index Claim All, Pick Up All, and cash Rebirth controls.
 - Added the game's Performance Mode, pond/catch ESP, status dashboard, Anti AFK, and travel shortcuts.
 - Registered PlaceId `74729868188364` and GameId `9582986239` in RAVENHUB.
 
