@@ -1,7 +1,7 @@
 --[[
     RAVEN HUB | [UPD] Load The Truck!
     PlaceId: 120491560796071 | GameId: 10417812127
-    Version: v1.0.0
+    Version: v1.0.1
 
     Auto Boxes | Worker Mgmt | Upgrades | Scanner | Rewards | Teleport | ESP
 ]]
@@ -161,12 +161,15 @@ return function(Window, scriptInfo)
 
     local function fireRemote(remote, args)
         args = args or {}
+        local argumentCount = args.n or #args
         if remote and typeof(remote) == "Instance" then
             if remote:IsA("RemoteEvent") then
-                pcall(function() remote:FireServer(unpack(args)) end)
-                return true
+                local ok = pcall(function() remote:FireServer(unpack(args, 1, argumentCount)) end)
+                return ok
             elseif remote:IsA("RemoteFunction") then
-                local ok, result = pcall(function() return remote:InvokeServer(unpack(args)) end)
+                local ok, result = pcall(function()
+                    return remote:InvokeServer(unpack(args, 1, argumentCount))
+                end)
                 return ok and result or nil
             end
         end
@@ -187,7 +190,18 @@ return function(Window, scriptInfo)
     local function getPlayerRebirths()
         local ls = player:FindFirstChild("leaderstats")
         local r = ls and ls:FindFirstChild("Rebirths")
-        return r and r:IsA("ValueBase") and r.Value or 0
+        return r and r:IsA("ValueBase") and (tonumber(r.Value) or 0) or 0
+    end
+
+    local function getMyPlot()
+        local plots = workspace:FindFirstChild("Plots")
+        if not plots then return nil end
+        for _, plot in ipairs(plots:GetChildren()) do
+            if tostring(plot:GetAttribute("Owner")) == tostring(player.UserId) then
+                return plot
+            end
+        end
+        return nil
     end
 
     -- ============================================================
@@ -285,17 +299,35 @@ return function(Window, scriptInfo)
     -- ============================================================
     local function getWorkerCount()
         local workers = workspace:FindFirstChild("ActiveWorkers")
-        return workers and #workers:GetChildren() or 0
+        if not workers then return 0 end
+        local count = 0
+        for _, worker in ipairs(workers:GetChildren()) do
+            if tostring(worker:GetAttribute("OwnerUserId")) == tostring(player.UserId) then
+                count += 1
+            end
+        end
+        return count
     end
 
     local function getTruckCount()
         local vehicles = workspace:FindFirstChild("ActiveVehicles")
-        return vehicles and #vehicles:GetChildren() or 0
+        if not vehicles then return 0 end
+        local count = 0
+        for _, vehicle in ipairs(vehicles:GetChildren()) do
+            local owner = vehicle:GetAttribute("OwnerUserId") or vehicle:GetAttribute("Owner")
+            if tostring(owner) == tostring(player.UserId) then count += 1 end
+        end
+        return count
     end
 
     local function getManagerCount()
         local managers = workspace:FindFirstChild("ActiveManagers")
-        return managers and #managers:GetChildren() or 0
+        if not managers then return 0 end
+        local count = 0
+        for _, manager in ipairs(managers:GetChildren()) do
+            if tostring(manager:GetAttribute("OwnerUserId")) == tostring(player.UserId) then count += 1 end
+        end
+        return count
     end
 
     local function getBoxCount()
@@ -313,36 +345,21 @@ return function(Window, scriptInfo)
     -- ============================================================
     --  TAB 1: BOX FARM
     -- ============================================================
-    local lastCollectTick = 0
     local totalCollected = 0
 
     local function performAutoCollect()
         if not running or not settings.autoCollectBoxes then return end
-        local now = os.clock()
-        if now - lastCollectTick < settings.collectInterval then return end
-        lastCollectTick = now
-
         local _, _, root = getCharacter()
         if not root then return end
 
-        -- Find nearest collect zone
-        local plotRoot = workspace:FindFirstChild("Plots")
-        if not plotRoot then return end
-
-        -- Find any cardboard boxes nearby (player carries them)
-        local boxCount = getBoxCount()
-
-        -- Find CollectZone on any plot
-        for _, plot in ipairs(plotRoot:GetChildren()) do
-            local collectZone = plot:FindFirstChild("CollectZone")
-            if collectZone and collectZone:IsA("BasePart") then
-                local dist = (collectZone.Position - root.Position).Magnitude
-                if dist < 50 then
-                    teleportTo(collectZone.Position + Vector3.new(0, 3, 0))
-                    totalCollected = totalCollected + 1
-                    break
-                end
-            end
+        local plot = getMyPlot()
+        local collectZone = plot and plot:FindFirstChild("CollectZone")
+        if collectZone and collectZone:IsA("BasePart") then
+            local before = getBoxCount()
+            teleportTo(collectZone.Position + Vector3.new(0, 3, 0))
+            task.delay(0.25, function()
+                if running and getBoxCount() ~= before then totalCollected += 1 end
+            end)
         end
     end
 
@@ -409,23 +426,13 @@ return function(Window, scriptInfo)
     -- ============================================================
     --  TAB 2: WORKERS & TRUCKS
     -- ============================================================
-    local lastWorkerTick = 0
-
     local function performAutoHireWorker()
         if not running or not settings.autoHireWorker then return end
-        local now = os.clock()
-        if now - lastWorkerTick < settings.workerInterval then return end
-        lastWorkerTick = now
-
         fireRemote(HireWorker, {})
     end
 
     local function performAutoWakeWorker()
         if not running or not settings.autoWakeWorker then return end
-        local now = os.clock()
-        if now - lastWorkerTick < settings.workerInterval then return end
-        lastWorkerTick = now
-
         local myId = tostring(player.UserId)
         local workers = workspace:FindFirstChild("ActiveWorkers")
         if workers then
@@ -439,6 +446,20 @@ return function(Window, scriptInfo)
                     if owner == myId and (working == false or stamina == 0) then
                         fireRemote(WakeWorker, {worker.Name})
                     end
+                end
+            end
+        end
+    end
+
+    local function performAutoAssignZone()
+        if not running or not settings.autoAssignZone then return end
+        local workers = workspace:FindFirstChild("ActiveWorkers")
+        if not workers then return end
+        for _, worker in ipairs(workers:GetChildren()) do
+            if tostring(worker:GetAttribute("OwnerUserId")) == tostring(player.UserId) then
+                local index = tonumber(worker.Name:match("_Worker_(%d+)$"))
+                if index then
+                    fireRemote(AssignWorkerZone, table.pack("Worker", nil, index, "Auto"))
                 end
             end
         end
@@ -493,38 +514,25 @@ return function(Window, scriptInfo)
     -- ============================================================
     --  TAB 3: UPGRADES
     -- ============================================================
-    local lastUpgradeTick = 0
-
     local function performAutoUpgrade()
         if not running or not settings.autoUpgrade then return end
-        local now = os.clock()
-        if now - lastUpgradeTick < settings.upgradeInterval then return end
-        lastUpgradeTick = now
-
-        fireRemote(Upgrade, {})
+        for _, upgradeName in ipairs({"ProductionRate", "WorkerSpeed", "TruckSpeed", "TruckSpawnRate"}) do
+            fireRemote(Upgrade, {upgradeName, "Cash"})
+        end
     end
 
     local function performAutoUnlockConveyor()
         if not running or not settings.autoUnlockConveyor then return end
-        local now = os.clock()
-        if now - lastUpgradeTick < settings.upgradeInterval then return end
-
         fireRemote(UnlockConveyor, {})
     end
 
     local function performAutoUnlockFloor()
         if not running or not settings.autoUnlockFloor then return end
-        local now = os.clock()
-        if now - lastUpgradeTick < settings.upgradeInterval then return end
-
         fireRemote(UnlockFloor, {})
     end
 
     local function performAutoUnlockParking()
         if not running or not settings.autoUnlockParking then return end
-        local now = os.clock()
-        if now - lastUpgradeTick < settings.upgradeInterval then return end
-
         fireRemote(UnlockParking, {})
     end
 
@@ -570,7 +578,7 @@ return function(Window, scriptInfo)
     UpgradeTab:CreateButton({
         Name = "Upgrade Now",
         Callback = function()
-            fireRemote(Upgrade, {})
+            fireRemote(Upgrade, {"ProductionRate", "Cash"})
             notify("⬆️ Upgrade", "Upgrade requested")
         end,
     })
@@ -592,23 +600,20 @@ return function(Window, scriptInfo)
     -- ============================================================
     --  TAB 4: SCANNER
     -- ============================================================
-    local lastScannerTick = 0
-
     local function performAutoScan()
         if not running or not settings.autoScan then return end
-        local now = os.clock()
-        if now - lastScannerTick < settings.scannerInterval then return end
-        lastScannerTick = now
-
         fireRemote(BoxScanned, {})
     end
 
     local function performAutoUpgradeScanner()
         if not running or not settings.autoUpgradeScanner then return end
-        local now = os.clock()
-        if now - lastScannerTick < settings.scannerInterval then return end
+        fireRemote(ScannerUpgrade, {"ScanCooldown", "Cash"})
+        fireRemote(ScannerUpgrade, {"CashMultiplier", "Cash"})
+    end
 
-        fireRemote(ScannerUpgrade, {})
+
+    local function performAutoUnlockScanner()
+        if running and settings.autoUnlockScanner then fireRemote(UnlockScanner, {}) end
     end
 
     local ScannerTab = Window:CreateTab("📡 Scanner", "radio")
@@ -654,7 +659,7 @@ return function(Window, scriptInfo)
     ScannerTab:CreateButton({
         Name = "Upgrade Scanner",
         Callback = function()
-            fireRemote(ScannerUpgrade, {})
+            fireRemote(ScannerUpgrade, {"ScanCooldown", "Cash"})
             notify("📡 Scanner", "Scanner upgrade requested")
         end,
     })
@@ -705,8 +710,7 @@ return function(Window, scriptInfo)
             if not plots then notify("🗺 Travel", "No plots found") return end
             local best, bestDist
             for _, plot in ipairs(plots:GetChildren()) do
-                local part = plot:FindFirstChildWhichIsA("BasePart")
-                    or plot.PrimaryPart
+                local part = plot:FindFirstChildWhichIsA("BasePart", true)
                 if part then
                     local dist = (part.Position - root.Position).Magnitude
                     if not bestDist or dist < bestDist then
@@ -715,7 +719,7 @@ return function(Window, scriptInfo)
                 end
             end
             if best then
-                local part = best:FindFirstChildWhichIsA("BasePart") or best.PrimaryPart
+                local part = best:FindFirstChildWhichIsA("BasePart", true)
                 if part then
                     teleportTo(part.Position + Vector3.new(0, 5, 0))
                     notify("🗺 Travel", "Teleported to " .. best.Name)
@@ -803,6 +807,12 @@ return function(Window, scriptInfo)
         Flag = "LoadTruckLuckyBlockEsp",
         Callback = function(v) settings.luckyBlockEsp = v; if not v then clearEsp("luckyBlock") end end,
     })
+    TravelTab:CreateToggle({
+        Name = "Conveyor ESP",
+        CurrentValue = false,
+        Flag = "LoadTruckConveyorEsp",
+        Callback = function(v) settings.conveyorEsp = v; if not v then clearEsp("conveyor") end end,
+    })
     TravelTab:CreateSlider({
         Name = "ESP Max Distance",
         Range = {50, 2000},
@@ -810,7 +820,12 @@ return function(Window, scriptInfo)
         CurrentValue = 500,
         Suffix = " studs",
         Flag = "LoadTruckEspMaxDist",
-        Callback = function(v) settings.espMaxDist = v end,
+        Callback = function(v)
+            settings.espMaxDist = v
+            for _, entry in pairs(espObjects) do
+                if entry.billboard then entry.billboard.MaxDistance = v end
+            end
+        end,
     })
 
     -- ============================================================
@@ -981,12 +996,12 @@ return function(Window, scriptInfo)
         if workers then
             for _, worker in ipairs(workers:GetChildren()) do
                 if worker:IsA("Model") then
-                    seen[worker] = true
                     local part = worker.PrimaryPart or worker:FindFirstChildWhichIsA("BasePart")
                     if part then
                         local dist = (part.Position - root.Position).Magnitude
-                        if dist <= settings.espMaxDist and not espObjects[worker] then
-                            addEsp(worker, "worker", "[WORKER] " .. worker.Name)
+                        if dist <= settings.espMaxDist then
+                            seen[worker] = true
+                            if not espObjects[worker] then addEsp(worker, "worker", "[WORKER] " .. worker.Name) end
                         end
                     end
                 end
@@ -1010,12 +1025,12 @@ return function(Window, scriptInfo)
         if vehicles then
             for _, vehicle in ipairs(vehicles:GetChildren()) do
                 if vehicle:IsA("Model") then
-                    seen[vehicle] = true
                     local part = vehicle.PrimaryPart or vehicle:FindFirstChildWhichIsA("BasePart")
                     if part then
                         local dist = (part.Position - root.Position).Magnitude
-                        if dist <= settings.espMaxDist and not espObjects[vehicle] then
-                            addEsp(vehicle, "truck", "[TRUCK] " .. vehicle.Name)
+                        if dist <= settings.espMaxDist then
+                            seen[vehicle] = true
+                            if not espObjects[vehicle] then addEsp(vehicle, "truck", "[TRUCK] " .. vehicle.Name) end
                         end
                     end
                 end
@@ -1039,13 +1054,13 @@ return function(Window, scriptInfo)
         if blocks then
             for _, block in ipairs(blocks:GetChildren()) do
                 if block:IsA("Model") or block:IsA("BasePart") then
-                    seen[block] = true
                     local part = block:IsA("BasePart") and block
                         or block.PrimaryPart or block:FindFirstChildWhichIsA("BasePart")
                     if part then
                         local dist = (part.Position - root.Position).Magnitude
-                        if dist <= settings.espMaxDist and not espObjects[block] then
-                            addEsp(block, "luckyBlock", "[LUCKY] " .. block.Name)
+                        if dist <= settings.espMaxDist then
+                            seen[block] = true
+                            if not espObjects[block] then addEsp(block, "luckyBlock", "[LUCKY] " .. block.Name) end
                         end
                     end
                 end
@@ -1056,6 +1071,30 @@ return function(Window, scriptInfo)
             if entry.category == "luckyBlock" and (not instance.Parent or not seen[instance]) then
                 removeEsp(instance)
             end
+        end
+    end
+
+
+    local function refreshConveyorEsp()
+        if not settings.conveyorEsp then clearEsp("conveyor") return end
+        local _, _, root = getCharacter()
+        local plot = getMyPlot()
+        if not root or not plot then return end
+        local seen = {}
+        local conveyors = plot:FindFirstChild("Conveyors")
+        if conveyors then
+            for _, conveyor in ipairs(conveyors:GetChildren()) do
+                local part = conveyor:IsA("BasePart") and conveyor
+                    or (conveyor:IsA("Model") and conveyor.PrimaryPart)
+                    or conveyor:FindFirstChildWhichIsA("BasePart", true)
+                if part and (part.Position - root.Position).Magnitude <= settings.espMaxDist then
+                    seen[conveyor] = true
+                    if not espObjects[conveyor] then addEsp(conveyor, "conveyor", "[CONVEYOR] " .. conveyor.Name) end
+                end
+            end
+        end
+        for instance, entry in pairs(espObjects) do
+            if entry.category == "conveyor" and (not instance.Parent or not seen[instance]) then removeEsp(instance) end
         end
     end
 
@@ -1080,6 +1119,9 @@ return function(Window, scriptInfo)
         local upgradeAt = 0
         local scannerAt = 0
         local rewardAt = 0
+        local depositAt = 0
+        local rebirthAt = 0
+        local leaveRewardAt = 0
         local espAt = 0
         local statusAt = 0
 
@@ -1094,16 +1136,18 @@ return function(Window, scriptInfo)
                 end
 
                 -- Auto Deposit
-                if settings.autoDeposit and now - collectAt >= settings.collectInterval * 2 then
+                if settings.autoDeposit and now - depositAt >= settings.collectInterval * 2 then
+                    depositAt = now
                     performAutoDeposit()
                 end
 
                 -- Workers
-                if (settings.autoHireWorker or settings.autoWakeWorker)
+                if (settings.autoHireWorker or settings.autoWakeWorker or settings.autoAssignZone)
                     and now - workerAt >= settings.workerInterval then
                     workerAt = now
                     performAutoHireWorker()
                     performAutoWakeWorker()
+                    performAutoAssignZone()
                 end
 
                 -- Upgrades
@@ -1118,11 +1162,12 @@ return function(Window, scriptInfo)
                 end
 
                 -- Scanner
-                if (settings.autoScan or settings.autoUpgradeScanner)
+                if (settings.autoScan or settings.autoUpgradeScanner or settings.autoUnlockScanner)
                     and now - scannerAt >= settings.scannerInterval then
                     scannerAt = now
                     performAutoScan()
                     performAutoUpgradeScanner()
+                    performAutoUnlockScanner()
                 end
 
                 -- Rewards
@@ -1135,23 +1180,26 @@ return function(Window, scriptInfo)
                 end
 
                 -- Auto Rebirth
-                if settings.autoRebirth then
+                if settings.autoRebirth and now - rebirthAt >= settings.rewardInterval then
+                    rebirthAt = now
                     performAutoRebirth()
                 end
 
                 -- Auto Leave Reward (separate timer)
-                if settings.autoClaimLeave then
+                if settings.autoClaimLeave and now - leaveRewardAt >= settings.rewardInterval then
+                    leaveRewardAt = now
                     fireRemote(CheckLeaveReward, {})
                     fireRemote(ClaimLeaveReward, {})
                 end
 
                 -- ESP Refresh
-                if (settings.workerEsp or settings.truckEsp or settings.luckyBlockEsp)
+                if (settings.workerEsp or settings.truckEsp or settings.luckyBlockEsp or settings.conveyorEsp)
                     and now - espAt >= 1.5 then
                     espAt = now
                     refreshWorkerEsp()
                     refreshTruckEsp()
                     refreshLuckyBlockEsp()
+                    refreshConveyorEsp()
                 end
 
                 -- Status Update
@@ -1268,6 +1316,7 @@ return function(Window, scriptInfo)
     end
 
     environment.__RAVEN_LOAD_TRUCK = {
+        Version = "v1.0.1",
         Settings = settings,
         Destroy = destroy,
         TeleportTo = teleportTo,
@@ -1282,5 +1331,5 @@ return function(Window, scriptInfo)
         scriptInfo.registerCleanup(destroy)
     end
 
-    notify("📦 Load The Truck", "v1.0.0 loaded — Box Farm + Workers + Upgrades + Rewards ready!")
+    notify("📦 Load The Truck", "v1.0.1 loaded — automation timers, ownership, remotes, and ESP fixed")
 end
