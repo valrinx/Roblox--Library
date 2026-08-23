@@ -11,7 +11,7 @@
     - No Fog
     - FOV Changer
     - Characters folder support (game uses workspace.Characters)
-    - v1.1.2 target-aware character visibility raycasts
+    - v1.1.3 cached multi-part visibility raycasts for partially exposed players
 
     Module format: returns function(Window, runtimeInfo) for RAVENHUB loader
 ]]
@@ -131,6 +131,15 @@ return function(Window, runtimeInfo)
     local RayParams = RaycastParams.new()
     RayParams.FilterType = Enum.RaycastFilterType.Exclude
 
+    local VISIBILITY_PARTS = {
+        "Head", "Torso", "UpperTorso", "LowerTorso", "HumanoidRootPart",
+        "Left Arm", "Right Arm", "Left Leg", "Right Leg",
+        "LeftUpperArm", "RightUpperArm", "LeftLowerArm", "RightLowerArm",
+        "LeftUpperLeg", "RightUpperLeg", "LeftLowerLeg", "RightLowerLeg",
+    }
+    local VISIBILITY_CACHE_SECONDS = 0.08
+    local visibilityCache = {}
+
     local COLOR_VISIBLE = Color3.fromRGB(255, 30, 30)
     local COLOR_HIDDEN  = Color3.fromRGB(0, 255, 80)
     local COLOR_TEXT_VISIBLE = Color3.fromRGB(255, 60, 60)
@@ -147,12 +156,55 @@ return function(Window, runtimeInfo)
         RayParams.FilterDescendantsInstances = ignore
     end
 
-    local function isVisible(fromPos, toPos, targetCharacter)
-        buildRayFilter()
+    local function rayReachesTarget(fromPos, toPos, targetCharacter)
         local direction = toPos - fromPos
         local result = workspace:Raycast(fromPos, direction, RayParams)
         if not result then return true end
         return targetCharacter ~= nil and result.Instance:IsDescendantOf(targetCharacter)
+    end
+
+    local function isPointVisible(fromPos, toPos, targetCharacter)
+        buildRayFilter()
+        return rayReachesTarget(fromPos, toPos, targetCharacter)
+    end
+
+    local function isCharacterVisible(fromPos, targetCharacter)
+        if not targetCharacter then return false end
+
+        local now = os.clock()
+        local cached = visibilityCache[targetCharacter]
+        if cached and now - cached.checkedAt < VISIBILITY_CACHE_SECONDS then
+            return cached.visible
+        end
+
+        local visible = false
+        buildRayFilter()
+        for _, partName in ipairs(VISIBILITY_PARTS) do
+            local part = targetCharacter:FindFirstChild(partName)
+            if part and part:IsA("BasePart") then
+                -- Check the centre first, then four inset corners. A limb or the
+                -- edge of the torso can be visible while its centre remains covered.
+                local halfX = math.max(0, part.Size.X * 0.42)
+                local halfY = math.max(0, part.Size.Y * 0.42)
+                local offsets = {
+                    Vector3.zero,
+                    Vector3.new(halfX, halfY, 0),
+                    Vector3.new(-halfX, halfY, 0),
+                    Vector3.new(halfX, -halfY, 0),
+                    Vector3.new(-halfX, -halfY, 0),
+                }
+                for _, offset in ipairs(offsets) do
+                    if rayReachesTarget(fromPos, part.CFrame:PointToWorldSpace(offset), targetCharacter) then
+                        visible = true
+                        break
+                    end
+                end
+            end
+            if visible then break end
+        end
+
+        visibilityCache[targetCharacter] = {visible = visible, checkedAt = now}
+        return visible
     end
 
     ---------------------------------------------------------------------------
@@ -270,7 +322,7 @@ return function(Window, runtimeInfo)
 
                     if State.ESPWallCheck and myHRP then
                         local camPos = Camera.CFrame.Position
-                        local visible = isVisible(camPos, hrp.Position, char)
+                        local visible = isCharacterVisible(camPos, char)
                         if visible then
                             esp.highlight.FillColor = COLOR_VISIBLE
                             esp.highlight.OutlineColor = COLOR_VISIBLE
@@ -532,7 +584,7 @@ return function(Window, runtimeInfo)
 
             local dist2D = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
             if (not maxPixels or dist2D <= maxPixels) and dist2D < closestDist
-                and (not requireVisible or isVisible(Camera.CFrame.Position, targetPart.Position, char)) then
+                and (not requireVisible or isPointVisible(Camera.CFrame.Position, targetPart.Position, char)) then
                 closestDist = dist2D
                 closestPlayer = player
             end
@@ -553,7 +605,7 @@ return function(Window, runtimeInfo)
         if not onScreen or point.Z <= 0 then return false end
         local center = Camera.ViewportSize * 0.5
         if (Vector2.new(point.X, point.Y) - center).Magnitude > State.AimFOV then return false end
-        return not State.AimVisibleCheck or isVisible(Camera.CFrame.Position, part.Position, char)
+        return not State.AimVisibleCheck or isPointVisible(Camera.CFrame.Position, part.Position, char)
     end
 
     local function updateAutoAim()
@@ -626,7 +678,7 @@ return function(Window, runtimeInfo)
                         end
                         local scaled = planar / State.RadarRange * (State.RadarSize - 6)
                         blip.Position = center + Vector2.new(scaled.X, scaled.Y)
-                        blip.Color = isVisible(Camera.CFrame.Position, root.Position, getCharacter(player))
+                        blip.Color = isCharacterVisible(Camera.CFrame.Position, getCharacter(player))
                             and Color3.fromRGB(255, 70, 70) or Color3.fromRGB(255, 190, 60)
                         blip.Visible = true
                         active[player] = true
@@ -738,6 +790,8 @@ return function(Window, runtimeInfo)
     end)
 
     Connections.playerRemoving = Players.PlayerRemoving:Connect(function(p)
+        local character = getCharacter(p)
+        if character then visibilityCache[character] = nil end
         removeESP(p)
         if radarBlips[p] then radarBlips[p]:Remove(); radarBlips[p] = nil end
     end)
@@ -970,7 +1024,7 @@ return function(Window, runtimeInfo)
                 getgenv().__RAVEN_COLD_WAR = nil
             end
     end
-    getgenv().__RAVEN_COLD_WAR = {Version="v1.1.2",State=State,Destroy=destroy}
+    getgenv().__RAVEN_COLD_WAR = {Version="v1.1.3",State=State,Destroy=destroy}
     if runtimeInfo.registerCleanup then
         runtimeInfo.registerCleanup(destroy)
     end
