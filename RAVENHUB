@@ -302,11 +302,19 @@ local SCRIPTS = {
     },
     {
         name        = "Fish an Anime RNG 🎲",
-        description = "Native Auto Fish | Backpack | Performance | Teleport | ESP",
+        description = "Native Auto Fish | Backpack | Rewards | Rebirth | Performance | ESP",
         placeIds    = {74729868188364},
         gameIds     = {9582986239},
         version     = "v1.0.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/fish_anime_rng.lua",
+    },
+    {
+        name        = "TTK Testing [MAP VOTING]",
+        description = "FFA Player ESP | Match Dashboard | Map Tracker | Visibility QoL",
+        placeIds    = {120189115846709},
+        gameIds     = {10090256806},
+        version     = "v1.0.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/ttk_testing.lua",
     },
     {
         name        = "KILLSTREAK!",
