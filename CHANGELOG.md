@@ -2,6 +2,7 @@
 
 ## 2026-08-23
 
+- **Cold War v1.1.3** — Added cached multi-part and inset-corner visibility sampling, so ESP/radar detect enemies whose head, limbs, or body edge is exposed while the HumanoidRootPart remains behind cover.
 - **RAVEN HUB maclib-4** — Removed automatic `queue_on_teleport` persistence; script startup is now left to the executor's Auto Execute configuration.
 - **RAVEN HUB maclib-3** — Added JobId-scoped queue_on_teleport persistence so the hub reloads and re-arms itself after dungeon/lobby server transitions without duplicate queues in the same session.
 - **Iron Soul: Dungeon v1.2.11** — Added a guarded Door-to-Portal chain recovery: after an open door, an empty between-round player within 35 studs of a real portal is teleported into it and touched automatically.
