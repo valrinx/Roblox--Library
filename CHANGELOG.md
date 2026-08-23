@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-08-23 - Fish an Anime RNG v1.0.0
+
+- Added native-controller Auto Fish, backpack capacity automation, Equip Best and guarded Sell All.
+- Added the game's Performance Mode, pond/catch ESP, status dashboard, Anti AFK, and travel shortcuts.
+- Registered PlaceId `74729868188364` and GameId `9582986239` in RAVENHUB.
+
 ## 2026-08-23 - Load The Truck v1.0.3
 
 - Fixed `WakeWorker`, `AssignWorkerZone`, conveyor/floor/parking unlock, scanner upgrade/unlock, and box-tier remote arguments to match the live game controllers.
