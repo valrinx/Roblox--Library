@@ -11,7 +11,7 @@
     - No Fog
     - FOV Changer
     - Characters folder support (game uses workspace.Characters)
-    - v1.1.3 cached multi-part visibility raycasts for partially exposed players
+    - v1.1.5 rotating multi-part visibility checks for every player each frame
 
     Module format: returns function(Window, runtimeInfo) for RAVENHUB loader
 ]]
@@ -134,11 +134,11 @@ return function(Window, runtimeInfo)
     local VISIBILITY_PARTS = {
         "Head", "Torso", "UpperTorso", "LowerTorso", "HumanoidRootPart",
         "Left Arm", "Right Arm", "Left Leg", "Right Leg",
-        "LeftUpperArm", "RightUpperArm", "LeftLowerArm", "RightLowerArm",
-        "LeftUpperLeg", "RightUpperLeg", "LeftLowerLeg", "RightLowerLeg",
+        "LeftUpperArm", "RightUpperArm", "LeftUpperLeg", "RightUpperLeg",
     }
-    local VISIBILITY_CACHE_SECONDS = 0.08
     local visibilityCache = {}
+    local visibilityFrame = 0
+    local rayFilterFrame = -1
 
     local COLOR_VISIBLE = Color3.fromRGB(255, 30, 30)
     local COLOR_HIDDEN  = Color3.fromRGB(0, 255, 80)
@@ -146,6 +146,7 @@ return function(Window, runtimeInfo)
     local COLOR_TEXT_HIDDEN  = Color3.fromRGB(0, 255, 100)
 
     local function buildRayFilter()
+        if rayFilterFrame == visibilityFrame then return end
         local ignore = {}
         local myChar = getCharacter(LP)
         if myChar then table.insert(ignore, myChar) end
@@ -154,6 +155,7 @@ return function(Window, runtimeInfo)
             if folder then table.insert(ignore, folder) end
         end
         RayParams.FilterDescendantsInstances = ignore
+        rayFilterFrame = visibilityFrame
     end
 
     local function rayReachesTarget(fromPos, toPos, targetCharacter)
@@ -171,40 +173,45 @@ return function(Window, runtimeInfo)
     local function isCharacterVisible(fromPos, targetCharacter)
         if not targetCharacter then return false end
 
-        local now = os.clock()
         local cached = visibilityCache[targetCharacter]
-        if cached and now - cached.checkedAt < VISIBILITY_CACHE_SECONDS then
+        if cached and cached.frame == visibilityFrame then
             return cached.visible
         end
 
-        local visible = false
-        buildRayFilter()
+        local samplePoints = {}
         for _, partName in ipairs(VISIBILITY_PARTS) do
             local part = targetCharacter:FindFirstChild(partName)
             if part and part:IsA("BasePart") then
-                -- Check the centre first, then four inset corners. A limb or the
-                -- edge of the torso can be visible while its centre remains covered.
-                local halfX = math.max(0, part.Size.X * 0.42)
-                local halfY = math.max(0, part.Size.Y * 0.42)
-                local offsets = {
-                    Vector3.zero,
-                    Vector3.new(halfX, halfY, 0),
-                    Vector3.new(-halfX, halfY, 0),
-                    Vector3.new(halfX, -halfY, 0),
-                    Vector3.new(-halfX, -halfY, 0),
-                }
-                for _, offset in ipairs(offsets) do
-                    if rayReachesTarget(fromPos, part.CFrame:PointToWorldSpace(offset), targetCharacter) then
-                        visible = true
-                        break
-                    end
+                table.insert(samplePoints, part.Position)
+                if partName == "Head" or partName == "Torso" or partName == "UpperTorso" then
+                    local halfX = part.Size.X * 0.42
+                    table.insert(samplePoints, part.CFrame:PointToWorldSpace(Vector3.new(halfX, 0, 0)))
+                    table.insert(samplePoints, part.CFrame:PointToWorldSpace(Vector3.new(-halfX, 0, 0)))
                 end
             end
-            if visible then break end
         end
 
-        visibilityCache[targetCharacter] = {visible = visible, checkedAt = now}
-        return visible
+        if #samplePoints == 0 then return false end
+
+        cached = cached or {sampleIndex = 1, visible = false, cycleVisible = false}
+        local sampleIndex = math.clamp(cached.sampleIndex or 1, 1, #samplePoints)
+        buildRayFilter()
+        local sampleVisible = rayReachesTarget(fromPos, samplePoints[sampleIndex], targetCharacter)
+        cached.cycleVisible = cached.cycleVisible or sampleVisible
+
+        -- A hit is reported immediately. A hidden result is committed only after
+        -- every body sample has missed, preventing flicker between rotating parts.
+        if sampleVisible then cached.visible = true end
+        sampleIndex += 1
+        if sampleIndex > #samplePoints then
+            cached.visible = cached.cycleVisible
+            cached.cycleVisible = false
+            sampleIndex = 1
+        end
+        cached.sampleIndex = sampleIndex
+        cached.frame = visibilityFrame
+        visibilityCache[targetCharacter] = cached
+        return cached.visible
     end
 
     ---------------------------------------------------------------------------
@@ -804,6 +811,7 @@ return function(Window, runtimeInfo)
     end)
 
     Connections.render = RunService.RenderStepped:Connect(function()
+        visibilityFrame += 1
         predictionFrame += 1
         updateESP()
         updateAimPrediction()
@@ -1024,7 +1032,7 @@ return function(Window, runtimeInfo)
                 getgenv().__RAVEN_COLD_WAR = nil
             end
     end
-    getgenv().__RAVEN_COLD_WAR = {Version="v1.1.3",State=State,Destroy=destroy}
+    getgenv().__RAVEN_COLD_WAR = {Version="v1.1.5",State=State,Destroy=destroy}
     if runtimeInfo.registerCleanup then
         runtimeInfo.registerCleanup(destroy)
     end
