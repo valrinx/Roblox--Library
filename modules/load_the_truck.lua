@@ -424,12 +424,22 @@ return function(Window, scriptInfo)
         if not running or not settings.autoWakeWorker then return end
         local now = os.clock()
         if now - lastWorkerTick < settings.workerInterval then return end
+        lastWorkerTick = now
 
-        -- Wake all sleeping workers
+        local myId = tostring(player.UserId)
         local workers = workspace:FindFirstChild("ActiveWorkers")
         if workers then
             for _, worker in ipairs(workers:GetChildren()) do
-                fireRemote(WakeWorker, {worker.Name})
+                if worker:IsA("Model") then
+                    local owner = tostring(worker:GetAttribute("OwnerUserId") or "")
+                    local working = worker:GetAttribute("Working")
+                    local stamina = worker:GetAttribute("Stamina") or 0
+
+                    -- Only wake my workers that are sleeping (Working=false or Stamina=0)
+                    if owner == myId and (working == false or stamina == 0) then
+                        fireRemote(WakeWorker, {worker.Name})
+                    end
+                end
             end
         end
     end
