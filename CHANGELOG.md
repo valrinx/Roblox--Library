@@ -2,6 +2,7 @@
 
 ## 2026-08-23
 
+- **Load The Truck v1.0.1** — Fixed shared-timer starvation across collect/deposit, workers, upgrades, and scanners; implemented Auto Assign and Auto Unlock Scanner; corrected upgrade remote arguments; rate-limited rebirth/leave rewards; restricted status and collection to owned objects; fixed ESP range cleanup/distance updates; and added Conveyor ESP.
 - **Cold War v1.1.5** — Restored visibility evaluation for every enemy each frame while rotating one body sample per enemy per frame; full character coverage is retained without burst raycasts, and hidden state is committed only after a complete missed cycle.
 - **Cold War v1.1.4** — Capped multi-part visibility work at three characters per frame, increased cache lifetime, and reduced each character to bounded centre/side samples to remove the v1.1.3 frame spikes.
 - **Cold War v1.1.3** — Added cached multi-part and inset-corner visibility sampling, so ESP/radar detect enemies whose head, limbs, or body edge is exposed while the HumanoidRootPart remains behind cover.
