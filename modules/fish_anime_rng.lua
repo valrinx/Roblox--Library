@@ -24,9 +24,15 @@ return function(Window, scriptInfo)
     local settings = {
         autoFish = false,
         autoEquipBest = false,
+        autoPickUpAll = false,
         autoSellAll = false,
         sellAtPercent = 95,
         performanceMode = false,
+        autoClaimDaily = false,
+        autoClaimPlaytime = false,
+        autoClaimQuests = false,
+        autoClaimIndex = false,
+        autoRebirth = false,
         characterEsp = false,
         pondEsp = false,
         espDistance = 750,
@@ -117,6 +123,48 @@ return function(Window, scriptInfo)
         root.CFrame = CFrame.new(position + Vector3.new(0, 4, 0))
         root.AssemblyLinearVelocity = Vector3.zero
         return true
+    end
+
+    local function activateButton(button)
+        if not button or not button:IsA("GuiButton") then return false end
+        if type(firesignal) == "function" then
+            return pcall(function() firesignal(button.Activated) end)
+        end
+        return pcall(function() button:Activate() end)
+    end
+
+    local function claimReadyRewards()
+        local gui = player:FindFirstChildOfClass("PlayerGui")
+        local main = gui and gui:FindFirstChild("MainGui")
+        if not main then return end
+        if settings.autoClaimPlaytime then
+            local frame = main:FindFirstChild("PlaytimeRewardsGUI")
+            local container = frame and frame:FindFirstChild("RewardsContainer")
+            for _, reward in ipairs(container and container:GetChildren() or {}) do
+                local status = reward:FindFirstChild("Status")
+                if reward:IsA("GuiButton") and status and status:IsA("TextLabel")
+                    and status.Text:upper():find("CLAIM", 1, true) and not status.Text:find("Claimed", 1, true) then
+                    activateButton(reward)
+                    return
+                end
+            end
+        end
+        if settings.autoClaimDaily then
+            local daily = main:FindFirstChild("DailyGUI")
+            for day = 1, 7 do
+                local row = daily and daily:FindFirstChild("Day" .. day)
+                local status = row and row:FindFirstChild("Status" .. day)
+                local card = row and row:FindFirstChild(tostring(day))
+                local claim = card and card:FindFirstChild("ClaimBtn")
+                if status and status:IsA("TextLabel") and claim
+                    and not status.Text:find("Claimed", 1, true) and not status.Text:find("Not Ready", 1, true) then
+                    activateButton(claim)
+                    return
+                end
+            end
+        end
+        if settings.autoClaimQuests then call("QuestClaimAll") end
+        if settings.autoClaimIndex then call("IndexClaimAllRewards") end
     end
 
     local function findNamedObject(names)
@@ -222,6 +270,10 @@ return function(Window, scriptInfo)
         Callback = function(value) settings.autoEquipBest = value end,
     })
     BackpackTab:CreateToggle({
+        Name = "Auto Pick Up All", CurrentValue = false, Flag = "FishAnimePickUpAll",
+        Callback = function(value) settings.autoPickUpAll = value end,
+    })
+    BackpackTab:CreateToggle({
         Name = "Auto Sell All When Full", CurrentValue = false, Flag = "FishAnimeSellAll",
         Callback = function(value) settings.autoSellAll = value end,
     })
@@ -231,7 +283,19 @@ return function(Window, scriptInfo)
         Callback = function(value) settings.sellAtPercent = value end,
     })
     BackpackTab:CreateButton({Name = "Equip Best Now", Callback = function() call("BackpackEquipBest") end})
+    BackpackTab:CreateButton({Name = "Pick Up All Now", Callback = function() call("BackpackPickUpAll") end})
     BackpackTab:CreateButton({Name = "Sell All Now", Callback = function() call("BackpackSellAllRequest") end})
+
+    local RewardsTab = Window:CreateTab("🎁 Rewards", "gift")
+    RewardsTab:CreateSection("Auto Claim")
+    RewardsTab:CreateToggle({Name = "Daily Reward", CurrentValue = false, Flag = "FishAnimeDaily", Callback = function(v) settings.autoClaimDaily = v end})
+    RewardsTab:CreateToggle({Name = "Playtime Rewards", CurrentValue = false, Flag = "FishAnimePlaytime", Callback = function(v) settings.autoClaimPlaytime = v end})
+    RewardsTab:CreateToggle({Name = "Quest Rewards", CurrentValue = false, Flag = "FishAnimeQuests", Callback = function(v) settings.autoClaimQuests = v end})
+    RewardsTab:CreateToggle({Name = "Index Rewards", CurrentValue = false, Flag = "FishAnimeIndex", Callback = function(v) settings.autoClaimIndex = v end})
+    RewardsTab:CreateButton({Name = "Claim Ready Rewards Now", Callback = claimReadyRewards})
+    RewardsTab:CreateSection("Rebirth")
+    RewardsTab:CreateToggle({Name = "Auto Rebirth (Cash)", CurrentValue = false, Flag = "FishAnimeRebirth", Callback = function(v) settings.autoRebirth = v end})
+    RewardsTab:CreateButton({Name = "Rebirth With Cash Now", Callback = function() call("RebirthPurchase", "Cash") end})
 
     local VisualTab = Window:CreateTab("👁 Visual", "eye")
     VisualTab:CreateSection("ESP")
@@ -271,16 +335,26 @@ return function(Window, scriptInfo)
     end))
 
     task.spawn(function()
-        local actionAt, espAt, statusAt = 0, 0, 0
+        local actionAt, rewardAt, rebirthAt, espAt, statusAt = 0, 0, 0, 0, 0
         while running do
             local now = os.clock()
             if now - actionAt >= 5 then
                 actionAt = now
                 local used, capacity = backpackUsage()
                 if settings.autoEquipBest then call("BackpackEquipBest") end
+                if settings.autoPickUpAll then call("BackpackPickUpAll") end
                 if settings.autoSellAll and capacity > 0 and used / capacity * 100 >= settings.sellAtPercent then
                     call("BackpackSellAllRequest")
                 end
+            end
+            if now - rewardAt >= 10 and (settings.autoClaimDaily or settings.autoClaimPlaytime
+                or settings.autoClaimQuests or settings.autoClaimIndex) then
+                rewardAt = now
+                claimReadyRewards()
+            end
+            if now - rebirthAt >= 15 and settings.autoRebirth then
+                rebirthAt = now
+                call("RebirthPurchase", "Cash")
             end
             if now - espAt >= 2 and (settings.pondEsp or settings.characterEsp) then
                 espAt = now
