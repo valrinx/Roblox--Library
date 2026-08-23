@@ -1,7 +1,7 @@
 --[[
     RAVEN HUB | [UPD] Load The Truck!
     PlaceId: 120491560796071 | GameId: 10417812127
-    Version: v1.0.1
+    Version: v1.0.3
 
     Auto Boxes | Worker Mgmt | Upgrades | Scanner | Rewards | Teleport | ESP
 ]]
@@ -199,6 +199,48 @@ return function(Window, scriptInfo)
         for _, plot in ipairs(plots:GetChildren()) do
             if tostring(plot:GetAttribute("Owner")) == tostring(player.UserId) then
                 return plot
+            end
+        end
+        return nil
+    end
+
+    local function getNextConveyorIndex()
+        local plot = getMyPlot()
+        local unlocks = plot and plot:FindFirstChild("ConveyorUnlocks")
+        if not unlocks then return nil end
+        local best
+        for _, unlock in ipairs(unlocks:GetChildren()) do
+            local index = tonumber(unlock.Name:match("(%d+)$"))
+            local surface = unlock:FindFirstChild("SurfacePart")
+            if index and surface and surface:IsA("BasePart") and surface.Transparency < 0.5
+                and (not best or index < best) then
+                best = index
+            end
+        end
+        return best
+    end
+
+    local function getOwnedConveyorIndices()
+        local nextIndex = getNextConveyorIndex() or 16
+        local result = {}
+        for index = 1, math.max(1, nextIndex - 1) do result[#result + 1] = index end
+        return result
+    end
+
+    local function getNextBoxTier()
+        local gui = player:FindFirstChildOfClass("PlayerGui")
+        local frames = gui and gui:FindFirstChild("Frames")
+        local boxTiers = frames and frames:FindFirstChild("BoxTiers")
+        local scrolling = boxTiers and boxTiers:FindFirstChild("ScrollingFrame")
+        local holder = scrolling and scrolling:FindFirstChild("Holder")
+        if not holder then return nil end
+        for _, row in ipairs(holder:GetChildren()) do
+            local cash = row:FindFirstChild("Cash")
+            local equip = row:FindFirstChild("Equip")
+            local locked = row:FindFirstChild("LockedFrame")
+            if cash and cash:IsA("GuiButton") and cash.Visible
+                and (not locked or not locked.Visible) and (not equip or not equip.Visible) then
+                return row.Name
             end
         end
         return nil
@@ -411,8 +453,14 @@ return function(Window, scriptInfo)
     FarmTab:CreateButton({
         Name = "Upgrade Box Tier",
         Callback = function()
-            fireRemote(BoxTier, {})
-            notify("📦 Box", "Box tier upgrade requested")
+            local tier = getNextBoxTier()
+            if tier then
+                fireRemote(BoxTier, {"Buy", tier})
+                task.delay(0.5, function() if running then fireRemote(BoxTier, {"Equip", tier}) end end)
+                notify("📦 Box", "Buying box tier: " .. tier)
+            else
+                notify("📦 Box", "No purchasable box tier found")
+            end
         end,
     })
     FarmTab:CreateButton({
@@ -431,6 +479,7 @@ return function(Window, scriptInfo)
         fireRemote(HireWorker, {})
     end
 
+    local workerWakeAt = setmetatable({}, {__mode = "k"})
     local function performAutoWakeWorker()
         if not running or not settings.autoWakeWorker then return end
         local myId = tostring(player.UserId)
@@ -443,14 +492,18 @@ return function(Window, scriptInfo)
                     local stamina = worker:GetAttribute("Stamina") or 0
 
                     -- Only wake my workers that are sleeping (Working=false or Stamina=0)
-                    if owner == myId and (working == false or stamina == 0) then
-                        fireRemote(WakeWorker, {worker.Name})
+                    local now = os.clock()
+                    if owner == myId and (working == false or stamina == 0)
+                        and now - (workerWakeAt[worker] or -math.huge) >= 5 then
+                        fireRemote(WakeWorker, {worker})
+                        workerWakeAt[worker] = now
                     end
                 end
             end
         end
     end
 
+    local assignedWorkers = {}
     local function performAutoAssignZone()
         if not running or not settings.autoAssignZone then return end
         local workers = workspace:FindFirstChild("ActiveWorkers")
@@ -458,8 +511,9 @@ return function(Window, scriptInfo)
         for _, worker in ipairs(workers:GetChildren()) do
             if tostring(worker:GetAttribute("OwnerUserId")) == tostring(player.UserId) then
                 local index = tonumber(worker.Name:match("_Worker_(%d+)$"))
-                if index then
+                if index and not assignedWorkers[index] then
                     fireRemote(AssignWorkerZone, table.pack("Worker", nil, index, "Auto"))
+                    assignedWorkers[index] = true
                 end
             end
         end
@@ -514,26 +568,55 @@ return function(Window, scriptInfo)
     -- ============================================================
     --  TAB 3: UPGRADES
     -- ============================================================
+    local upgradeNames = {
+        "ProductionRate", "WalkSpeed", "StackSize", "Luck", "BoxFlySpeed",
+        "WorkerSpeed", "WorkerStackSize", "WorkerLuck", "WorkerEnergy",
+        "TruckSpeed", "TruckSpawnRate",
+    }
+    local upgradeCursor = 0
     local function performAutoUpgrade()
         if not running or not settings.autoUpgrade then return end
-        for _, upgradeName in ipairs({"ProductionRate", "WorkerSpeed", "TruckSpeed", "TruckSpawnRate"}) do
-            fireRemote(Upgrade, {upgradeName, "Cash"})
-        end
+        upgradeCursor = upgradeCursor % #upgradeNames + 1
+        fireRemote(Upgrade, {upgradeNames[upgradeCursor], "Cash"})
     end
 
     local function performAutoUnlockConveyor()
         if not running or not settings.autoUnlockConveyor then return end
-        fireRemote(UnlockConveyor, {})
+        local index = getNextConveyorIndex()
+        if index then fireRemote(UnlockConveyor, {index}) end
+    end
+
+    local function unlockNextFloor()
+        local plot = getMyPlot()
+        if not plot then return end
+        for floor, signName in ipairs({"SecondFloorUnlockSign", "ThirdFloorUnlockSign"}) do
+            local sign = plot:FindFirstChild(signName)
+            local part = sign and sign:FindFirstChildWhichIsA("BasePart", true)
+            if part and part.Transparency < 0.5 then
+                fireRemote(UnlockFloor, {floor + 1})
+                return
+            end
+        end
     end
 
     local function performAutoUnlockFloor()
         if not running or not settings.autoUnlockFloor then return end
-        fireRemote(UnlockFloor, {})
+        unlockNextFloor()
     end
 
     local function performAutoUnlockParking()
         if not running or not settings.autoUnlockParking then return end
-        fireRemote(UnlockParking, {})
+        local plot = getMyPlot()
+        local unlocks = plot and (plot:FindFirstChild("ParkingUnlocks") or plot:FindFirstChild("VehicleStopUnlocks"))
+        if not unlocks then return end
+        for _, unlock in ipairs(unlocks:GetChildren()) do
+            local index = tonumber(unlock.Name:match("(%d+)$"))
+            local part = unlock:FindFirstChildWhichIsA("BasePart", true)
+            if index and part and part.Transparency < 0.5 then
+                fireRemote(UnlockParking, {index})
+                return
+            end
+        end
     end
 
     local UpgradeTab = Window:CreateTab("⬆️ Upgrades", "arrow-up")
@@ -585,14 +668,15 @@ return function(Window, scriptInfo)
     UpgradeTab:CreateButton({
         Name = "Unlock Next Conveyor",
         Callback = function()
-            fireRemote(UnlockConveyor, {})
+            local index = getNextConveyorIndex()
+            if index then fireRemote(UnlockConveyor, {index}) end
             notify("⬆️ Upgrade", "Conveyor unlock requested")
         end,
     })
     UpgradeTab:CreateButton({
         Name = "Unlock Next Floor",
         Callback = function()
-            fireRemote(UnlockFloor, {})
+            unlockNextFloor()
             notify("⬆️ Upgrade", "Floor unlock requested")
         end,
     })
@@ -605,15 +689,25 @@ return function(Window, scriptInfo)
         fireRemote(BoxScanned, {})
     end
 
+    local scannerCursor = 0
+    local function nextScannerIndex()
+        local indices = getOwnedConveyorIndices()
+        scannerCursor = scannerCursor % #indices + 1
+        return indices[scannerCursor]
+    end
+
     local function performAutoUpgradeScanner()
         if not running or not settings.autoUpgradeScanner then return end
-        fireRemote(ScannerUpgrade, {"ScanCooldown", "Cash"})
-        fireRemote(ScannerUpgrade, {"CashMultiplier", "Cash"})
+        local index = nextScannerIndex()
+        fireRemote(ScannerUpgrade, {index, "ScanCooldown", "Cash"})
+        fireRemote(ScannerUpgrade, {index, "CashMultiplier", "Cash"})
     end
 
 
     local function performAutoUnlockScanner()
-        if running and settings.autoUnlockScanner then fireRemote(UnlockScanner, {}) end
+        if running and settings.autoUnlockScanner then
+            fireRemote(UnlockScanner, {nextScannerIndex()})
+        end
     end
 
     local ScannerTab = Window:CreateTab("📡 Scanner", "radio")
@@ -1316,7 +1410,7 @@ return function(Window, scriptInfo)
     end
 
     environment.__RAVEN_LOAD_TRUCK = {
-        Version = "v1.0.1",
+        Version = "v1.0.3",
         Settings = settings,
         Destroy = destroy,
         TeleportTo = teleportTo,
@@ -1331,5 +1425,5 @@ return function(Window, scriptInfo)
         scriptInfo.registerCleanup(destroy)
     end
 
-    notify("📦 Load The Truck", "v1.0.1 loaded — automation timers, ownership, remotes, and ESP fixed")
+    notify("📦 Load The Truck", "v1.0.3 loaded — remotes fixed and repeated calls reduced")
 end
