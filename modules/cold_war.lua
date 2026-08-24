@@ -191,6 +191,41 @@ return function(Window, runtimeInfo)
         return closestIndex
     end
 
+    local function scanAutoVisibleParts(fromPos, targetCharacter, parts, cached)
+        buildRayFilter()
+        local center = Camera.ViewportSize * 0.5
+        local priorityPart, priorityDistance = nil, math.huge
+        local anyVisible = false
+
+        for _, candidate in ipairs(parts) do
+            local sampleVisible = rayReachesTarget(
+                fromPos, candidate.Position, targetCharacter, candidate
+            )
+            local partState = cached.parts[candidate] or {}
+            partState.sampleIndex = 1
+            partState.cycleVisible = false
+            partState.visible = sampleVisible
+            cached.parts[candidate] = partState
+
+            if sampleVisible then
+                anyVisible = true
+                local point, onScreen = Camera:WorldToViewportPoint(candidate.Position)
+                if onScreen and point.Z > 0 then
+                    local distance = (Vector2.new(point.X, point.Y) - center).Magnitude
+                    if distance < priorityDistance then
+                        priorityPart, priorityDistance = candidate, distance
+                    end
+                end
+            end
+        end
+
+        cached.visible = anyVisible
+        cached.priorityPart = priorityPart
+        cached.frame = visibilityFrame
+        visibilityCache[targetCharacter] = cached
+        return cached.visible, cached.parts, cached.priorityPart
+    end
+
     local function isCharacterVisible(fromPos, targetCharacter)
         if not targetCharacter then return false end
 
@@ -217,7 +252,7 @@ return function(Window, runtimeInfo)
         local autoVisibleActive = State.AutoAim and State.AimPartMode == "Auto Visible"
             and (State.AimActivation == "Always" or rightMouseDown)
         if autoVisibleActive then
-            partIndex = closestPartIndexToCrosshair(parts)
+            return scanAutoVisibleParts(fromPos, targetCharacter, parts, cached)
         end
         local part = parts[partIndex]
         local partState = cached.parts[part] or {sampleIndex = 1, visible = false, cycleVisible = false}
