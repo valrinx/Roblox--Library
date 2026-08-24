@@ -14,13 +14,15 @@ return function(Window, scriptInfo)
     local lastTriggerAt = 0
     local espAccumulator = 0
     local mouseHeld = false
+    local lockKeyHeld = false
     local bindingName = "RavenSniperArenaAim_" .. tostring(localPlayer.UserId)
 
     local settings = {
         aimlock = false,
         aimPart = "Head",
         fov = 200,
-        smoothness = 1,
+        aimSmooth = 55,
+        aimActivation = "Hold Key",
         triggerBot = false,
         triggerDelay = 0.03,
         triggerCooldown = 0.16,
@@ -160,8 +162,13 @@ return function(Window, scriptInfo)
         local origin = camera.CFrame.Position
         if (target.part.Position - origin).Magnitude < 0.01 then return end
         local goal = CFrame.lookAt(origin, target.part.Position)
-        local strength = math.clamp(settings.smoothness, 0.05, 1)
-        local alpha = 1 - math.pow(1 - strength, math.max(deltaTime * 60, 0.01))
+        local smooth = math.clamp(settings.aimSmooth, 0, 100) / 100
+        if smooth <= 0.001 then
+            camera.CFrame = goal
+            return
+        end
+        local response = 1.5 + (30 * ((1 - smooth) ^ 2))
+        local alpha = 1 - math.exp(-response * math.max(deltaTime, 1 / 240))
         camera.CFrame = camera.CFrame:Lerp(goal, math.clamp(alpha, 0, 1))
     end
 
@@ -341,7 +348,8 @@ return function(Window, scriptInfo)
     RunService:BindToRenderStep(bindingName, 10000, function(deltaTime)
         if not running then return end
 
-        if settings.aimlock then
+        local lockActive = settings.aimlock and (settings.aimActivation == "Always" or lockKeyHeld)
+        if lockActive then
             lockedTarget = refreshTarget(lockedTarget)
             if not lockedTarget then
                 lockedTarget = getBestTarget()
@@ -404,13 +412,28 @@ return function(Window, scriptInfo)
         Callback = function(value) settings.fov = value end,
     })
     CombatTab:CreateSlider({
-        Name = "Aim Speed",
-        Range = {5, 100},
-        Increment = 5,
+        Name = "Aim Smoothness",
+        Range = {0, 100},
+        Increment = 1,
         Suffix = "%",
-        CurrentValue = 100,
-        Flag = "SAAimSpeed",
-        Callback = function(value) settings.smoothness = value / 100 end,
+        CurrentValue = 55,
+        Flag = "SAAimSmoothness",
+        Callback = function(value) settings.aimSmooth = value end,
+    })
+    CombatTab:CreateDropdown({
+        Name = "Lock Activation",
+        Options = {"Hold Key", "Always"},
+        CurrentOption = {"Hold Key"},
+        MultipleOptions = false,
+        Flag = "SALockActivation",
+        Callback = function(value)
+            settings.aimActivation = type(value) == "table" and value[1] or tostring(value)
+            lockedTarget = nil
+        end,
+    })
+    CombatTab:CreateKeybind({
+        Name = "Lock Key", CurrentKeybind = "Q", HoldToInteract = true, Flag = "SALockKey",
+        Callback = function(value) lockKeyHeld = value == true end,
     })
     CombatTab:CreateToggle({
         Name = "Team Check",
@@ -491,6 +514,7 @@ return function(Window, scriptInfo)
         if not running then return end
         running = false
         settings.aimlock = false
+        lockKeyHeld = false
         settings.triggerBot = false
         settings.esp = false
         lockedTarget = nil
