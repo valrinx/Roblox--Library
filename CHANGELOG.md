@@ -1,3 +1,4 @@
+- **Train Your Fish to Race v1.2.0** - Added eligibility-gated Auto Online Rewards, Auto Daily Sign, Auto Spin/Free Spin, and event-driven Auto Race Reward with cooldown protection.
 # Changelog
 
 ## 2026-08-25
