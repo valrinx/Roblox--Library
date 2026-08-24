@@ -11,7 +11,7 @@
     - No Fog
     - FOV Changer
     - Characters folder support (game uses workspace.Characters)
-    - v1.7.0 Frag Auto Aim with gravity and map-bounce trajectory solving
+    - v1.7.4 Gun Aim Prediction no longer applies duplicate display smoothing
     - v1.6.1 Auto Visible prefers the exposed body part nearest the crosshair
     - v1.6.0 configurable auto-lock restricted to shootable body parts
 
@@ -55,12 +55,6 @@ return function(Window, runtimeInfo)
         AimPartMode = "Auto Visible",
         AimActivation = "Right Mouse",
         StickyTarget = true,
-        FragAutoAim = false,
-        FragThrowSpeed = 90,
-        FragBounce = 0.42,
-        FragFriction = 0.22,
-        FragFuse = 4,
-        FragSmoothness = 0.2,
         Radar = false,
         RadarRange = 700,
         RadarSize = 150,
@@ -662,8 +656,6 @@ return function(Window, runtimeInfo)
     local predictionDot = nil
     local predictionCircle = nil
     local predictionText = nil
-    local predictionDisplayPosition = nil
-    local predictionDisplayTarget = nil
 
     local function createPredictionDot()
         if predictionDot then return end
@@ -697,130 +689,9 @@ return function(Window, runtimeInfo)
         if predictionDot then predictionDot:Remove(); predictionDot = nil end
         if predictionCircle then predictionCircle:Remove(); predictionCircle = nil end
         if predictionText then predictionText:Remove(); predictionText = nil end
-        predictionDisplayPosition = nil
-        predictionDisplayTarget = nil
     end
 
     local resolveAimPart
-
-    local function getEquippedGrenade()
-        local character = getCharacter(LP)
-        if not character then return nil end
-        for _, child in ipairs(character:GetChildren()) do
-            if child:IsA("Tool") and child:GetAttribute("ToolType") == "Grenade" then
-                return child
-            end
-        end
-        return nil
-    end
-
-    local function simulateFragTrajectory(origin, velocity, options)
-        options = options or {}
-        local fuse = math.max(0.1, options.fuse or State.FragFuse)
-        local bounce = math.clamp(options.bounce or State.FragBounce, 0, 1)
-        local friction = math.clamp(options.friction or State.FragFriction, 0, 1)
-        local step = math.clamp(options.step or (1 / 30), 1 / 120, 0.1)
-        local gravity = Vector3.new(0, -(options.gravity or workspace.Gravity), 0)
-        local params = RaycastParams.new()
-        params.FilterType = Enum.RaycastFilterType.Exclude
-        params.FilterDescendantsInstances = {getCharacter(LP)}
-        params.IgnoreWater = false
-        local position = origin
-        local points = {origin}
-        local bounces = 0
-        local closestDistance = options.target and (origin - options.target).Magnitude or math.huge
-        local closestPosition = origin
-        for _ = 1, math.ceil(fuse / step) do
-            local nextVelocity = velocity + gravity * step
-            local nextPosition = position + (velocity + nextVelocity) * 0.5 * step
-            local hit = workspace:Raycast(position, nextPosition - position, params)
-            if hit then
-                local normal = hit.Normal
-                local normalVelocity = normal * nextVelocity:Dot(normal)
-                local tangentVelocity = nextVelocity - normalVelocity
-                nextVelocity = tangentVelocity * (1 - friction) - normalVelocity * bounce
-                nextPosition = hit.Position + normal * 0.05
-                bounces += 1
-            end
-            position, velocity = nextPosition, nextVelocity
-            table.insert(points, position)
-            if options.target then
-                local distance = (position - options.target).Magnitude
-                if distance < closestDistance then
-                    closestDistance, closestPosition = distance, position
-                end
-            end
-        end
-        return {position=position, velocity=velocity, points=points, bounces=bounces,
-            closestDistance=closestDistance, closestPosition=closestPosition}
-    end
-
-    local function solveFragTrajectory(origin, target, options)
-        options = options or {}
-        local speed = math.max(10, options.speed or State.FragThrowSpeed)
-        local flat = Vector3.new(target.X - origin.X, 0, target.Z - origin.Z)
-        if flat.Magnitude < 0.01 then flat = Vector3.new(Camera.CFrame.LookVector.X, 0, Camera.CFrame.LookVector.Z) end
-        if flat.Magnitude < 0.01 then flat = Vector3.zAxis end
-        flat = flat.Unit
-        local best
-        for elevation = -10, 75, 2.5 do
-            local radians = math.rad(elevation)
-            local direction = flat * math.cos(radians) + Vector3.yAxis * math.sin(radians)
-            local result = simulateFragTrajectory(origin, direction * speed, {
-                target=target, fuse=options.fuse, bounce=options.bounce,
-                friction=options.friction, gravity=options.gravity, step=options.step,
-            })
-            if not best or result.closestDistance < best.missDistance then
-                best = {direction=direction, elevation=elevation, missDistance=result.closestDistance,
-                    impact=result.closestPosition, bounces=result.bounces, points=result.points}
-            end
-        end
-        return best
-    end
-
-    local function getFragTarget()
-        local center = Camera.ViewportSize * 0.5
-        local best, bestDistance
-        for _, player in ipairs(Players:GetPlayers()) do
-            if isEnemy(player) then
-                local character = getCharacter(player)
-                local part = character and (character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("Torso") or character:FindFirstChild("Head"))
-                if part then
-                    local point, onScreen = Camera:WorldToViewportPoint(part.Position)
-                    if onScreen and point.Z > 0 then
-                        local distance = (Vector2.new(point.X, point.Y) - center).Magnitude
-                        if distance <= State.AimFOV and (not bestDistance or distance < bestDistance) then
-                            best, bestDistance = part, distance
-                        end
-                    end
-                end
-            end
-        end
-        return best
-    end
-
-    local nextFragSolve = 0
-    local fragSolution
-    local function updateFragAim(dt)
-        State.FragAimTarget = nil
-        State.FragAimMiss = nil
-        if not State.FragAutoAim or not getEquippedGrenade() then fragSolution = nil return false end
-        local active = State.AimActivation == "Always" or rightMouseDown
-        if not active then fragSolution = nil return true end
-        local target = getFragTarget()
-        if not target then fragSolution = nil return true end
-        if os.clock() >= nextFragSolve then
-            nextFragSolve = os.clock() + 0.1
-            fragSolution = solveFragTrajectory(Camera.CFrame.Position, target.Position, {})
-        end
-        if fragSolution then
-            State.FragAimTarget = target.Parent and target.Parent.Name or target.Name
-            State.FragAimMiss = fragSolution.missDistance
-            local desired = CFrame.lookAt(Camera.CFrame.Position, Camera.CFrame.Position + fragSolution.direction)
-            Camera.CFrame = Camera.CFrame:Lerp(desired, 1 - math.exp(-dt / math.max(State.FragSmoothness, 0.01)))
-        end
-        return true
-    end
 
     -- Find closest enemy to crosshair
     local function getClosestEnemyToCrosshair(maxPixels, requireVisible)
@@ -921,11 +792,6 @@ return function(Window, runtimeInfo)
     end
 
     local function updateAutoAim(dt)
-        if State.FragAutoAim and getEquippedGrenade() then
-            State.AimLockedPart = nil
-            lockedTarget = nil
-            return
-        end
         local inputActive = aimActive()
         State.AimInputActive = inputActive
         State.AimEngaged = false
@@ -1025,8 +891,6 @@ return function(Window, runtimeInfo)
             if predictionDot then predictionDot.Visible = false end
             if predictionCircle then predictionCircle.Visible = false end
             if predictionText then predictionText.Visible = false end
-            predictionDisplayPosition = nil
-            predictionDisplayTarget = nil
             return
         end
 
@@ -1078,20 +942,6 @@ return function(Window, runtimeInfo)
         if onScreen then
             local rawPos2D = Vector2.new(screenPos.X, screenPos.Y)
             local pos2D = rawPos2D
-            if State.AutoAim and aimActive() then
-                if predictionDisplayTarget ~= target or predictionDisplayPosition == nil then
-                    predictionDisplayPosition = Camera.ViewportSize * 0.5
-                end
-                local center = Camera.ViewportSize * 0.5
-                local response = getAimResponse((rawPos2D - center).Magnitude)
-                local alpha = 1 - math.exp(-response * math.max(dt or 1 / 60, 1 / 240))
-                predictionDisplayPosition = predictionDisplayPosition:Lerp(rawPos2D, math.clamp(alpha, 0, 1))
-                predictionDisplayTarget = target
-                pos2D = predictionDisplayPosition
-            else
-                predictionDisplayPosition = nil
-                predictionDisplayTarget = nil
-            end
             predictionDot.Position = pos2D
             predictionDot.Radius = State.PredictDotSize
             predictionDot.Visible = true
@@ -1165,7 +1015,6 @@ return function(Window, runtimeInfo)
     RunService:BindToRenderStep(aimRenderStepName, Enum.RenderPriority.Camera.Value + 10, function(dt)
         visibilityFrame += 1
         predictionFrame += 1
-        updateFragAim(dt)
         updateAutoAim(dt)
         updateAimPrediction(dt)
         updateESP()
@@ -1354,12 +1203,6 @@ return function(Window, runtimeInfo)
     AimTab:CreateToggle({Name="Recoil / Sway Compensation",CurrentValue=true,Callback=function(v) State.AimSwayCompensation=v end})
     AimTab:CreateToggle({Name="Adaptive Smoothness",CurrentValue=true,Flag="ColdWarAdaptiveSmoothness",Callback=function(v) State.AdaptiveSmoothness=v == true end})
     AimTab:CreateSlider({Name="Aim FOV",Range={40,500},Increment=10,CurrentValue=180,Suffix=" px",Callback=function(v) State.AimFOV=v end})
-    AimTab:CreateSection("Frag Auto Aim")
-    AimTab:CreateToggle({Name="Enable Frag Auto Aim",CurrentValue=false,Flag="ColdWarFragAutoAim",Callback=function(v) State.FragAutoAim=v == true end})
-    AimTab:CreateSlider({Name="Frag Throw Speed",Range={40,150},Increment=1,CurrentValue=90,Suffix=" studs/s",Flag="ColdWarFragSpeed",Callback=function(v) State.FragThrowSpeed=v end})
-    AimTab:CreateSlider({Name="Frag Bounce",Range={0,80},Increment=1,CurrentValue=42,Suffix="%",Flag="ColdWarFragBounce",Callback=function(v) State.FragBounce=v/100 end})
-    AimTab:CreateSlider({Name="Frag Fuse",Range={2,6},Increment=0.1,CurrentValue=4,Suffix=" s",Flag="ColdWarFragFuse",Callback=function(v) State.FragFuse=v end})
-    AimTab:CreateSlider({Name="Frag Smoothness",Range={1,50},Increment=1,CurrentValue=20,Suffix="%",Flag="ColdWarFragSmooth",Callback=function(v) State.FragSmoothness=v/100 end})
     AimTab:CreateSlider({Name="Smoothness",Range={0.05,0.6},Increment=0.01,CurrentValue=0.18,Callback=function(v) State.AimSmoothness=v end})
 
     local TacticalTab = Window:CreateTab("Tactical", "radar")
@@ -1423,8 +1266,7 @@ return function(Window, runtimeInfo)
                 getgenv().__RAVEN_COLD_WAR = nil
             end
     end
-    getgenv().__RAVEN_COLD_WAR = {Version="v1.7.0",State=State,Destroy=destroy,
-        SimulateFragTrajectory=simulateFragTrajectory,SolveFragTrajectory=solveFragTrajectory}
+    getgenv().__RAVEN_COLD_WAR = {Version="v1.8.0",State=State,Destroy=destroy}
     if runtimeInfo.registerCleanup then
         runtimeInfo.registerCleanup(destroy)
     end
