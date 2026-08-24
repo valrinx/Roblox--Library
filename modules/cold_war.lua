@@ -167,7 +167,10 @@ return function(Window, runtimeInfo)
         local direction = toPos - fromPos
         local result = workspace:Raycast(fromPos, direction, RayParams)
         if not result then return true end
-        if targetPart then return result.Instance == targetPart end
+        if targetPart then
+            return result.Instance == targetPart
+                or (targetCharacter ~= nil and result.Instance:IsDescendantOf(targetCharacter))
+        end
         return targetCharacter ~= nil and result.Instance:IsDescendantOf(targetCharacter)
     end
 
@@ -191,16 +194,48 @@ return function(Window, runtimeInfo)
         return closestIndex
     end
 
+    local AUTO_VISIBLE_SAMPLE_SCALE = 0.48
+
+    local function getVisibilityOffsets(part, scale)
+        local halfX = part.Size.X * scale
+        local halfY = part.Size.Y * scale
+        return {
+            Vector3.zero,
+            Vector3.new(halfX, 0, 0),
+            Vector3.new(-halfX, 0, 0),
+            Vector3.new(0, halfY, 0),
+            Vector3.new(0, -halfY, 0),
+            Vector3.new(halfX, halfY, 0),
+            Vector3.new(-halfX, halfY, 0),
+            Vector3.new(halfX, -halfY, 0),
+            Vector3.new(-halfX, -halfY, 0),
+        }
+    end
+
+    local function getAimPartPriority(part)
+        local name = part.Name
+        if name == "Head" then return 1 end
+        if string.find(name, "Torso", 1, true) then return 2 end
+        if string.find(name, "Arm", 1, true) then return 3 end
+        return 4
+    end
+
     local function scanAutoVisibleParts(fromPos, targetCharacter, parts, cached)
         buildRayFilter()
         local center = Camera.ViewportSize * 0.5
-        local priorityPart, priorityDistance = nil, math.huge
+        local priorityPart, priorityRank, priorityDistance = nil, math.huge, math.huge
         local anyVisible = false
 
         for _, candidate in ipairs(parts) do
-            local sampleVisible = rayReachesTarget(
-                fromPos, candidate.Position, targetCharacter, candidate
-            )
+            local sampleVisible = false
+            for _, offset in ipairs(getVisibilityOffsets(candidate, AUTO_VISIBLE_SAMPLE_SCALE)) do
+                if rayReachesTarget(
+                    fromPos, candidate.CFrame:PointToWorldSpace(offset), targetCharacter, candidate
+                ) then
+                    sampleVisible = true
+                    break
+                end
+            end
             local partState = cached.parts[candidate] or {}
             partState.sampleIndex = 1
             partState.cycleVisible = false
@@ -211,9 +246,10 @@ return function(Window, runtimeInfo)
                 anyVisible = true
                 local point, onScreen = Camera:WorldToViewportPoint(candidate.Position)
                 if onScreen and point.Z > 0 then
+                    local rank = getAimPartPriority(candidate)
                     local distance = (Vector2.new(point.X, point.Y) - center).Magnitude
-                    if distance < priorityDistance then
-                        priorityPart, priorityDistance = candidate, distance
+                    if rank < priorityRank or (rank == priorityRank and distance < priorityDistance) then
+                        priorityPart, priorityRank, priorityDistance = candidate, rank, distance
                     end
                 end
             end
@@ -256,15 +292,7 @@ return function(Window, runtimeInfo)
         end
         local part = parts[partIndex]
         local partState = cached.parts[part] or {sampleIndex = 1, visible = false, cycleVisible = false}
-        local halfX = part.Size.X * 0.42
-        local halfY = part.Size.Y * 0.42
-        local offsets = {
-            Vector3.zero,
-            Vector3.new(halfX, 0, 0),
-            Vector3.new(-halfX, 0, 0),
-            Vector3.new(0, halfY, 0),
-            Vector3.new(0, -halfY, 0),
-        }
+        local offsets = getVisibilityOffsets(part, 0.42)
         local sampleIndex = math.clamp(partState.sampleIndex or 1, 1, #offsets)
         buildRayFilter()
         local sampleVisible = rayReachesTarget(
@@ -1301,7 +1329,7 @@ return function(Window, runtimeInfo)
                 getgenv().__RAVEN_COLD_WAR = nil
             end
     end
-    getgenv().__RAVEN_COLD_WAR = {Version="v1.8.1-local",State=State,Destroy=destroy}
+    getgenv().__RAVEN_COLD_WAR = {Version="v1.8.2",State=State,Destroy=destroy}
     if runtimeInfo.registerCleanup then
         runtimeInfo.registerCleanup(destroy)
     end
