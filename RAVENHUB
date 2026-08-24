@@ -191,10 +191,10 @@ local SCRIPTS = {
     {
         name        = "Sniper Arena",
         description = "Auto Lock | Trigger Bot | Entity ESP",
-        placeIds    = {126042865144779, 122446657157717},
+        placeIds    = {126042865144779, 122446657157717, 119661268047775},
         gameIds     = {9534705677},
-        version     = "v1.2",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/sniper_arena.lua?v=sniper-arena-1.2",
+        version     = "v1.3",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/sniper_arena.lua?v=sniper-arena-1.3",
     },
     {
         name        = "A Quiet Place: Deadzone",
