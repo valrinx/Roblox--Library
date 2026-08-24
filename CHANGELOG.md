@@ -1,5 +1,50 @@
 # Changelog
 
+## 2026-08-24 - Roll A Gnome v1.0.8
+
+- Reduced per-plant readiness wait from 0.8 seconds to 0.12 seconds.
+- Removed the fixed delay after every collect remote and retained one short batch-settle wait.
+
+## 2026-08-24 - Roll A Gnome v1.0.7
+
+- Fixed the ready queue repeatedly selecting a plant through its stale `FruitReady` attribute.
+- Ready collection now requires an eligible ready fruit model and reports growing fruit separately.
+
+## 2026-08-24 - Roll A Gnome v1.0.6
+
+- Added per-`FruitId` retry cooldown so a ready fruit rejected or delayed by the server is not targeted every collection tick.
+- Added an adjustable Same Fruit Retry interval, defaulting to 15 seconds.
+
+## 2026-08-24 - Roll A Gnome v1.0.5
+
+- The farm status now separates spawned fruit models from server-ready fruit so visible growing fruit is no longer mistaken for collectable fruit.
+
+## 2026-08-24 - Roll A Gnome v1.0.4
+
+- Ready now reports individual fruit models whose `READY` attribute is true instead of counting mature plants.
+- Collected now uses the replicated inventory delta and no longer counts rejected collection requests.
+- Plants are queued only when they contain ready fruit, avoiding repeated requests for mature but uncollectable plants.
+
+## 2026-08-24 - Roll A Gnome v1.0.3
+
+- Fixed newly replicated plants being skipped when `OwnerUserId` is temporarily absent; ownership remains bounded by the player's plot.
+
+## 2026-08-24 - Roll A Gnome v1.0.2
+
+- Fixed collection proximity by raycasting to the owned garden floor instead of positioning above the plant model.
+- Waits briefly for the game's `CanCollect` state before requesting collection, then restores the original position.
+
+## 2026-08-24 - Roll A Gnome v1.0.1
+
+- Fixed ready detection to match the game's `READY` or `FruitReady` collection contract.
+- Auto Collect now enters collection range briefly for each plant and restores the original position after the batch.
+
+## 2026-08-24 - Roll A Gnome v1.0.0
+
+- Added owner-plot-only collection for plants whose fruit is ready.
+- Added throttled Auto Collect and Auto Sell controls with manual actions and bounded batch size.
+- Added cleanup-safe runtime state and status counters.
+
 ## 2026-08-24 - Cold War v1.8.0
 
 - Removed Frag Auto Aim, Frag Auto Equip, trajectory solving, related runtime state, and menu controls.
