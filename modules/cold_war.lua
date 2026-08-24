@@ -11,7 +11,7 @@
     - No Fog
     - FOV Changer
     - Characters folder support (game uses workspace.Characters)
-    - v1.4.0 synchronized adaptive smoothness for fast acquisition and precise settling
+    - v1.6.0 configurable auto-lock restricted to shootable body parts
 
     Module format: returns function(Window, runtimeInfo) for RAVENHUB loader
 ]]
@@ -50,6 +50,7 @@ return function(Window, runtimeInfo)
         AdaptiveSmoothness = true,
         AimSwayCompensation = true,
         AimVisibleCheck = true,
+        AimPartMode = "Auto Visible",
         AimActivation = "Right Mouse",
         StickyTarget = true,
         Radar = false,
@@ -134,7 +135,7 @@ return function(Window, runtimeInfo)
     RayParams.FilterType = Enum.RaycastFilterType.Exclude
 
     local VISIBILITY_PARTS = {
-        "Head", "Torso", "UpperTorso", "LowerTorso", "HumanoidRootPart",
+        "Head", "Torso", "UpperTorso", "LowerTorso",
         "Left Arm", "Right Arm", "Left Leg", "Right Leg",
         "LeftUpperArm", "RightUpperArm", "LeftUpperLeg", "RightUpperLeg",
     }
@@ -177,43 +178,58 @@ return function(Window, runtimeInfo)
 
         local cached = visibilityCache[targetCharacter]
         if cached and cached.frame == visibilityFrame then
-            return cached.visible
+            return cached.visible, cached.parts
         end
 
-        local samplePoints = {}
+        local parts = {}
         for _, partName in ipairs(VISIBILITY_PARTS) do
             local part = targetCharacter:FindFirstChild(partName)
             if part and part:IsA("BasePart") then
-                table.insert(samplePoints, part.Position)
-                if partName == "Head" or partName == "Torso" or partName == "UpperTorso" then
-                    local halfX = part.Size.X * 0.42
-                    table.insert(samplePoints, part.CFrame:PointToWorldSpace(Vector3.new(halfX, 0, 0)))
-                    table.insert(samplePoints, part.CFrame:PointToWorldSpace(Vector3.new(-halfX, 0, 0)))
-                end
+                table.insert(parts, part)
             end
         end
 
-        if #samplePoints == 0 then return false end
+        if #parts == 0 then return false, {} end
 
-        cached = cached or {sampleIndex = 1, visible = false, cycleVisible = false}
-        local sampleIndex = math.clamp(cached.sampleIndex or 1, 1, #samplePoints)
+        cached = cached or {partIndex = 1, parts = {}}
+        cached.parts = cached.parts or {}
+        local partIndex = math.clamp(cached.partIndex or 1, 1, #parts)
+        local part = parts[partIndex]
+        local partState = cached.parts[part] or {sampleIndex = 1, visible = false, cycleVisible = false}
+        local halfX = part.Size.X * 0.42
+        local halfY = part.Size.Y * 0.42
+        local offsets = {
+            Vector3.zero,
+            Vector3.new(halfX, 0, 0),
+            Vector3.new(-halfX, 0, 0),
+            Vector3.new(0, halfY, 0),
+            Vector3.new(0, -halfY, 0),
+        }
+        local sampleIndex = math.clamp(partState.sampleIndex or 1, 1, #offsets)
         buildRayFilter()
-        local sampleVisible = rayReachesTarget(fromPos, samplePoints[sampleIndex], targetCharacter)
-        cached.cycleVisible = cached.cycleVisible or sampleVisible
-
-        -- A hit is reported immediately. A hidden result is committed only after
-        -- every body sample has missed, preventing flicker between rotating parts.
-        if sampleVisible then cached.visible = true end
+        local sampleVisible = rayReachesTarget(
+            fromPos, part.CFrame:PointToWorldSpace(offsets[sampleIndex]), targetCharacter
+        )
+        partState.cycleVisible = partState.cycleVisible or sampleVisible
+        if sampleVisible then partState.visible = true end
         sampleIndex += 1
-        if sampleIndex > #samplePoints then
-            cached.visible = cached.cycleVisible
-            cached.cycleVisible = false
+        if sampleIndex > #offsets then
+            partState.visible = partState.cycleVisible
+            partState.cycleVisible = false
             sampleIndex = 1
+            partIndex = partIndex % #parts + 1
         end
-        cached.sampleIndex = sampleIndex
+        partState.sampleIndex = sampleIndex
+        cached.parts[part] = partState
+        cached.partIndex = partIndex
+        local anyVisible = false
+        for _, state in pairs(cached.parts) do
+            if state.visible then anyVisible = true break end
+        end
+        cached.visible = anyVisible
         cached.frame = visibilityFrame
         visibilityCache[targetCharacter] = cached
-        return cached.visible
+        return cached.visible, cached.parts
     end
 
     ---------------------------------------------------------------------------
@@ -271,12 +287,50 @@ return function(Window, runtimeInfo)
             billboard = billboard,
             nameLabel = nameLabel,
             distLabel = distLabel,
+            partBoxes = {},
         }
+    end
+
+    local function hidePartBoxes(esp)
+        for _, box in pairs(esp.partBoxes or {}) do box.Visible = false end
+    end
+
+    local function updatePartBoxes(esp, character, partStates)
+        local active = {}
+        for part, state in pairs(partStates or {}) do
+            if part.Parent and part:IsDescendantOf(character) then
+                local box = esp.partBoxes[part]
+                if not box then
+                    box = Instance.new("BoxHandleAdornment")
+                    box.Name = "PartVisibility"
+                    box.AlwaysOnTop = true
+                    box.ZIndex = 5
+                    box.Transparency = 0.72
+                    box.Adornee = part
+                    box.Parent = espFolder
+                    esp.partBoxes[part] = box
+                end
+                box.Size = part.Size + Vector3.new(0.04, 0.04, 0.04)
+                box.Color3 = state.visible and COLOR_VISIBLE or COLOR_HIDDEN
+                box.Visible = true
+                active[part] = true
+            end
+        end
+        for part, box in pairs(esp.partBoxes) do
+            if not active[part] then
+                box.Visible = false
+                if not part.Parent then
+                    box:Destroy()
+                    esp.partBoxes[part] = nil
+                end
+            end
+        end
     end
 
     local function removeESP(player)
         local obj = ESPObjects[player]
         if obj then
+            for _, box in pairs(obj.partBoxes or {}) do box:Destroy() end
             obj.highlight:Destroy()
             obj.billboard:Destroy()
             ESPObjects[player] = nil
@@ -294,6 +348,7 @@ return function(Window, runtimeInfo)
             for _, esp in pairs(ESPObjects) do
                 esp.highlight.Enabled = false
                 esp.billboard.Enabled = false
+                hidePartBoxes(esp)
             end
             return
         end
@@ -315,6 +370,7 @@ return function(Window, runtimeInfo)
             if not isEnemy(player) then
                 esp.highlight.Enabled = false
                 esp.billboard.Enabled = false
+                hidePartBoxes(esp)
                 continue
             end
 
@@ -324,14 +380,15 @@ return function(Window, runtimeInfo)
 
                 if dist <= State.MaxDistance then
                     local char = getCharacter(player)
-                    esp.highlight.Adornee = char
-                    esp.highlight.Enabled = true
+                    esp.highlight.Adornee = nil
+                    esp.highlight.Enabled = false
                     esp.billboard.Adornee = hrp
                     esp.billboard.Enabled = true
 
                     if State.ESPWallCheck and myHRP then
                         local camPos = Camera.CFrame.Position
-                        local visible = isCharacterVisible(camPos, char)
+                        local visible, partStates = isCharacterVisible(camPos, char)
+                        updatePartBoxes(esp, char, partStates)
                         if visible then
                             esp.highlight.FillColor = COLOR_VISIBLE
                             esp.highlight.OutlineColor = COLOR_VISIBLE
@@ -342,6 +399,9 @@ return function(Window, runtimeInfo)
                             esp.nameLabel.TextColor3 = COLOR_TEXT_HIDDEN
                         end
                     else
+                        hidePartBoxes(esp)
+                        esp.highlight.Adornee = char
+                        esp.highlight.Enabled = true
                         esp.highlight.FillColor = COLOR_VISIBLE
                         esp.highlight.OutlineColor = COLOR_VISIBLE
                         esp.nameLabel.TextColor3 = COLOR_TEXT_VISIBLE
@@ -356,10 +416,12 @@ return function(Window, runtimeInfo)
                 else
                     esp.highlight.Enabled = false
                     esp.billboard.Enabled = false
+                    hidePartBoxes(esp)
                 end
             else
                 esp.highlight.Enabled = false
                 esp.billboard.Enabled = false
+                hidePartBoxes(esp)
             end
         end
     end
@@ -534,10 +596,11 @@ return function(Window, runtimeInfo)
     -- Prediction Dot and Auto Aim must consume the exact same ballistic sample.
     -- Sampling target velocity twice in one frame produces a near-zero second delta
     -- and makes the displayed point disagree with the position Auto Aim follows.
-    local function getSharedPrediction(player, weaponConfig)
+    local function getSharedPrediction(player, weaponConfig, selectedPart)
         if not player or not weaponConfig then return nil end
         local char = getCharacter(player)
-        local targetPart = char and (char:FindFirstChild(State.PredictTargetPart) or char:FindFirstChild("Head"))
+        local targetPart = selectedPart
+            or (char and (char:FindFirstChild(State.PredictTargetPart) or char:FindFirstChild("Head")))
         if not targetPart then return nil end
         local cached = predictionCache[player]
         if cached and cached.frame == predictionFrame and cached.part == targetPart
@@ -604,7 +667,7 @@ return function(Window, runtimeInfo)
         predictionDisplayTarget = nil
     end
 
-    local isAimPartVisible
+    local resolveAimPart
 
     -- Find closest enemy to crosshair
     local function getClosestEnemyToCrosshair(maxPixels, requireVisible)
@@ -614,17 +677,14 @@ return function(Window, runtimeInfo)
 
         for _, player in ipairs(Players:GetPlayers()) do
             if not isEnemy(player) then continue end
-            local char = getCharacter(player)
-            if not char then continue end
-            local targetPart = char:FindFirstChild(State.PredictTargetPart) or char:FindFirstChild("Head")
+            local targetPart = resolveAimPart(player, requireVisible)
             if not targetPart then continue end
 
             local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
             if not onScreen then continue end
 
             local dist2D = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
-            if (not maxPixels or dist2D <= maxPixels) and dist2D < closestDist
-                and (not requireVisible or isAimPartVisible(char, targetPart)) then
+            if (not maxPixels or dist2D <= maxPixels) and dist2D < closestDist then
                 closestDist = dist2D
                 closestPlayer = player
             end
@@ -652,50 +712,74 @@ return function(Window, runtimeInfo)
         return response
     end
 
-    isAimPartVisible = function(character, preferredPart)
-        local origin = Camera.CFrame.Position
+    resolveAimPart = function(player, requireVisible)
+        local character = getCharacter(player)
+        if not character then return nil end
+        local preferred = character:FindFirstChild(State.PredictTargetPart) or character:FindFirstChild("Head")
+        if not requireVisible then return preferred end
+
+        local _, states = isCharacterVisible(Camera.CFrame.Position, character)
+        local function visible(part)
+            local state = part and states and states[part]
+            return part and part:IsA("BasePart") and state and state.visible
+        end
+        if State.AimPartMode == "Selected Only" then
+            return visible(preferred) and preferred or nil
+        end
+
         local candidates = {
-            preferredPart,
-            character and character:FindFirstChild("Head"),
-            character and (character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso")),
-            character and character:FindFirstChild("HumanoidRootPart"),
+            preferred,
+            character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso"),
+            character:FindFirstChild("LowerTorso"),
+            character:FindFirstChild("Head"),
+            character:FindFirstChild("Left Arm") or character:FindFirstChild("LeftUpperArm"),
+            character:FindFirstChild("Right Arm") or character:FindFirstChild("RightUpperArm"),
+            character:FindFirstChild("Left Leg") or character:FindFirstChild("LeftUpperLeg"),
+            character:FindFirstChild("Right Leg") or character:FindFirstChild("RightUpperLeg"),
         }
+        local best, bestDistance = nil, math.huge
+        local center = Camera.ViewportSize * 0.5
         local seen = {}
         for _, part in ipairs(candidates) do
-            if part and part:IsA("BasePart") and not seen[part] then
+            if visible(part) and not seen[part] then
                 seen[part] = true
-                if isPointVisible(origin, part.Position, character) then return true end
+                if State.AimPartMode == "Auto Visible" then return part end
+                local point, onScreen = Camera:WorldToViewportPoint(part.Position)
+                if onScreen and point.Z > 0 then
+                    local distance = (Vector2.new(point.X, point.Y) - center).Magnitude
+                    if distance < bestDistance then best, bestDistance = part, distance end
+                end
             end
         end
-        return false
+        return best
     end
 
     local function validAimTarget(player)
         if not player or not isEnemy(player) then return false end
-        local char = getCharacter(player)
-        local part = char and (char:FindFirstChild(State.PredictTargetPart) or char:FindFirstChild("Head"))
+        local part = resolveAimPart(player, State.AimVisibleCheck)
         if not part then return false end
         local point, onScreen = Camera:WorldToViewportPoint(part.Position)
         if not onScreen or point.Z <= 0 then return false end
         local center = Camera.ViewportSize * 0.5
         if (Vector2.new(point.X, point.Y) - center).Magnitude > State.AimFOV then return false end
-        return not State.AimVisibleCheck or isAimPartVisible(char, part)
+        return true
     end
 
     local function updateAutoAim(dt)
         local inputActive = aimActive()
         State.AimInputActive = inputActive
         State.AimEngaged = false
+        State.AimLockedPart = nil
         if not inputActive then lockedTarget = nil return end
         if not State.StickyTarget or not validAimTarget(lockedTarget) then
             lockedTarget = getClosestEnemyToCrosshair(State.AimFOV, State.AimVisibleCheck)
         end
         if not lockedTarget then return end
-        local char = getCharacter(lockedTarget)
-        local part = char and (char:FindFirstChild(State.PredictTargetPart) or char:FindFirstChild("Head"))
+        local part = resolveAimPart(lockedTarget, State.AimVisibleCheck)
         if not part then return end
+        State.AimLockedPart = part.Name
         local cfg = getCurrentWeaponConfig()
-        local sample = getSharedPrediction(lockedTarget, cfg)
+        local sample = getSharedPrediction(lockedTarget, cfg, part)
         if not sample then return end
         local point, onScreen = Camera:WorldToViewportPoint(sample.position)
         if not onScreen then return end
@@ -796,7 +880,11 @@ return function(Window, runtimeInfo)
             return
         end
 
-        local target = getClosestEnemyToCrosshair(nil, false)
+        local requireShootable = State.AutoAim and aimActive() and State.AimVisibleCheck
+        local target = lockedTarget
+        if not target or (requireShootable and not validAimTarget(target)) then
+            target = getClosestEnemyToCrosshair(nil, requireShootable)
+        end
         if not target then
             predictionDot.Visible = false
             predictionCircle.Visible = false
@@ -812,7 +900,7 @@ return function(Window, runtimeInfo)
             return
         end
 
-        local targetPart = char:FindFirstChild(State.PredictTargetPart) or char:FindFirstChild("Head")
+        local targetPart = resolveAimPart(target, requireShootable)
         if not targetPart then
             predictionDot.Visible = false
             predictionCircle.Visible = false
@@ -822,7 +910,7 @@ return function(Window, runtimeInfo)
 
         local shooterPos = Camera.CFrame.Position
         local targetPos = targetPart.Position
-        local sample = getSharedPrediction(target, weaponConfig)
+        local sample = getSharedPrediction(target, weaponConfig, targetPart)
         if not sample then return end
         local predictedPos, travelTime = sample.position, sample.travelTime
         local screenPos, onScreen = Camera:WorldToViewportPoint(predictedPos)
@@ -961,7 +1049,7 @@ return function(Window, runtimeInfo)
     })
 
     VisualsTab:CreateToggle({
-        Name = "Wall Check (Red=Visible, Green=Hidden)",
+        Name = "Part Visible Check (Red=Visible, Green=Hidden)",
         CurrentValue = true,
         Callback = function(v)
             State.ESPWallCheck = v
@@ -1082,6 +1170,22 @@ return function(Window, runtimeInfo)
     end})
     AimTab:CreateToggle({Name="Sticky Target",CurrentValue=true,Callback=function(v) State.StickyTarget=v end})
     AimTab:CreateToggle({Name="Aim Visible Check",CurrentValue=true,Callback=function(v) State.AimVisibleCheck=v end})
+    AimTab:CreateDropdown({Name="Auto Lock Part",Options={"Auto Visible","Closest Visible","Selected Only"},CurrentOption={"Auto Visible"},MultipleOptions=false,Flag="ColdWarAimPartMode",Callback=function(v)
+        local selected = v
+        if type(v) == "table" then
+            selected = v[1]
+            if selected == nil then
+                for key, value in pairs(v) do
+                    selected = value == true and key or value
+                    break
+                end
+            end
+        end
+        selected = tostring(selected or "Auto Visible")
+        if selected ~= "Closest Visible" and selected ~= "Selected Only" then selected = "Auto Visible" end
+        State.AimPartMode = selected
+        lockedTarget = nil
+    end})
     AimTab:CreateToggle({Name="Recoil / Sway Compensation",CurrentValue=true,Callback=function(v) State.AimSwayCompensation=v end})
     AimTab:CreateToggle({Name="Adaptive Smoothness",CurrentValue=true,Flag="ColdWarAdaptiveSmoothness",Callback=function(v) State.AdaptiveSmoothness=v == true end})
     AimTab:CreateSlider({Name="Aim FOV",Range={40,500},Increment=10,CurrentValue=180,Suffix=" px",Callback=function(v) State.AimFOV=v end})
@@ -1148,7 +1252,7 @@ return function(Window, runtimeInfo)
                 getgenv().__RAVEN_COLD_WAR = nil
             end
     end
-    getgenv().__RAVEN_COLD_WAR = {Version="v1.4.0",State=State,Destroy=destroy}
+    getgenv().__RAVEN_COLD_WAR = {Version="v1.6.0",State=State,Destroy=destroy}
     if runtimeInfo.registerCleanup then
         runtimeInfo.registerCleanup(destroy)
     end
