@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-08-24 - Cold War v1.2.2
+
+- Fixed Right Mouse activation continuing from stale `InputBegan` state after the button was released.
+- Right Mouse mode now reads the physical mouse-button state on every aim frame.
+- Normalized MacLib dropdown return shapes and moved activation to a new config flag so an old saved `Always` value cannot override the UI.
+
+## 2026-08-24 - Cold War v1.2.1
+
+- Fixed Auto Aim remaining inactive when Cold War consumes right-mouse input before the module receives `InputBegan`.
+- Added persistent UI flags for Auto Aim and activation mode.
+- Changed aim visibility validation from head-only to multi-part checks across head, torso and root.
+
+## 2026-08-24 - Cold War v1.2.0
+
+- Moved Auto Aim after the game's camera render step so weapon sway and camera recoil are included in each correction.
+- Added configurable recoil/sway compensation using frame-rate-independent camera convergence.
+- Corrected ballistic drop for the weapon's configured sight zero and smoothed target velocity using replicated assembly velocity.
+
 ## 2026-08-23 - TTK Testing v1.0.0
 
 - Added FFA player ESP with live health and distance, plus configurable range.
