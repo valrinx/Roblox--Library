@@ -1301,7 +1301,7 @@ return function(Window, runtimeInfo)
                 getgenv().__RAVEN_COLD_WAR = nil
             end
     end
-    getgenv().__RAVEN_COLD_WAR = {Version="v1.8.0",State=State,Destroy=destroy}
+    getgenv().__RAVEN_COLD_WAR = {Version="v1.8.1-local",State=State,Destroy=destroy}
     if runtimeInfo.registerCleanup then
         runtimeInfo.registerCleanup(destroy)
     end
