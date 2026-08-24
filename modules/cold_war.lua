@@ -11,7 +11,7 @@
     - No Fog
     - FOV Changer
     - Characters folder support (game uses workspace.Characters)
-    - v1.1.5 rotating multi-part visibility checks for every player each frame
+    - v1.2.2 strict right-mouse activation without stale input state
 
     Module format: returns function(Window, runtimeInfo) for RAVENHUB loader
 ]]
@@ -47,6 +47,7 @@ return function(Window, runtimeInfo)
         AutoAim = false,
         AimFOV = 180,
         AimSmoothness = 0.18,
+        AimSwayCompensation = true,
         AimVisibleCheck = true,
         AimActivation = "Right Mouse",
         StickyTarget = true,
@@ -428,6 +429,8 @@ return function(Window, runtimeInfo)
             MuzzleVelocity = bs.MuzzleVelocity or 3000,
             Drag = bs.Drag or 1,
             Spread = cfg.Spread or 1,
+            ZeroMeters = (cfg.Zeroing and cfg.Zeroing.Aimpoint1 and cfg.Zeroing.Aimpoint1.Default) or 0,
+            Recoil = cfg.Recoil or {},
             Name = weaponName,
         }
         WeaponCache[weaponName] = result
@@ -467,6 +470,7 @@ return function(Window, runtimeInfo)
     -- Get target velocity (movement prediction)
     local lastPositions = {}
     local lastPositionTimes = {}
+    local smoothedVelocities = {}
 
     local function getTargetVelocity(player)
         local hrp = getHRP(player)
@@ -483,7 +487,14 @@ return function(Window, runtimeInfo)
         if lastPos and lastTime then
             local dt = currentTime - lastTime
             if dt > 0 and dt < 1 then
-                return (currentPos - lastPos) / dt
+                local measured = (currentPos - lastPos) / dt
+                local assembly = hrp.AssemblyLinearVelocity
+                if assembly.Magnitude < 250 then measured = measured:Lerp(assembly, 0.45) end
+                local previous = smoothedVelocities[player] or measured
+                local alpha = 1 - math.exp(-dt * 12)
+                local smoothed = previous:Lerp(measured, alpha)
+                smoothedVelocities[player] = smoothed
+                return smoothed
             end
         end
         return Vector3.zero
@@ -498,7 +509,11 @@ return function(Window, runtimeInfo)
 
         local travelTime = getBulletTravelTime(horizontalDist, weaponConfig.MuzzleVelocity, weaponConfig.Drag)
         local leadOffset = targetVelocity * travelTime
-        local drop = getBulletDrop(travelTime)
+        local studsPerMeter = 1 / 0.3048
+        local zeroDistance = (weaponConfig.ZeroMeters or 0) * studsPerMeter
+        local zeroTime = zeroDistance > 0
+            and getBulletTravelTime(zeroDistance, weaponConfig.MuzzleVelocity, weaponConfig.Drag) or 0
+        local drop = getBulletDrop(travelTime) - getBulletDrop(zeroTime)
 
         local predicted = targetPos + leadOffset + Vector3.new(0, drop, 0)
         return predicted, travelTime
@@ -573,6 +588,8 @@ return function(Window, runtimeInfo)
         if predictionText then predictionText:Remove(); predictionText = nil end
     end
 
+    local isAimPartVisible
+
     -- Find closest enemy to crosshair
     local function getClosestEnemyToCrosshair(maxPixels, requireVisible)
         local closestPlayer = nil
@@ -591,7 +608,7 @@ return function(Window, runtimeInfo)
 
             local dist2D = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
             if (not maxPixels or dist2D <= maxPixels) and dist2D < closestDist
-                and (not requireVisible or isPointVisible(Camera.CFrame.Position, targetPart.Position, char)) then
+                and (not requireVisible or isAimPartVisible(char, targetPart)) then
                 closestDist = dist2D
                 closestPlayer = player
             end
@@ -600,7 +617,30 @@ return function(Window, runtimeInfo)
     end
 
     local function aimActive()
-        return State.AutoAim and (State.AimActivation == "Always" or rightMouseDown)
+        if not State.AutoAim then return false end
+        if State.AimActivation == "Always" then return true end
+        local ok, held = pcall(function()
+            return UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
+        end)
+        return ok and held == true
+    end
+
+    isAimPartVisible = function(character, preferredPart)
+        local origin = Camera.CFrame.Position
+        local candidates = {
+            preferredPart,
+            character and character:FindFirstChild("Head"),
+            character and (character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso")),
+            character and character:FindFirstChild("HumanoidRootPart"),
+        }
+        local seen = {}
+        for _, part in ipairs(candidates) do
+            if part and part:IsA("BasePart") and not seen[part] then
+                seen[part] = true
+                if isPointVisible(origin, part.Position, character) then return true end
+            end
+        end
+        return false
     end
 
     local function validAimTarget(player)
@@ -612,11 +652,14 @@ return function(Window, runtimeInfo)
         if not onScreen or point.Z <= 0 then return false end
         local center = Camera.ViewportSize * 0.5
         if (Vector2.new(point.X, point.Y) - center).Magnitude > State.AimFOV then return false end
-        return not State.AimVisibleCheck or isPointVisible(Camera.CFrame.Position, part.Position, char)
+        return not State.AimVisibleCheck or isAimPartVisible(char, part)
     end
 
-    local function updateAutoAim()
-        if not aimActive() then lockedTarget = nil return end
+    local function updateAutoAim(dt)
+        local inputActive = aimActive()
+        State.AimInputActive = inputActive
+        State.AimEngaged = false
+        if not inputActive then lockedTarget = nil return end
         if not State.StickyTarget or not validAimTarget(lockedTarget) then
             lockedTarget = getClosestEnemyToCrosshair(State.AimFOV, State.AimVisibleCheck)
         end
@@ -629,12 +672,20 @@ return function(Window, runtimeInfo)
         if not sample then return end
         local point, onScreen = Camera:WorldToViewportPoint(sample.position)
         if not onScreen then return end
-        local center = Camera.ViewportSize * 0.5
-        local delta = Vector2.new(point.X, point.Y) - center
-        if type(mousemoverel) == "function" then
-            pcall(mousemoverel, delta.X * State.AimSmoothness, delta.Y * State.AimSmoothness)
+        State.AimEngaged = true
+        if State.AimSwayCompensation then
+            local desired = CFrame.lookAt(Camera.CFrame.Position, sample.position, Camera.CFrame.UpVector)
+            local response = math.max(1, State.AimSmoothness * 60)
+            local alpha = 1 - math.exp(-response * math.max(dt or 1 / 60, 1 / 240))
+            Camera.CFrame = Camera.CFrame:Lerp(desired, math.clamp(alpha, 0, 1))
         else
-            Camera.CFrame = Camera.CFrame:Lerp(CFrame.lookAt(Camera.CFrame.Position, sample.position), State.AimSmoothness)
+            local center = Camera.ViewportSize * 0.5
+            local delta = Vector2.new(point.X, point.Y) - center
+            if type(mousemoverel) == "function" then
+                pcall(mousemoverel, delta.X * State.AimSmoothness, delta.Y * State.AimSmoothness)
+            else
+                Camera.CFrame = Camera.CFrame:Lerp(CFrame.lookAt(Camera.CFrame.Position, sample.position), State.AimSmoothness)
+            end
         end
     end
 
@@ -810,12 +861,13 @@ return function(Window, runtimeInfo)
         if input.UserInputType == Enum.UserInputType.MouseButton2 then rightMouseDown = false end
     end)
 
-    Connections.render = RunService.RenderStepped:Connect(function()
+    local aimRenderStepName = "RavenColdWarAim_" .. tostring(LP.UserId)
+    RunService:BindToRenderStep(aimRenderStepName, Enum.RenderPriority.Camera.Value + 10, function(dt)
         visibilityFrame += 1
         predictionFrame += 1
         updateESP()
         updateAimPrediction()
-        updateAutoAim()
+        updateAutoAim(dt)
         updateRadar()
         aimFovCircle.Position = Camera.ViewportSize * 0.5
         aimFovCircle.Radius = State.AimFOV
@@ -965,10 +1017,24 @@ return function(Window, runtimeInfo)
     AimTab:CreateLabel("Targets closest enemy to crosshair")
 
     AimTab:CreateSection("Smooth Auto Aim")
-    AimTab:CreateToggle({Name="Enable Auto Aim",CurrentValue=false,Callback=function(v) State.AutoAim=v if not v then lockedTarget=nil end end})
-    AimTab:CreateDropdown({Name="Activation",Options={"Right Mouse","Always"},CurrentOption={"Right Mouse"},MultipleOptions=false,Callback=function(v) State.AimActivation=type(v)=="table"and v[1]or v end})
+    AimTab:CreateToggle({Name="Enable Auto Aim",CurrentValue=false,Flag="ColdWarAutoAim",Callback=function(v) State.AutoAim=v == true if not State.AutoAim then lockedTarget=nil end end})
+    AimTab:CreateDropdown({Name="Activation",Options={"Right Mouse","Always"},CurrentOption={"Right Mouse"},MultipleOptions=false,Flag="ColdWarAimActivationV2",Callback=function(v)
+        local selected = v
+        if type(v) == "table" then
+            selected = v[1]
+            if selected == nil then
+                for key, value in pairs(v) do
+                    selected = value == true and key or value
+                    break
+                end
+            end
+        end
+        selected = tostring(selected or "Right Mouse")
+        State.AimActivation = selected:lower():find("right", 1, true) and "Right Mouse" or "Always"
+    end})
     AimTab:CreateToggle({Name="Sticky Target",CurrentValue=true,Callback=function(v) State.StickyTarget=v end})
     AimTab:CreateToggle({Name="Aim Visible Check",CurrentValue=true,Callback=function(v) State.AimVisibleCheck=v end})
+    AimTab:CreateToggle({Name="Recoil / Sway Compensation",CurrentValue=true,Callback=function(v) State.AimSwayCompensation=v end})
     AimTab:CreateSlider({Name="Aim FOV",Range={40,500},Increment=10,CurrentValue=180,Suffix=" px",Callback=function(v) State.AimFOV=v end})
     AimTab:CreateSlider({Name="Smoothness",Range={0.05,0.6},Increment=0.01,CurrentValue=0.18,Callback=function(v) State.AimSmoothness=v end})
 
@@ -1015,6 +1081,7 @@ return function(Window, runtimeInfo)
     local function destroy()
             if destroyed then return end
             destroyed = true
+            pcall(function() RunService:UnbindFromRenderStep(aimRenderStepName) end)
             for _, conn in pairs(Connections) do
                 pcall(function() conn:Disconnect() end)
             end
@@ -1032,7 +1099,7 @@ return function(Window, runtimeInfo)
                 getgenv().__RAVEN_COLD_WAR = nil
             end
     end
-    getgenv().__RAVEN_COLD_WAR = {Version="v1.1.5",State=State,Destroy=destroy}
+    getgenv().__RAVEN_COLD_WAR = {Version="v1.2.2",State=State,Destroy=destroy}
     if runtimeInfo.registerCleanup then
         runtimeInfo.registerCleanup(destroy)
     end
