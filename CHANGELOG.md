@@ -1,6 +1,12 @@
 # Changelog
 
 ## 2026-08-25
+- **Train Your Fish v1.1.2** - Made Smart Loop race-aware and synchronized native Auto Train/Auto Race toggles back to the game BoolValues after server-side rejection or changes.
+- **Train Your Fish v1.1.1** - Fixed BoolValue resolution for Train/Auto states and reads Level, Evolution, and Mount from Character with Player fallback.
+
+- **Train Your Fish to Race v1.1.0** - Fixed native state detection by resolving only ValueBase instances and caching AutoTrain/AutoRace/Train references, avoiding collisions with same-named UI/scripts and repeated deep scans.
+
+- **Train Your Fish to Race v1.0.0** - Added native Auto Train/Auto Race controls, Smart Train + Race loop, live Race HUD, boost/progress tracking, native-state sync, and Anti AFK.
 
 - **Sniper Arena v1.3** - Added adjustable 0-100 aim smoothness plus configurable Hold Key / Always lock activation with a user-selectable lock key.
 - **Sniper Arena** - Verified `[No Bots FFA]` (PlaceId `119661268047775`) under GameId `9534705677` and added explicit registry support for the current sub-place.
