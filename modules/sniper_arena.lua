@@ -14,7 +14,7 @@ return function(Window, scriptInfo)
     local lastTriggerAt = 0
     local espAccumulator = 0
     local mouseHeld = false
-    local lockKeyHeld = false
+    local lockKeyActive = false
     local bindingName = "RavenSniperArenaAim_" .. tostring(localPlayer.UserId)
 
     local settings = {
@@ -22,7 +22,7 @@ return function(Window, scriptInfo)
         aimPart = "Head",
         fov = 200,
         aimSmooth = 55,
-        aimActivation = "Hold Key",
+        aimActivation = "Toggle Key",
         triggerBot = false,
         triggerDelay = 0.03,
         triggerCooldown = 0.16,
@@ -348,7 +348,7 @@ return function(Window, scriptInfo)
     RunService:BindToRenderStep(bindingName, 10000, function(deltaTime)
         if not running then return end
 
-        local lockActive = settings.aimlock and (settings.aimActivation == "Always" or lockKeyHeld)
+        local lockActive = settings.aimlock and (settings.aimActivation == "Always" or lockKeyActive)
         if lockActive then
             lockedTarget = refreshTarget(lockedTarget)
             if not lockedTarget then
@@ -422,8 +422,8 @@ return function(Window, scriptInfo)
     })
     CombatTab:CreateDropdown({
         Name = "Lock Activation",
-        Options = {"Hold Key", "Always"},
-        CurrentOption = {"Hold Key"},
+        Options = {"Toggle Key", "Always"},
+        CurrentOption = {"Toggle Key"},
         MultipleOptions = false,
         Flag = "SALockActivation",
         Callback = function(value)
@@ -432,8 +432,14 @@ return function(Window, scriptInfo)
         end,
     })
     CombatTab:CreateKeybind({
-        Name = "Lock Key", CurrentKeybind = "Q", HoldToInteract = true, Flag = "SALockKey",
-        Callback = function(value) lockKeyHeld = value == true end,
+        Name = "Lock Key (Toggle)",
+        CurrentKeybind = "Q",
+        HoldToInteract = false,
+        Flag = "SALockKey",
+        Callback = function()
+            lockKeyActive = not lockKeyActive
+            lockedTarget = lockKeyActive and getBestTarget() or nil
+        end,
     })
     CombatTab:CreateToggle({
         Name = "Team Check",
@@ -514,7 +520,7 @@ return function(Window, scriptInfo)
         if not running then return end
         running = false
         settings.aimlock = false
-        lockKeyHeld = false
+        lockKeyActive = false
         settings.triggerBot = false
         settings.esp = false
         lockedTarget = nil
