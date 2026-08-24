@@ -237,6 +237,14 @@ local SCRIPTS = {
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/leaf_game.lua",
     },
     {
+        name        = "Roll A Gnome",
+        description = "Auto Collect Ready Fruit | Auto Sell Inventory",
+        placeIds    = {117539213094671},
+        gameIds     = {10514280922},
+        version     = "v1.0.8",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/roll_a_gnome.lua",
+    },
+    {
         name        = "Cold War [MOUNTED MGs]",
         description = "Enemy ESP | Zero-aware Aim Prediction | Recoil/Sway Auto Aim | Tactical Tools",
         placeIds    = {13687899540},
