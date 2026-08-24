@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-08-24 - Cold War v1.6.1
+
+- Fixed Auto Visible choosing Head/Torso by priority even when the crosshair is on an exposed arm or leg.
+- Part visibility rays now count only when they reach the sampled body part, preventing another body part from producing a false visible result.
+- Reused the existing visibility cache and ray budget; the fix does not add per-frame raycasts.
+
 ## 2026-08-24 - Cold War v1.6.0
 
 - Added configurable Auto Lock Part modes: Auto Visible, Closest Visible, and Selected Only.
