@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-08-25
+
+- **Sniper Arena v1.3** - Added adjustable 0-100 aim smoothness plus configurable Hold Key / Always lock activation with a user-selectable lock key.
+- **Sniper Arena** - Verified `[No Bots FFA]` (PlaceId `119661268047775`) under GameId `9534705677` and added explicit registry support for the current sub-place.
+
 ## 2026-08-24 - Roll A Gnome v1.0.8
 
 - Reduced per-plant readiness wait from 0.8 seconds to 0.12 seconds.
