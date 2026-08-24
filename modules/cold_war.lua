@@ -11,7 +11,7 @@
     - No Fog
     - FOV Changer
     - Characters folder support (game uses workspace.Characters)
-    - v1.3.1 prediction display synchronized with Auto Aim smoothness
+    - v1.4.0 synchronized adaptive smoothness for fast acquisition and precise settling
 
     Module format: returns function(Window, runtimeInfo) for RAVENHUB loader
 ]]
@@ -47,6 +47,7 @@ return function(Window, runtimeInfo)
         AutoAim = false,
         AimFOV = 180,
         AimSmoothness = 0.18,
+        AdaptiveSmoothness = true,
         AimSwayCompensation = true,
         AimVisibleCheck = true,
         AimActivation = "Right Mouse",
@@ -642,6 +643,15 @@ return function(Window, runtimeInfo)
         return rightMouseDown and ok and held == true
     end
 
+    local function getAimResponse(screenError)
+        local response = math.max(1, State.AimSmoothness * 60)
+        if State.AdaptiveSmoothness then
+            local normalizedError = math.clamp((screenError or 0) / math.max(State.AimFOV, 1), 0, 1)
+            response *= 1 + normalizedError * 2.5
+        end
+        return response
+    end
+
     isAimPartVisible = function(character, preferredPart)
         local origin = Camera.CFrame.Position
         local candidates = {
@@ -692,7 +702,8 @@ return function(Window, runtimeInfo)
         State.AimEngaged = true
         if State.AimSwayCompensation then
             local desired = CFrame.lookAt(Camera.CFrame.Position, sample.position, Camera.CFrame.UpVector)
-            local response = math.max(1, State.AimSmoothness * 60)
+            local center = Camera.ViewportSize * 0.5
+            local response = getAimResponse((Vector2.new(point.X, point.Y) - center).Magnitude)
             local alpha = 1 - math.exp(-response * math.max(dt or 1 / 60, 1 / 240))
             Camera.CFrame = Camera.CFrame:Lerp(desired, math.clamp(alpha, 0, 1))
         else
@@ -823,7 +834,8 @@ return function(Window, runtimeInfo)
                 if predictionDisplayTarget ~= target or predictionDisplayPosition == nil then
                     predictionDisplayPosition = Camera.ViewportSize * 0.5
                 end
-                local response = math.max(1, State.AimSmoothness * 60)
+                local center = Camera.ViewportSize * 0.5
+                local response = getAimResponse((rawPos2D - center).Magnitude)
                 local alpha = 1 - math.exp(-response * math.max(dt or 1 / 60, 1 / 240))
                 predictionDisplayPosition = predictionDisplayPosition:Lerp(rawPos2D, math.clamp(alpha, 0, 1))
                 predictionDisplayTarget = target
@@ -1071,6 +1083,7 @@ return function(Window, runtimeInfo)
     AimTab:CreateToggle({Name="Sticky Target",CurrentValue=true,Callback=function(v) State.StickyTarget=v end})
     AimTab:CreateToggle({Name="Aim Visible Check",CurrentValue=true,Callback=function(v) State.AimVisibleCheck=v end})
     AimTab:CreateToggle({Name="Recoil / Sway Compensation",CurrentValue=true,Callback=function(v) State.AimSwayCompensation=v end})
+    AimTab:CreateToggle({Name="Adaptive Smoothness",CurrentValue=true,Flag="ColdWarAdaptiveSmoothness",Callback=function(v) State.AdaptiveSmoothness=v == true end})
     AimTab:CreateSlider({Name="Aim FOV",Range={40,500},Increment=10,CurrentValue=180,Suffix=" px",Callback=function(v) State.AimFOV=v end})
     AimTab:CreateSlider({Name="Smoothness",Range={0.05,0.6},Increment=0.01,CurrentValue=0.18,Callback=function(v) State.AimSmoothness=v end})
 
@@ -1135,7 +1148,7 @@ return function(Window, runtimeInfo)
                 getgenv().__RAVEN_COLD_WAR = nil
             end
     end
-    getgenv().__RAVEN_COLD_WAR = {Version="v1.3.1",State=State,Destroy=destroy}
+    getgenv().__RAVEN_COLD_WAR = {Version="v1.4.0",State=State,Destroy=destroy}
     if runtimeInfo.registerCleanup then
         runtimeInfo.registerCleanup(destroy)
     end
