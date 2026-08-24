@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-08-24 - Cold War v1.8.0
+
+- Removed Frag Auto Aim, Frag Auto Equip, trajectory solving, related runtime state, and menu controls.
+- Removed the Frag render-step and Auto Aim interception so gun Auto Aim and Aim Prediction remain independent.
+
+## 2026-08-24 - Cold War v1.7.4
+
+- Fixed gun Aim Prediction applying a second screen-space smoothing pass after Auto Aim had already smoothed the camera.
+- The prediction marker now uses the ballistic point projected through the latest camera state, keeping it synchronized with the configured aim smoothness.
+
+## 2026-08-24 - Cold War v1.7.3
+
+- Added Frag Auto Equip so enabling Frag Auto Aim can equip an available grenade from the backpack automatically.
+- Auto equip is throttled and only runs while Frag Auto Aim is enabled.
+
+## 2026-08-24 - Cold War v1.7.2
+
+- Added Best Effort Frag locking so Auto Aim still locks the closest trajectory when every target is outside grenade range.
+- Added Frag Reachable Only for users who want the lock restricted to solutions inside Frag Max Miss.
+- Exposed FragAimReachable state so the menu/runtime can distinguish a true hit solution from best effort.
+
+## 2026-08-24 - Cold War v1.7.1
+
+- Frag Auto Aim now rejects unreachable solutions instead of pulling the camera toward targets far outside the grenade trajectory.
+- Added an adjustable Frag Max Miss threshold, defaulting to 12 studs.
+- Reduced trajectory solve frequency and search density to lower raycast cost while retaining bounce calculation.
+
 ## 2026-08-24 - Cold War v1.7.0
 
 - Added Frag Auto Aim for equipped grenade tools with adjustable throw speed, bounce, fuse, and smoothing.
