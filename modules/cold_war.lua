@@ -135,6 +135,7 @@ return function(Window, runtimeInfo)
 
     local RayParams = RaycastParams.new()
     RayParams.FilterType = Enum.RaycastFilterType.Exclude
+    local MAX_VISION_PASSTHROUGHS = 12
 
     local VISIBILITY_PARTS = {
         "Head", "Torso", "UpperTorso", "LowerTorso",
@@ -163,15 +164,34 @@ return function(Window, runtimeInfo)
         rayFilterFrame = visibilityFrame
     end
 
+    local function isVisionTransparent(instance)
+        return instance:IsA("BasePart") and instance.Transparency >= 0.25
+    end
+
     local function rayReachesTarget(fromPos, toPos, targetCharacter, targetPart)
         local direction = toPos - fromPos
-        local result = workspace:Raycast(fromPos, direction, RayParams)
-        if not result then return true end
-        if targetPart then
-            return result.Instance == targetPart
-                or (targetCharacter ~= nil and result.Instance:IsDescendantOf(targetCharacter))
+        local baseIgnored = table.clone(RayParams.FilterDescendantsInstances)
+        local ignored = table.clone(baseIgnored)
+        local reachesTarget = false
+
+        for _ = 1, MAX_VISION_PASSTHROUGHS do
+            RayParams.FilterDescendantsInstances = ignored
+            local result = workspace:Raycast(fromPos, direction, RayParams)
+            if not result then
+                reachesTarget = true
+                break
+            end
+            if result.Instance == targetPart
+                or (targetCharacter ~= nil and result.Instance:IsDescendantOf(targetCharacter)) then
+                reachesTarget = true
+                break
+            end
+            if not isVisionTransparent(result.Instance) then break end
+            table.insert(ignored, result.Instance)
         end
-        return targetCharacter ~= nil and result.Instance:IsDescendantOf(targetCharacter)
+
+        RayParams.FilterDescendantsInstances = baseIgnored
+        return reachesTarget
     end
 
     local function isPointVisible(fromPos, toPos, targetCharacter)
@@ -195,10 +215,20 @@ return function(Window, runtimeInfo)
     end
 
     local AUTO_VISIBLE_SAMPLE_SCALE = 0.48
+    local AUTO_VISIBLE_GRID_STEPS = {-1, -0.5, 0, 0.5, 1}
 
-    local function getVisibilityOffsets(part, scale)
+    local function getVisibilityOffsets(part, scale, dense)
         local halfX = part.Size.X * scale
         local halfY = part.Size.Y * scale
+        if dense then
+            local offsets = {}
+            for _, yStep in ipairs(AUTO_VISIBLE_GRID_STEPS) do
+                for _, xStep in ipairs(AUTO_VISIBLE_GRID_STEPS) do
+                    table.insert(offsets, Vector3.new(halfX * xStep, halfY * yStep, 0))
+                end
+            end
+            return offsets
+        end
         return {
             Vector3.zero,
             Vector3.new(halfX, 0, 0),
@@ -223,36 +253,40 @@ return function(Window, runtimeInfo)
     local function scanAutoVisibleParts(fromPos, targetCharacter, parts, cached)
         buildRayFilter()
         local center = Camera.ViewportSize * 0.5
-        local priorityPart, priorityRank, priorityDistance = nil, math.huge, math.huge
+        local priorityPart, priorityDistance = nil, math.huge
         local anyVisible = false
 
-        for _, candidate in ipairs(parts) do
-            local sampleVisible = false
-            for _, offset in ipairs(getVisibilityOffsets(candidate, AUTO_VISIBLE_SAMPLE_SCALE)) do
-                if rayReachesTarget(
-                    fromPos, candidate.CFrame:PointToWorldSpace(offset), targetCharacter, candidate
-                ) then
-                    sampleVisible = true
-                    break
-                end
-            end
-            local partState = cached.parts[candidate] or {}
-            partState.sampleIndex = 1
-            partState.cycleVisible = false
-            partState.visible = sampleVisible
-            cached.parts[candidate] = partState
+        for rank = 1, 4 do
+            for _, candidate in ipairs(parts) do
+                if getAimPartPriority(candidate) == rank then
+                    local sampleVisible = false
+                    for _, offset in ipairs(getVisibilityOffsets(candidate, AUTO_VISIBLE_SAMPLE_SCALE, true)) do
+                        if rayReachesTarget(
+                            fromPos, candidate.CFrame:PointToWorldSpace(offset), targetCharacter, candidate
+                        ) then
+                            sampleVisible = true
+                            break
+                        end
+                    end
+                    local partState = cached.parts[candidate] or {}
+                    partState.sampleIndex = 1
+                    partState.cycleVisible = false
+                    partState.visible = sampleVisible
+                    cached.parts[candidate] = partState
 
-            if sampleVisible then
-                anyVisible = true
-                local point, onScreen = Camera:WorldToViewportPoint(candidate.Position)
-                if onScreen and point.Z > 0 then
-                    local rank = getAimPartPriority(candidate)
-                    local distance = (Vector2.new(point.X, point.Y) - center).Magnitude
-                    if rank < priorityRank or (rank == priorityRank and distance < priorityDistance) then
-                        priorityPart, priorityRank, priorityDistance = candidate, rank, distance
+                    if sampleVisible then
+                        anyVisible = true
+                        local point, onScreen = Camera:WorldToViewportPoint(candidate.Position)
+                        if onScreen and point.Z > 0 then
+                            local distance = (Vector2.new(point.X, point.Y) - center).Magnitude
+                            if distance < priorityDistance then
+                                priorityPart, priorityDistance = candidate, distance
+                            end
+                        end
                     end
                 end
             end
+            if priorityPart then break end
         end
 
         cached.visible = anyVisible
@@ -262,7 +296,7 @@ return function(Window, runtimeInfo)
         return cached.visible, cached.parts, cached.priorityPart
     end
 
-    local function isCharacterVisible(fromPos, targetCharacter)
+    local function isCharacterVisible(fromPos, targetCharacter, autoVisibleRequest)
         if not targetCharacter then return false end
 
         local cached = visibilityCache[targetCharacter]
@@ -285,7 +319,8 @@ return function(Window, runtimeInfo)
         end
         cached.parts = cached.parts or {}
         local partIndex = math.clamp(cached.partIndex or 1, 1, #parts)
-        local autoVisibleActive = State.AutoAim and State.AimPartMode == "Auto Visible"
+        local autoVisibleActive = autoVisibleRequest == true and State.AutoAim
+            and State.AimPartMode == "Auto Visible"
             and (State.AimActivation == "Always" or rightMouseDown)
         if autoVisibleActive then
             return scanAutoVisibleParts(fromPos, targetCharacter, parts, cached)
@@ -755,6 +790,7 @@ return function(Window, runtimeInfo)
     end
 
     local resolveAimPart
+    local AIM_PREFILTER_MARGIN = 80
 
     -- Find closest enemy to crosshair
     local function getClosestEnemyToCrosshair(maxPixels, requireVisible)
@@ -764,6 +800,21 @@ return function(Window, runtimeInfo)
 
         for _, player in ipairs(Players:GetPlayers()) do
             if not isEnemy(player) then continue end
+            local character = getCharacter(player)
+            local referencePart = character and (
+                character:FindFirstChild("Head")
+                or character:FindFirstChild("UpperTorso")
+                or character:FindFirstChild("Torso")
+                or character:FindFirstChild("HumanoidRootPart")
+            )
+            if not referencePart then continue end
+            local referencePoint, referenceOnScreen = Camera:WorldToViewportPoint(referencePart.Position)
+            if not referenceOnScreen or referencePoint.Z <= 0 then continue end
+            local referenceDistance = (
+                Vector2.new(referencePoint.X, referencePoint.Y) - screenCenter
+            ).Magnitude
+            if maxPixels and referenceDistance > maxPixels + AIM_PREFILTER_MARGIN then continue end
+
             local targetPart = resolveAimPart(player, requireVisible)
             if not targetPart then continue end
 
@@ -805,7 +856,9 @@ return function(Window, runtimeInfo)
         local preferred = character:FindFirstChild(State.PredictTargetPart) or character:FindFirstChild("Head")
         if not requireVisible then return preferred end
 
-        local _, states, priorityPart = isCharacterVisible(Camera.CFrame.Position, character)
+        local _, states, priorityPart = isCharacterVisible(
+            Camera.CFrame.Position, character, true
+        )
         local function visible(part)
             local state = part and states and states[part]
             return part and part:IsA("BasePart") and state and state.visible
@@ -970,7 +1023,9 @@ return function(Window, runtimeInfo)
         local requireShootable = State.AutoAim and aimActive() and State.AimVisibleCheck
         local target = lockedTarget
         if not target or (requireShootable and not validAimTarget(target)) then
-            target = getClosestEnemyToCrosshair(nil, requireShootable)
+            target = getClosestEnemyToCrosshair(
+                requireShootable and State.AimFOV or nil, requireShootable
+            )
         end
         if not target then
             predictionDot.Visible = false
@@ -1329,7 +1384,7 @@ return function(Window, runtimeInfo)
                 getgenv().__RAVEN_COLD_WAR = nil
             end
     end
-    getgenv().__RAVEN_COLD_WAR = {Version="v1.8.2",State=State,Destroy=destroy}
+    getgenv().__RAVEN_COLD_WAR = {Version="v1.8.4",State=State,Destroy=destroy}
     if runtimeInfo.registerCleanup then
         runtimeInfo.registerCleanup(destroy)
     end
