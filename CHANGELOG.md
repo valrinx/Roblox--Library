@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-08-24 - Cold War v1.4.0
+
+- Added Adaptive Smoothness: large crosshair errors acquire faster while small errors retain the configured precision response.
+- Prediction display and Auto Aim share the same adaptive response calculation so their motion remains synchronized.
+
 ## 2026-08-24 - Cold War v1.3.1
 
 - Synchronized the prediction dot/circle/text motion with the same frame-rate-independent response used by Auto Aim smoothness.
