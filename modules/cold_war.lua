@@ -11,7 +11,7 @@
     - No Fog
     - FOV Changer
     - Characters folder support (game uses workspace.Characters)
-    - v1.2.2 strict right-mouse activation without stale input state
+    - v1.3.1 prediction display synchronized with Auto Aim smoothness
 
     Module format: returns function(Window, runtimeInfo) for RAVENHUB loader
 ]]
@@ -413,6 +413,8 @@ return function(Window, runtimeInfo)
 
     local GRAVITY = workspace.Gravity -- 75 studs/s^2
     local WCM = game.ReplicatedStorage.Shared.WeaponConfigManager
+    local Trajectory = require(game.ReplicatedStorage.Shared.Ballistics.Trajectory)
+    local STUDS_PER_METER = 3.57 -- Cold War's ZeroSolver constant
 
     -- Cache weapon configs
     local WeaponCache = {}
@@ -450,16 +452,20 @@ return function(Window, runtimeInfo)
         return nil
     end
 
-    -- Calculate bullet travel time with drag (exponential decay model)
+    -- Use the game's own trajectory implementation. In Cold War, BulletSettings.Drag
+    -- is passed to Trajectory as K; applying another scale makes long-range zeroing drift.
     local function getBulletTravelTime(distance, muzzleVelocity, drag)
-        local dragFactor = drag * 0.3
-        local t = 0
-        for _ = 1, 2000 do
-            local pos = (muzzleVelocity / dragFactor) * (1 - math.exp(-dragFactor * t))
-            if pos >= distance then return t end
-            t = t + 0.01
-        end
-        return t
+        local ok, result = pcall(function()
+            local trajectory = Trajectory.new({
+                Origin = Vector3.zero,
+                Direction = Vector3.new(0, 0, -1),
+                MuzzleSpeed = muzzleVelocity,
+                K = drag,
+                Gravity = GRAVITY,
+            })
+            return Trajectory.GetTimeForDistance(trajectory, math.max(distance, 0))
+        end)
+        return ok and type(result) == "number" and result or (distance / math.max(muzzleVelocity, 1))
     end
 
     -- Calculate bullet drop at given time
@@ -504,13 +510,18 @@ return function(Window, runtimeInfo)
     local function getPredictedPosition(targetPos, targetVelocity, weaponConfig, shooterPos)
         if not weaponConfig then return targetPos, 0 end
 
-        local direction = targetPos - shooterPos
-        local horizontalDist = Vector3.new(direction.X, 0, direction.Z).Magnitude
-
-        local travelTime = getBulletTravelTime(horizontalDist, weaponConfig.MuzzleVelocity, weaponConfig.Drag)
-        local leadOffset = targetVelocity * travelTime
-        local studsPerMeter = 1 / 0.3048
-        local zeroDistance = (weaponConfig.ZeroMeters or 0) * studsPerMeter
+        local travelTime = 0
+        local leadOffset = Vector3.zero
+        -- Re-solve distance after lead. Two extra iterations converge for normal
+        -- infantry speeds without adding a per-frame simulation loop.
+        for _ = 1, 3 do
+            leadOffset = targetVelocity * travelTime
+            local futureDirection = targetPos + leadOffset - shooterPos
+            local forwardDistance = Vector3.new(futureDirection.X, 0, futureDirection.Z).Magnitude
+            travelTime = getBulletTravelTime(forwardDistance, weaponConfig.MuzzleVelocity, weaponConfig.Drag)
+        end
+        leadOffset = targetVelocity * travelTime
+        local zeroDistance = (weaponConfig.ZeroMeters or 0) * STUDS_PER_METER
         local zeroTime = zeroDistance > 0
             and getBulletTravelTime(zeroDistance, weaponConfig.MuzzleVelocity, weaponConfig.Drag) or 0
         local drop = getBulletDrop(travelTime) - getBulletDrop(zeroTime)
@@ -553,6 +564,8 @@ return function(Window, runtimeInfo)
     local predictionDot = nil
     local predictionCircle = nil
     local predictionText = nil
+    local predictionDisplayPosition = nil
+    local predictionDisplayTarget = nil
 
     local function createPredictionDot()
         if predictionDot then return end
@@ -586,6 +599,8 @@ return function(Window, runtimeInfo)
         if predictionDot then predictionDot:Remove(); predictionDot = nil end
         if predictionCircle then predictionCircle:Remove(); predictionCircle = nil end
         if predictionText then predictionText:Remove(); predictionText = nil end
+        predictionDisplayPosition = nil
+        predictionDisplayTarget = nil
     end
 
     local isAimPartVisible
@@ -622,7 +637,9 @@ return function(Window, runtimeInfo)
         local ok, held = pcall(function()
             return UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
         end)
-        return ok and held == true
+        -- Both sources must agree. This prevents a stale event or a UI callback
+        -- with an unexpected value from engaging aim on its own.
+        return rightMouseDown and ok and held == true
     end
 
     isAimPartVisible = function(character, preferredPart)
@@ -748,11 +765,13 @@ return function(Window, runtimeInfo)
     end
 
     -- Update prediction dot each frame
-    local function updateAimPrediction()
+    local function updateAimPrediction(dt)
         if not State.AimPrediction then
             if predictionDot then predictionDot.Visible = false end
             if predictionCircle then predictionCircle.Visible = false end
             if predictionText then predictionText.Visible = false end
+            predictionDisplayPosition = nil
+            predictionDisplayTarget = nil
             return
         end
 
@@ -798,7 +817,21 @@ return function(Window, runtimeInfo)
         local screenPos, onScreen = Camera:WorldToViewportPoint(predictedPos)
 
         if onScreen then
-            local pos2D = Vector2.new(screenPos.X, screenPos.Y)
+            local rawPos2D = Vector2.new(screenPos.X, screenPos.Y)
+            local pos2D = rawPos2D
+            if State.AutoAim and aimActive() then
+                if predictionDisplayTarget ~= target or predictionDisplayPosition == nil then
+                    predictionDisplayPosition = Camera.ViewportSize * 0.5
+                end
+                local response = math.max(1, State.AimSmoothness * 60)
+                local alpha = 1 - math.exp(-response * math.max(dt or 1 / 60, 1 / 240))
+                predictionDisplayPosition = predictionDisplayPosition:Lerp(rawPos2D, math.clamp(alpha, 0, 1))
+                predictionDisplayTarget = target
+                pos2D = predictionDisplayPosition
+            else
+                predictionDisplayPosition = nil
+                predictionDisplayTarget = nil
+            end
             predictionDot.Position = pos2D
             predictionDot.Radius = State.PredictDotSize
             predictionDot.Visible = true
@@ -854,8 +887,11 @@ return function(Window, runtimeInfo)
         if radarBlips[p] then radarBlips[p]:Remove(); radarBlips[p] = nil end
     end)
 
-    Connections.inputBegan = UserInputService.InputBegan:Connect(function(input, processed)
-        if not processed and input.UserInputType == Enum.UserInputType.MouseButton2 then rightMouseDown = true end
+    Connections.inputBegan = UserInputService.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton2
+            and UserInputService:GetFocusedTextBox() == nil then
+            rightMouseDown = true
+        end
     end)
     Connections.inputEnded = UserInputService.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton2 then rightMouseDown = false end
@@ -866,7 +902,7 @@ return function(Window, runtimeInfo)
         visibilityFrame += 1
         predictionFrame += 1
         updateESP()
-        updateAimPrediction()
+        updateAimPrediction(dt)
         updateAutoAim(dt)
         updateRadar()
         aimFovCircle.Position = Camera.ViewportSize * 0.5
@@ -1030,7 +1066,7 @@ return function(Window, runtimeInfo)
             end
         end
         selected = tostring(selected or "Right Mouse")
-        State.AimActivation = selected:lower():find("right", 1, true) and "Right Mouse" or "Always"
+        State.AimActivation = selected:lower() == "always" and "Always" or "Right Mouse"
     end})
     AimTab:CreateToggle({Name="Sticky Target",CurrentValue=true,Callback=function(v) State.StickyTarget=v end})
     AimTab:CreateToggle({Name="Aim Visible Check",CurrentValue=true,Callback=function(v) State.AimVisibleCheck=v end})
@@ -1099,7 +1135,7 @@ return function(Window, runtimeInfo)
                 getgenv().__RAVEN_COLD_WAR = nil
             end
     end
-    getgenv().__RAVEN_COLD_WAR = {Version="v1.2.2",State=State,Destroy=destroy}
+    getgenv().__RAVEN_COLD_WAR = {Version="v1.3.1",State=State,Destroy=destroy}
     if runtimeInfo.registerCleanup then
         runtimeInfo.registerCleanup(destroy)
     end
