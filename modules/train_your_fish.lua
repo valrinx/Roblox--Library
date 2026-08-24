@@ -1,4 +1,4 @@
--- RAVEN HUB | Train Your Fish to Race v1.1.3
+-- RAVEN HUB | Train Your Fish to Race v1.2.0
 return function(Window, scriptInfo)
     local Players = game:GetService("Players")
     local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -13,7 +13,7 @@ return function(Window, scriptInfo)
 
     local running = true
     local connections = {}
-    local settings = { smartLoop = false, antiAfk = true }
+    local settings = { smartLoop = false, antiAfk = true, autoOnlineReward = false, autoDailySign = false, autoSpin = false, autoRaceReward = false }
 
     local remotes = ReplicatedStorage:FindFirstChild("Remotes")
     local eventFolder = remotes and remotes:FindFirstChild("Event")
@@ -22,6 +22,21 @@ return function(Window, scriptInfo)
     local raceCount = ReplicatedStorage:FindFirstChild("RaceCount")
     local raceFlag = raceCount and raceCount:FindFirstChild("Raceing")
     local raceCounter = raceCount and raceCount:FindFirstChild("Count")
+    local functionFolder = remotes and remotes:FindFirstChild("Function")
+    local gameRunFunctions = functionFolder and functionFolder:FindFirstChild("GameRun")
+    local dailyEvents = eventFolder and eventFolder:FindFirstChild("DailySign")
+    local dailyFunctions = functionFolder and functionFolder:FindFirstChild("DailySign")
+    local spinEvents = eventFolder and eventFolder:FindFirstChild("Spin")
+    local spinFunctions = functionFolder and functionFolder:FindFirstChild("Spin")
+    local onlineRewardFunction = gameRunFunctions and gameRunFunctions:FindFirstChild("[C-S]TryGetOnlineReward")
+    local dailySignEvent = dailyEvents and dailyEvents:FindFirstChild("[C-S]PlayerTrySign")
+    local dailyDataFunction = dailyFunctions and dailyFunctions:FindFirstChild("[C-S]TryGetDailySignData")
+    local dailyCanFunction = dailyFunctions and dailyFunctions:FindFirstChild("[C-S]PlayerIsCanSign")
+    local freeSpinEvent = spinEvents and spinEvents:FindFirstChild("[C-S]PlayerTryFreeGetDrawNumber")
+    local spinLoadFunction = spinFunctions and spinFunctions:FindFirstChild("[C-S]PlayerLoadSpin")
+    local spinUseFunction = spinFunctions and spinFunctions:FindFirstChild("[C-S]PlayerTryUserSpin")
+    local raceRewardEvent = gameRun and gameRun:FindFirstChild("[C-S]PlayerTryGetRaceReward")
+    local showRaceRewardEvent = gameRun and gameRun:FindFirstChild("[S-C]ShowRaceBoxReward")
 
     local function connect(signal, callback)
         local c = signal:Connect(callback)
@@ -91,6 +106,50 @@ return function(Window, scriptInfo)
         return string.format("%.0f", n)
     end
 
+    local rewardCooldown = {}
+    local function rewardReady(key, delay)
+        local now = os.clock()
+        if (rewardCooldown[key] or 0) > now then return false end
+        rewardCooldown[key] = now + delay
+        return true
+    end
+
+    local function tryOnlineRewards()
+        if not onlineRewardFunction or not rewardReady("online", 2) then return end
+        local gui = player:FindFirstChildOfClass("PlayerGui")
+        local main = gui and gui:FindFirstChild("Main")
+        local rewardGui = main and main:FindFirstChild("OnlineReward")
+        local holder = rewardGui and rewardGui:FindFirstChild("Holder")
+        if not holder then return end
+        for _, button in ipairs(holder:GetChildren()) do
+            local timer = button:FindFirstChild("Timer")
+            if button:IsA("GuiButton") and timer and timer:IsA("IntValue") and timer.Value == 0 then
+                pcall(function() onlineRewardFunction:InvokeServer(button.Name) end)
+                task.wait(0.15)
+            end
+        end
+    end
+
+    local function tryDailySign()
+        if not dailyCanFunction or not dailyDataFunction or not dailySignEvent or not rewardReady("daily", 10) then return end
+        local okCan, canSign = pcall(function() return dailyCanFunction:InvokeServer() end)
+        if not okCan or canSign ~= true then return end
+        local okData, data = pcall(function() return dailyDataFunction:InvokeServer() end)
+        if not okData or type(data) ~= "table" then return end
+        local day = math.clamp(#data + 1, 1, 7)
+        pcall(function() dailySignEvent:FireServer(tostring(day)) end)
+    end
+
+    local function trySpinReward()
+        if not spinLoadFunction or not rewardReady("spin", 3) then return end
+        local ok, data = pcall(function() return spinLoadFunction:InvokeServer() end)
+        if not ok or type(data) ~= "table" then return end
+        local timeLeft = tonumber(data.Time)
+        if settings.autoSpin and freeSpinEvent and timeLeft and timeLeft <= 0 then pcall(function() freeSpinEvent:FireServer() end) end
+        local spin = type(data.Spin) == "table" and data.Spin or nil
+        if settings.autoSpin and spinUseFunction and spin and (tonumber(spin.have) or 0) > 0 then pcall(function() spinUseFunction:InvokeServer(1) end) end
+    end
+
     local AutomationTab = Window:CreateTab("Automation", "automation")
     AutomationTab:CreateSection("Native Automation")
     local nativeToggles = {}
@@ -157,6 +216,14 @@ return function(Window, scriptInfo)
         end,
     })
 
+    local RewardsTab = Window:CreateTab("Auto Rewards", "gift")
+    RewardsTab:CreateSection("Ready Rewards")
+    RewardsTab:CreateToggle({Name = "Auto Online Rewards", CurrentValue = false, Flag = "TYFAutoOnlineReward", Callback = function(v) settings.autoOnlineReward = v == true end})
+    RewardsTab:CreateToggle({Name = "Auto Daily Sign", CurrentValue = false, Flag = "TYFAutoDailySign", Callback = function(v) settings.autoDailySign = v == true end})
+    RewardsTab:CreateToggle({Name = "Auto Spin + Free Spin", CurrentValue = false, Flag = "TYFAutoSpin", Callback = function(v) settings.autoSpin = v == true end})
+    RewardsTab:CreateToggle({Name = "Auto Race Reward", CurrentValue = false, Flag = "TYFAutoRaceReward", Callback = function(v) settings.autoRaceReward = v == true end})
+    RewardsTab:CreateButton({Name = "Claim Ready Rewards Now", Callback = function() tryOnlineRewards(); tryDailySign(); trySpinReward() end})
+
     local StatsTab = Window:CreateTab("Race HUD", "overview")
     StatsTab:CreateSection("Live Race")
     local modeLabel = StatsTab:CreateLabel("Mode: loading...")
@@ -210,6 +277,23 @@ return function(Window, scriptInfo)
         end
     end)
 
+    if showRaceRewardEvent then
+        connect(showRaceRewardEvent.OnClientEvent, function()
+            if settings.autoRaceReward and raceRewardEvent and rewardReady("race", 1) then
+                task.delay(0.2, function() if running then pcall(function() raceRewardEvent:FireServer("10") end) end end)
+            end
+        end)
+    end
+
+    task.spawn(function()
+        while running do
+            if settings.autoOnlineReward then tryOnlineRewards() end
+            if settings.autoDailySign then tryDailySign() end
+            if settings.autoSpin then trySpinReward() end
+            task.wait(1)
+        end
+    end)
+
     local accumulator = 0
     connect(RunService.Heartbeat, function(dt)
         if not running then return end
@@ -253,5 +337,5 @@ return function(Window, scriptInfo)
     if scriptInfo and type(scriptInfo.registerCleanup) == "function" then
         scriptInfo.registerCleanup(destroyScript)
     end
-    notify("Train Your Fish v1.1.0", "Native Train/Race automation loaded")
+    notify("Train Your Fish v1.2.0", "Native automation and Auto Rewards loaded")
 end
