@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-08-24 - Cold War v1.3.1
+
+- Synchronized the prediction dot/circle/text motion with the same frame-rate-independent response used by Auto Aim smoothness.
+- The display starts at the crosshair when aim engages and resets cleanly on target changes, release, or disable.
+
+## 2026-08-24 - Cold War v1.3.0
+
+- Replaced the approximate drag loop with Cold War's native `Trajectory:GetTimeForDistance()` calculation using the weapon's real `Drag` value.
+- Matched the game's `ZeroSolver` conversion of `3.57 studs/m` and added iterative moving-target lead convergence.
+- Hardened Right Mouse activation so unknown dropdown values fail safe to Right Mouse and both event and physical input state must agree.
+
 ## 2026-08-24 - Cold War v1.2.2
 
 - Fixed Right Mouse activation continuing from stale `InputBegan` state after the button was released.
