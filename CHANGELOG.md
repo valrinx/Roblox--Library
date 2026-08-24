@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-08-24 - Cold War v1.7.0
+
+- Added Frag Auto Aim for equipped grenade tools with adjustable throw speed, bounce, fuse, and smoothing.
+- Added a map-aware trajectory solver that applies gravity and raycast collision reflection for grenade bounces.
+- Frag aiming uses normal player input and does not fire the grenade remote automatically.
+
 ## 2026-08-24 - Cold War v1.6.1
 
 - Fixed Auto Visible choosing Head/Torso by priority even when the crosshair is on an exposed arm or leg.
