@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-08-24 - Cold War v1.6.0
+
+- Added configurable Auto Lock Part modes: Auto Visible, Closest Visible, and Selected Only.
+- Auto Aim and its prediction display now share the same cached shootable body part and switch away from covered parts without extra raycasts.
+
+## 2026-08-24 - Cold War v1.5.0
+
+- Reworked visibility into independent Head/Torso/arm/leg states with center and four edge samples per part.
+- Kept raycast cost bounded to one sample per enemy per frame and replaced whole-character coloring with per-part adornments for partial cover.
+
 ## 2026-08-24 - Cold War v1.4.0
 
 - Added Adaptive Smoothness: large crosshair errors acquire faster while small errors retain the configured precision response.
