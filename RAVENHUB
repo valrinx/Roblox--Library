@@ -169,7 +169,7 @@ local SCRIPTS = {
         description = "Auto Mine | Auto Sell | Ore ESP | Remote Utility",
         placeIds    = {18680867089},
         gameIds     = {18680867089},
-        version     = "v1.1.2",
+        version     = "v1.2.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/umt/main.lua",
     },
     {
@@ -318,11 +318,11 @@ local SCRIPTS = {
     },
     {
         name        = "Train Your Fish to Race",
-        description = "Native Auto Train | Auto Race | Smart Loop | Race HUD | Anti AFK",
+        description = "Native Auto Train | Auto Race | Smart Loop | Auto Rewards | Race HUD | Anti AFK",
         placeIds    = {119244328726647},
         gameIds     = {9637959941},
     version     = "v1.1.2",
-    moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/train_your_fish.lua?v=train-your-fish-1.1.2",
+    moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/train_your_fish.lua?v=train-your-fish-1.2.0",
     },
     {
         name        = "TTK Testing [MAP VOTING]",
