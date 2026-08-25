@@ -325,6 +325,14 @@ local SCRIPTS = {
     moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/train_your_fish.lua?v=train-your-fish-1.2.0",
     },
     {
+        name        = "Anime Card Farm",
+        description = "Tween Auto Carry/Sell | Filtered Pack Hunt | Cash Guard | Anti Spam",
+        placeIds    = {125039473548047},
+        gameIds     = {10144587520},
+        version     = "v0.1.1",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/anime_card_farm.lua?v=anime-card-farm-0.1.1",
+    },
+    {
         name        = "TTK Testing [MAP VOTING]",
         description = "FFA Player ESP | Match Dashboard | Map Tracker | Visibility QoL",
         placeIds    = {120189115846709},
