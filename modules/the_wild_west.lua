@@ -1,5 +1,5 @@
 --[[
-    RAVEN HUB Module - The Wild West v0.1.2
+    RAVEN HUB Module - The Wild West v0.1.3
     Game: The Wild West (PlaceId: 2317712696, GameId: 807930589)
     Developer: Starboard Studios
 
@@ -49,11 +49,16 @@ return function(Window, runtimeInfo)
         IgnoreSameTeam = true,
         IgnoreSameFaction = true,
         PlayerESP = false,
+        PlayerESPDistance = 1800,
+        PlayerESPShowRole = true,
+        PlayerESPShowFaction = true,
         AnimalESP = false,
+        AnimalESPDistance = 900,
         LootESP = false,
         LootAvailableOnly = true,
+        LootESPDistance = 1200,
         OreESP = false,
-        ESPMaxDistance = 1800,
+        OreESPDistance = 1200,
         Fullbright = false,
         NoFog = false,
         FOVEnabled = false,
@@ -495,63 +500,73 @@ return function(Window, runtimeInfo)
     aimCircle.Visible = false
 
     local PlayerESPObjects = {}
-    local EspRecords = {animals = {}, loot = {}, ore = {}}
+    local EntityESPObjects = {animals = {}, loot = {}, ore = {}}
     local PLAYER_ESP_UPDATE_INTERVAL = 0.5
-    local WORLD_ESP_UPDATE_INTERVAL = 0.35
+    local WORLD_ESP_UPDATE_INTERVAL = 0.75
 
-    local function removeDrawing(record)
-        if record and record.text then pcall(function() record.text:Remove() end) end
+    local function createEntityESP(group, key, owner, part, color)
+        if group[key] or not owner or not part then return end
+        local highlight = Instance.new("Highlight")
+        highlight.Name = "RavenWildWestEntityHighlight"
+        highlight.FillTransparency = 0.82
+        highlight.OutlineTransparency = 0.15
+        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        highlight.FillColor = color
+        highlight.OutlineColor = color
+        highlight.Enabled = false
+        highlight.Parent = owner
+
+        local billboard = Instance.new("BillboardGui")
+        billboard.Name = "RavenWildWestEntityBillboard"
+        billboard.Size = UDim2.new(0, 190, 0, 24)
+        billboard.StudsOffset = Vector3.new(0, 2.6, 0)
+        billboard.AlwaysOnTop = true
+        billboard.Enabled = false
+        billboard.Parent = part
+
+        local label = Instance.new("TextLabel")
+        label.Size = UDim2.fromScale(1, 1)
+        label.BackgroundTransparency = 1
+        label.TextColor3 = color
+        label.TextStrokeTransparency = 0.25
+        label.TextStrokeColor3 = Color3.new(0, 0, 0)
+        label.TextScaled = false
+        label.TextSize = 12
+        label.Font = Enum.Font.GothamBold
+        label.Parent = billboard
+
+        group[key] = {highlight = highlight, billboard = billboard, label = label}
     end
 
-    local function clearGroup(group)
-        for key, record in pairs(group) do
-            removeDrawing(record)
-            group[key] = nil
-        end
+    local function removeEntityESP(group, key)
+        local esp = group[key]
+        if not esp then return end
+        pcall(function() esp.highlight:Destroy() end)
+        pcall(function() esp.billboard:Destroy() end)
+        group[key] = nil
     end
 
-    local function getTextRecord(group, key)
-        local record = group[key]
-        if record then return record end
-        local text = Drawing.new("Text")
-        text.Size = 13
-        text.Center = true
-        text.Outline = true
-        text.Visible = false
-        record = {text = text}
-        group[key] = record
-        return record
+    local function clearEntityGroup(group)
+        for key in pairs(group) do removeEntityESP(group, key) end
     end
 
-    local function setEspText(record, part, label, color)
-        if not record or not part then return false end
-        local myRoot = getMyRoot()
-        if not myRoot then
-            record.text.Visible = false
-            return false
-        end
-        local distance = (part.Position - myRoot.Position).Magnitude
-        if distance > State.ESPMaxDistance then
-            record.text.Visible = false
-            return false
-        end
-        local point, onScreen = Camera:WorldToViewportPoint(part.Position)
-        if not onScreen or point.Z <= 0 then
-            record.text.Visible = false
-            return false
-        end
-        record.text.Position = Vector2.new(point.X, point.Y)
-        record.text.Text = string.format("%s | %.0fm", label, distance)
-        record.text.Color = color
-        record.text.Visible = true
-        return true
+    local function updateEntityESP(group, key, owner, part, label, color)
+        if not group[key] then createEntityESP(group, key, owner, part, color) end
+        local esp = group[key]
+        if not esp or not esp.highlight.Parent or not esp.billboard.Parent then return end
+        esp.highlight.FillColor = color
+        esp.highlight.OutlineColor = color
+        esp.highlight.Enabled = true
+        esp.billboard.Enabled = true
+        esp.label.TextColor3 = color
+        esp.label.Text = label
     end
 
     local function createPlayerESP(player, model, adornee)
         if PlayerESPObjects[player] or not model or not adornee then return end
         local highlight = Instance.new("Highlight")
         highlight.Name = "RavenWildWestHighlight"
-        highlight.FillTransparency = 0.72
+        highlight.FillTransparency = 0.76
         highlight.OutlineTransparency = 0
         highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
         highlight.Enabled = false
@@ -559,29 +574,31 @@ return function(Window, runtimeInfo)
 
         local billboard = Instance.new("BillboardGui")
         billboard.Name = "RavenWildWestBillboard"
-        billboard.Size = UDim2.new(0, 260, 0, 52)
-        billboard.StudsOffset = Vector3.new(0, 3.5, 0)
+        billboard.Size = UDim2.new(0, 210, 0, 40)
+        billboard.StudsOffset = Vector3.new(0, 3.15, 0)
         billboard.AlwaysOnTop = true
         billboard.Enabled = false
         billboard.Parent = adornee
 
         local nameLabel = Instance.new("TextLabel")
-        nameLabel.Size = UDim2.new(1, 0, 0.52, 0)
+        nameLabel.Size = UDim2.new(1, 0, 0.55, 0)
         nameLabel.BackgroundTransparency = 1
         nameLabel.TextStrokeTransparency = 0.2
         nameLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
-        nameLabel.TextScaled = true
+        nameLabel.TextScaled = false
+        nameLabel.TextSize = 14
         nameLabel.Font = Enum.Font.GothamBold
         nameLabel.Parent = billboard
 
         local infoLabel = Instance.new("TextLabel")
-        infoLabel.Size = UDim2.new(1, 0, 0.48, 0)
-        infoLabel.Position = UDim2.new(0, 0, 0.52, 0)
+        infoLabel.Size = UDim2.new(1, 0, 0.45, 0)
+        infoLabel.Position = UDim2.new(0, 0, 0.55, 0)
         infoLabel.BackgroundTransparency = 1
         infoLabel.TextStrokeTransparency = 0.25
         infoLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
         infoLabel.TextColor3 = Color3.fromRGB(235, 235, 235)
-        infoLabel.TextScaled = true
+        infoLabel.TextScaled = false
+        infoLabel.TextSize = 12
         infoLabel.Font = Enum.Font.Gotham
         infoLabel.Parent = billboard
 
@@ -606,13 +623,7 @@ return function(Window, runtimeInfo)
     end
 
     local function updatePlayerESP()
-        if not State.PlayerESP then
-            for _, esp in pairs(PlayerESPObjects) do
-                esp.highlight.Enabled = false
-                esp.billboard.Enabled = false
-            end
-            return
-        end
+        if not State.PlayerESP then clearPlayerESP() return end
 
         local myRoot = getMyRoot()
         local active = {}
@@ -623,26 +634,26 @@ return function(Window, runtimeInfo)
                 local root = getRoot(model)
                 local adornee = model and (model:FindFirstChild("Head") or root)
                 if model and humanoid and humanoid.Health > 0 and root and adornee and myRoot then
-                    if not PlayerESPObjects[player] then createPlayerESP(player, model, adornee) end
-                    local esp = PlayerESPObjects[player]
-                    if esp and esp.highlight.Parent and esp.billboard.Parent then
-                        active[player] = true
-                        local distance = (myRoot.Position - root.Position).Magnitude
-                        if distance <= State.ESPMaxDistance then
+                    local distance = (myRoot.Position - root.Position).Magnitude
+                    if distance <= State.PlayerESPDistance then
+                        if not PlayerESPObjects[player] then createPlayerESP(player, model, adornee) end
+                        local esp = PlayerESPObjects[player]
+                        if esp and esp.highlight.Parent and esp.billboard.Parent then
+                            active[player] = true
                             local roleLabel, roleColor = getRoleLabel(player)
                             local factionName, factionTag = getFactionInfo(player)
                             local factionText = factionTag or factionName
                             local sameFaction = isSameFaction(player)
+                            local title = player.DisplayName
+                            if State.PlayerESPShowRole then title ..= " [" .. roleLabel .. "]" end
+                            if State.PlayerESPShowFaction and factionText then title ..= " [" .. factionText .. "]" end
                             esp.highlight.FillColor = roleColor
                             esp.highlight.OutlineColor = sameFaction and Color3.fromRGB(80, 255, 120) or roleColor
                             esp.highlight.Enabled = true
                             esp.billboard.Enabled = true
                             esp.nameLabel.TextColor3 = roleColor
-                            esp.nameLabel.Text = string.format("%s [%s]%s", player.DisplayName, roleLabel, factionText and (" [" .. factionText .. "]") or "")
+                            esp.nameLabel.Text = title
                             esp.infoLabel.Text = string.format("%.0fm | HP %.0f%s", distance, humanoid.Health, sameFaction and " | ALLY" or "")
-                        else
-                            esp.highlight.Enabled = false
-                            esp.billboard.Enabled = false
                         end
                     end
                 end
@@ -655,65 +666,67 @@ return function(Window, runtimeInfo)
     end
 
     local function updateAnimalESP()
-        if not State.AnimalESP or not animalFolder then clearGroup(EspRecords.animals) return end
+        local group = EntityESPObjects.animals
+        if not State.AnimalESP or not animalFolder then clearEntityGroup(group) return end
+        local myRoot = getMyRoot()
+        if not myRoot then return end
         local active = {}
         for _, animal in ipairs(animalFolder:GetChildren()) do
             local part = animal:FindFirstChild("Head") or animal:FindFirstChild("HumanoidRootPart") or getBasePart(animal)
-            if part then
+            if part and (part.Position - myRoot.Position).Magnitude <= State.AnimalESPDistance then
                 local health = animal:FindFirstChild("Health")
                 local anger = animal:FindFirstChild("Anger")
-                local suffix = health and string.format(" HP %.0f", tonumber(health.Value) or 0) or ""
-                if anger and tonumber(anger.Value) and tonumber(anger.Value) > 0 then suffix ..= " !" end
-                local record = getTextRecord(EspRecords.animals, animal)
-                setEspText(record, part, animal.Name .. suffix, Color3.fromRGB(255, 210, 90))
+                local label = animal.Name
+                if health then label ..= string.format(" | HP %.0f", tonumber(health.Value) or 0) end
+                if anger and tonumber(anger.Value) and tonumber(anger.Value) > 0 then label ..= " | HOSTILE" end
+                updateEntityESP(group, animal, animal, part, label, Color3.fromRGB(255, 210, 90))
                 active[animal] = true
             end
         end
-        for key, record in pairs(EspRecords.animals) do
-            if not active[key] then removeDrawing(record); EspRecords.animals[key] = nil end
-        end
+        for key in pairs(group) do if not active[key] then removeEntityESP(group, key) end end
     end
 
     local function updateLootESP()
-        if not State.LootESP or not lootFolder then clearGroup(EspRecords.loot) return end
+        local group = EntityESPObjects.loot
+        if not State.LootESP or not lootFolder then clearEntityGroup(group) return end
+        local myRoot = getMyRoot()
+        if not myRoot then return end
         local active = {}
         for _, chest in ipairs(CollectionService:GetTagged("LootChest")) do
             if chest:IsDescendantOf(lootFolder) then
                 local state = chest:GetAttribute("State")
                 if not State.LootAvailableOnly or state == "Available" then
                     local part = getBasePart(chest)
-                    if part then
-                        local record = getTextRecord(EspRecords.loot, chest)
+                    if part and (part.Position - myRoot.Position).Magnitude <= State.LootESPDistance then
                         local lootTable = chest:GetAttribute("LootTable") or chest.Name
-                        setEspText(record, part, tostring(lootTable) .. " [" .. tostring(state or "?") .. "]", Color3.fromRGB(100, 255, 150))
+                        updateEntityESP(group, chest, chest, part, tostring(lootTable) .. " [" .. tostring(state or "?") .. "]", Color3.fromRGB(100, 255, 150))
                         active[chest] = true
                     end
                 end
             end
         end
-        for key, record in pairs(EspRecords.loot) do
-            if not active[key] then removeDrawing(record); EspRecords.loot[key] = nil end
-        end
+        for key in pairs(group) do if not active[key] then removeEntityESP(group, key) end end
     end
 
     local function updateOreESP()
-        if not State.OreESP or not oreDeposits then clearGroup(EspRecords.ore) return end
+        local group = EntityESPObjects.ore
+        if not State.OreESP or not oreDeposits then clearEntityGroup(group) return end
+        local myRoot = getMyRoot()
+        if not myRoot then return end
         local active = {}
         for _, typeFolder in ipairs(oreDeposits:GetChildren()) do
             for _, deposit in ipairs(typeFolder:GetChildren()) do
                 local part = getBasePart(deposit)
-                if part then
-                    local record = getTextRecord(EspRecords.ore, deposit)
+                if part and (part.Position - myRoot.Position).Magnitude <= State.OreESPDistance then
                     local oreRemaining = deposit:FindFirstChild("OreRemaining", true)
-                    local suffix = oreRemaining and string.format(" %.0f", tonumber(oreRemaining.Value) or 0) or ""
-                    setEspText(record, part, typeFolder.Name .. suffix, Color3.fromRGB(120, 200, 255))
+                    local label = typeFolder.Name
+                    if oreRemaining then label ..= string.format(" | %.0f", tonumber(oreRemaining.Value) or 0) end
+                    updateEntityESP(group, deposit, deposit, part, label, Color3.fromRGB(120, 200, 255))
                     active[deposit] = true
                 end
             end
         end
-        for key, record in pairs(EspRecords.ore) do
-            if not active[key] then removeDrawing(record); EspRecords.ore[key] = nil end
-        end
+        for key in pairs(group) do if not active[key] then removeEntityESP(group, key) end end
     end
 
     local function applyFullbright(enabled)
@@ -837,13 +850,24 @@ return function(Window, runtimeInfo)
     CombatTab:CreateLabel("FPS-safe: 4 parts per visibility scan, every 2 frames")
 
     local EspTab = Window:CreateTab("ESP", "eye")
-    EspTab:CreateSection("Entities")
+    EspTab:CreateSection("Player")
     EspTab:CreateToggle({Name="Player ESP",CurrentValue=false,Flag="WildWestPlayerESP",Callback=function(v) State.PlayerESP = v == true end})
+    EspTab:CreateToggle({Name="Show Role",CurrentValue=true,Flag="WildWestPlayerRole",Callback=function(v) State.PlayerESPShowRole = v == true end})
+    EspTab:CreateToggle({Name="Show Faction",CurrentValue=true,Flag="WildWestPlayerFaction",Callback=function(v) State.PlayerESPShowFaction = v == true end})
+    EspTab:CreateSlider({Name="Player ESP Distance",Range={100,5000},Increment=100,CurrentValue=1800,Suffix=" studs",Flag="WildWestPlayerESPRange",Callback=function(v) State.PlayerESPDistance = v end})
+
+    EspTab:CreateSection("Animal")
     EspTab:CreateToggle({Name="Animal ESP",CurrentValue=false,Flag="WildWestAnimalESP",Callback=function(v) State.AnimalESP = v == true end})
+    EspTab:CreateSlider({Name="Animal ESP Distance",Range={100,3000},Increment=100,CurrentValue=900,Suffix=" studs",Flag="WildWestAnimalESPRange",Callback=function(v) State.AnimalESPDistance = v end})
+
+    EspTab:CreateSection("Chest")
     EspTab:CreateToggle({Name="Loot Chest ESP",CurrentValue=false,Flag="WildWestLootESP",Callback=function(v) State.LootESP = v == true end})
     EspTab:CreateToggle({Name="Available Chests Only",CurrentValue=true,Flag="WildWestLootAvailable",Callback=function(v) State.LootAvailableOnly = v == true end})
+    EspTab:CreateSlider({Name="Chest ESP Distance",Range={100,3000},Increment=100,CurrentValue=1200,Suffix=" studs",Flag="WildWestLootESPRange",Callback=function(v) State.LootESPDistance = v end})
+
+    EspTab:CreateSection("Ore")
     EspTab:CreateToggle({Name="Ore ESP",CurrentValue=false,Flag="WildWestOreESP",Callback=function(v) State.OreESP = v == true end})
-    EspTab:CreateSlider({Name="ESP Max Distance",Range={100,5000},Increment=100,CurrentValue=1800,Suffix=" studs",Flag="WildWestESPRange",Callback=function(v) State.ESPMaxDistance = v end})
+    EspTab:CreateSlider({Name="Ore ESP Distance",Range={100,3000},Increment=100,CurrentValue=1200,Suffix=" studs",Flag="WildWestOreESPRange",Callback=function(v) State.OreESPDistance = v end})
 
     local VisualsTab = Window:CreateTab("Visuals", "sun")
     VisualsTab:CreateSection("Environment")
@@ -893,9 +917,9 @@ return function(Window, runtimeInfo)
         for _, connection in pairs(Connections) do pcall(function() connection:Disconnect() end) end
         pcall(function() aimCircle:Remove() end)
         clearPlayerESP()
-        clearGroup(EspRecords.animals)
-        clearGroup(EspRecords.loot)
-        clearGroup(EspRecords.ore)
+        clearEntityGroup(EntityESPObjects.animals)
+        clearEntityGroup(EntityESPObjects.loot)
+        clearEntityGroup(EntityESPObjects.ore)
         applyFullbright(false)
         applyNoFog(false)
         Camera.FieldOfView = OriginalFOV
@@ -904,6 +928,6 @@ return function(Window, runtimeInfo)
         end
     end
 
-    getgenv().__RAVEN_THE_WILD_WEST = {Version="v0.1.2",State=State,Destroy=destroy}
+    getgenv().__RAVEN_THE_WILD_WEST = {Version="v0.1.3",State=State,Destroy=destroy}
     if runtimeInfo and runtimeInfo.registerCleanup then runtimeInfo.registerCleanup(destroy) end
 end
