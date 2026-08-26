@@ -29,10 +29,14 @@ if ($source -notmatch 'type\(mousemoverel\) == "function"' -or
 }
 
 if ($source -notmatch 'local PLAYER_ESP_UPDATE_INTERVAL = 0\.5' -or
+    $source -notmatch 'local WORLD_ESP_UPDATE_INTERVAL = 0\.75' -or
+    $source -notmatch 'EntityESPObjects = \{animals = \{\}, loot = \{\}, ore = \{\}\}' -or
     $source -notmatch 'Instance\.new\("Highlight"\)' -or
     $source -notmatch 'Instance\.new\("BillboardGui"\)' -or
-    $source -match 'EspRecords = \{players =') {
-    throw 'Player ESP must use persistent Cold War-style instances instead of the old Drawing projection loop'
+    $source -match 'Drawing\.new\("Text"\)' -or
+    $source -notmatch 'nameLabel\.TextSize = 14' -or
+    $source -notmatch 'infoLabel\.TextSize = 12') {
+    throw 'All ESP categories must use persistent low-cost instances with compact player labels'
 }
 
 if ($source -notmatch 'CurrentFactionId' -or
@@ -43,9 +47,9 @@ if ($source -notmatch 'CurrentFactionId' -or
     throw 'Faction and role separation is incomplete'
 }
 
-foreach ($required in @('Player ESP','Animal ESP','Loot Chest ESP','Ore ESP','Fullbright','No Fog','Custom FOV')) {
+foreach ($required in @('Player ESP','Player ESP Distance','Show Role','Show Faction','Animal ESP','Animal ESP Distance','Loot Chest ESP','Chest ESP Distance','Ore ESP','Ore ESP Distance','Fullbright','No Fog','Custom FOV')) {
     if ($source -notmatch [regex]::Escape($required)) {
-        throw "Missing v0.1.2 control: $required"
+        throw "Missing v0.1.3 control: $required"
     }
 }
 
@@ -56,7 +60,7 @@ if ($source -notmatch 'CollectionService:GetTagged\("LootChest"\)' -or
 }
 
 if ($source -notmatch 'UnbindFromRenderStep\(renderStepName\)' -or
-    $source -notmatch '__RAVEN_THE_WILD_WEST = \{Version="v0\.1\.2"') {
+    $source -notmatch '__RAVEN_THE_WILD_WEST = \{Version="v0\.1\.3"') {
     throw 'Module cleanup/runtime registration is incomplete'
 }
 
@@ -67,4 +71,4 @@ if ($hub -notmatch 'name\s*=\s*"The Wild West"' -or
     throw 'RAVENHUB registration is missing or incorrect'
 }
 
-Write-Output 'PASS: The Wild West v0.1.2 Auto Lock/team/ESP regression checks passed'
+Write-Output 'PASS: The Wild West v0.1.3 Auto Lock/team/ESP regression checks passed'
