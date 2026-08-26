@@ -1,5 +1,5 @@
 --[[
-    RAVEN HUB Module - The Wild West v0.1.0
+    RAVEN HUB Module - The Wild West v0.1.1
     Game: The Wild West (PlaceId: 2317712696, GameId: 807930589)
     Developer: Starboard Studios
 
@@ -98,12 +98,29 @@ return function(Window, runtimeInfo)
         return getRoot(getPlayerModel(LP))
     end
 
+    local function getTeamName(player)
+        if not player then return nil end
+        local team = player.Team
+        if team and team.Name ~= "" then return team.Name end
+        local model = getPlayerModel(player)
+        if model then
+            return model:GetAttribute("Team") or model:GetAttribute("Faction")
+        end
+        return nil
+    end
+
+    local function isSameTeam(player)
+        local myTeam = getTeamName(LP)
+        local otherTeam = getTeamName(player)
+        return myTeam ~= nil and otherTeam ~= nil and myTeam == otherTeam
+    end
+
     local function isTargetPlayer(player)
         if not player or player == LP then return false end
         local model = getPlayerModel(player)
         local humanoid = getHumanoid(model)
         if not model or not humanoid or humanoid.Health <= 0 then return false end
-        if State.IgnoreSameTeam and LP.Team and player.Team and LP.Team == player.Team then return false end
+        if State.IgnoreSameTeam and isSameTeam(player) then return false end
         return true
     end
 
@@ -362,27 +379,50 @@ return function(Window, runtimeInfo)
         return best
     end
 
+    local function clearAimState()
+        State.AimEngaged = false
+        State.AimLockedPart = nil
+        State.AimLockedPlayer = nil
+    end
+
     local function updateAutoLock(dt)
         if not aimActive() then
             lockedTarget = nil
-            State.AimEngaged = false
-            State.AimLockedPart = nil
+            clearAimState()
             return
         end
         if not State.StickyTarget or not validAimTarget(lockedTarget) then
             lockedTarget = getClosestTarget()
         end
-        if not lockedTarget then return end
+        if not lockedTarget then
+            clearAimState()
+            return
+        end
         local part = resolveAimPart(lockedTarget, State.AimVisibleCheck)
-        if not part then return end
+        if not part then
+            lockedTarget = nil
+            clearAimState()
+            return
+        end
 
+        local center = Camera.ViewportSize * 0.5
         local point, onScreen = Camera:WorldToViewportPoint(part.Position)
-        if not onScreen or point.Z <= 0 then return end
-        local desired = CFrame.lookAt(Camera.CFrame.Position, part.Position, Camera.CFrame.UpVector)
-        local screenError = (Vector2.new(point.X, point.Y) - Camera.ViewportSize * 0.5).Magnitude
-        local response = getAimResponse(screenError)
-        local alpha = 1 - math.exp(-response * math.max(dt or 1 / 60, 1 / 240))
-        Camera.CFrame = Camera.CFrame:Lerp(desired, math.clamp(alpha, 0, 1))
+        if not onScreen or point.Z <= 0 then
+            lockedTarget = nil
+            clearAimState()
+            return
+        end
+        local delta = Vector2.new(point.X, point.Y) - center
+        local response = getAimResponse(delta.Magnitude)
+        local alpha = math.clamp(1 - math.exp(-response * math.max(dt or 1 / 60, 1 / 240)), 0, 1)
+
+        if type(mousemoverel) == "function" then
+            pcall(mousemoverel, delta.X * alpha, delta.Y * alpha)
+        else
+            local desired = CFrame.lookAt(Camera.CFrame.Position, part.Position, Camera.CFrame.UpVector)
+            Camera.CFrame = Camera.CFrame:Lerp(desired, alpha)
+        end
+
         State.AimEngaged = true
         State.AimLockedPart = part.Name
         State.AimLockedPlayer = lockedTarget.Name
@@ -396,6 +436,7 @@ return function(Window, runtimeInfo)
     aimCircle.Visible = false
 
     local EspRecords = {players = {}, animals = {}, loot = {}, ore = {}}
+    local ESP_UPDATE_INTERVAL = 0.25
 
     local function removeDrawing(record)
         if record and record.text then pcall(function() record.text:Remove() end) end
@@ -422,26 +463,27 @@ return function(Window, runtimeInfo)
     end
 
     local function setEspText(record, part, label, color)
-        if not record or not part then return end
-        local point, onScreen = Camera:WorldToViewportPoint(part.Position)
-        if not onScreen or point.Z <= 0 then
-            record.text.Visible = false
-            return
-        end
+        if not record or not part then return false end
         local myRoot = getMyRoot()
         if not myRoot then
             record.text.Visible = false
-            return
+            return false
         end
         local distance = (part.Position - myRoot.Position).Magnitude
         if distance > State.ESPMaxDistance then
             record.text.Visible = false
-            return
+            return false
+        end
+        local point, onScreen = Camera:WorldToViewportPoint(part.Position)
+        if not onScreen or point.Z <= 0 then
+            record.text.Visible = false
+            return false
         end
         record.text.Position = Vector2.new(point.X, point.Y)
-        record.text.Text = string.format("%s | %.0f", label, distance)
+        record.text.Text = string.format("%s | %.0fm", label, distance)
         record.text.Color = color
         record.text.Visible = true
+        return true
     end
 
     local function updatePlayerESP()
@@ -454,7 +496,7 @@ return function(Window, runtimeInfo)
                 local humanoid = getHumanoid(model)
                 if head and humanoid and humanoid.Health > 0 then
                     local record = getTextRecord(EspRecords.players, player)
-                    local label = string.format("%s | HP %.0f", player.Name, humanoid.Health)
+                    local label = string.format("%s [%s] | HP %.0f", player.Name, getTeamName(player) or "?", humanoid.Health)
                     setEspText(record, head, label, Color3.fromRGB(255, 90, 90))
                     active[player] = true
                 end
@@ -578,7 +620,7 @@ return function(Window, runtimeInfo)
         aimCircle.Visible = State.AutoLock
         if State.FOVEnabled then Camera.FieldOfView = State.FOVValue end
         espAccumulator += dt
-        if espAccumulator >= 0.1 then
+        if espAccumulator >= ESP_UPDATE_INTERVAL then
             espAccumulator = 0
             updatePlayerESP()
             updateAnimalESP()
@@ -704,6 +746,6 @@ return function(Window, runtimeInfo)
         end
     end
 
-    getgenv().__RAVEN_THE_WILD_WEST = {Version="v0.1.0",State=State,Destroy=destroy}
+    getgenv().__RAVEN_THE_WILD_WEST = {Version="v0.1.1",State=State,Destroy=destroy}
     if runtimeInfo and runtimeInfo.registerCleanup then runtimeInfo.registerCleanup(destroy) end
 end
