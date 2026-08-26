@@ -249,7 +249,7 @@ local SCRIPTS = {
         description = "FPS-safe Auto Lock | Player/Animal/Loot/Ore ESP | Visual Tools",
         placeIds    = {2317712696},
         gameIds     = {807930589},
-        version     = "v0.1.2",
+        version     = "v0.1.3",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/the_wild_west.lua",
     },
     {
