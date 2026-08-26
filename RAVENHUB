@@ -245,6 +245,14 @@ local SCRIPTS = {
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/roll_a_gnome.lua",
     },
     {
+        name        = "The Wild West",
+        description = "FPS-safe Auto Lock | Player/Animal/Loot/Ore ESP | Visual Tools",
+        placeIds    = {2317712696},
+        gameIds     = {807930589},
+        version     = "v0.1.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/the_wild_west.lua",
+    },
+    {
         name        = "Cold War [MOUNTED MGs]",
         description = "Enemy ESP | Zero-aware Aim Prediction | Recoil/Sway Auto Aim | Tactical Tools",
         placeIds    = {13687899540},
