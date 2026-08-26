@@ -25,6 +25,9 @@ return function(Window, runtimeInfo)
     local SystemModules = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("System")
     local ReplicatedState = require(SystemModules:WaitForChild("ReplicatedState"))
     local PlayerData = require(SystemModules:WaitForChild("PlayerData"))
+    local CharacterModules = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Character")
+    local PlayerCharacter = require(CharacterModules:WaitForChild("PlayerCharacter"))
+    local ProjectileHandler = require(ReplicatedStorage:WaitForChild("SharedModules"):WaitForChild("World"):WaitForChild("ProjectileHandler"))
 
     local LP = Players.LocalPlayer
     local Camera = workspace.CurrentCamera
@@ -38,6 +41,9 @@ return function(Window, runtimeInfo)
 
     local State = {
         AutoLock = false,
+        AnimalAutoLock = false,
+        AimPrediction = false,
+        PredictDotSize = 6,
         AimActivation = "Right Mouse",
         AimFOV = 180,
         AimSmoothness = 0.18,
@@ -69,6 +75,13 @@ return function(Window, runtimeInfo)
     local rightMouseDown = false
     local lockedTarget = nil
     local destroyed = false
+    local predictionFrame = 0
+    local predictionCache = {}
+    local lastTargetPositions = {}
+    local lastTargetTimes = {}
+    local smoothedTargetVelocities = {}
+    local cachedWeaponItem = nil
+    local cachedWeaponConfig = nil
 
     local OriginalLighting = {
         Brightness = Lighting.Brightness,
@@ -195,6 +208,15 @@ return function(Window, runtimeInfo)
         return instance:FindFirstChildWhichIsA("BasePart", true)
     end
 
+    local function isTargetAnimal(animal)
+        if not animalFolder or not animal or not animal:IsDescendantOf(animalFolder) then return false end
+        local humanoid = getHumanoid(animal)
+        if humanoid and humanoid.Health <= 0 then return false end
+        local health = animal:FindFirstChild("Health")
+        if health and health:IsA("ValueBase") and tonumber(health.Value) and tonumber(health.Value) <= 0 then return false end
+        return getBasePart(animal) ~= nil
+    end
+
     local RayParams = RaycastParams.new()
     RayParams.FilterType = Enum.RaycastFilterType.Exclude
     local MAX_VISION_PASSTHROUGHS = 6
@@ -269,16 +291,31 @@ return function(Window, runtimeInfo)
     local function getAimPartPriority(part)
         local name = part.Name
         if name == "Head" then return 1 end
-        if string.find(name, "Torso", 1, true) then return 2 end
+        if name == "HumanoidRootPart" or string.find(name, "Torso", 1, true) or string.find(name, "Body", 1, true) then return 2 end
         if string.find(name, "Arm", 1, true) or string.find(name, "Hand", 1, true) then return 3 end
         return 4
     end
 
     local function getAimParts(model)
         local parts = {}
+        local seen = {}
+        local function add(part)
+            if part and part:IsA("BasePart") and not seen[part] then
+                seen[part] = true
+                table.insert(parts, part)
+            end
+        end
         for _, partName in ipairs(VISIBILITY_PARTS) do
-            local part = model:FindFirstChild(partName)
-            if part and part:IsA("BasePart") then table.insert(parts, part) end
+            add(model:FindFirstChild(partName))
+        end
+        if #parts == 0 then
+            add(model:FindFirstChild("Head"))
+            add(model:FindFirstChild("HumanoidRootPart"))
+            if model:IsA("Model") then add(model.PrimaryPart) end
+            for _, part in ipairs(model:GetDescendants()) do
+                if #parts >= 6 then break end
+                if part:IsA("BasePart") and part.Transparency < 1 then add(part) end
+            end
         end
         return parts
     end
@@ -357,10 +394,10 @@ return function(Window, runtimeInfo)
         return scanAutoVisibleParts(Camera.CFrame.Position, targetModel, parts, cached)
     end
 
-    local function resolveAimPart(player, requireVisible)
-        local model = getPlayerModel(player)
+    local function resolveModelAimPart(model, preferredName, requireVisible)
         if not model then return nil end
-        local preferred = model:FindFirstChild(State.AimTargetPart) or model:FindFirstChild("Head")
+        local preferred = model:FindFirstChild(preferredName or State.AimTargetPart)
+            or model:FindFirstChild("Head") or model:FindFirstChild("HumanoidRootPart") or getBasePart(model)
         if not requireVisible then return preferred end
         local _, states, priorityPart = getVisibleState(model)
         local function visible(part)
@@ -390,8 +427,96 @@ return function(Window, runtimeInfo)
         return best
     end
 
+    local function resolveTargetAimPart(target, requireVisible)
+        if not target then return nil end
+        if target:IsA("Player") then
+            return resolveModelAimPart(getPlayerModel(target), State.AimTargetPart, requireVisible)
+        end
+        return resolveModelAimPart(target, "Head", requireVisible)
+    end
+
+    local function getTargetModel(target)
+        if not target then return nil end
+        return target:IsA("Player") and getPlayerModel(target) or target
+    end
+
+    local function isTargetValid(target)
+        if not target then return false end
+        if target:IsA("Player") then return State.AutoLock and isTargetPlayer(target) end
+        return State.AnimalAutoLock and isTargetAnimal(target)
+    end
+
+    local function getCurrentProjectileConfig()
+        local ok, item = pcall(function() return PlayerCharacter:GetEquippedItem() end)
+        if not ok or type(item) ~= "table" then
+            cachedWeaponItem, cachedWeaponConfig = nil, nil
+            return nil
+        end
+        if item == cachedWeaponItem then return cachedWeaponConfig end
+        cachedWeaponItem = item
+        cachedWeaponConfig = nil
+        if item.IsGunItem ~= true or type(item.SharedData) ~= "table" then return nil end
+        local shared = item.SharedData
+        local speed = tonumber(shared.ProjectilePower) or 1000
+        if speed <= 0 then return nil end
+        local gravity = ProjectileHandler.Gravity or Vector3.new(0, -32, 0)
+        pcall(function()
+            local resolved = ProjectileHandler:GetProjectileGravity(shared, nil)
+            if typeof(resolved) == "Vector3" then gravity = resolved end
+        end)
+        cachedWeaponConfig = {Name = tostring(item.Name or shared.Name or "Gun"), Speed = speed, Gravity = gravity}
+        return cachedWeaponConfig
+    end
+
+    local function getTargetVelocity(target, aimPart)
+        local model = getTargetModel(target)
+        local motionPart = getRoot(model) or aimPart
+        if not motionPart then return Vector3.zero end
+        local now = os.clock()
+        local position = motionPart.Position
+        local lastPosition = lastTargetPositions[target]
+        local lastTime = lastTargetTimes[target]
+        lastTargetPositions[target] = position
+        lastTargetTimes[target] = now
+        if not lastPosition or not lastTime then return Vector3.zero end
+        local dt = now - lastTime
+        if dt <= 0 or dt >= 1 then return Vector3.zero end
+        local measured = (position - lastPosition) / dt
+        local assembly = motionPart.AssemblyLinearVelocity
+        if assembly.Magnitude < 250 then measured = measured:Lerp(assembly, 0.45) end
+        local previous = smoothedTargetVelocities[target] or measured
+        local smoothed = previous:Lerp(measured, 1 - math.exp(-dt * 12))
+        smoothedTargetVelocities[target] = smoothed
+        return smoothed
+    end
+
+    local function getPredictedPosition(targetPosition, targetVelocity, weaponConfig, shooterPosition)
+        if not weaponConfig then return targetPosition, 0 end
+        local travelTime = 0
+        for _ = 1, 3 do
+            local futurePosition = targetPosition + targetVelocity * travelTime
+            travelTime = (futurePosition - shooterPosition).Magnitude / math.max(weaponConfig.Speed, 1)
+        end
+        local predicted = targetPosition + targetVelocity * travelTime
+            - weaponConfig.Gravity * (0.5 * travelTime * travelTime)
+        return predicted, travelTime
+    end
+
+    local function getSharedPrediction(target, weaponConfig, aimPart)
+        if not target or not weaponConfig or not aimPart then return nil end
+        local cached = predictionCache[target]
+        if cached and cached.frame == predictionFrame and cached.part == aimPart and cached.weapon == weaponConfig.Name then
+            return cached
+        end
+        local velocity = getTargetVelocity(target, aimPart)
+        local predicted, travelTime = getPredictedPosition(aimPart.Position, velocity, weaponConfig, Camera.CFrame.Position)
+        cached = {frame = predictionFrame, part = aimPart, weapon = weaponConfig.Name, position = predicted, travelTime = travelTime}
+        predictionCache[target] = cached
+        return cached
+    end
+
     local function aimActive()
-        if not State.AutoLock then return false end
+        if not State.AutoLock and not State.AnimalAutoLock then return false end
         if State.AimActivation == "Always" then return true end
         local ok, held = pcall(function()
             return UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
@@ -408,35 +533,56 @@ return function(Window, runtimeInfo)
         return response
     end
 
-    local function validAimTarget(player)
-        if not isTargetPlayer(player) then return false end
-        local part = resolveAimPart(player, State.AimVisibleCheck)
+    local function validAimTarget(target)
+        if not isTargetValid(target) then return false end
+        local part = resolveTargetAimPart(target, State.AimVisibleCheck)
         if not part then return false end
         local point, onScreen = Camera:WorldToViewportPoint(part.Position)
         if not onScreen or point.Z <= 0 then return false end
         return (Vector2.new(point.X, point.Y) - Camera.ViewportSize * 0.5).Magnitude <= State.AimFOV
     end
 
-    local function getClosestTarget()
+    local function getClosestTarget(includePlayers, includeAnimals)
         local center = Camera.ViewportSize * 0.5
         local best, bestDistance = nil, math.huge
-        for _, player in ipairs(Players:GetPlayers()) do
-            if not isTargetPlayer(player) then continue end
-            local model = getPlayerModel(player)
-            local reference = model and (model:FindFirstChild("Head") or model:FindFirstChild("UpperTorso") or getRoot(model))
-            if not reference then continue end
-            local point, onScreen = Camera:WorldToViewportPoint(reference.Position)
-            if not onScreen or point.Z <= 0 then continue end
-            local distance = (Vector2.new(point.X, point.Y) - center).Magnitude
-            if distance > State.AimFOV + AIM_PREFILTER_MARGIN then continue end
-            local part = resolveAimPart(player, State.AimVisibleCheck)
-            if part then
+
+        if includePlayers then
+            for _, player in ipairs(Players:GetPlayers()) do
+                if not isTargetPlayer(player) then continue end
+                local model = getPlayerModel(player)
+                local reference = model and (model:FindFirstChild("Head") or model:FindFirstChild("UpperTorso") or getRoot(model))
+                if not reference then continue end
+                local point, onScreen = Camera:WorldToViewportPoint(reference.Position)
+                if not onScreen or point.Z <= 0 then continue end
+                local distance = (Vector2.new(point.X, point.Y) - center).Magnitude
+                if distance > State.AimFOV + AIM_PREFILTER_MARGIN then continue end
+                local part = resolveTargetAimPart(player, State.AimVisibleCheck)
+                if not part then continue end
                 local targetPoint, targetOnScreen = Camera:WorldToViewportPoint(part.Position)
-                if targetOnScreen and targetPoint.Z > 0 then
-                    local targetDistance = (Vector2.new(targetPoint.X, targetPoint.Y) - center).Magnitude
-                    if targetDistance <= State.AimFOV and targetDistance < bestDistance then
-                        best, bestDistance = player, targetDistance
-                    end
+                if not targetOnScreen or targetPoint.Z <= 0 then continue end
+                local targetDistance = (Vector2.new(targetPoint.X, targetPoint.Y) - center).Magnitude
+                if targetDistance <= State.AimFOV and targetDistance < bestDistance then
+                    best, bestDistance = player, targetDistance
+                end
+            end
+        end
+
+        if includeAnimals and animalFolder then
+            for _, animal in ipairs(animalFolder:GetChildren()) do
+                if not isTargetAnimal(animal) then continue end
+                local reference = animal:FindFirstChild("Head") or animal:FindFirstChild("HumanoidRootPart") or getBasePart(animal)
+                if not reference then continue end
+                local point, onScreen = Camera:WorldToViewportPoint(reference.Position)
+                if not onScreen or point.Z <= 0 then continue end
+                local distance = (Vector2.new(point.X, point.Y) - center).Magnitude
+                if distance > State.AimFOV + AIM_PREFILTER_MARGIN then continue end
+                local part = resolveTargetAimPart(animal, State.AimVisibleCheck)
+                if not part then continue end
+                local targetPoint, targetOnScreen = Camera:WorldToViewportPoint(part.Position)
+                if not targetOnScreen or targetPoint.Z <= 0 then continue end
+                local targetDistance = (Vector2.new(targetPoint.X, targetPoint.Y) - center).Magnitude
+                if targetDistance <= State.AimFOV and targetDistance < bestDistance then
+                    best, bestDistance = animal, targetDistance
                 end
             end
         end
@@ -456,21 +602,26 @@ return function(Window, runtimeInfo)
             return
         end
         if not State.StickyTarget or not validAimTarget(lockedTarget) then
-            lockedTarget = getClosestTarget()
+            lockedTarget = getClosestTarget(State.AutoLock, State.AnimalAutoLock)
         end
         if not lockedTarget then
             clearAimState()
             return
         end
-        local part = resolveAimPart(lockedTarget, State.AimVisibleCheck)
+        local part = resolveTargetAimPart(lockedTarget, State.AimVisibleCheck)
         if not part then
             lockedTarget = nil
             clearAimState()
             return
         end
 
+        local aimPosition = part.Position
+        if State.AimPrediction then
+            local sample = getSharedPrediction(lockedTarget, getCurrentProjectileConfig(), part)
+            if sample then aimPosition = sample.position end
+        end
         local center = Camera.ViewportSize * 0.5
-        local point, onScreen = Camera:WorldToViewportPoint(part.Position)
+        local point, onScreen = Camera:WorldToViewportPoint(aimPosition)
         if not onScreen or point.Z <= 0 then
             lockedTarget = nil
             clearAimState()
@@ -483,7 +634,7 @@ return function(Window, runtimeInfo)
         if type(mousemoverel) == "function" then
             pcall(mousemoverel, delta.X * alpha, delta.Y * alpha)
         else
-            local desired = CFrame.lookAt(Camera.CFrame.Position, part.Position, Camera.CFrame.UpVector)
+            local desired = CFrame.lookAt(Camera.CFrame.Position, aimPosition, Camera.CFrame.UpVector)
             Camera.CFrame = Camera.CFrame:Lerp(desired, alpha)
         end
 
@@ -498,6 +649,31 @@ return function(Window, runtimeInfo)
     aimCircle.Transparency = 0.7
     aimCircle.Color = Color3.fromRGB(255, 100, 100)
     aimCircle.Visible = false
+
+    local predictionDot = Drawing.new("Circle")
+    predictionDot.Filled = true
+    predictionDot.Thickness = 1
+    predictionDot.Transparency = 0.9
+    predictionDot.Color = Color3.fromRGB(100, 255, 140)
+    predictionDot.Visible = false
+
+    local function updateAimPrediction()
+        predictionDot.Visible = false
+        if not State.AimPrediction then return end
+        local target = lockedTarget
+        if not target or not validAimTarget(target) then
+            target = getClosestTarget(true, State.AnimalAutoLock)
+        end
+        if not target then return end
+        local part = resolveTargetAimPart(target, State.AimVisibleCheck)
+        local sample = getSharedPrediction(target, getCurrentProjectileConfig(), part)
+        if not sample then return end
+        local point, onScreen = Camera:WorldToViewportPoint(sample.position)
+        if not onScreen or point.Z <= 0 then return end
+        predictionDot.Position = Vector2.new(point.X, point.Y)
+        predictionDot.Radius = State.PredictDotSize
+        predictionDot.Visible = true
+    end
 
     local PlayerESPObjects = {}
     local EntityESPObjects = {animals = {}, loot = {}, ore = {}}
@@ -775,10 +951,12 @@ return function(Window, runtimeInfo)
     local renderStepName = "RavenWildWest_" .. tostring(LP.UserId)
     RunService:BindToRenderStep(renderStepName, Enum.RenderPriority.Camera.Value + 10, function(dt)
         visibilityFrame += 1
+        predictionFrame += 1
         updateAutoLock(dt)
+        updateAimPrediction()
         aimCircle.Position = Camera.ViewportSize * 0.5
         aimCircle.Radius = State.AimFOV
-        aimCircle.Visible = State.AutoLock
+        aimCircle.Visible = State.AutoLock or State.AnimalAutoLock
         if State.FOVEnabled then Camera.FieldOfView = State.FOVValue end
 
         playerEspAccumulator += dt
@@ -812,10 +990,18 @@ return function(Window, runtimeInfo)
     end
 
     local CombatTab = Window:CreateTab("Combat", "crosshair")
+    CombatTab:CreateSection("Aim Prediction")
+    CombatTab:CreateToggle({Name="Enable Aim Prediction",CurrentValue=false,Flag="WildWestAimPrediction",Callback=function(v) State.AimPrediction = v == true end})
+    CombatTab:CreateSlider({Name="Prediction Dot Size",Range={2,14},Increment=1,CurrentValue=6,Suffix=" px",Flag="WildWestPredictDotSize",Callback=function(v) State.PredictDotSize = v end})
+    CombatTab:CreateLabel("Uses The Wild West ProjectilePower + projectile gravity")
     CombatTab:CreateSection("Smooth Auto Lock")
-    CombatTab:CreateToggle({Name="Enable Auto Lock",CurrentValue=false,Flag="WildWestAutoLock",Callback=function(v)
+    CombatTab:CreateToggle({Name="Player Auto Lock",CurrentValue=false,Flag="WildWestAutoLock",Callback=function(v)
         State.AutoLock = v == true
         if not State.AutoLock then lockedTarget = nil end
+    end})
+    CombatTab:CreateToggle({Name="Animal Auto Lock",CurrentValue=false,Flag="WildWestAnimalAutoLock",Callback=function(v)
+        State.AnimalAutoLock = v == true
+        lockedTarget = nil
     end})
     CombatTab:CreateDropdown({Name="Activation",Options={"Right Mouse","Always"},CurrentOption={"Right Mouse"},MultipleOptions=false,Flag="WildWestAimActivation",Callback=function(v)
         local selected = dropdownValue(v, "Right Mouse")
@@ -916,6 +1102,7 @@ return function(Window, runtimeInfo)
         pcall(function() RunService:UnbindFromRenderStep(renderStepName) end)
         for _, connection in pairs(Connections) do pcall(function() connection:Disconnect() end) end
         pcall(function() aimCircle:Remove() end)
+        pcall(function() predictionDot:Remove() end)
         clearPlayerESP()
         clearEntityGroup(EntityESPObjects.animals)
         clearEntityGroup(EntityESPObjects.loot)
