@@ -215,20 +215,12 @@ return function(Window, runtimeInfo)
     end
 
     local AUTO_VISIBLE_SAMPLE_SCALE = 0.48
-    local AUTO_VISIBLE_GRID_STEPS = {-1, -0.5, 0, 0.5, 1}
+    local AUTO_VISIBLE_PARTS_PER_SCAN = 4
+    local AUTO_VISIBLE_SCAN_INTERVAL = 2
 
-    local function getVisibilityOffsets(part, scale, dense)
+    local function getVisibilityOffsets(part, scale)
         local halfX = part.Size.X * scale
         local halfY = part.Size.Y * scale
-        if dense then
-            local offsets = {}
-            for _, yStep in ipairs(AUTO_VISIBLE_GRID_STEPS) do
-                for _, xStep in ipairs(AUTO_VISIBLE_GRID_STEPS) do
-                    table.insert(offsets, Vector3.new(halfX * xStep, halfY * yStep, 0))
-                end
-            end
-            return offsets
-        end
         return {
             Vector3.zero,
             Vector3.new(halfX, 0, 0),
@@ -252,30 +244,50 @@ return function(Window, runtimeInfo)
 
     local function scanAutoVisibleParts(fromPos, targetCharacter, parts, cached)
         buildRayFilter()
+        cached.parts = cached.parts or {}
+
+        if cached.lastAutoVisibleScan
+            and visibilityFrame - cached.lastAutoVisibleScan < AUTO_VISIBLE_SCAN_INTERVAL then
+            cached.frame = visibilityFrame
+            visibilityCache[targetCharacter] = cached
+            return cached.visible or false, cached.parts, cached.priorityPart
+        end
+        cached.lastAutoVisibleScan = visibilityFrame
+
+        local scanCount = math.min(AUTO_VISIBLE_PARTS_PER_SCAN, #parts)
+        local partIndex = math.clamp(cached.autoVisiblePartIndex or 1, 1, #parts)
+        for _ = 1, scanCount do
+            local candidate = parts[partIndex]
+            local partState = cached.parts[candidate] or {edgeIndex = 2, visible = false}
+            local offsets = getVisibilityOffsets(candidate, AUTO_VISIBLE_SAMPLE_SCALE)
+            local centerVisible = rayReachesTarget(
+                fromPos, candidate.CFrame:PointToWorldSpace(offsets[1]), targetCharacter, candidate
+            )
+            local sampleVisible = centerVisible
+            if not sampleVisible and #offsets > 1 then
+                local edgeIndex = math.clamp(partState.edgeIndex or 2, 2, #offsets)
+                sampleVisible = rayReachesTarget(
+                    fromPos, candidate.CFrame:PointToWorldSpace(offsets[edgeIndex]), targetCharacter, candidate
+                )
+                edgeIndex += 1
+                if edgeIndex > #offsets then edgeIndex = 2 end
+                partState.edgeIndex = edgeIndex
+            end
+            partState.visible = sampleVisible
+            cached.parts[candidate] = partState
+            partIndex = partIndex % #parts + 1
+        end
+        cached.autoVisiblePartIndex = partIndex
+
         local center = Camera.ViewportSize * 0.5
         local priorityPart, priorityDistance = nil, math.huge
         local anyVisible = false
-
         for rank = 1, 4 do
             for _, candidate in ipairs(parts) do
-                if getAimPartPriority(candidate) == rank then
-                    local sampleVisible = false
-                    for _, offset in ipairs(getVisibilityOffsets(candidate, AUTO_VISIBLE_SAMPLE_SCALE, true)) do
-                        if rayReachesTarget(
-                            fromPos, candidate.CFrame:PointToWorldSpace(offset), targetCharacter, candidate
-                        ) then
-                            sampleVisible = true
-                            break
-                        end
-                    end
-                    local partState = cached.parts[candidate] or {}
-                    partState.sampleIndex = 1
-                    partState.cycleVisible = false
-                    partState.visible = sampleVisible
-                    cached.parts[candidate] = partState
-
-                    if sampleVisible then
-                        anyVisible = true
+                local state = cached.parts[candidate]
+                if state and state.visible then
+                    anyVisible = true
+                    if getAimPartPriority(candidate) == rank then
                         local point, onScreen = Camera:WorldToViewportPoint(candidate.Position)
                         if onScreen and point.Z > 0 then
                             local distance = (Vector2.new(point.X, point.Y) - center).Magnitude
