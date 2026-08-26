@@ -1,5 +1,5 @@
 --[[
-    RAVEN HUB Module - The Wild West v0.1.1
+    RAVEN HUB Module - The Wild West v0.1.2
     Game: The Wild West (PlaceId: 2317712696, GameId: 807930589)
     Developer: Starboard Studios
 
@@ -21,6 +21,10 @@ return function(Window, runtimeInfo)
     local UserInputService = game:GetService("UserInputService")
     local Lighting = game:GetService("Lighting")
     local CollectionService = game:GetService("CollectionService")
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+    local SystemModules = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("System")
+    local ReplicatedState = require(SystemModules:WaitForChild("ReplicatedState"))
+    local PlayerData = require(SystemModules:WaitForChild("PlayerData"))
 
     local LP = Players.LocalPlayer
     local Camera = workspace.CurrentCamera
@@ -42,7 +46,8 @@ return function(Window, runtimeInfo)
         AimVisibleCheck = true,
         AimPartMode = "Auto Visible",
         AimTargetPart = "Head",
-        IgnoreSameTeam = false,
+        IgnoreSameTeam = true,
+        IgnoreSameFaction = true,
         PlayerESP = false,
         AnimalESP = false,
         LootESP = false,
@@ -98,15 +103,62 @@ return function(Window, runtimeInfo)
         return getRoot(getPlayerModel(LP))
     end
 
+    local ROLE_LABELS = {
+        Outlaws = "OUTLAW",
+        Lawmen = "LAWMAN",
+        Citizens = "CITIZEN",
+        Default = "DEFAULT",
+    }
+    local ROLE_COLORS = {
+        Outlaws = Color3.fromRGB(255, 70, 70),
+        Lawmen = Color3.fromRGB(80, 165, 255),
+        Citizens = Color3.fromRGB(255, 215, 105),
+        Default = Color3.fromRGB(190, 190, 190),
+    }
+    local factionIdCache = {}
+    local factionInfoCache = {}
+
     local function getTeamName(player)
         if not player then return nil end
         local team = player.Team
-        if team and team.Name ~= "" then return team.Name end
-        local model = getPlayerModel(player)
-        if model then
-            return model:GetAttribute("Team") or model:GetAttribute("Faction")
-        end
-        return nil
+        return team and team.Name ~= "" and team.Name or nil
+    end
+
+    local function getRoleLabel(player)
+        local teamName = getTeamName(player) or "Default"
+        return ROLE_LABELS[teamName] or string.upper(teamName), ROLE_COLORS[teamName] or ROLE_COLORS.Default
+    end
+
+    local function getFactionId(player)
+        if not player then return nil end
+        local now = os.clock()
+        local cached = factionIdCache[player]
+        if cached and now < cached.expires then return cached.id end
+        local factionId = nil
+        pcall(function()
+            local playerState = ReplicatedState:GetPlayerState(player)
+            factionId = playerState and playerState.State and playerState.State.CurrentFactionId or nil
+        end)
+        factionIdCache[player] = {id = factionId, expires = now + 1}
+        return factionId
+    end
+
+    local function getFactionInfo(player)
+        local factionId = getFactionId(player)
+        if not factionId then return nil, nil end
+        local now = os.clock()
+        local cached = factionInfoCache[factionId]
+        if cached and now < cached.expires then return cached.name, cached.tag end
+        local name, tag = nil, nil
+        pcall(function()
+            local faction = PlayerData:GetFaction(factionId)
+            if faction and faction.Data then
+                name = faction.Data.Name
+                tag = faction.Data.Tag
+            end
+        end)
+        factionInfoCache[factionId] = {name = name, tag = tag, expires = now + 5}
+        return name, tag
     end
 
     local function isSameTeam(player)
@@ -115,12 +167,19 @@ return function(Window, runtimeInfo)
         return myTeam ~= nil and otherTeam ~= nil and myTeam == otherTeam
     end
 
+    local function isSameFaction(player)
+        local myFaction = getFactionId(LP)
+        local otherFaction = getFactionId(player)
+        return myFaction ~= nil and otherFaction ~= nil and myFaction == otherFaction
+    end
+
     local function isTargetPlayer(player)
         if not player or player == LP then return false end
         local model = getPlayerModel(player)
         local humanoid = getHumanoid(model)
         if not model or not humanoid or humanoid.Health <= 0 then return false end
         if State.IgnoreSameTeam and isSameTeam(player) then return false end
+        if State.IgnoreSameFaction and isSameFaction(player) then return false end
         return true
     end
 
@@ -435,8 +494,10 @@ return function(Window, runtimeInfo)
     aimCircle.Color = Color3.fromRGB(255, 100, 100)
     aimCircle.Visible = false
 
-    local EspRecords = {players = {}, animals = {}, loot = {}, ore = {}}
-    local ESP_UPDATE_INTERVAL = 0.25
+    local PlayerESPObjects = {}
+    local EspRecords = {animals = {}, loot = {}, ore = {}}
+    local PLAYER_ESP_UPDATE_INTERVAL = 0.5
+    local WORLD_ESP_UPDATE_INTERVAL = 0.35
 
     local function removeDrawing(record)
         if record and record.text then pcall(function() record.text:Remove() end) end
@@ -486,24 +547,110 @@ return function(Window, runtimeInfo)
         return true
     end
 
+    local function createPlayerESP(player, model, adornee)
+        if PlayerESPObjects[player] or not model or not adornee then return end
+        local highlight = Instance.new("Highlight")
+        highlight.Name = "RavenWildWestHighlight"
+        highlight.FillTransparency = 0.72
+        highlight.OutlineTransparency = 0
+        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        highlight.Enabled = false
+        highlight.Parent = model
+
+        local billboard = Instance.new("BillboardGui")
+        billboard.Name = "RavenWildWestBillboard"
+        billboard.Size = UDim2.new(0, 260, 0, 52)
+        billboard.StudsOffset = Vector3.new(0, 3.5, 0)
+        billboard.AlwaysOnTop = true
+        billboard.Enabled = false
+        billboard.Parent = adornee
+
+        local nameLabel = Instance.new("TextLabel")
+        nameLabel.Size = UDim2.new(1, 0, 0.52, 0)
+        nameLabel.BackgroundTransparency = 1
+        nameLabel.TextStrokeTransparency = 0.2
+        nameLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
+        nameLabel.TextScaled = true
+        nameLabel.Font = Enum.Font.GothamBold
+        nameLabel.Parent = billboard
+
+        local infoLabel = Instance.new("TextLabel")
+        infoLabel.Size = UDim2.new(1, 0, 0.48, 0)
+        infoLabel.Position = UDim2.new(0, 0, 0.52, 0)
+        infoLabel.BackgroundTransparency = 1
+        infoLabel.TextStrokeTransparency = 0.25
+        infoLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
+        infoLabel.TextColor3 = Color3.fromRGB(235, 235, 235)
+        infoLabel.TextScaled = true
+        infoLabel.Font = Enum.Font.Gotham
+        infoLabel.Parent = billboard
+
+        PlayerESPObjects[player] = {
+            highlight = highlight,
+            billboard = billboard,
+            nameLabel = nameLabel,
+            infoLabel = infoLabel,
+        }
+    end
+
+    local function removePlayerESP(player)
+        local esp = PlayerESPObjects[player]
+        if not esp then return end
+        pcall(function() esp.highlight:Destroy() end)
+        pcall(function() esp.billboard:Destroy() end)
+        PlayerESPObjects[player] = nil
+    end
+
+    local function clearPlayerESP()
+        for player in pairs(PlayerESPObjects) do removePlayerESP(player) end
+    end
+
     local function updatePlayerESP()
-        if not State.PlayerESP then clearGroup(EspRecords.players) return end
+        if not State.PlayerESP then
+            for _, esp in pairs(PlayerESPObjects) do
+                esp.highlight.Enabled = false
+                esp.billboard.Enabled = false
+            end
+            return
+        end
+
+        local myRoot = getMyRoot()
         local active = {}
         for _, player in ipairs(Players:GetPlayers()) do
             if player ~= LP then
                 local model = getPlayerModel(player)
-                local head = model and (model:FindFirstChild("Head") or getRoot(model))
                 local humanoid = getHumanoid(model)
-                if head and humanoid and humanoid.Health > 0 then
-                    local record = getTextRecord(EspRecords.players, player)
-                    local label = string.format("%s [%s] | HP %.0f", player.Name, getTeamName(player) or "?", humanoid.Health)
-                    setEspText(record, head, label, Color3.fromRGB(255, 90, 90))
-                    active[player] = true
+                local root = getRoot(model)
+                local adornee = model and (model:FindFirstChild("Head") or root)
+                if model and humanoid and humanoid.Health > 0 and root and adornee and myRoot then
+                    if not PlayerESPObjects[player] then createPlayerESP(player, model, adornee) end
+                    local esp = PlayerESPObjects[player]
+                    if esp and esp.highlight.Parent and esp.billboard.Parent then
+                        active[player] = true
+                        local distance = (myRoot.Position - root.Position).Magnitude
+                        if distance <= State.ESPMaxDistance then
+                            local roleLabel, roleColor = getRoleLabel(player)
+                            local factionName, factionTag = getFactionInfo(player)
+                            local factionText = factionTag or factionName
+                            local sameFaction = isSameFaction(player)
+                            esp.highlight.FillColor = roleColor
+                            esp.highlight.OutlineColor = sameFaction and Color3.fromRGB(80, 255, 120) or roleColor
+                            esp.highlight.Enabled = true
+                            esp.billboard.Enabled = true
+                            esp.nameLabel.TextColor3 = roleColor
+                            esp.nameLabel.Text = string.format("%s [%s]%s", player.DisplayName, roleLabel, factionText and (" [" .. factionText .. "]") or "")
+                            esp.infoLabel.Text = string.format("%.0fm | HP %.0f%s", distance, humanoid.Health, sameFaction and " | ALLY" or "")
+                        else
+                            esp.highlight.Enabled = false
+                            esp.billboard.Enabled = false
+                        end
+                    end
                 end
             end
         end
-        for key, record in pairs(EspRecords.players) do
-            if not active[key] then removeDrawing(record); EspRecords.players[key] = nil end
+
+        for player in pairs(PlayerESPObjects) do
+            if not active[player] then removePlayerESP(player) end
         end
     end
 
@@ -610,7 +757,8 @@ return function(Window, runtimeInfo)
         if input.UserInputType == Enum.UserInputType.MouseButton2 then rightMouseDown = false end
     end)
 
-    local espAccumulator = 0
+    local playerEspAccumulator = 0
+    local worldEspAccumulator = 0
     local renderStepName = "RavenWildWest_" .. tostring(LP.UserId)
     RunService:BindToRenderStep(renderStepName, Enum.RenderPriority.Camera.Value + 10, function(dt)
         visibilityFrame += 1
@@ -619,10 +767,16 @@ return function(Window, runtimeInfo)
         aimCircle.Radius = State.AimFOV
         aimCircle.Visible = State.AutoLock
         if State.FOVEnabled then Camera.FieldOfView = State.FOVValue end
-        espAccumulator += dt
-        if espAccumulator >= ESP_UPDATE_INTERVAL then
-            espAccumulator = 0
+
+        playerEspAccumulator += dt
+        if playerEspAccumulator >= PLAYER_ESP_UPDATE_INTERVAL then
+            playerEspAccumulator = 0
             updatePlayerESP()
+        end
+
+        worldEspAccumulator += dt
+        if worldEspAccumulator >= WORLD_ESP_UPDATE_INTERVAL then
+            worldEspAccumulator = 0
             updateAnimalESP()
             updateLootESP()
             updateOreESP()
@@ -659,8 +813,12 @@ return function(Window, runtimeInfo)
         State.AimVisibleCheck = v == true
         lockedTarget = nil
     end})
-    CombatTab:CreateToggle({Name="Ignore Same Team",CurrentValue=false,Flag="WildWestIgnoreTeam",Callback=function(v)
+    CombatTab:CreateToggle({Name="Ignore Same Team",CurrentValue=true,Flag="WildWestIgnoreTeam",Callback=function(v)
         State.IgnoreSameTeam = v == true
+        lockedTarget = nil
+    end})
+    CombatTab:CreateToggle({Name="Ignore Same Faction",CurrentValue=true,Flag="WildWestIgnoreFaction",Callback=function(v)
+        State.IgnoreSameFaction = v == true
         lockedTarget = nil
     end})
     CombatTab:CreateDropdown({Name="Auto Lock Part",Options={"Auto Visible","Closest Visible","Selected Only"},CurrentOption={"Auto Visible"},MultipleOptions=false,Flag="WildWestAimPartMode",Callback=function(v)
@@ -734,7 +892,7 @@ return function(Window, runtimeInfo)
         pcall(function() RunService:UnbindFromRenderStep(renderStepName) end)
         for _, connection in pairs(Connections) do pcall(function() connection:Disconnect() end) end
         pcall(function() aimCircle:Remove() end)
-        clearGroup(EspRecords.players)
+        clearPlayerESP()
         clearGroup(EspRecords.animals)
         clearGroup(EspRecords.loot)
         clearGroup(EspRecords.ore)
@@ -746,6 +904,6 @@ return function(Window, runtimeInfo)
         end
     end
 
-    getgenv().__RAVEN_THE_WILD_WEST = {Version="v0.1.1",State=State,Destroy=destroy}
+    getgenv().__RAVEN_THE_WILD_WEST = {Version="v0.1.2",State=State,Destroy=destroy}
     if runtimeInfo and runtimeInfo.registerCleanup then runtimeInfo.registerCleanup(destroy) end
 end
