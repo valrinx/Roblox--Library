@@ -28,14 +28,24 @@ if ($source -notmatch 'type\(mousemoverel\) == "function"' -or
     throw 'Auto Lock must drive the Wild West custom camera through mouse delta when available'
 }
 
-if ($source -notmatch 'local ESP_UPDATE_INTERVAL = 0\.25' -or
-    $source -notmatch 'if espAccumulator >= ESP_UPDATE_INTERVAL then') {
-    throw 'ESP must use the throttled update cadence'
+if ($source -notmatch 'local PLAYER_ESP_UPDATE_INTERVAL = 0\.5' -or
+    $source -notmatch 'Instance\.new\("Highlight"\)' -or
+    $source -notmatch 'Instance\.new\("BillboardGui"\)' -or
+    $source -match 'EspRecords = \{players =') {
+    throw 'Player ESP must use persistent Cold War-style instances instead of the old Drawing projection loop'
+}
+
+if ($source -notmatch 'CurrentFactionId' -or
+    $source -notmatch 'if State\.IgnoreSameFaction and isSameFaction\(player\) then return false end' -or
+    $source -notmatch 'Outlaws = "OUTLAW"' -or
+    $source -notmatch 'Lawmen = "LAWMAN"' -or
+    $source -notmatch 'Citizens = "CITIZEN"') {
+    throw 'Faction and role separation is incomplete'
 }
 
 foreach ($required in @('Player ESP','Animal ESP','Loot Chest ESP','Ore ESP','Fullbright','No Fog','Custom FOV')) {
     if ($source -notmatch [regex]::Escape($required)) {
-        throw "Missing v0.1.1 control: $required"
+        throw "Missing v0.1.2 control: $required"
     }
 }
 
@@ -46,7 +56,7 @@ if ($source -notmatch 'CollectionService:GetTagged\("LootChest"\)' -or
 }
 
 if ($source -notmatch 'UnbindFromRenderStep\(renderStepName\)' -or
-    $source -notmatch '__RAVEN_THE_WILD_WEST = \{Version="v0\.1\.1"') {
+    $source -notmatch '__RAVEN_THE_WILD_WEST = \{Version="v0\.1\.2"') {
     throw 'Module cleanup/runtime registration is incomplete'
 }
 
@@ -57,4 +67,4 @@ if ($hub -notmatch 'name\s*=\s*"The Wild West"' -or
     throw 'RAVENHUB registration is missing or incorrect'
 }
 
-Write-Output 'PASS: The Wild West v0.1.1 Auto Lock/team/ESP regression checks passed'
+Write-Output 'PASS: The Wild West v0.1.2 Auto Lock/team/ESP regression checks passed'
