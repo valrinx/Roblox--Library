@@ -2,8 +2,10 @@ $ErrorActionPreference = 'Stop'
 
 $source = Get-Content -Raw (Join-Path $PSScriptRoot '..\modules\cold_war.lua')
 
-if ($source -notmatch '(?s)local function scanAutoVisibleParts\(.*?for _, candidate in ipairs\(parts\).*?rayReachesTarget') {
-    throw 'Auto Visible must evaluate every candidate part in the same visibility update'
+if ($source -notmatch 'local AUTO_VISIBLE_PARTS_PER_SCAN = 4' -or
+    $source -notmatch 'local AUTO_VISIBLE_SCAN_INTERVAL = 2' -or
+    $source -notmatch '(?s)local function scanAutoVisibleParts\(.*?local scanCount = math\.min\(AUTO_VISIBLE_PARTS_PER_SCAN, #parts\).*?for _ = 1, scanCount do.*?rayReachesTarget') {
+    throw 'Auto Visible must use the bounded per-scan raycast budget'
 }
 
 if ($source -notmatch '(?s)if autoVisibleActive then\s+.*?scanAutoVisibleParts\(') {
@@ -18,12 +20,13 @@ if ($source -notmatch '(?s)local function getAimPartPriority\(part\).*?Head.*?re
     throw 'Auto Lock Part must prioritize head, torso, arms, then legs'
 }
 
-if ($source -notmatch '(?s)local AUTO_VISIBLE_SAMPLE_SCALE = 0\.48.*?for _, offset in ipairs\(getVisibilityOffsets\(candidate, AUTO_VISIBLE_SAMPLE_SCALE, true\)\).*?rayReachesTarget') {
-    throw 'Auto Visible must sample near each part edge to detect small exposed areas'
+if ($source -notmatch '(?s)local AUTO_VISIBLE_SAMPLE_SCALE = 0\.48.*?offsets\[1\].*?edgeIndex.*?rayReachesTarget') {
+    throw 'Auto Visible must check the part center first and rotate one edge fallback'
 }
 
-if ($source -notmatch '(?s)local AUTO_VISIBLE_GRID_STEPS = \{-1, -0\.5, 0, 0\.5, 1\}.*?getVisibilityOffsets\(candidate, AUTO_VISIBLE_SAMPLE_SCALE, true\)') {
-    throw 'Auto Visible must use a dense 5x5 grid for narrow exposed areas'
+if ($source -match 'AUTO_VISIBLE_GRID_STEPS' -or
+    $source -match 'getVisibilityOffsets\(candidate, AUTO_VISIBLE_SAMPLE_SCALE, true\)') {
+    throw 'Auto Visible must not restore the dense 5x5 per-part scan'
 }
 
 if ($source -notmatch '(?s)local function isVisionTransparent\(instance\).*?instance\.Transparency >= 0\.25') {
@@ -55,4 +58,4 @@ if ($source -notmatch 'local function isCharacterVisible\(fromPos, targetCharact
     throw 'Dense Auto Visible scans must be requested only by aim resolution, never globally by ESP or radar'
 }
 
-Write-Output 'PASS: Auto Visible evaluates all candidate parts together'
+Write-Output 'PASS: Auto Visible uses bounded center/edge visibility scans'
