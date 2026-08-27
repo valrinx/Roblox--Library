@@ -10,7 +10,7 @@ return function(MacLib)
     assert(type(MacLib) == "table" and type(MacLib.Window) == "function", "MacLib is unavailable")
 
     local Adapter = {
-        Version = "maclib-adapter-1.0.0",
+        Version = "maclib-adapter-1.1.1",
         Flags = MacLib.Options or {},
         _maclib = MacLib,
         _window = nil,
@@ -546,6 +546,9 @@ return function(MacLib)
         if saving.Enabled ~= false then
             MacLib:SetFolder(tostring(saving.FolderName or "RAVENHUB"))
         end
+        -- MacLib defines its config methods inside MacLib:Window, so install
+        -- the deterministic loader only after the native window exists.
+        installExactConfigLoader()
 
         native:GlobalSetting({
             Name = "UI Blur",
