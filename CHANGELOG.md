@@ -1,6 +1,12 @@
 - **Train Your Fish to Race v1.2.0** - Added eligibility-gated Auto Online Rewards, Auto Daily Sign, Auto Spin/Free Spin, and event-driven Auto Race Reward with cooldown protection.
 # Changelog
 
+## 2026-08-28 - The Wild West v0.1.12
+
+- Added a short lock grace window so transient visibility scans do not drop a valid target.
+- Candidate targets now receive a complete body-part visibility scan before acquisition; incremental scans remain for steady-state performance.
+- Reduced visibility refresh latency and added an adjustable `Prediction Lead` multiplier shared by the aim point and prediction dot.
+
 ## 2026-08-25
 - **Train Your Fish v1.1.2** - Made Smart Loop race-aware and synchronized native Auto Train/Auto Race toggles back to the game BoolValues after server-side rejection or changes.
 - **Train Your Fish v1.1.1** - Fixed BoolValue resolution for Train/Auto states and reads Level, Evolution, and Mount from Character with Player fallback.

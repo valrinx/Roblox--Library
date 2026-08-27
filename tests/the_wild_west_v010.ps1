@@ -8,7 +8,7 @@ if ($source -notmatch 'WORKSPACE_Entities' -or $source -notmatch 'FindFirstChild
 }
 
 if ($source -notmatch 'local AUTO_VISIBLE_PARTS_PER_SCAN = 4' -or
-    $source -notmatch 'local AUTO_VISIBLE_SCAN_INTERVAL = 2' -or
+    $source -notmatch 'local AUTO_VISIBLE_SCAN_INTERVAL = 1' -or
     $source -match 'AUTO_VISIBLE_GRID_STEPS') {
     throw 'Auto Lock must keep the bounded visibility budget from the Cold War FPS fix'
 }
@@ -129,7 +129,7 @@ if ($source -notmatch 'CollectionService:GetTagged\("LootChest"\)' -or
 }
 
 if ($source -notmatch 'UnbindFromRenderStep\(renderStepName\)' -or
-    $source -notmatch '__RAVEN_THE_WILD_WEST = \{Version="v0\.1\.9"') {
+    $source -notmatch '__RAVEN_THE_WILD_WEST = \{Version="v0\.1\.12"') {
     throw 'Module cleanup/runtime registration is incomplete'
 }
 
@@ -140,4 +140,4 @@ if ($hub -notmatch 'name\s*=\s*"The Wild West"' -or
     throw 'RAVENHUB registration is missing or incorrect'
 }
 
-Write-Output 'PASS: The Wild West v0.1.9 weapon ballistics/Auto Lock/team/ESP regression checks passed'
+Write-Output 'PASS: The Wild West v0.1.12 weapon ballistics/Auto Lock/team/ESP regression checks passed'

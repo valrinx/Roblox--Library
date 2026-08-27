@@ -1,5 +1,5 @@
 --[[
-    RAVEN HUB Module - The Wild West v0.1.11
+    RAVEN HUB Module - The Wild West v0.1.12
     Game: The Wild West (PlaceId: 2317712696, GameId: 807930589)
     Developer: Starboard Studios
 
@@ -609,7 +609,7 @@ return function(Window, runtimeInfo)
         local speed = math.max(weaponConfig.Speed, 1)
         local travelTime = (targetPosition - shooterPosition).Magnitude / speed
         for _ = 1, 5 do
-            local futurePosition = targetPosition + targetVelocity * travelTime
+            local futurePosition = targetPosition + targetVelocity * travelTime * math.max(0, State.PredictionLeadScale)
             local launchVector = futurePosition - shooterPosition
                 - weaponConfig.Gravity * (0.5 * travelTime * travelTime)
             local nextTime = launchVector.Magnitude / speed
@@ -1234,6 +1234,8 @@ return function(Window, runtimeInfo)
             rightMouseDown = true
             visibilityCache = {}
             lockedTarget = nil
+            lockedAimPart = nil
+            lockedTargetLostAt = nil
         end
     end)
     Connections.inputEnded = UserInputService.InputEnded:Connect(function(input)
@@ -1422,44 +1424,48 @@ return function(Window, runtimeInfo)
     CombatTab:CreateToggle({Name="Enable Aim Prediction",CurrentValue=false,Flag="WildWestAimPrediction",Callback=function(v) State.AimPrediction = v == true end})
     CombatTab:CreateToggle({Name="Capture Exact Projectile Seed",CurrentValue=false,Flag="WildWestExactSeed",Callback=function(v) State.ExactSeedCapture = v == true end})
     CombatTab:CreateSlider({Name="Prediction Dot Size",Range={2,14},Increment=1,CurrentValue=6,Suffix=" px",Flag="WildWestPredictDotSize",Callback=function(v) State.PredictDotSize = v end})
+    CombatTab:CreateSlider({Name="Prediction Lead",Range={0.5,1.5},Increment=0.05,CurrentValue=1,Suffix="x",Flag="WildWestPredictionLead",Callback=function(v) State.PredictionLeadScale = math.clamp(tonumber(v) or 1, 0.5, 1.5) end})
     CombatTab:CreateLabel("Uses live weapon/ammo power, gravity, fanning and muzzle origin")
     CombatTab:CreateLabel("Exact Seed capture is read-only before the server projectile packet")
     CombatTab:CreateLabel("Auto Visible prefers center mass when weapon accuracy is below 90%")
     CombatTab:CreateSection("Smooth Auto Lock")
     CombatTab:CreateToggle({Name="Player Auto Lock",CurrentValue=false,Flag="WildWestAutoLock",Callback=function(v)
         State.AutoLock = v == true
-        if not State.AutoLock then lockedTarget = nil end
+        if not State.AutoLock then lockedTarget, lockedAimPart, lockedTargetLostAt = nil, nil, nil end
     end})
     CombatTab:CreateToggle({Name="Animal Auto Lock",CurrentValue=false,Flag="WildWestAnimalAutoLock",Callback=function(v)
         State.AnimalAutoLock = v == true
-        lockedTarget = nil
+        lockedTarget, lockedAimPart, lockedTargetLostAt = nil, nil, nil
     end})
     CombatTab:CreateDropdown({Name="Activation",Options={"Right Mouse","Always"},CurrentOption={"Right Mouse"},MultipleOptions=false,Flag="WildWestAimActivation",Callback=function(v)
         local selected = dropdownValue(v, "Right Mouse")
         State.AimActivation = selected:lower() == "always" and "Always" or "Right Mouse"
     end})
-    CombatTab:CreateToggle({Name="Sticky Target",CurrentValue=true,Flag="WildWestStickyTarget",Callback=function(v) State.StickyTarget = v == true end})
+    CombatTab:CreateToggle({Name="Sticky Target",CurrentValue=true,Flag="WildWestStickyTarget",Callback=function(v)
+        State.StickyTarget = v == true
+        if not State.StickyTarget then lockedTarget, lockedAimPart, lockedTargetLostAt = nil, nil, nil end
+    end})
     CombatTab:CreateToggle({Name="Visible Check",CurrentValue=true,Flag="WildWestVisibleCheck",Callback=function(v)
         State.AimVisibleCheck = v == true
-        lockedTarget = nil
+        lockedTarget, lockedAimPart, lockedTargetLostAt = nil, nil, nil
     end})
     CombatTab:CreateToggle({Name="Ignore Same Team",CurrentValue=true,Flag="WildWestIgnoreTeam",Callback=function(v)
         State.IgnoreSameTeam = v == true
-        lockedTarget = nil
+        lockedTarget, lockedAimPart, lockedTargetLostAt = nil, nil, nil
     end})
     CombatTab:CreateToggle({Name="Ignore Same Faction",CurrentValue=true,Flag="WildWestIgnoreFaction",Callback=function(v)
         State.IgnoreSameFaction = v == true
-        lockedTarget = nil
+        lockedTarget, lockedAimPart, lockedTargetLostAt = nil, nil, nil
     end})
     CombatTab:CreateDropdown({Name="Auto Lock Part",Options={"Auto Visible","Closest Visible","Selected Only"},CurrentOption={"Auto Visible"},MultipleOptions=false,Flag="WildWestAimPartMode",Callback=function(v)
         local selected = dropdownValue(v, "Auto Visible")
         if selected ~= "Closest Visible" and selected ~= "Selected Only" then selected = "Auto Visible" end
         State.AimPartMode = selected
-        lockedTarget = nil
+        lockedTarget, lockedAimPart, lockedTargetLostAt = nil, nil, nil
     end})
     CombatTab:CreateDropdown({Name="Selected Part",Options={"Head","UpperTorso","LowerTorso"},CurrentOption={"Head"},MultipleOptions=false,Flag="WildWestAimTargetPart",Callback=function(v)
         State.AimTargetPart = dropdownValue(v, "Head")
-        lockedTarget = nil
+        lockedTarget, lockedAimPart, lockedTargetLostAt = nil, nil, nil
     end})
     CombatTab:CreateToggle({Name="Adaptive Smoothness",CurrentValue=true,Flag="WildWestAdaptiveSmooth",Callback=function(v) State.AdaptiveSmoothness = v == true end})
     CombatTab:CreateSlider({Name="Aim FOV",Range={40,500},Increment=10,CurrentValue=180,Suffix=" px",Flag="WildWestAimFOV",Callback=function(v) State.AimFOV = v end})
@@ -1641,6 +1647,6 @@ return function(Window, runtimeInfo)
         end
     end
 
-    getgenv().__RAVEN_THE_WILD_WEST = {Version="v0.1.11",State=State,Destroy=destroy}
+    getgenv().__RAVEN_THE_WILD_WEST = {Version="v0.1.12",State=State,Destroy=destroy}
     if runtimeInfo and runtimeInfo.registerCleanup then runtimeInfo.registerCleanup(destroy) end
 end
