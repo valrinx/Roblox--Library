@@ -826,6 +826,7 @@ return function(Window, runtimeInfo)
                     return original(self, projectileType, sharedData, info, callback, ...)
                 end
                 initProjectilesHookRecursion = true
+                pcall(function() _G._ravenHookFired = (_G._ravenHookFired or 0) + 1 end)
                 local success, err = pcall(function()
                     if State.SilentAim and type(info) == "table" then
                         local targetPos = cachedSilentAimTarget
@@ -835,6 +836,7 @@ return function(Window, runtimeInfo)
                             if direction.Magnitude > 0.0001 then
                                 info.accuracy = 1  -- Max accuracy = no spread
                                 info.direction = direction.Unit  -- Aim at target
+                                pcall(function() _G._ravenAimRedirected = (_G._ravenAimRedirected or 0) + 1 end)
                             end
                         end
                     end
