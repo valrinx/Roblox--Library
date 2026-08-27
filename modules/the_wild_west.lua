@@ -1,5 +1,5 @@
 --[[
-    RAVEN HUB Module - The Wild West v0.1.17
+    RAVEN HUB Module - The Wild West v0.1.18
     Game: The Wild West (PlaceId: 2317712696, GameId: 807930589)
     Developer: Starboard Studios
 
@@ -122,6 +122,11 @@ return function(Window, runtimeInfo)
     local spreadHookInstalled = false
     local silentAimLastTarget = nil
     local cachedSilentAimTarget = nil
+    local originalInitProjectiles = nil
+    local initProjectilesHookTarget = nil
+    local initProjectilesHookInstalled = false
+    local initProjectilesHookRecursion = false
+    local playersData = {}
     local RECOVERY_UPDATE_INTERVAL = 0.08
     local GET_UP_COOLDOWN = 1.5
     local BREAK_FREE_INTERVAL = 0.12
@@ -740,7 +745,7 @@ return function(Window, runtimeInfo)
         State.NoSpreadHookActive = false
     end
 
-    local function installSpreadAndAimHook()
+    local function installSpreadHook()
         if type(hookfunction) ~= "function" then return end
         local target = ProjectileHandler.GetProjectileSpread
         if type(target) ~= "function" then return end
@@ -750,19 +755,8 @@ return function(Window, runtimeInfo)
         local original
         local ok = pcall(function()
             original = hookfunction(target, function(self, projectileType, sharedData, projectileData, projectileCount, ...)
-                -- Silent Aim: modify direction BEFORE original so server sees new direction
-                if State.SilentAim and cachedSilentAimTarget and type(projectileData) == "table" then
-                    local origin = Camera.CFrame.Position
-                    local okAim, aimDir = pcall(function() return (cachedSilentAimTarget - origin) end)
-                    if okAim and typeof(aimDir) == "Vector3" and aimDir.Magnitude > 0.0001 then
-                        -- Clone projectileData to avoid mutating shared reference
-                        local patched = table.clone(projectileData)
-                        patched.direction = aimDir
-                        projectileData = patched
-                    end
-                end
                 local result = original(self, projectileType, sharedData, projectileData, projectileCount, ...)
-                if not State.NoSpread and not State.SilentAim then return result end
+                if not State.NoSpread then return result end
                 return adjustProjectileDirection(result, projectileType, projectileData, sharedData)
             end)
         end)
@@ -779,7 +773,109 @@ return function(Window, runtimeInfo)
         State.NoSpreadHookActive = true
     end
 
-    installSpreadAndAimHook()
+    installSpreadHook()
+
+    -- Silent Aim: Hook ProjectileHandler.InitProjectiles to redirect bullet direction
+    -- This is the correct hook point - modifies info.accuracy + info.direction
+    -- BEFORE the projectile is processed, so server sees consistent data.
+    local function restoreInitProjectilesHook()
+        if initProjectilesHookInstalled and initProjectilesHookTarget and originalInitProjectiles and type(hookfunction) == "function" then
+            pcall(hookfunction, initProjectilesHookTarget, originalInitProjectiles)
+        end
+        initProjectilesHookTarget = nil
+        originalInitProjectiles = nil
+        initProjectilesHookInstalled = false
+    end
+
+    local function getInitProjectilesTarget()
+        -- Try direct access first
+        if type(ProjectileHandler.InitProjectiles) == "function" then
+            return ProjectileHandler.InitProjectiles
+        end
+        -- Try through SharedProjectiles module
+        if type(SharedProjectiles.InitProjectiles) == "function" then
+            return SharedProjectiles.InitProjectiles
+        end
+        -- Try scanning upvalues of GetProjectileSpread to find InitProjectiles
+        if type(debug) == "table" and type(debug.getupvalues) == "function" then
+            local ok, uvs = pcall(debug.getupvalues, ProjectileHandler)
+            if ok and type(uvs) == "table" then
+                for _, v in pairs(uvs) do
+                    if type(v) == "table" then
+                        if type(v.InitProjectiles) == "function" then
+                            return v.InitProjectiles
+                        end
+                    end
+                end
+            end
+        end
+        return nil
+    end
+
+    local function installInitProjectilesHook()
+        if type(hookfunction) ~= "function" then return end
+        if initProjectilesHookInstalled then return end
+        local target = getInitProjectilesTarget()
+        if not target then return end
+
+        local original
+        local ok = pcall(function()
+            original = hookfunction(target, function(self, projectileType, sharedData, info, callback, ...)
+                -- Recursion guard
+                if initProjectilesHookRecursion then
+                    return original(self, projectileType, sharedData, info, callback, ...)
+                end
+                initProjectilesHookRecursion = true
+                local success, err = pcall(function()
+                    if State.SilentAim and type(info) == "table" then
+                        local targetPos = cachedSilentAimTarget
+                        if targetPos and typeof(targetPos) == "Vector3" then
+                            local origin = Camera.CFrame.Position
+                            local direction = (targetPos - origin)
+                            if direction.Magnitude > 0.0001 then
+                                info.accuracy = 1  -- Max accuracy = no spread
+                                info.direction = direction.Unit  -- Aim at target
+                            end
+                        end
+                    end
+                end)
+                initProjectilesHookRecursion = false
+                if not success then
+                    -- Silently ignore errors in hook
+                end
+                return original(self, projectileType, sharedData, info, callback, ...)
+            end)
+        end)
+        if not ok or type(original) ~= "function" then
+            initProjectilesHookTarget = nil
+            originalInitProjectiles = nil
+            initProjectilesHookInstalled = false
+            return
+        end
+        initProjectilesHookTarget = target
+        originalInitProjectiles = original
+        initProjectilesHookInstalled = true
+    end
+
+    installInitProjectilesHook()
+
+    -- Ban packet protection: block Terrain.Color changes that contain 'Environment' in traceback
+    -- This prevents the game from sending ban packets when it detects script interference
+    do
+        local IsA = game.IsA
+        local oldNewIndex
+        oldNewIndex = hookmetamethod(game, "__newindex", function(self, p, v)
+            if initProjectilesHookRecursion then return oldNewIndex(self, p, v) end
+            if IsA(self, "Terrain") and p == "Color" then
+                local trace = debug.traceback()
+                if trace and string.find(trace, "Environment") then
+                    -- Block ban packet
+                    return
+                end
+            end
+            return oldNewIndex(self, p, v)
+        end)
+    end
 
     local function getWeaponAdjustedAimPart(target, part, weaponConfig)
         if not part or not weaponConfig or State.AimPartMode ~= "Auto Visible" or weaponConfig.Accuracy >= 0.9 then
@@ -1821,6 +1917,7 @@ return function(Window, runtimeInfo)
             recoilHookInstalled = false
         end
         restoreNoSpreadHook()
+        restoreInitProjectilesHook()
         clearPlayerESP()
         clearEntityGroup(EntityESPObjects.animals)
         clearEntityGroup(EntityESPObjects.loot)
@@ -1834,6 +1931,6 @@ return function(Window, runtimeInfo)
         end
     end
 
-    getgenv().__RAVEN_THE_WILD_WEST = {Version="v0.1.17",State=State,Destroy=destroy}
+    getgenv().__RAVEN_THE_WILD_WEST = {Version="v0.1.18",State=State,Destroy=destroy}
     if runtimeInfo and runtimeInfo.registerCleanup then runtimeInfo.registerCleanup(destroy) end
 end
