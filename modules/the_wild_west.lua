@@ -1,5 +1,5 @@
 --[[
-    RAVEN HUB Module - The Wild West v0.1.13
+    RAVEN HUB Module - The Wild West v0.1.14
     Game: The Wild West (PlaceId: 2317712696, GameId: 807930589)
     Developer: Starboard Studios
 
@@ -1680,10 +1680,6 @@ return function(Window, runtimeInfo)
             recoilHookInstalled = false
         end
         restoreNoSpreadHook()
-        if namecallHookInstalled and originalNamecall and type(hookmetamethod) == "function" then
-            pcall(hookmetamethod, game, "__namecall", originalNamecall)
-            namecallHookInstalled = false
-        end
         clearPlayerESP()
         clearEntityGroup(EntityESPObjects.animals)
         clearEntityGroup(EntityESPObjects.loot)
@@ -1696,6 +1692,6 @@ return function(Window, runtimeInfo)
         end
     end
 
-    getgenv().__RAVEN_THE_WILD_WEST = {Version="v0.1.13",State=State,Destroy=destroy}
+    getgenv().__RAVEN_THE_WILD_WEST = {Version="v0.1.14",State=State,Destroy=destroy}
     if runtimeInfo and runtimeInfo.registerCleanup then runtimeInfo.registerCleanup(destroy) end
 end
