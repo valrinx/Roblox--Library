@@ -41,16 +41,21 @@ foreach ($requiredBallistic in @(
     'local function getTargetScreenDistance(target, part)',
     'local sample = getSharedPrediction(target, weaponConfig, part)',
     'type(hookfunction) ~= "function"',
-    'if info.seed ~= nil then',
-    'local function getSpreadCenter(spread)',
-    'local probeInfo = table.clone(info)',
-    'CFrame.fromAxisAngle(axis.Unit, math.acos(dot))',
-    'Exact Projectile Seed Correction',
-    'State.LastSeedCorrectionApplied = true'
+    'type(ProjectileHandler.GenerateProjectileSeed) ~= "function"',
+    'seedHookTarget = ProjectileHandler.GenerateProjectileSeed',
+    'local seed = original(self, ...)',
+    'State.LastProjectileSeed = seed',
+    'return seed',
+    'Capture Exact Projectile Seed'
 )) {
     if ($source.IndexOf($requiredBallistic) -lt 0) {
         throw "Missing weapon-specific ballistic behavior: $requiredBallistic"
     }
+}
+
+if ($source -match 'correctedInfo\.direction' -or
+    $source -match 'seedHookTarget = ProjectileHandler\.GetProjectileSpread') {
+    throw 'Exact seed capture must not mutate spread direction after the server projectile packet is sent'
 }
 
 if ($source -notmatch 'local PLAYER_ESP_UPDATE_INTERVAL = 0\.5' -or
@@ -74,7 +79,7 @@ if ($source -notmatch 'CurrentFactionId' -or
 
 foreach ($required in @('Player ESP','Player ESP Distance','Show Role','Show Faction','Animal ESP','Animal ESP Distance','Loot Chest ESP','Chest ESP Distance','Ore ESP','Ore ESP Distance','Fullbright','No Fog','Custom FOV')) {
     if ($source -notmatch [regex]::Escape($required)) {
-        throw "Missing v0.1.5 control: $required"
+        throw "Missing v0.1.6 control: $required"
     }
 }
 
@@ -85,7 +90,7 @@ if ($source -notmatch 'CollectionService:GetTagged\("LootChest"\)' -or
 }
 
 if ($source -notmatch 'UnbindFromRenderStep\(renderStepName\)' -or
-    $source -notmatch '__RAVEN_THE_WILD_WEST = \{Version="v0\.1\.5"') {
+    $source -notmatch '__RAVEN_THE_WILD_WEST = \{Version="v0\.1\.6"') {
     throw 'Module cleanup/runtime registration is incomplete'
 }
 
@@ -96,4 +101,4 @@ if ($hub -notmatch 'name\s*=\s*"The Wild West"' -or
     throw 'RAVENHUB registration is missing or incorrect'
 }
 
-Write-Output 'PASS: The Wild West v0.1.5 weapon ballistics/Auto Lock/team/ESP regression checks passed'
+Write-Output 'PASS: The Wild West v0.1.6 weapon ballistics/Auto Lock/team/ESP regression checks passed'

@@ -1,5 +1,5 @@
 --[[
-    RAVEN HUB Module - The Wild West v0.1.5
+    RAVEN HUB Module - The Wild West v0.1.6
     Game: The Wild West (PlaceId: 2317712696, GameId: 807930589)
     Developer: Starboard Studios
 
@@ -49,9 +49,8 @@ return function(Window, runtimeInfo)
         AutoLock = false,
         AnimalAutoLock = false,
         AimPrediction = false,
-        ExactSeedCorrection = false,
+        ExactSeedCapture = false,
         LastProjectileSeed = nil,
-        LastSeedCorrectionApplied = false,
         PredictDotSize = 6,
         AimActivation = "Right Mouse",
         AimFOV = 180,
@@ -92,8 +91,7 @@ return function(Window, runtimeInfo)
     local cachedWeaponItem = nil
     local cachedWeaponConfig = nil
     local cachedWeaponFrame = -1
-    local latestAimSolution = nil
-    local originalGetProjectileSpread = nil
+    local originalGenerateProjectileSeed = nil
     local seedHookTarget = nil
     local seedHookInstalled = false
 
@@ -599,73 +597,19 @@ return function(Window, runtimeInfo)
         return cached
     end
 
-    local function getSpreadCenter(spread)
-        if type(spread) ~= "table" then return nil end
-        local sum = Vector3.zero
-        local count = 0
-        for _, velocity in ipairs(spread) do
-            if typeof(velocity) == "Vector3" and velocity.Magnitude > 0 then
-                sum += velocity.Unit
-                count += 1
-            end
-        end
-        if count == 0 or sum.Magnitude <= 1e-6 then return nil end
-        return sum.Unit
-    end
-
-    local function rotateSpreadInput(inputDirection, actualDirection, desiredDirection)
-        local dot = math.clamp(actualDirection:Dot(desiredDirection), -1, 1)
-        local axis = actualDirection:Cross(desiredDirection)
-        if dot >= 0.999999 or axis.Magnitude <= 1e-6 then return inputDirection end
-        return CFrame.fromAxisAngle(axis.Unit, math.acos(dot)):VectorToWorldSpace(inputDirection).Unit
-    end
-
-    local function solveExactSeedDirection(projectileType, shared, info, numProjectiles, desiredDirection)
-        if not originalGetProjectileSpread or type(info) ~= "table" then return nil end
-        local corrected = desiredDirection.Unit
-        for _ = 1, 2 do
-            local probeInfo = table.clone(info)
-            probeInfo.direction = corrected
-            local ok, spread = pcall(originalGetProjectileSpread, ProjectileHandler, projectileType, shared, probeInfo, numProjectiles)
-            if not ok then return nil end
-            local center = getSpreadCenter(spread)
-            if not center then return nil end
-            corrected = rotateSpreadInput(corrected, center, desiredDirection)
-        end
-        return corrected
-    end
-
     local function installExactSeedHook()
-        if type(hookfunction) ~= "function" or type(ProjectileHandler.GetProjectileSpread) ~= "function" then return end
-        seedHookTarget = ProjectileHandler.GetProjectileSpread
+        if type(hookfunction) ~= "function" or type(ProjectileHandler.GenerateProjectileSeed) ~= "function" then return end
+        seedHookTarget = ProjectileHandler.GenerateProjectileSeed
         local original
-        original = hookfunction(seedHookTarget, function(self, projectileType, shared, info, numProjectiles)
-            if self ~= ProjectileHandler or type(info) ~= "table" then
-                return original(self, projectileType, shared, info, numProjectiles)
-            end
-
-            if info.seed ~= nil then
-                State.LastProjectileSeed = info.seed
+        original = hookfunction(seedHookTarget, function(self, ...)
+            local seed = original(self, ...)
+            if self == ProjectileHandler and State.ExactSeedCapture then
+                State.LastProjectileSeed = seed
                 State.LastProjectileSeedTime = os.clock()
             end
-
-            local solution = latestAimSolution
-            if State.ExactSeedCorrection and State.AimPrediction and State.AimEngaged
-                and solution and os.clock() - solution.updatedAt <= 0.15
-                and typeof(solution.direction) == "Vector3" and solution.direction.Magnitude > 0 then
-                local corrected = solveExactSeedDirection(projectileType, shared, info, numProjectiles, solution.direction)
-                if corrected then
-                    local correctedInfo = table.clone(info)
-                    correctedInfo.direction = corrected
-                    State.LastSeedCorrectionApplied = true
-                    return original(self, projectileType, shared, correctedInfo, numProjectiles)
-                end
-            end
-
-            State.LastSeedCorrectionApplied = false
-            return original(self, projectileType, shared, info, numProjectiles)
+            return seed
         end)
-        originalGetProjectileSpread = original
+        originalGenerateProjectileSeed = original
         seedHookInstalled = true
     end
 
@@ -783,7 +727,6 @@ return function(Window, runtimeInfo)
         State.AimEngaged = false
         State.AimLockedPart = nil
         State.AimLockedPlayer = nil
-        latestAimSolution = nil
     end
 
     local function updateAutoLock(dt)
@@ -812,19 +755,6 @@ return function(Window, runtimeInfo)
         if State.AimPrediction and weaponConfig then
             local sample = getSharedPrediction(lockedTarget, weaponConfig, part)
             if sample then aimPosition = sample.position end
-        end
-        if State.AimPrediction and weaponConfig then
-            local launchVector = aimPosition - weaponConfig.Origin
-            if launchVector.Magnitude > 1e-3 then
-                latestAimSolution = {
-                    direction = launchVector.Unit,
-                    updatedAt = os.clock(),
-                    weapon = weaponConfig.CacheKey,
-                    target = lockedTarget,
-                }
-            end
-        else
-            latestAimSolution = nil
         end
         local center = Camera.ViewportSize * 0.5
         local point, onScreen = Camera:WorldToViewportPoint(aimPosition)
@@ -1200,10 +1130,10 @@ return function(Window, runtimeInfo)
     local CombatTab = Window:CreateTab("Combat", "crosshair")
     CombatTab:CreateSection("Aim Prediction")
     CombatTab:CreateToggle({Name="Enable Aim Prediction",CurrentValue=false,Flag="WildWestAimPrediction",Callback=function(v) State.AimPrediction = v == true end})
-    CombatTab:CreateToggle({Name="Exact Projectile Seed Correction",CurrentValue=false,Flag="WildWestExactSeed",Callback=function(v) State.ExactSeedCorrection = v == true end})
+    CombatTab:CreateToggle({Name="Capture Exact Projectile Seed",CurrentValue=false,Flag="WildWestExactSeed",Callback=function(v) State.ExactSeedCapture = v == true end})
     CombatTab:CreateSlider({Name="Prediction Dot Size",Range={2,14},Increment=1,CurrentValue=6,Suffix=" px",Flag="WildWestPredictDotSize",Callback=function(v) State.PredictDotSize = v end})
     CombatTab:CreateLabel("Uses live weapon/ammo power, gravity, fanning and muzzle origin")
-    CombatTab:CreateLabel("Exact Seed centers the real seeded spread pattern on the ballistic solution")
+    CombatTab:CreateLabel("Exact Seed capture is read-only before the server projectile packet")
     CombatTab:CreateLabel("Auto Visible prefers center mass when weapon accuracy is below 90%")
     CombatTab:CreateSection("Smooth Auto Lock")
     CombatTab:CreateToggle({Name="Player Auto Lock",CurrentValue=false,Flag="WildWestAutoLock",Callback=function(v)
@@ -1314,8 +1244,8 @@ return function(Window, runtimeInfo)
         for _, connection in pairs(Connections) do pcall(function() connection:Disconnect() end) end
         pcall(function() aimCircle:Remove() end)
         pcall(function() predictionDot:Remove() end)
-        if seedHookInstalled and seedHookTarget and originalGetProjectileSpread and type(hookfunction) == "function" then
-            pcall(hookfunction, seedHookTarget, originalGetProjectileSpread)
+        if seedHookInstalled and seedHookTarget and originalGenerateProjectileSeed and type(hookfunction) == "function" then
+            pcall(hookfunction, seedHookTarget, originalGenerateProjectileSeed)
             seedHookInstalled = false
         end
         clearPlayerESP()
@@ -1330,6 +1260,6 @@ return function(Window, runtimeInfo)
         end
     end
 
-    getgenv().__RAVEN_THE_WILD_WEST = {Version="v0.1.5",State=State,Destroy=destroy}
+    getgenv().__RAVEN_THE_WILD_WEST = {Version="v0.1.6",State=State,Destroy=destroy}
     if runtimeInfo and runtimeInfo.registerCleanup then runtimeInfo.registerCleanup(destroy) end
 end
