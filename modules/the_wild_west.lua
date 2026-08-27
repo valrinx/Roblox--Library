@@ -1300,10 +1300,8 @@ return function(Window, runtimeInfo)
         predictionFrame += 1
         updateAutoLock(dt)
         updateAimPrediction()
-        -- Cache silent aim target once per frame to avoid heavy computation in __namecall hook
-        namecallRecursionGuard = true
+        -- Cache silent aim target once per frame for GetProjectileSpread hook
         cachedSilentAimTarget = State.SilentAim and getSilentAimTarget() or nil
-        namecallRecursionGuard = false
         aimCircle.Position = Camera.ViewportSize * 0.5
         aimCircle.Radius = State.AimFOV
         aimCircle.Visible = State.AutoLock or State.AnimalAutoLock
