@@ -146,6 +146,9 @@ return function(Window, runtimeInfo)
         Ambient = Lighting.Ambient,
         OutdoorAmbient = Lighting.OutdoorAmbient,
         GlobalShadows = Lighting.GlobalShadows,
+        ExposureCompensation = Lighting.ExposureCompensation,
+        EnvironmentDiffuseScale = Lighting.EnvironmentDiffuseScale,
+        EnvironmentSpecularScale = Lighting.EnvironmentSpecularScale,
     }
     local OriginalFOV = Camera.FieldOfView
     local originalAtmospheres = {}
@@ -1323,17 +1326,23 @@ return function(Window, runtimeInfo)
 
     local function applyFullbright(enabled)
         if enabled then
-            Lighting.Brightness = 2
+            Lighting.Brightness = 1.5
             Lighting.ClockTime = 14
-            Lighting.Ambient = Color3.new(1, 1, 1)
-            Lighting.OutdoorAmbient = Color3.new(1, 1, 1)
+            Lighting.Ambient = Color3.fromRGB(200, 200, 200)
+            Lighting.OutdoorAmbient = Color3.fromRGB(200, 200, 200)
             Lighting.GlobalShadows = false
+            Lighting.ExposureCompensation = 0
+            Lighting.EnvironmentDiffuseScale = 1
+            Lighting.EnvironmentSpecularScale = 1
         else
             Lighting.Brightness = OriginalLighting.Brightness
             Lighting.ClockTime = OriginalLighting.ClockTime
             Lighting.Ambient = OriginalLighting.Ambient
             Lighting.OutdoorAmbient = OriginalLighting.OutdoorAmbient
             Lighting.GlobalShadows = OriginalLighting.GlobalShadows
+            Lighting.ExposureCompensation = OriginalLighting.ExposureCompensation
+            Lighting.EnvironmentDiffuseScale = OriginalLighting.EnvironmentDiffuseScale
+            Lighting.EnvironmentSpecularScale = OriginalLighting.EnvironmentSpecularScale
         end
     end
 
@@ -1355,6 +1364,7 @@ return function(Window, runtimeInfo)
                 if atmosphere.Parent == Lighting then
                     atmosphere.Density = 0
                     atmosphere.Haze = 0
+                    atmosphere.Glare = 0
                 end
             end
         else
@@ -1389,18 +1399,26 @@ return function(Window, runtimeInfo)
     local playerEspAccumulator = 0
     local worldEspAccumulator = 0
     local renderStepName = "RavenWildWest_" .. tostring(LP.UserId)
-    RunService:BindToRenderStep(renderStepName, Enum.RenderPriority.Camera.Value + 10, function(dt)
+    RunService:BindToRenderStep(renderStepName, Enum.RenderPriority.Last.Value, function(dt)
+        -- Apply environment overrides first so a separate aim/ESP error cannot
+        -- prevent Fullbright or No Fog from taking effect this frame.
+        if State.Fullbright then applyFullbright(true) end
+        if State.NoFog then applyNoFog(true) end
         visibilityFrame += 1
         predictionFrame += 1
         updateAutoLock(dt)
         updateAimPrediction()
         -- Cache silent aim target once per frame for GetProjectileSpread hook
-        cachedSilentAimTarget = State.SilentAim and getSilentAimTarget() or nil
+        if State.SilentAim then
+            local ok, target = pcall(getSilentAimTarget)
+            cachedSilentAimTarget = ok and target or nil
+        else
+            cachedSilentAimTarget = nil
+        end
         aimCircle.Position = Camera.ViewportSize * 0.5
         aimCircle.Radius = State.AimFOV
         aimCircle.Visible = State.AutoLock or State.AnimalAutoLock
         if State.FOVEnabled then Camera.FieldOfView = State.FOVValue end
-
         playerEspAccumulator += dt
         if playerEspAccumulator >= PLAYER_ESP_UPDATE_INTERVAL then
             playerEspAccumulator = 0
