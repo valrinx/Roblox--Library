@@ -1,5 +1,5 @@
 --[[
-    RAVEN HUB Module - The Wild West v0.1.3
+    RAVEN HUB Module - The Wild West v0.1.4
     Game: The Wild West (PlaceId: 2317712696, GameId: 807930589)
     Developer: Starboard Studios
 
@@ -27,7 +27,13 @@ return function(Window, runtimeInfo)
     local PlayerData = require(SystemModules:WaitForChild("PlayerData"))
     local CharacterModules = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Character")
     local PlayerCharacter = require(CharacterModules:WaitForChild("PlayerCharacter"))
-    local ProjectileHandler = require(ReplicatedStorage:WaitForChild("SharedModules"):WaitForChild("World"):WaitForChild("ProjectileHandler"))
+    local SharedModules = ReplicatedStorage:WaitForChild("SharedModules")
+    local ProjectileModule = SharedModules:WaitForChild("World"):WaitForChild("ProjectileHandler")
+    local ProjectileHandler = require(ProjectileModule)
+    local SharedProjectiles = require(ProjectileModule:WaitForChild("SharedProjectiles"))
+    local Global = require(SharedModules:WaitForChild("Global"))
+    local Hotbar = nil
+    pcall(function() Hotbar = Global.LoadModule("Hotbar") end)
 
     local LP = Players.LocalPlayer
     local Camera = workspace.CurrentCamera
@@ -82,6 +88,7 @@ return function(Window, runtimeInfo)
     local smoothedTargetVelocities = {}
     local cachedWeaponItem = nil
     local cachedWeaponConfig = nil
+    local cachedWeaponFrame = -1
 
     local OriginalLighting = {
         Brightness = Lighting.Brightness,
@@ -308,9 +315,10 @@ return function(Window, runtimeInfo)
         for _, partName in ipairs(VISIBILITY_PARTS) do
             add(model:FindFirstChild(partName))
         end
+        add(model:FindFirstChild("HumanoidRootPart"))
+        add(model:FindFirstChild("Body"))
         if #parts == 0 then
             add(model:FindFirstChild("Head"))
-            add(model:FindFirstChild("HumanoidRootPart"))
             if model:IsA("Model") then add(model.PrimaryPart) end
             for _, part in ipairs(model:GetDescendants()) do
                 if #parts >= 6 then break end
@@ -446,25 +454,86 @@ return function(Window, runtimeInfo)
         return State.AnimalAutoLock and isTargetAnimal(target)
     end
 
+    local function getEffectiveAmmoType(shared)
+        local specialAmmo = shared.SpecialAmmoTypes
+        if type(specialAmmo) ~= "table" then return nil end
+        local sniperAmmo = Hotbar and Hotbar.EquippedSniperAmmo or nil
+        local shotgunAmmo = Hotbar and Hotbar.EquippedShotgunAmmo or nil
+        for _, ammoType in {sniperAmmo, shotgunAmmo, shared.DefaultAmmoType} do
+            if ammoType and table.find(specialAmmo, ammoType) then
+                if ammoType == shared.DefaultAmmoType then return ammoType end
+                local ok, owned = pcall(function() return PlayerData:HasItemOfName(ammoType) end)
+                if ok and owned then return ammoType end
+            end
+        end
+        return nil
+    end
+
+    local function getProjectileOrigin(item)
+        local origin = Camera.CFrame.Position
+        pcall(function()
+            local muzzleOrigin = item:GetShootOrigin()
+            if typeof(muzzleOrigin) ~= "Vector3" then return end
+            origin = muzzleOrigin
+            local root = getMyRoot()
+            if root then
+                local resolved = SharedProjectiles.ResolveProjectileOrigin(root.Position, muzzleOrigin)
+                if typeof(resolved) == "Vector3" then origin = resolved end
+            end
+        end)
+        return origin
+    end
+
     local function getCurrentProjectileConfig()
         local ok, item = pcall(function() return PlayerCharacter:GetEquippedItem() end)
         if not ok or type(item) ~= "table" then
-            cachedWeaponItem, cachedWeaponConfig = nil, nil
+            cachedWeaponItem, cachedWeaponConfig, cachedWeaponFrame = nil, nil, -1
             return nil
         end
-        if item == cachedWeaponItem then return cachedWeaponConfig end
+        if item == cachedWeaponItem and cachedWeaponFrame == predictionFrame then return cachedWeaponConfig end
         cachedWeaponItem = item
+        cachedWeaponFrame = predictionFrame
         cachedWeaponConfig = nil
         if item.IsGunItem ~= true or type(item.SharedData) ~= "table" then return nil end
+
         local shared = item.SharedData
-        local speed = tonumber(shared.ProjectilePower) or 1000
+        local ammoType = getEffectiveAmmoType(shared)
+        local hipOrFanning = not item.IsAiming or item.IsFanning
+        local accuracyModifier = hipOrFanning and (tonumber(shared.FanAccuracy) or 0.75) or 1
+        pcall(function()
+            accuracyModifier *= tonumber(ProjectileHandler:GetHorseBackAccMod(shared)) or 1
+        end)
+
+        local info = {
+            ammoType = ammoType,
+            accuracy = accuracyModifier,
+            isAiming = item.IsAiming == true,
+            isFanning = item.IsFanning == true,
+        }
+        local speed, accuracy = tonumber(shared.ProjectilePower) or 1000, tonumber(shared.ProjectileAccuracy) or 1
+        pcall(function()
+            local resolvedSpeed, resolvedAccuracy = ProjectileHandler:GetProjectilePowerAndAccuracy("GunProjectile", shared, info)
+            if tonumber(resolvedSpeed) then speed = tonumber(resolvedSpeed) end
+            if tonumber(resolvedAccuracy) then accuracy = tonumber(resolvedAccuracy) end
+        end)
         if speed <= 0 then return nil end
+
         local gravity = ProjectileHandler.Gravity or Vector3.new(0, -32, 0)
         pcall(function()
-            local resolved = ProjectileHandler:GetProjectileGravity(shared, nil)
+            local resolved = ProjectileHandler:GetProjectileGravity(shared, info)
             if typeof(resolved) == "Vector3" then gravity = resolved end
         end)
-        cachedWeaponConfig = {Name = tostring(item.Name or shared.Name or "Gun"), Speed = speed, Gravity = gravity}
+
+        local name = tostring(item.Name or shared.ItemType or "Gun")
+        cachedWeaponConfig = {
+            Name = name,
+            AmmoType = ammoType,
+            Speed = speed,
+            Accuracy = math.clamp(accuracy, 0, 1),
+            Gravity = gravity,
+            Origin = getProjectileOrigin(item),
+            CacheKey = table.concat({name, tostring(ammoType), string.format("%.4f", accuracy)}, "|"),
+        }
         return cachedWeaponConfig
     end
 
@@ -492,10 +561,18 @@ return function(Window, runtimeInfo)
 
     local function getPredictedPosition(targetPosition, targetVelocity, weaponConfig, shooterPosition)
         if not weaponConfig then return targetPosition, 0 end
-        local travelTime = 0
-        for _ = 1, 3 do
+        local speed = math.max(weaponConfig.Speed, 1)
+        local travelTime = (targetPosition - shooterPosition).Magnitude / speed
+        for _ = 1, 5 do
             local futurePosition = targetPosition + targetVelocity * travelTime
-            travelTime = (futurePosition - shooterPosition).Magnitude / math.max(weaponConfig.Speed, 1)
+            local launchVector = futurePosition - shooterPosition
+                - weaponConfig.Gravity * (0.5 * travelTime * travelTime)
+            local nextTime = launchVector.Magnitude / speed
+            if math.abs(nextTime - travelTime) < 0.0001 then
+                travelTime = nextTime
+                break
+            end
+            travelTime = nextTime
         end
         local predicted = targetPosition + targetVelocity * travelTime
             - weaponConfig.Gravity * (0.5 * travelTime * travelTime)
@@ -505,14 +582,39 @@ return function(Window, runtimeInfo)
     local function getSharedPrediction(target, weaponConfig, aimPart)
         if not target or not weaponConfig or not aimPart then return nil end
         local cached = predictionCache[target]
-        if cached and cached.frame == predictionFrame and cached.part == aimPart and cached.weapon == weaponConfig.Name then
+        if cached and cached.frame == predictionFrame and cached.part == aimPart and cached.weapon == weaponConfig.CacheKey then
             return cached
         end
         local velocity = getTargetVelocity(target, aimPart)
-        local predicted, travelTime = getPredictedPosition(aimPart.Position, velocity, weaponConfig, Camera.CFrame.Position)
-        cached = {frame = predictionFrame, part = aimPart, weapon = weaponConfig.Name, position = predicted, travelTime = travelTime}
+        local predicted, travelTime = getPredictedPosition(aimPart.Position, velocity, weaponConfig, weaponConfig.Origin)
+        cached = {frame = predictionFrame, part = aimPart, weapon = weaponConfig.CacheKey, position = predicted, travelTime = travelTime}
         predictionCache[target] = cached
         return cached
+    end
+
+    local function getWeaponAdjustedAimPart(target, part, weaponConfig)
+        if not part or not weaponConfig or State.AimPartMode ~= "Auto Visible" or weaponConfig.Accuracy >= 0.9 then
+            return part
+        end
+        local model = getTargetModel(target)
+        if not model then return part end
+        local candidates = target:IsA("Player")
+            and {"UpperTorso", "LowerTorso", "HumanoidRootPart"}
+            or {"Body", "HumanoidRootPart"}
+        local visibleStates = nil
+        if State.AimVisibleCheck then
+            local _, states = getVisibleState(model)
+            visibleStates = states
+        end
+        for _, partName in ipairs(candidates) do
+            local candidate = model:FindFirstChild(partName)
+            if candidate and candidate:IsA("BasePart") then
+                if not State.AimVisibleCheck or (visibleStates[candidate] and visibleStates[candidate].visible) then
+                    return candidate
+                end
+            end
+        end
+        return part
     end
 
     local function aimActive()
@@ -545,6 +647,19 @@ return function(Window, runtimeInfo)
     local function getClosestTarget(includePlayers, includeAnimals)
         local center = Camera.ViewportSize * 0.5
         local best, bestDistance = nil, math.huge
+        local weaponConfig = getCurrentProjectileConfig()
+
+        local function getTargetScreenDistance(target, part)
+            part = getWeaponAdjustedAimPart(target, part, weaponConfig)
+            local aimPosition = part.Position
+            if State.AimPrediction and weaponConfig then
+                local sample = getSharedPrediction(target, weaponConfig, part)
+                if sample then aimPosition = sample.position end
+            end
+            local targetPoint, targetOnScreen = Camera:WorldToViewportPoint(aimPosition)
+            if not targetOnScreen or targetPoint.Z <= 0 then return nil end
+            return (Vector2.new(targetPoint.X, targetPoint.Y) - center).Magnitude
+        end
 
         if includePlayers then
             for _, player in ipairs(Players:GetPlayers()) do
@@ -558,10 +673,8 @@ return function(Window, runtimeInfo)
                 if distance > State.AimFOV + AIM_PREFILTER_MARGIN then continue end
                 local part = resolveTargetAimPart(player, State.AimVisibleCheck)
                 if not part then continue end
-                local targetPoint, targetOnScreen = Camera:WorldToViewportPoint(part.Position)
-                if not targetOnScreen or targetPoint.Z <= 0 then continue end
-                local targetDistance = (Vector2.new(targetPoint.X, targetPoint.Y) - center).Magnitude
-                if targetDistance <= State.AimFOV and targetDistance < bestDistance then
+                local targetDistance = getTargetScreenDistance(player, part)
+                if targetDistance and targetDistance <= State.AimFOV and targetDistance < bestDistance then
                     best, bestDistance = player, targetDistance
                 end
             end
@@ -578,10 +691,8 @@ return function(Window, runtimeInfo)
                 if distance > State.AimFOV + AIM_PREFILTER_MARGIN then continue end
                 local part = resolveTargetAimPart(animal, State.AimVisibleCheck)
                 if not part then continue end
-                local targetPoint, targetOnScreen = Camera:WorldToViewportPoint(part.Position)
-                if not targetOnScreen or targetPoint.Z <= 0 then continue end
-                local targetDistance = (Vector2.new(targetPoint.X, targetPoint.Y) - center).Magnitude
-                if targetDistance <= State.AimFOV and targetDistance < bestDistance then
+                local targetDistance = getTargetScreenDistance(animal, part)
+                if targetDistance and targetDistance <= State.AimFOV and targetDistance < bestDistance then
                     best, bestDistance = animal, targetDistance
                 end
             end
@@ -615,9 +726,11 @@ return function(Window, runtimeInfo)
             return
         end
 
+        local weaponConfig = getCurrentProjectileConfig()
+        part = getWeaponAdjustedAimPart(lockedTarget, part, weaponConfig)
         local aimPosition = part.Position
-        if State.AimPrediction then
-            local sample = getSharedPrediction(lockedTarget, getCurrentProjectileConfig(), part)
+        if State.AimPrediction and weaponConfig then
+            local sample = getSharedPrediction(lockedTarget, weaponConfig, part)
             if sample then aimPosition = sample.position end
         end
         local center = Camera.ViewportSize * 0.5
@@ -666,7 +779,9 @@ return function(Window, runtimeInfo)
         end
         if not target then return end
         local part = resolveTargetAimPart(target, State.AimVisibleCheck)
-        local sample = getSharedPrediction(target, getCurrentProjectileConfig(), part)
+        local weaponConfig = getCurrentProjectileConfig()
+        part = getWeaponAdjustedAimPart(target, part, weaponConfig)
+        local sample = getSharedPrediction(target, weaponConfig, part)
         if not sample then return end
         local point, onScreen = Camera:WorldToViewportPoint(sample.position)
         if not onScreen or point.Z <= 0 then return end
@@ -993,7 +1108,8 @@ return function(Window, runtimeInfo)
     CombatTab:CreateSection("Aim Prediction")
     CombatTab:CreateToggle({Name="Enable Aim Prediction",CurrentValue=false,Flag="WildWestAimPrediction",Callback=function(v) State.AimPrediction = v == true end})
     CombatTab:CreateSlider({Name="Prediction Dot Size",Range={2,14},Increment=1,CurrentValue=6,Suffix=" px",Flag="WildWestPredictDotSize",Callback=function(v) State.PredictDotSize = v end})
-    CombatTab:CreateLabel("Uses The Wild West ProjectilePower + projectile gravity")
+    CombatTab:CreateLabel("Uses live weapon/ammo power, gravity, fanning and muzzle origin")
+    CombatTab:CreateLabel("Auto Visible prefers center mass when weapon accuracy is below 90%")
     CombatTab:CreateSection("Smooth Auto Lock")
     CombatTab:CreateToggle({Name="Player Auto Lock",CurrentValue=false,Flag="WildWestAutoLock",Callback=function(v)
         State.AutoLock = v == true
@@ -1115,6 +1231,6 @@ return function(Window, runtimeInfo)
         end
     end
 
-    getgenv().__RAVEN_THE_WILD_WEST = {Version="v0.1.3",State=State,Destroy=destroy}
+    getgenv().__RAVEN_THE_WILD_WEST = {Version="v0.1.4",State=State,Destroy=destroy}
     if runtimeInfo and runtimeInfo.registerCleanup then runtimeInfo.registerCleanup(destroy) end
 end
