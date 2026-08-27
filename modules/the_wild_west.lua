@@ -1,5 +1,5 @@
 --[[
-    RAVEN HUB Module - The Wild West v0.1.14
+    RAVEN HUB Module - The Wild West v0.1.15
     Game: The Wild West (PlaceId: 2317712696, GameId: 807930589)
     Developer: Starboard Studios
 
@@ -709,18 +709,6 @@ return function(Window, runtimeInfo)
 
         local direction = projectileData.direction
         if typeof(direction) ~= "Vector3" or direction.Magnitude <= 0.0001 then return result end
-
-        -- Silent Aim: redirect direction toward cached target
-        if State.SilentAim and cachedSilentAimTarget then
-            local origin = Camera.CFrame.Position
-            local ok, aimDir = pcall(function()
-                return (cachedSilentAimTarget - origin)
-            end)
-            if ok and typeof(aimDir) == "Vector3" and aimDir.Magnitude > 0.0001 then
-                direction = aimDir
-            end
-        end
-
         local unitDirection = direction.Unit
         local flattened = {}
         local changed = false
@@ -755,6 +743,17 @@ return function(Window, runtimeInfo)
         local original
         local ok = pcall(function()
             original = hookfunction(target, function(self, projectileType, sharedData, projectileData, projectileCount, ...)
+                -- Silent Aim: modify direction BEFORE original so server sees new direction
+                if State.SilentAim and cachedSilentAimTarget and type(projectileData) == "table" then
+                    local origin = Camera.CFrame.Position
+                    local okAim, aimDir = pcall(function() return (cachedSilentAimTarget - origin) end)
+                    if okAim and typeof(aimDir) == "Vector3" and aimDir.Magnitude > 0.0001 then
+                        -- Clone projectileData to avoid mutating shared reference
+                        local patched = table.clone(projectileData)
+                        patched.direction = aimDir
+                        projectileData = patched
+                    end
+                end
                 local result = original(self, projectileType, sharedData, projectileData, projectileCount, ...)
                 if not State.NoSpread and not State.SilentAim then return result end
                 return adjustProjectileDirection(result, projectileType, projectileData, sharedData)
@@ -1692,6 +1691,6 @@ return function(Window, runtimeInfo)
         end
     end
 
-    getgenv().__RAVEN_THE_WILD_WEST = {Version="v0.1.14",State=State,Destroy=destroy}
+    getgenv().__RAVEN_THE_WILD_WEST = {Version="v0.1.15",State=State,Destroy=destroy}
     if runtimeInfo and runtimeInfo.registerCleanup then runtimeInfo.registerCleanup(destroy) end
 end
