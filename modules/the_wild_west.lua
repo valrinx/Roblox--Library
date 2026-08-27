@@ -1,5 +1,5 @@
 --[[
-    RAVEN HUB Module - The Wild West v0.1.10
+    RAVEN HUB Module - The Wild West v0.1.11
     Game: The Wild West (PlaceId: 2317712696, GameId: 807930589)
     Developer: Starboard Studios
 
@@ -113,6 +113,8 @@ return function(Window, runtimeInfo)
     local spreadHookTarget = nil
     local spreadHookInstalled = false
     local silentAimLastTarget = nil
+    local originalNamecall = nil
+    local namecallHookInstalled = false
     local RECOVERY_UPDATE_INTERVAL = 0.08
     local GET_UP_COOLDOWN = 1.5
     local BREAK_FREE_INTERVAL = 0.12
@@ -698,13 +700,6 @@ return function(Window, runtimeInfo)
             if typeof(direction) ~= "Vector3" then
                 return original(self, direction, ...)
             end
-            if State.SilentAim then
-                local aimTarget = getSilentAimTarget()
-                if aimTarget then
-                    local origin = Camera.CFrame.Position
-                    return (aimTarget - origin).Unit * direction.Magnitude
-                end
-            end
             if State.NoSpread then
                 return direction
             end
@@ -715,6 +710,38 @@ return function(Window, runtimeInfo)
     end
 
     installNoSpreadHook()
+
+    -- Silent Aim: hook workspace:Raycast via __namecall to redirect bullet direction
+    local function installSilentAimHook()
+        if type(hookmetamethod) ~= "function" then return end
+        if type(getnamecallmethod) ~= "function" then return end
+        if type(newcclosure) ~= "function" then return end
+        if namecallHookInstalled then return end
+
+        originalNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+            local method = getnamecallmethod()
+
+            if State.SilentAim and method == "Raycast" and self == workspace then
+                local aimTarget = getSilentAimTarget()
+                if aimTarget then
+                    local args = {...}
+                    local origin = args[1]
+                    if typeof(origin) == "Vector3" then
+                        local direction = args[2]
+                        if typeof(direction) == "Vector3" then
+                            local newDir = (aimTarget - origin)
+                            return originalNamecall(self, origin, newDir, select(3, ...))
+                        end
+                    end
+                end
+            end
+
+            return originalNamecall(self, ...)
+        end))
+        namecallHookInstalled = true
+    end
+
+    installSilentAimHook()
 
     local function getWeaponAdjustedAimPart(target, part, weaponConfig)
         if not part or not weaponConfig or State.AimPartMode ~= "Auto Visible" or weaponConfig.Accuracy >= 0.9 then
@@ -1570,6 +1597,10 @@ return function(Window, runtimeInfo)
             pcall(hookfunction, spreadHookTarget, originalGetProjectileSpread)
             spreadHookInstalled = false
         end
+        if namecallHookInstalled and originalNamecall and type(hookmetamethod) == "function" then
+            pcall(hookmetamethod, game, "__namecall", originalNamecall)
+            namecallHookInstalled = false
+        end
         clearPlayerESP()
         clearEntityGroup(EntityESPObjects.animals)
         clearEntityGroup(EntityESPObjects.loot)
@@ -1582,6 +1613,6 @@ return function(Window, runtimeInfo)
         end
     end
 
-    getgenv().__RAVEN_THE_WILD_WEST = {Version="v0.1.10",State=State,Destroy=destroy}
+    getgenv().__RAVEN_THE_WILD_WEST = {Version="v0.1.11",State=State,Destroy=destroy}
     if runtimeInfo and runtimeInfo.registerCleanup then runtimeInfo.registerCleanup(destroy) end
 end
