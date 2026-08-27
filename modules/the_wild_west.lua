@@ -1,11 +1,11 @@
 --[[
-    RAVEN HUB Module - The Wild West v0.1.15
+    RAVEN HUB Module - The Wild West v0.1.16
     Game: The Wild West (PlaceId: 2317712696, GameId: 807930589)
     Developer: Starboard Studios
 
     Features:
     - FPS-safe Smooth Auto Lock for replicated player models
-    - Player / Animal / Loot Chest / Ore ESP
+    - Player / Animal / Loot Chest / Ore / Dropped Item ESP
     - Fullbright / No Fog / Custom FOV
     - Cleanup-safe runtime state
 ]]
@@ -45,6 +45,7 @@ return function(Window, runtimeInfo)
     local playerModels = entitiesRoot and entitiesRoot:FindFirstChild("Players")
     local animalFolder = entitiesRoot and entitiesRoot:FindFirstChild("Animals")
     local lootFolder = interactablesRoot and interactablesRoot:FindFirstChild("LootChests")
+    local droppedItemsFolder = interactablesRoot and interactablesRoot:FindFirstChild("DroppedItems")
     local miningFolder = interactablesRoot and interactablesRoot:FindFirstChild("Mining")
     local oreDeposits = miningFolder and miningFolder:FindFirstChild("OreDeposits")
 
@@ -77,6 +78,9 @@ return function(Window, runtimeInfo)
         LootESPDistance = 1200,
         OreESP = false,
         OreESPDistance = 1200,
+        ItemESP = false,
+        ItemESPDistance = 1200,
+        ItemESPSelected = {},
         AutoRespawn = false,
         RespawnLocation = "CanyonCamp",
         AutoGetUp = false,
@@ -997,7 +1001,11 @@ return function(Window, runtimeInfo)
     end
 
     local PlayerESPObjects = {}
-    local EntityESPObjects = {animals = {}, loot = {}, ore = {}}
+    local EntityESPObjects = {animals = {}, loot = {}, ore = {}, items = {}}
+    local itemFilterOptions = {}
+    local itemFilterOptionSet = {}
+    local itemFilterDropdown = nil
+    local itemFilterOptionsDirty = false
     local PLAYER_ESP_UPDATE_INTERVAL = 0.5
     local WORLD_ESP_UPDATE_INTERVAL = 0.75
 
@@ -1226,6 +1234,93 @@ return function(Window, runtimeInfo)
         for key in pairs(group) do if not active[key] then removeEntityESP(group, key) end end
     end
 
+    local function addItemFilterOption(value)
+        local name = tostring(value or "")
+        if name == "" or itemFilterOptionSet[name] then return false end
+        itemFilterOptionSet[name] = true
+        table.insert(itemFilterOptions, name)
+        itemFilterOptionsDirty = true
+        return true
+    end
+
+    local function seedItemFilterOptions()
+        -- PlayerItems contains the authoritative item ids, so the filter is
+        -- useful even when no dropped item is currently on the map.
+        local sharedData = Global.SharedData
+        local playerItems = sharedData and sharedData.PlayerItems
+        if type(playerItems) == "table" then
+            for itemName, itemData in pairs(playerItems) do
+                if type(itemName) == "string" and type(itemData) == "table" then
+                    local droppable = itemData.Droppable == true or itemData.Droppable == "true"
+                    local loot = itemData.IsLoot == true or itemData.IsLoot == "true"
+                    local dropsOnDeath = itemData.DropOnDeath == "Drop"
+                    if droppable or loot or dropsOnDeath then addItemFilterOption(itemName) end
+                end
+            end
+        end
+        for _, itemName in ipairs({"AnimalMeat", "GatorSkin"}) do addItemFilterOption(itemName) end
+        table.sort(itemFilterOptions)
+        itemFilterOptionsDirty = false
+    end
+
+    local function getDroppedItemName(item)
+        if not item then return nil end
+        local name = item:GetAttribute("ItemName") or item:GetAttribute("ItemId") or item:GetAttribute("ItemType")
+        return tostring(name or item.Name)
+    end
+
+    local function isItemSelected(itemName)
+        local selected = State.ItemESPSelected
+        if type(selected) ~= "table" then return true end
+        local hasSelection = false
+        for _, value in pairs(selected) do
+            if value == true then hasSelection = true break end
+        end
+        return not hasSelection or selected[itemName] == true
+    end
+
+    local function refreshItemFilterOptions()
+        if not itemFilterDropdown or not itemFilterOptionsDirty then return end
+        table.sort(itemFilterOptions)
+        itemFilterDropdown:Refresh(itemFilterOptions, true)
+        itemFilterOptionsDirty = false
+    end
+
+    local function updateItemESP()
+        local group = EntityESPObjects.items
+        if not State.ItemESP then clearEntityGroup(group) return end
+        local folder = droppedItemsFolder
+        if not folder or not folder.Parent then
+            interactablesRoot = workspace:FindFirstChild("WORKSPACE_Interactables")
+            folder = interactablesRoot and interactablesRoot:FindFirstChild("DroppedItems")
+            droppedItemsFolder = folder
+        end
+        if not folder then clearEntityGroup(group) return end
+
+        local myRoot = getMyRoot()
+        if not myRoot then return end
+        local active = {}
+        for _, item in ipairs(CollectionService:GetTagged("DroppedItem")) do
+            if item:IsDescendantOf(folder) then
+                local itemName = getDroppedItemName(item)
+                if itemName then
+                    addItemFilterOption(itemName)
+                    local part = item:FindFirstChild("DropCollider", true)
+                    if not part or not part:IsA("BasePart") then part = getBasePart(item) end
+                    if part and isItemSelected(itemName) and (part.Position - myRoot.Position).Magnitude <= State.ItemESPDistance then
+                        local distance = (part.Position - myRoot.Position).Magnitude
+                        updateEntityESP(group, item, item, part, string.format("%s | %.0fm", itemName, distance), Color3.fromRGB(255, 190, 90))
+                        active[item] = true
+                    end
+                end
+            end
+        end
+        for key in pairs(group) do if not active[key] then removeEntityESP(group, key) end end
+        refreshItemFilterOptions()
+    end
+
+    seedItemFilterOptions()
+
     local function applyFullbright(enabled)
         if enabled then
             Lighting.Brightness = 2
@@ -1318,6 +1413,7 @@ return function(Window, runtimeInfo)
             updateAnimalESP()
             updateLootESP()
             updateOreESP()
+            updateItemESP()
         end
     end)
 
@@ -1470,6 +1566,26 @@ return function(Window, runtimeInfo)
         return fallback
     end
 
+    local function dropdownValues(value)
+        local selected = {}
+        if type(value) ~= "table" then
+            local name = tostring(value or "")
+            if name ~= "" then selected[name] = true end
+            return selected
+        end
+        for key, item in pairs(value) do
+            if type(key) == "number" then
+                local name = tostring(item or "")
+                if name ~= "" then selected[name] = true end
+            elseif item == true then
+                selected[tostring(key)] = true
+            elseif item ~= false and item ~= nil then
+                selected[tostring(item)] = true
+            end
+        end
+        return selected
+    end
+
     local CombatTab = Window:CreateTab("Combat", "crosshair")
     CombatTab:CreateSection("Aim Prediction")
     CombatTab:CreateToggle({Name="Enable Aim Prediction",CurrentValue=false,Flag="WildWestAimPrediction",Callback=function(v) State.AimPrediction = v == true end})
@@ -1553,6 +1669,14 @@ return function(Window, runtimeInfo)
     EspTab:CreateSection("Ore")
     EspTab:CreateToggle({Name="Ore ESP",CurrentValue=false,Flag="WildWestOreESP",Callback=function(v) State.OreESP = v == true end})
     EspTab:CreateSlider({Name="Ore ESP Distance",Range={100,3000},Increment=100,CurrentValue=1200,Suffix=" studs",Flag="WildWestOreESPRange",Callback=function(v) State.OreESPDistance = v end})
+
+    EspTab:CreateSection("Dropped Items")
+    EspTab:CreateToggle({Name="Item ESP",CurrentValue=false,Flag="WildWestItemESP",Callback=function(v) State.ItemESP = v == true end})
+    itemFilterDropdown = EspTab:CreateDropdown({Name="Item Filter",Options=itemFilterOptions,CurrentOption={},MultipleOptions=true,Flag="WildWestItemFilter",Callback=function(v)
+        State.ItemESPSelected = dropdownValues(v)
+    end})
+    EspTab:CreateLabel("Empty filter = show every DroppedItem")
+    EspTab:CreateSlider({Name="Item ESP Distance",Range={100,3000},Increment=100,CurrentValue=1200,Suffix=" studs",Flag="WildWestItemESPRange",Callback=function(v) State.ItemESPDistance = v end})
 
     local function buildRespawnOptions()
         local options = {}
@@ -1683,6 +1807,7 @@ return function(Window, runtimeInfo)
         clearEntityGroup(EntityESPObjects.animals)
         clearEntityGroup(EntityESPObjects.loot)
         clearEntityGroup(EntityESPObjects.ore)
+        clearEntityGroup(EntityESPObjects.items)
         applyFullbright(false)
         applyNoFog(false)
         Camera.FieldOfView = OriginalFOV
@@ -1691,6 +1816,6 @@ return function(Window, runtimeInfo)
         end
     end
 
-    getgenv().__RAVEN_THE_WILD_WEST = {Version="v0.1.15",State=State,Destroy=destroy}
+    getgenv().__RAVEN_THE_WILD_WEST = {Version="v0.1.16",State=State,Destroy=destroy}
     if runtimeInfo and runtimeInfo.registerCleanup then runtimeInfo.registerCleanup(destroy) end
 end
