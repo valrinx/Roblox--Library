@@ -1,5 +1,5 @@
 --[[
-    RAVEN HUB Module - The Wild West v0.1.6
+    RAVEN HUB Module - The Wild West v0.1.7
     Game: The Wild West (PlaceId: 2317712696, GameId: 807930589)
     Developer: Starboard Studios
 
@@ -27,6 +27,7 @@ return function(Window, runtimeInfo)
     local PlayerData = require(SystemModules:WaitForChild("PlayerData"))
     local CharacterModules = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Character")
     local PlayerCharacter = require(CharacterModules:WaitForChild("PlayerCharacter"))
+    local Ragdolls = require(CharacterModules:WaitForChild("Ragdolls"))
     local SharedModules = ReplicatedStorage:WaitForChild("SharedModules")
     local ProjectileModule = SharedModules:WaitForChild("World"):WaitForChild("ProjectileHandler")
     local ProjectileHandler = require(ProjectileModule)
@@ -73,6 +74,8 @@ return function(Window, runtimeInfo)
         LootESPDistance = 1200,
         OreESP = false,
         OreESPDistance = 1200,
+        AutoGetUp = false,
+        AutoBreakFree = false,
         Fullbright = false,
         NoFog = false,
         FOVEnabled = false,
@@ -94,6 +97,13 @@ return function(Window, runtimeInfo)
     local originalGenerateProjectileSeed = nil
     local seedHookTarget = nil
     local seedHookInstalled = false
+    local RECOVERY_UPDATE_INTERVAL = 0.08
+    local GET_UP_COOLDOWN = 1.5
+    local BREAK_FREE_INTERVAL = 0.12
+    local recoveryAccumulator = 0
+    local getUpAttemptedThisFall = false
+    local lastGetUpAttempt = -math.huge
+    local lastBreakFreeAttempt = -math.huge
 
     local OriginalLighting = {
         Brightness = Lighting.Brightness,
@@ -1112,8 +1122,45 @@ return function(Window, runtimeInfo)
         end
     end)
 
-    Connections.environment = RunService.Heartbeat:Connect(function()
+    local function updateRecovery(dt)
+        recoveryAccumulator += dt or 0
+        if recoveryAccumulator < RECOVERY_UPDATE_INTERVAL then return end
+        recoveryAccumulator = 0
+
+        local character = PlayerCharacter.Character
+        local repChar = PlayerCharacter.RepChar
+        local tiedUp = repChar and repChar.State and repChar.State.TiedUp == true or false
+        local ragdolled = false
+        if character then
+            pcall(function() ragdolled = Ragdolls:IsRagdolledLocal(character) == true end)
+        end
+
+        if not ragdolled then getUpAttemptedThisFall = false end
+        if State.AutoGetUp and ragdolled and not tiedUp and not getUpAttemptedThisFall then
+            local canGetUp = false
+            pcall(function() canGetUp = PlayerCharacter:CanGetUp() == true end)
+            if canGetUp and os.clock() - lastGetUpAttempt >= GET_UP_COOLDOWN then
+                lastGetUpAttempt = os.clock()
+                local ok = pcall(function() PlayerCharacter:GetUp() end)
+                if ok then getUpAttemptedThisFall = true end
+            end
+        end
+
+        if not tiedUp then
+            lastBreakFreeAttempt = -math.huge
+        elseif State.AutoBreakFree and os.clock() - lastBreakFreeAttempt >= BREAK_FREE_INTERVAL then
+            local canBreakFree = false
+            pcall(function() canBreakFree = PlayerCharacter:CanBreakFree() == true end)
+            if canBreakFree then
+                lastBreakFreeAttempt = os.clock()
+                pcall(function() PlayerCharacter:BreakFree() end)
+            end
+        end
+    end
+
+    Connections.environment = RunService.Heartbeat:Connect(function(dt)
         if destroyed then return end
+        updateRecovery(dt)
         if State.Fullbright then applyFullbright(true) end
         if State.NoFog then applyNoFog(true) end
     end)
@@ -1196,6 +1243,19 @@ return function(Window, runtimeInfo)
     EspTab:CreateToggle({Name="Ore ESP",CurrentValue=false,Flag="WildWestOreESP",Callback=function(v) State.OreESP = v == true end})
     EspTab:CreateSlider({Name="Ore ESP Distance",Range={100,3000},Increment=100,CurrentValue=1200,Suffix=" studs",Flag="WildWestOreESPRange",Callback=function(v) State.OreESPDistance = v end})
 
+    local AutomationTab = Window:CreateTab("Automation", "zap")
+    AutomationTab:CreateSection("Recovery")
+    AutomationTab:CreateToggle({Name="Auto Get Up",CurrentValue=false,Flag="WildWestAutoGetUp",Callback=function(v)
+        State.AutoGetUp = v == true
+        if not State.AutoGetUp then getUpAttemptedThisFall = false end
+    end})
+    AutomationTab:CreateToggle({Name="Auto Break Free",CurrentValue=false,Flag="WildWestAutoBreakFree",Callback=function(v)
+        State.AutoBreakFree = v == true
+        if not State.AutoBreakFree then lastBreakFreeAttempt = -math.huge end
+    end})
+    AutomationTab:CreateLabel("Get Up: one attempt per real ragdoll, never while tied")
+    AutomationTab:CreateLabel("Break Free: only while TiedUp + CanBreakFree, 0.12s gated wiggles")
+
     local VisualsTab = Window:CreateTab("Visuals", "sun")
     VisualsTab:CreateSection("Environment")
     VisualsTab:CreateToggle({Name="Fullbright",CurrentValue=false,Flag="WildWestFullbright",Callback=function(v)
@@ -1260,6 +1320,6 @@ return function(Window, runtimeInfo)
         end
     end
 
-    getgenv().__RAVEN_THE_WILD_WEST = {Version="v0.1.6",State=State,Destroy=destroy}
+    getgenv().__RAVEN_THE_WILD_WEST = {Version="v0.1.7",State=State,Destroy=destroy}
     if runtimeInfo and runtimeInfo.registerCleanup then runtimeInfo.registerCleanup(destroy) end
 end
