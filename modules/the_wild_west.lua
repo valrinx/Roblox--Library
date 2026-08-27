@@ -1,5 +1,5 @@
 --[[
-    RAVEN HUB Module - The Wild West v0.1.16
+    RAVEN HUB Module - The Wild West v0.1.17
     Game: The Wild West (PlaceId: 2317712696, GameId: 807930589)
     Developer: Starboard Studios
 
@@ -1834,6 +1834,6 @@ return function(Window, runtimeInfo)
         end
     end
 
-    getgenv().__RAVEN_THE_WILD_WEST = {Version="v0.1.16",State=State,Destroy=destroy}
+    getgenv().__RAVEN_THE_WILD_WEST = {Version="v0.1.17",State=State,Destroy=destroy}
     if runtimeInfo and runtimeInfo.registerCleanup then runtimeInfo.registerCleanup(destroy) end
 end
