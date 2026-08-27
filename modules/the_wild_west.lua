@@ -59,6 +59,7 @@ return function(Window, runtimeInfo)
         AimFOV = 180,
         AimSmoothness = 0.18,
         AdaptiveSmoothness = true,
+        PredictionLeadScale = 1,
         StickyTarget = true,
         AimVisibleCheck = true,
         AimPartMode = "Auto Visible",
@@ -94,6 +95,8 @@ return function(Window, runtimeInfo)
     local Connections = {}
     local rightMouseDown = false
     local lockedTarget = nil
+    local lockedAimPart = nil
+    local lockedTargetLostAt = nil
     local destroyed = false
     local predictionFrame = 0
     local predictionCache = {}
@@ -273,7 +276,8 @@ return function(Window, runtimeInfo)
     local rayFilterFrame = -1
     local AUTO_VISIBLE_SAMPLE_SCALE = 0.48
     local AUTO_VISIBLE_PARTS_PER_SCAN = 4
-    local AUTO_VISIBLE_SCAN_INTERVAL = 2
+    local AUTO_VISIBLE_SCAN_INTERVAL = 1
+    local LOCK_GRACE_DURATION = 0.2
     local AIM_PREFILTER_MARGIN = 80
     local VISIBILITY_PARTS = {
         "Head", "UpperTorso", "LowerTorso",
@@ -369,16 +373,16 @@ return function(Window, runtimeInfo)
         return parts
     end
 
-    local function scanAutoVisibleParts(fromPos, targetModel, parts, cached)
+    local function scanAutoVisibleParts(fromPos, targetModel, parts, cached, completeScan)
         cached.parts = cached.parts or {}
-        if cached.lastScan and visibilityFrame - cached.lastScan < AUTO_VISIBLE_SCAN_INTERVAL then
+        if not completeScan and cached.lastScan and visibilityFrame - cached.lastScan < AUTO_VISIBLE_SCAN_INTERVAL then
             cached.frame = visibilityFrame
             visibilityCache[targetModel] = cached
             return cached.visible or false, cached.parts, cached.priorityPart
         end
         cached.lastScan = visibilityFrame
 
-        local scanCount = math.min(AUTO_VISIBLE_PARTS_PER_SCAN, #parts)
+        local scanCount = completeScan and #parts or math.min(AUTO_VISIBLE_PARTS_PER_SCAN, #parts)
         local index = math.clamp(cached.partIndex or 1, 1, math.max(#parts, 1))
         for _ = 1, scanCount do
             local part = parts[index]
@@ -431,7 +435,7 @@ return function(Window, runtimeInfo)
         return anyVisible, cached.parts, priorityPart
     end
 
-    local function getVisibleState(targetModel)
+    local function getVisibleState(targetModel, completeScan)
         if not targetModel then return false, {}, nil end
         local cached = visibilityCache[targetModel]
         if cached and cached.frame == visibilityFrame then
@@ -440,15 +444,15 @@ return function(Window, runtimeInfo)
         local parts = getAimParts(targetModel)
         if #parts == 0 then return false, {}, nil end
         cached = cached or {parts = {}, partIndex = 1}
-        return scanAutoVisibleParts(Camera.CFrame.Position, targetModel, parts, cached)
+        return scanAutoVisibleParts(Camera.CFrame.Position, targetModel, parts, cached, completeScan == true)
     end
 
-    local function resolveModelAimPart(model, preferredName, requireVisible)
+    local function resolveModelAimPart(model, preferredName, requireVisible, completeScan)
         if not model then return nil end
         local preferred = model:FindFirstChild(preferredName or State.AimTargetPart)
             or model:FindFirstChild("Head") or model:FindFirstChild("HumanoidRootPart") or getBasePart(model)
         if not requireVisible then return preferred end
-        local _, states, priorityPart = getVisibleState(model)
+        local _, states, priorityPart = getVisibleState(model, completeScan)
         local function visible(part)
             local partState = part and states and states[part]
             return part and part:IsA("BasePart") and partState and partState.visible
@@ -476,12 +480,12 @@ return function(Window, runtimeInfo)
         return best
     end
 
-    local function resolveTargetAimPart(target, requireVisible)
+    local function resolveTargetAimPart(target, requireVisible, completeScan)
         if not target then return nil end
         if target:IsA("Player") then
-            return resolveModelAimPart(getPlayerModel(target), State.AimTargetPart, requireVisible)
+            return resolveModelAimPart(getPlayerModel(target), State.AimTargetPart, requireVisible, completeScan)
         end
-        return resolveModelAimPart(target, "Head", requireVisible)
+        return resolveModelAimPart(target, "Head", requireVisible, completeScan)
     end
 
     local function getTargetModel(target)
@@ -615,7 +619,7 @@ return function(Window, runtimeInfo)
             end
             travelTime = nextTime
         end
-        local predicted = targetPosition + targetVelocity * travelTime
+        local predicted = targetPosition + targetVelocity * travelTime * math.max(0, State.PredictionLeadScale)
             - weaponConfig.Gravity * (0.5 * travelTime * travelTime)
         return predicted, travelTime
     end
@@ -822,7 +826,7 @@ return function(Window, runtimeInfo)
                 if not onScreen or point.Z <= 0 then continue end
                 local distance = (Vector2.new(point.X, point.Y) - center).Magnitude
                 if distance > State.AimFOV + AIM_PREFILTER_MARGIN then continue end
-                local part = resolveTargetAimPart(player, State.AimVisibleCheck)
+                local part = resolveTargetAimPart(player, State.AimVisibleCheck, true)
                 if not part then continue end
                 local targetDistance = getTargetScreenDistance(player, part)
                 if targetDistance and targetDistance <= State.AimFOV and targetDistance < bestDistance then
@@ -840,7 +844,7 @@ return function(Window, runtimeInfo)
                 if not onScreen or point.Z <= 0 then continue end
                 local distance = (Vector2.new(point.X, point.Y) - center).Magnitude
                 if distance > State.AimFOV + AIM_PREFILTER_MARGIN then continue end
-                local part = resolveTargetAimPart(animal, State.AimVisibleCheck)
+                local part = resolveTargetAimPart(animal, State.AimVisibleCheck, true)
                 if not part then continue end
                 local targetDistance = getTargetScreenDistance(animal, part)
                 if targetDistance and targetDistance <= State.AimFOV and targetDistance < bestDistance then
@@ -858,21 +862,38 @@ return function(Window, runtimeInfo)
     end
 
     local function updateAutoLock(dt)
+        local now = os.clock()
         if not aimActive() then
             lockedTarget = nil
+            lockedAimPart = nil
+            lockedTargetLostAt = nil
             clearAimState()
             return
         end
-        if not State.StickyTarget or not validAimTarget(lockedTarget) then
+
+        local targetValid = lockedTarget and validAimTarget(lockedTarget)
+        if not targetValid and lockedTarget then
+            lockedTargetLostAt = lockedTargetLostAt or now
+        end
+        if not State.StickyTarget or not lockedTarget
+            or (not targetValid and now - (lockedTargetLostAt or now) > LOCK_GRACE_DURATION) then
             lockedTarget = getClosestTarget(State.AutoLock, State.AnimalAutoLock)
+            lockedAimPart = nil
+            lockedTargetLostAt = nil
         end
         if not lockedTarget then
             clearAimState()
             return
         end
         local part = resolveTargetAimPart(lockedTarget, State.AimVisibleCheck)
+        if not part and lockedAimPart and lockedAimPart.Parent and lockedTargetLostAt
+            and now - lockedTargetLostAt <= LOCK_GRACE_DURATION then
+            part = lockedAimPart
+        end
         if not part then
             lockedTarget = nil
+            lockedAimPart = nil
+            lockedTargetLostAt = nil
             clearAimState()
             return
         end
@@ -887,9 +908,15 @@ return function(Window, runtimeInfo)
         local center = Camera.ViewportSize * 0.5
         local point, onScreen = Camera:WorldToViewportPoint(aimPosition)
         if not onScreen or point.Z <= 0 then
-            lockedTarget = nil
-            clearAimState()
-            return
+            lockedTargetLostAt = lockedTargetLostAt or now
+            if not lockedAimPart or not lockedAimPart.Parent
+                or now - lockedTargetLostAt > LOCK_GRACE_DURATION then
+                lockedTarget = nil
+                lockedAimPart = nil
+                lockedTargetLostAt = nil
+                clearAimState()
+                return
+            end
         end
         local delta = Vector2.new(point.X, point.Y) - center
         local response = getAimResponse(delta.Magnitude)
@@ -905,6 +932,7 @@ return function(Window, runtimeInfo)
         State.AimEngaged = true
         State.AimLockedPart = part.Name
         State.AimLockedPlayer = lockedTarget.Name
+        lockedAimPart = part
     end
 
     local aimCircle = Drawing.new("Circle")
