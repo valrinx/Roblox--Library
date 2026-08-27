@@ -58,6 +58,27 @@ if ($source -match 'correctedInfo\.direction' -or
     throw 'Exact seed capture must not mutate spread direction after the server projectile packet is sent'
 }
 
+foreach ($requiredRespawn in @(
+    'AutoRespawn = false',
+    'RespawnLocation = "CanyonCamp"',
+    'repState.CanRespawn ~= true',
+    'repState.RespawnMenuOpen ~= true',
+    'Network:FireServer("RespawnTriggered")',
+    'Global.UI and Global.UI.Spawn',
+    'spawnUI:Select(spawnName)',
+    'spawnUI.SpawnUIPaused:get() == true',
+    'Network:FireServer("RequestStreamAround", streamPosition)',
+    'Network:InvokeServer("Respawn", spawnName)',
+    'streamingLoad:IsRegionStreamedIn(streamPosition)',
+    'local RESPAWN_RETRY_INTERVAL = 2',
+    'Respawn Location',
+    'Auto Respawn'
+)) {
+    if ($source.IndexOf($requiredRespawn) -lt 0) {
+        throw "Missing state-gated Auto Respawn behavior: $requiredRespawn"
+    }
+}
+
 foreach ($requiredRecovery in @(
     'Ragdolls:IsRagdolledLocal(character) == true',
     'PlayerCharacter:CanGetUp() == true',
@@ -97,7 +118,7 @@ if ($source -notmatch 'CurrentFactionId' -or
 
 foreach ($required in @('Player ESP','Player ESP Distance','Show Role','Show Faction','Animal ESP','Animal ESP Distance','Loot Chest ESP','Chest ESP Distance','Ore ESP','Ore ESP Distance','Fullbright','No Fog','Custom FOV')) {
     if ($source -notmatch [regex]::Escape($required)) {
-        throw "Missing v0.1.7 control: $required"
+        throw "Missing v0.1.9 control: $required"
     }
 }
 
@@ -108,7 +129,7 @@ if ($source -notmatch 'CollectionService:GetTagged\("LootChest"\)' -or
 }
 
 if ($source -notmatch 'UnbindFromRenderStep\(renderStepName\)' -or
-    $source -notmatch '__RAVEN_THE_WILD_WEST = \{Version="v0\.1\.7"') {
+    $source -notmatch '__RAVEN_THE_WILD_WEST = \{Version="v0\.1\.9"') {
     throw 'Module cleanup/runtime registration is incomplete'
 }
 
@@ -119,4 +140,4 @@ if ($hub -notmatch 'name\s*=\s*"The Wild West"' -or
     throw 'RAVENHUB registration is missing or incorrect'
 }
 
-Write-Output 'PASS: The Wild West v0.1.7 weapon ballistics/Auto Lock/team/ESP regression checks passed'
+Write-Output 'PASS: The Wild West v0.1.9 weapon ballistics/Auto Lock/team/ESP regression checks passed'
