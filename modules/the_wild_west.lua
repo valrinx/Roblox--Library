@@ -86,6 +86,9 @@ return function(Window, runtimeInfo)
         FOVValue = 90,
         NoRecoil = false,
         NoSpread = false,
+        SilentAim = false,
+        SilentAimFOV = 180,
+        SilentAimPart = "Head",
     }
 
     local Connections = {}
@@ -109,6 +112,7 @@ return function(Window, runtimeInfo)
     local originalGetProjectileSpread = nil
     local spreadHookTarget = nil
     local spreadHookInstalled = false
+    local silentAimLastTarget = nil
     local RECOVERY_UPDATE_INTERVAL = 0.08
     local GET_UP_COOLDOWN = 1.5
     local BREAK_FREE_INTERVAL = 0.12
@@ -663,13 +667,45 @@ return function(Window, runtimeInfo)
 
     installNoRecoilHook()
 
+    local function getSilentAimTarget()
+        if not State.SilentAim then return nil end
+        local weaponConfig = getCurrentProjectileConfig()
+        local target = getClosestTarget(State.AutoLock or true, State.AnimalAutoLock)
+        if not target then return nil end
+        local model = getTargetModel(target)
+        if not model then return nil end
+        local part = model:FindFirstChild(State.SilentAimPart) or model:FindFirstChild("Head") or getBasePart(model)
+        if not part then return nil end
+        local aimPosition = part.Position
+        if State.AimPrediction and weaponConfig then
+            local sample = getSharedPrediction(target, weaponConfig, part)
+            if sample then aimPosition = sample.position end
+        end
+        local point, onScreen = Camera:WorldToViewportPoint(aimPosition)
+        if not onScreen or point.Z <= 0 then return nil end
+        local center = Camera.ViewportSize * 0.5
+        local dist = (Vector2.new(point.X, point.Y) - center).Magnitude
+        if dist > State.SilentAimFOV then return nil end
+        return aimPosition
+    end
+
     local function installNoSpreadHook()
         if type(hookfunction) ~= "function" then return end
         if type(ProjectileHandler.GetProjectileSpread) ~= "function" then return end
         spreadHookTarget = ProjectileHandler.GetProjectileSpread
         local original
         original = hookfunction(spreadHookTarget, function(self, direction, ...)
-            if State.NoSpread and typeof(direction) == "Vector3" then
+            if typeof(direction) ~= "Vector3" then
+                return original(self, direction, ...)
+            end
+            if State.SilentAim then
+                local aimTarget = getSilentAimTarget()
+                if aimTarget then
+                    local origin = Camera.CFrame.Position
+                    return (aimTarget - origin).Unit * direction.Magnitude
+                end
+            end
+            if State.NoSpread then
                 return direction
             end
             return original(self, direction, ...)
@@ -1373,6 +1409,12 @@ return function(Window, runtimeInfo)
     CombatTab:CreateToggle({Name="Adaptive Smoothness",CurrentValue=true,Flag="WildWestAdaptiveSmooth",Callback=function(v) State.AdaptiveSmoothness = v == true end})
     CombatTab:CreateSlider({Name="Aim FOV",Range={40,500},Increment=10,CurrentValue=180,Suffix=" px",Flag="WildWestAimFOV",Callback=function(v) State.AimFOV = v end})
     CombatTab:CreateSlider({Name="Smoothness",Range={0.05,0.6},Increment=0.01,CurrentValue=0.18,Flag="WildWestAimSmooth",Callback=function(v) State.AimSmoothness = v end})
+    CombatTab:CreateSection("Silent Aim")
+    CombatTab:CreateToggle({Name="Silent Aim",CurrentValue=false,Flag="WildWestSilentAim",Callback=function(v) State.SilentAim = v == true end})
+    CombatTab:CreateDropdown({Name="Silent Aim Part",Options={"Head","UpperTorso","HumanoidRootPart"},CurrentOption={"Head"},MultipleOptions=false,Flag="WildWestSilentAimPart",Callback=function(v) State.SilentAimPart = dropdownValue(v, "Head") end})
+    CombatTab:CreateSlider({Name="Silent Aim FOV",Range={40,500},Increment=10,CurrentValue=180,Suffix=" px",Flag="WildWestSilentAimFOV",Callback=function(v) State.SilentAimFOV = v end})
+    CombatTab:CreateLabel("Silent Aim redirects projectiles toward nearest target")
+    CombatTab:CreateLabel("Works with existing Auto Lock target selection")
     CombatTab:CreateSection("Recoil & Spread")
     CombatTab:CreateToggle({Name="No Recoil",CurrentValue=false,Flag="WildWestNoRecoil",Callback=function(v) State.NoRecoil = v == true end})
     CombatTab:CreateToggle({Name="No Spread",CurrentValue=false,Flag="WildWestNoSpread",Callback=function(v) State.NoSpread = v == true end})
