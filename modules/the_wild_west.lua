@@ -1,5 +1,5 @@
 --[[
-    RAVEN HUB Module - The Wild West v0.1.7
+    RAVEN HUB Module - The Wild West v0.1.10
     Game: The Wild West (PlaceId: 2317712696, GameId: 807930589)
     Developer: Starboard Studios
 
@@ -33,6 +33,8 @@ return function(Window, runtimeInfo)
     local ProjectileHandler = require(ProjectileModule)
     local SharedProjectiles = require(ProjectileModule:WaitForChild("SharedProjectiles"))
     local Global = require(SharedModules:WaitForChild("Global"))
+    local Network = Global.Network
+    local SyncedTime = Global.SyncedTime
     local Hotbar = nil
     pcall(function() Hotbar = Global.LoadModule("Hotbar") end)
 
@@ -74,12 +76,16 @@ return function(Window, runtimeInfo)
         LootESPDistance = 1200,
         OreESP = false,
         OreESPDistance = 1200,
+        AutoRespawn = false,
+        RespawnLocation = "CanyonCamp",
         AutoGetUp = false,
         AutoBreakFree = false,
         Fullbright = false,
         NoFog = false,
         FOVEnabled = false,
         FOVValue = 90,
+        NoRecoil = false,
+        NoSpread = false,
     }
 
     local Connections = {}
@@ -97,14 +103,28 @@ return function(Window, runtimeInfo)
     local originalGenerateProjectileSeed = nil
     local seedHookTarget = nil
     local seedHookInstalled = false
+    local originalAddRecoil = nil
+    local recoilHookTarget = nil
+    local recoilHookInstalled = false
+    local originalGetProjectileSpread = nil
+    local spreadHookTarget = nil
+    local spreadHookInstalled = false
     local RECOVERY_UPDATE_INTERVAL = 0.08
     local GET_UP_COOLDOWN = 1.5
     local BREAK_FREE_INTERVAL = 0.12
+    local RESPAWN_UPDATE_INTERVAL = 0.2
+    local RESPAWN_RETRY_INTERVAL = 2
+    local RESPAWN_STREAM_FALLBACK_WAIT = 0.8
     local recoveryAccumulator = 0
+    local respawnAccumulator = 0
+    local lastRespawnTrigger = -math.huge
+    local lastRespawnAttempt = -math.huge
+    local respawnStreamRequestedAt = -math.huge
+    local respawnStreamLocation = nil
+    local respawnAcceptedThisDeath = false
     local getUpAttemptedThisFall = false
     local lastGetUpAttempt = -math.huge
     local lastBreakFreeAttempt = -math.huge
-
     local OriginalLighting = {
         Brightness = Lighting.Brightness,
         ClockTime = Lighting.ClockTime,
@@ -625,6 +645,41 @@ return function(Window, runtimeInfo)
 
     installExactSeedHook()
 
+    local function installNoRecoilHook()
+        if type(hookfunction) ~= "function" then return end
+        local CharacterModules = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Character")
+        local ok, CameraModule = pcall(function() return require(CharacterModules:WaitForChild("Camera")) end)
+        if not ok or type(CameraModule) ~= "table" then return end
+        if type(CameraModule.AddRecoil) ~= "function" then return end
+        recoilHookTarget = CameraModule.AddRecoil
+        local original
+        original = hookfunction(recoilHookTarget, function(self, ...)
+            if State.NoRecoil then return end
+            return original(self, ...)
+        end)
+        originalAddRecoil = original
+        recoilHookInstalled = true
+    end
+
+    installNoRecoilHook()
+
+    local function installNoSpreadHook()
+        if type(hookfunction) ~= "function" then return end
+        if type(ProjectileHandler.GetProjectileSpread) ~= "function" then return end
+        spreadHookTarget = ProjectileHandler.GetProjectileSpread
+        local original
+        original = hookfunction(spreadHookTarget, function(self, direction, ...)
+            if State.NoSpread and typeof(direction) == "Vector3" then
+                return direction
+            end
+            return original(self, direction, ...)
+        end)
+        originalGetProjectileSpread = original
+        spreadHookInstalled = true
+    end
+
+    installNoSpreadHook()
+
     local function getWeaponAdjustedAimPart(target, part, weaponConfig)
         if not part or not weaponConfig or State.AimPartMode ~= "Auto Visible" or weaponConfig.Accuracy >= 0.9 then
             return part
@@ -1122,6 +1177,102 @@ return function(Window, runtimeInfo)
         end
     end)
 
+    local function getRespawnStreamPosition(spawnName)
+        local sharedData = Global.SharedData
+        local spawnInfoFolder = sharedData and sharedData.SpawnInfoFolder
+        local spawnInfo = spawnInfoFolder and spawnInfoFolder:FindFirstChild(spawnName)
+        local cameraValue = spawnInfo and spawnInfo:FindFirstChild("CameraCFrame")
+        local cameraCFrame = cameraValue and cameraValue.Value
+        return typeof(cameraCFrame) == "CFrame" and cameraCFrame.Position or nil
+    end
+
+    local function resetRespawnCycle()
+        lastRespawnTrigger = -math.huge
+        lastRespawnAttempt = -math.huge
+        respawnStreamRequestedAt = -math.huge
+        respawnStreamLocation = nil
+        respawnAcceptedThisDeath = false
+    end
+
+    local function updateAutoRespawn(dt)
+        respawnAccumulator += dt or 0
+        if respawnAccumulator < RESPAWN_UPDATE_INTERVAL then return end
+        respawnAccumulator = 0
+
+        local repChar = PlayerCharacter.RepChar
+        local repState = repChar and repChar.State
+        local dead = PlayerCharacter.IsDead == true or (repState and repState.Dead == true)
+        if not dead then
+            resetRespawnCycle()
+            return
+        end
+        if not State.AutoRespawn or not repState or repState.CanRespawn ~= true or respawnAcceptedThisDeath then return end
+
+        local now = os.clock()
+        if repState.RespawnMenuOpen ~= true then
+            if now - lastRespawnTrigger >= RESPAWN_RETRY_INTERVAL then
+                lastRespawnTrigger = now
+                pcall(function() Network:FireServer("RespawnTriggered") end)
+            end
+            return
+        end
+
+        local spawnName = State.RespawnLocation
+        if type(spawnName) ~= "string" or spawnName == "" then return end
+
+        local spawnUI = Global.UI and Global.UI.Spawn
+        if spawnUI and type(spawnUI.Select) == "function" then
+            local selected = spawnUI.SelectedButton
+            local paused = false
+            pcall(function()
+                paused = spawnUI.SpawnUIPaused and spawnUI.SpawnUIPaused:get() == true or false
+            end)
+            if not selected or selected.Name ~= spawnName then
+                if spawnUI.SelectingButton or paused then return end
+                local ok = pcall(function() spawnUI:Select(spawnName) end)
+                if ok then
+                    respawnStreamLocation = spawnName
+                    respawnStreamRequestedAt = now
+                    return
+                end
+            end
+            if spawnUI.SelectingButton or paused then return end
+        else
+            local streamPosition = getRespawnStreamPosition(spawnName)
+            if respawnStreamLocation ~= spawnName then
+                respawnStreamLocation = spawnName
+                respawnStreamRequestedAt = now
+                if streamPosition then
+                    pcall(function() Network:FireServer("RequestStreamAround", streamPosition) end)
+                end
+                return
+            end
+
+            if streamPosition then
+                local streamingLoad = Global.StreamingLoad
+                if streamingLoad and type(streamingLoad.IsRegionStreamedIn) == "function" then
+                    local ok, ready = pcall(function() return streamingLoad:IsRegionStreamedIn(streamPosition) end)
+                    if ok then
+                        if ready ~= true then return end
+                    elseif now - respawnStreamRequestedAt < RESPAWN_STREAM_FALLBACK_WAIT then
+                        return
+                    end
+                elseif now - respawnStreamRequestedAt < RESPAWN_STREAM_FALLBACK_WAIT then
+                    return
+                end
+            elseif now - respawnStreamRequestedAt < RESPAWN_STREAM_FALLBACK_WAIT then
+                return
+            end
+        end
+
+        if now - lastRespawnAttempt < RESPAWN_RETRY_INTERVAL then return end
+        lastRespawnAttempt = now
+        local ok, accepted = pcall(function()
+            return Network:InvokeServer("Respawn", spawnName)
+        end)
+        if ok and accepted == true then respawnAcceptedThisDeath = true end
+    end
+
     local function updateRecovery(dt)
         recoveryAccumulator += dt or 0
         if recoveryAccumulator < RECOVERY_UPDATE_INTERVAL then return end
@@ -1160,6 +1311,7 @@ return function(Window, runtimeInfo)
 
     Connections.environment = RunService.Heartbeat:Connect(function(dt)
         if destroyed then return end
+        updateAutoRespawn(dt)
         updateRecovery(dt)
         if State.Fullbright then applyFullbright(true) end
         if State.NoFog then applyNoFog(true) end
@@ -1221,6 +1373,11 @@ return function(Window, runtimeInfo)
     CombatTab:CreateToggle({Name="Adaptive Smoothness",CurrentValue=true,Flag="WildWestAdaptiveSmooth",Callback=function(v) State.AdaptiveSmoothness = v == true end})
     CombatTab:CreateSlider({Name="Aim FOV",Range={40,500},Increment=10,CurrentValue=180,Suffix=" px",Flag="WildWestAimFOV",Callback=function(v) State.AimFOV = v end})
     CombatTab:CreateSlider({Name="Smoothness",Range={0.05,0.6},Increment=0.01,CurrentValue=0.18,Flag="WildWestAimSmooth",Callback=function(v) State.AimSmoothness = v end})
+    CombatTab:CreateSection("Recoil & Spread")
+    CombatTab:CreateToggle({Name="No Recoil",CurrentValue=false,Flag="WildWestNoRecoil",Callback=function(v) State.NoRecoil = v == true end})
+    CombatTab:CreateToggle({Name="No Spread",CurrentValue=false,Flag="WildWestNoSpread",Callback=function(v) State.NoSpread = v == true end})
+    CombatTab:CreateLabel("No Recoil: neutralizes camera kick on fire")
+    CombatTab:CreateLabel("No Spread: removes projectile direction deviation")
     CombatTab:CreateLabel("FPS-safe: 4 parts per visibility scan, every 2 frames")
 
     local EspTab = Window:CreateTab("ESP", "eye")
@@ -1243,7 +1400,63 @@ return function(Window, runtimeInfo)
     EspTab:CreateToggle({Name="Ore ESP",CurrentValue=false,Flag="WildWestOreESP",Callback=function(v) State.OreESP = v == true end})
     EspTab:CreateSlider({Name="Ore ESP Distance",Range={100,3000},Increment=100,CurrentValue=1200,Suffix=" studs",Flag="WildWestOreESPRange",Callback=function(v) State.OreESPDistance = v end})
 
+    local function buildRespawnOptions()
+        local options = {}
+        local nameByOption = {}
+        local spawnNames = {}
+        local sharedData = Global.SharedData
+        local spawnInfo = sharedData and sharedData.SpawnInfo
+        if type(spawnInfo) == "table" then
+            for spawnName in pairs(spawnInfo) do
+                if type(spawnName) == "string" then table.insert(spawnNames, spawnName) end
+            end
+        end
+        if #spawnNames == 0 then table.insert(spawnNames, "CanyonCamp") end
+        table.sort(spawnNames)
+
+        local playerGui = LP:FindFirstChildOfClass("PlayerGui")
+        local spawnGui = playerGui and playerGui:FindFirstChild("NewSpawnUI")
+        local screen = spawnGui and spawnGui:FindFirstChild("Screen")
+        local sideBar = screen and screen:FindFirstChild("SideBar")
+        local body = sideBar and sideBar:FindFirstChild("Body")
+        local scroller = body and body:FindFirstChild("ScrollingFrame")
+        for _, spawnName in ipairs(spawnNames) do
+            local display = spawnName
+            local button = scroller and scroller:FindFirstChild(spawnName)
+            local container = button and button:FindFirstChild("Container")
+            local label = container and container:FindFirstChild("TextLabel")
+            if label and label:IsA("TextLabel") and label.Text ~= "" then
+                display = string.format("%s [%s]", label.Text, spawnName)
+            end
+            nameByOption[display] = spawnName
+            table.insert(options, display)
+        end
+        return options, nameByOption
+    end
+
     local AutomationTab = Window:CreateTab("Automation", "zap")
+    local respawnOptions, respawnNameByOption = buildRespawnOptions()
+    local respawnCurrentOption = respawnOptions[1]
+    for option, spawnName in pairs(respawnNameByOption) do
+        if spawnName == State.RespawnLocation then
+            respawnCurrentOption = option
+            break
+        end
+    end
+    if respawnCurrentOption then State.RespawnLocation = respawnNameByOption[respawnCurrentOption] or State.RespawnLocation end
+    AutomationTab:CreateSection("Respawn")
+    AutomationTab:CreateDropdown({Name="Respawn Location",Options=respawnOptions,CurrentOption={respawnCurrentOption},MultipleOptions=false,Flag="WildWestRespawnLocation",Callback=function(v)
+        local option = dropdownValue(v, respawnCurrentOption)
+        State.RespawnLocation = respawnNameByOption[option] or State.RespawnLocation
+        respawnStreamLocation = nil
+        respawnStreamRequestedAt = -math.huge
+        lastRespawnAttempt = -math.huge
+    end})
+    AutomationTab:CreateToggle({Name="Auto Respawn",CurrentValue=false,Flag="WildWestAutoRespawn",Callback=function(v)
+        State.AutoRespawn = v == true
+        if not State.AutoRespawn then resetRespawnCycle() end
+    end})
+    AutomationTab:CreateLabel("Flow: RespawnTriggered -> stream selected location -> Respawn")
     AutomationTab:CreateSection("Recovery")
     AutomationTab:CreateToggle({Name="Auto Get Up",CurrentValue=false,Flag="WildWestAutoGetUp",Callback=function(v)
         State.AutoGetUp = v == true
@@ -1255,7 +1468,6 @@ return function(Window, runtimeInfo)
     end})
     AutomationTab:CreateLabel("Get Up: one attempt per real ragdoll, never while tied")
     AutomationTab:CreateLabel("Break Free: only while TiedUp + CanBreakFree, 0.12s gated wiggles")
-
     local VisualsTab = Window:CreateTab("Visuals", "sun")
     VisualsTab:CreateSection("Environment")
     VisualsTab:CreateToggle({Name="Fullbright",CurrentValue=false,Flag="WildWestFullbright",Callback=function(v)
@@ -1308,6 +1520,14 @@ return function(Window, runtimeInfo)
             pcall(hookfunction, seedHookTarget, originalGenerateProjectileSeed)
             seedHookInstalled = false
         end
+        if recoilHookInstalled and recoilHookTarget and originalAddRecoil and type(hookfunction) == "function" then
+            pcall(hookfunction, recoilHookTarget, originalAddRecoil)
+            recoilHookInstalled = false
+        end
+        if spreadHookInstalled and spreadHookTarget and originalGetProjectileSpread and type(hookfunction) == "function" then
+            pcall(hookfunction, spreadHookTarget, originalGetProjectileSpread)
+            spreadHookInstalled = false
+        end
         clearPlayerESP()
         clearEntityGroup(EntityESPObjects.animals)
         clearEntityGroup(EntityESPObjects.loot)
@@ -1320,6 +1540,6 @@ return function(Window, runtimeInfo)
         end
     end
 
-    getgenv().__RAVEN_THE_WILD_WEST = {Version="v0.1.7",State=State,Destroy=destroy}
+    getgenv().__RAVEN_THE_WILD_WEST = {Version="v0.1.10",State=State,Destroy=destroy}
     if runtimeInfo and runtimeInfo.registerCleanup then runtimeInfo.registerCleanup(destroy) end
 end
