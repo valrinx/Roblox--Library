@@ -1,5 +1,5 @@
 --[[
-    RAVEN HUB Module - The Wild West v0.1.12
+    RAVEN HUB Module - The Wild West v0.1.13
     Game: The Wild West (PlaceId: 2317712696, GameId: 807930589)
     Developer: Starboard Studios
 
@@ -87,6 +87,7 @@ return function(Window, runtimeInfo)
         FOVValue = 90,
         NoRecoil = false,
         NoSpread = false,
+        NoSpreadHookActive = false,
         SilentAim = false,
         SilentAimFOV = 180,
         SilentAimPart = "Head",
@@ -116,8 +117,7 @@ return function(Window, runtimeInfo)
     local spreadHookTarget = nil
     local spreadHookInstalled = false
     local silentAimLastTarget = nil
-    local originalNamecall = nil
-    local namecallHookInstalled = false
+    local cachedSilentAimTarget = nil
     local RECOVERY_UPDATE_INTERVAL = 0.08
     local GET_UP_COOLDOWN = 1.5
     local BREAK_FREE_INTERVAL = 0.12
@@ -699,57 +699,81 @@ return function(Window, runtimeInfo)
         return aimPosition
     end
 
-    local function installNoSpreadHook()
+    local function adjustProjectileDirection(result, projectileType, projectileData, sharedData)
+        if type(result) ~= "table" or type(projectileData) ~= "table" then return result end
+        if projectileType ~= "GunProjectile" and projectileType ~= "ServerGunProjectile"
+            and projectileType ~= "DartProjectile" and projectileType ~= "SnowballProjectile"
+            and projectileType ~= "GatlingProjectile" then
+            return result
+        end
+
+        local direction = projectileData.direction
+        if typeof(direction) ~= "Vector3" or direction.Magnitude <= 0.0001 then return result end
+
+        -- Silent Aim: redirect direction toward cached target
+        if State.SilentAim and cachedSilentAimTarget then
+            local origin = Camera.CFrame.Position
+            local ok, aimDir = pcall(function()
+                return (cachedSilentAimTarget - origin)
+            end)
+            if ok and typeof(aimDir) == "Vector3" and aimDir.Magnitude > 0.0001 then
+                direction = aimDir
+            end
+        end
+
+        local unitDirection = direction.Unit
+        local flattened = {}
+        local changed = false
+        for key, velocity in pairs(result) do
+            if typeof(velocity) == "Vector3" and velocity.Magnitude > 0.0001 then
+                flattened[key] = unitDirection * velocity.Magnitude
+                changed = true
+            else
+                flattened[key] = velocity
+            end
+        end
+        return changed and flattened or result
+    end
+
+    local function restoreNoSpreadHook()
+        if spreadHookInstalled and spreadHookTarget and originalGetProjectileSpread and type(hookfunction) == "function" then
+            pcall(hookfunction, spreadHookTarget, originalGetProjectileSpread)
+        end
+        spreadHookTarget = nil
+        originalGetProjectileSpread = nil
+        spreadHookInstalled = false
+        State.NoSpreadHookActive = false
+    end
+
+    local function installSpreadAndAimHook()
         if type(hookfunction) ~= "function" then return end
-        if type(ProjectileHandler.GetProjectileSpread) ~= "function" then return end
-        spreadHookTarget = ProjectileHandler.GetProjectileSpread
+        local target = ProjectileHandler.GetProjectileSpread
+        if type(target) ~= "function" then return end
+        if spreadHookInstalled and spreadHookTarget == target then return end
+        if spreadHookInstalled then restoreNoSpreadHook() end
+
         local original
-        original = hookfunction(spreadHookTarget, function(self, direction, ...)
-            if typeof(direction) ~= "Vector3" then
-                return original(self, direction, ...)
-            end
-            if State.NoSpread then
-                return direction
-            end
-            return original(self, direction, ...)
+        local ok = pcall(function()
+            original = hookfunction(target, function(self, projectileType, sharedData, projectileData, projectileCount, ...)
+                local result = original(self, projectileType, sharedData, projectileData, projectileCount, ...)
+                if not State.NoSpread and not State.SilentAim then return result end
+                return adjustProjectileDirection(result, projectileType, projectileData, sharedData)
+            end)
         end)
+        if not ok or type(original) ~= "function" then
+            spreadHookTarget = nil
+            originalGetProjectileSpread = nil
+            spreadHookInstalled = false
+            State.NoSpreadHookActive = false
+            return
+        end
+        spreadHookTarget = target
         originalGetProjectileSpread = original
         spreadHookInstalled = true
+        State.NoSpreadHookActive = true
     end
 
-    installNoSpreadHook()
-
-    -- Silent Aim: hook workspace:Raycast via __namecall to redirect bullet direction
-    local function installSilentAimHook()
-        if type(hookmetamethod) ~= "function" then return end
-        if type(getnamecallmethod) ~= "function" then return end
-        if type(newcclosure) ~= "function" then return end
-        if namecallHookInstalled then return end
-
-        originalNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
-            local method = getnamecallmethod()
-
-            if State.SilentAim and method == "Raycast" and self == workspace then
-                local aimTarget = getSilentAimTarget()
-                if aimTarget then
-                    local args = {...}
-                    local origin = args[1]
-                    if typeof(origin) == "Vector3" then
-                        local direction = args[2]
-                        if typeof(direction) == "Vector3" then
-                            local newDir = (aimTarget - origin)
-                            return originalNamecall(self, origin, newDir, select(3, ...))
-                        end
-                    end
-                end
-            end
-
-            return originalNamecall(self, ...)
-        end))
-        namecallHookInstalled = true
-    end
-
-    installSilentAimHook()
+    installSpreadAndAimHook()
 
     local function getWeaponAdjustedAimPart(target, part, weaponConfig)
         if not part or not weaponConfig or State.AimPartMode ~= "Auto Visible" or weaponConfig.Accuracy >= 0.9 then
@@ -1276,6 +1300,10 @@ return function(Window, runtimeInfo)
         predictionFrame += 1
         updateAutoLock(dt)
         updateAimPrediction()
+        -- Cache silent aim target once per frame to avoid heavy computation in __namecall hook
+        namecallRecursionGuard = true
+        cachedSilentAimTarget = State.SilentAim and getSilentAimTarget() or nil
+        namecallRecursionGuard = false
         aimCircle.Position = Camera.ViewportSize * 0.5
         aimCircle.Radius = State.AimFOV
         aimCircle.Visible = State.AutoLock or State.AnimalAutoLock
@@ -1653,10 +1681,7 @@ return function(Window, runtimeInfo)
             pcall(hookfunction, recoilHookTarget, originalAddRecoil)
             recoilHookInstalled = false
         end
-        if spreadHookInstalled and spreadHookTarget and originalGetProjectileSpread and type(hookfunction) == "function" then
-            pcall(hookfunction, spreadHookTarget, originalGetProjectileSpread)
-            spreadHookInstalled = false
-        end
+        restoreNoSpreadHook()
         if namecallHookInstalled and originalNamecall and type(hookmetamethod) == "function" then
             pcall(hookmetamethod, game, "__namecall", originalNamecall)
             namecallHookInstalled = false
@@ -1673,6 +1698,6 @@ return function(Window, runtimeInfo)
         end
     end
 
-    getgenv().__RAVEN_THE_WILD_WEST = {Version="v0.1.12",State=State,Destroy=destroy}
+    getgenv().__RAVEN_THE_WILD_WEST = {Version="v0.1.13",State=State,Destroy=destroy}
     if runtimeInfo and runtimeInfo.registerCleanup then runtimeInfo.registerCleanup(destroy) end
 end
