@@ -144,11 +144,15 @@ return function(Window, runtimeInfo)
         GlobalShadows = Lighting.GlobalShadows,
     }
     local OriginalFOV = Camera.FieldOfView
-    local OriginalAtmosphere = nil
+    local originalAtmospheres = {}
     for _, child in ipairs(Lighting:GetChildren()) do
         if child:IsA("Atmosphere") then
-            OriginalAtmosphere = {instance = child, Density = child.Density}
-            break
+            originalAtmospheres[child] = {
+                Density = child.Density,
+                Haze = child.Haze,
+                Glare = child.Glare,
+                Offset = child.Offset,
+            }
         end
     end
 
@@ -1216,15 +1220,37 @@ return function(Window, runtimeInfo)
     end
 
     local function applyNoFog(enabled)
+        for _, child in ipairs(Lighting:GetChildren()) do
+            if child:IsA("Atmosphere") and not originalAtmospheres[child] then
+                originalAtmospheres[child] = {
+                    Density = child.Density,
+                    Haze = child.Haze,
+                    Glare = child.Glare,
+                    Offset = child.Offset,
+                }
+            end
+        end
         if enabled then
             Lighting.FogStart = 1e6
             Lighting.FogEnd = 1e6
-            if OriginalAtmosphere and OriginalAtmosphere.instance then OriginalAtmosphere.instance.Density = 0 end
+            for atmosphere in pairs(originalAtmospheres) do
+                if atmosphere.Parent == Lighting then
+                    atmosphere.Density = 0
+                    atmosphere.Haze = 0
+                end
+            end
         else
             Lighting.FogStart = OriginalLighting.FogStart
             Lighting.FogEnd = OriginalLighting.FogEnd
-            if OriginalAtmosphere and OriginalAtmosphere.instance then
-                OriginalAtmosphere.instance.Density = OriginalAtmosphere.Density
+            for atmosphere, original in pairs(originalAtmospheres) do
+                if atmosphere.Parent == Lighting then
+                    atmosphere.Density = original.Density
+                    atmosphere.Haze = original.Haze
+                    atmosphere.Glare = original.Glare
+                    atmosphere.Offset = original.Offset
+                else
+                    originalAtmospheres[atmosphere] = nil
+                end
             end
         end
     end
