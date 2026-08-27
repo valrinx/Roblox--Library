@@ -738,8 +738,8 @@ return function(Window, runtimeInfo)
         end
         local point, onScreen = Camera:WorldToViewportPoint(aimPosition)
         if not onScreen or point.Z <= 0 then return nil end
-        local center = Camera.ViewportSize * 0.5
-        local dist = (Vector2.new(point.X, point.Y) - center).Magnitude
+        local screenCenter = Camera.ViewportSize * 0.5
+        local dist = (Vector2.new(point.X, point.Y) - screenCenter).Magnitude
         if dist > State.SilentAimFOV then return nil end
         return aimPosition
     end
