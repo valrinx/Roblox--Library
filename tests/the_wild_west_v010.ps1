@@ -99,7 +99,7 @@ foreach ($requiredRecovery in @(
 
 if ($source -notmatch 'local PLAYER_ESP_UPDATE_INTERVAL = 0\.5' -or
     $source -notmatch 'local WORLD_ESP_UPDATE_INTERVAL = 0\.75' -or
-    $source -notmatch 'EntityESPObjects = \{animals = \{\}, loot = \{\}, ore = \{\}\}' -or
+    $source -notmatch 'EntityESPObjects = \{animals = \{\}, loot = \{\}, ore = \{\}, items = \{\}\}' -or
     $source -notmatch 'Instance\.new\("Highlight"\)' -or
     $source -notmatch 'Instance\.new\("BillboardGui"\)' -or
     $source -match 'Drawing\.new\("Text"\)' -or
@@ -129,7 +129,7 @@ if ($source -notmatch 'CollectionService:GetTagged\("LootChest"\)' -or
 }
 
 if ($source -notmatch 'UnbindFromRenderStep\(renderStepName\)' -or
-    $source -notmatch '__RAVEN_THE_WILD_WEST = \{Version="v0\.1\.12"') {
+    $source -notmatch '__RAVEN_THE_WILD_WEST = \{Version="v0\.1\.17"') {
     throw 'Module cleanup/runtime registration is incomplete'
 }
 
@@ -140,4 +140,4 @@ if ($hub -notmatch 'name\s*=\s*"The Wild West"' -or
     throw 'RAVENHUB registration is missing or incorrect'
 }
 
-Write-Output 'PASS: The Wild West v0.1.12 weapon ballistics/Auto Lock/team/ESP regression checks passed'
+Write-Output 'PASS: The Wild West v0.1.17 weapon ballistics/Auto Lock/team/ESP regression checks passed'
