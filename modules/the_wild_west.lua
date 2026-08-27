@@ -692,7 +692,40 @@ return function(Window, runtimeInfo)
     local function getSilentAimTarget()
         if not State.SilentAim then return nil end
         local weaponConfig = getCurrentProjectileConfig()
+        -- Try full pipeline first
         local target = getClosestTarget(State.AutoLock or true, State.AnimalAutoLock)
+        if not target then
+            -- Fallback: find closest on-screen target without visibility check
+            local center = Camera.ViewportSize * 0.5
+            local bestDist = State.SilentAimFOV
+            do
+                for _, player in ipairs(Players:GetPlayers()) do
+                    if player == LP then continue end
+                    if State.IgnoreSameTeam and isSameTeam(player) then continue end
+                    if State.IgnoreSameFaction and isSameFaction(player) then continue end
+                    local model = getPlayerModel(player)
+                    local hum = getHumanoid(model)
+                    if not model or not hum or hum.Health <= 0 then continue end
+                    local ref = model:FindFirstChild("Head") or getRoot(model)
+                    if not ref then continue end
+                    local pt, ok = Camera:WorldToViewportPoint(ref.Position)
+                    if not ok or pt.Z <= 0 then continue end
+                    local d = (Vector2.new(pt.X, pt.Y) - center).Magnitude
+                    if d < bestDist then bestDist = d; target = player end
+                end
+            end
+            if State.AnimalAutoLock and animalFolder then
+                for _, animal in ipairs(animalFolder:GetChildren()) do
+                    if not isTargetAnimal(animal) then continue end
+                    local ref = animal:FindFirstChild("Head") or animal:FindFirstChild("HumanoidRootPart") or getBasePart(animal)
+                    if not ref then continue end
+                    local pt, ok = Camera:WorldToViewportPoint(ref.Position)
+                    if not ok or pt.Z <= 0 then continue end
+                    local d = (Vector2.new(pt.X, pt.Y) - center).Magnitude
+                    if d < bestDist then bestDist = d; target = animal end
+                end
+            end
+        end
         if not target then return nil end
         local model = getTargetModel(target)
         if not model then return nil end
