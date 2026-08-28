@@ -691,30 +691,32 @@ return function(Window, runtimeInfo)
         if not State.SilentAim then return nil end
         local center = Camera.ViewportSize * 0.5
         local bestPos, bestDist = nil, State.SilentAimFOV
-        -- Players
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player == LP then continue end
-            if State.IgnoreSameTeam and isSameTeam(player) then continue end
-            if State.IgnoreSameFaction and isSameFaction(player) then continue end
-            local model = getPlayerModel(player)
-            if not model then continue end
-            local ref = model:FindFirstChild(State.SilentAimPart) or model:FindFirstChild("Head") or getRoot(model)
-            if not ref then continue end
-            local pt, ok = Camera:WorldToViewportPoint(ref.Position)
-            if not ok or pt.Z <= 0 then continue end
-            local d = (Vector2.new(pt.X, pt.Y) - center).Magnitude
-            if d < bestDist then bestDist = d; bestPos = ref.Position end
-        end
-        -- Animals
-        if State.AnimalAutoLock and animalFolder then
-            for _, animal in ipairs(animalFolder:GetChildren()) do
-                if not isTargetAnimal(animal) then continue end
-                local ref = animal:FindFirstChild("Head") or animal:FindFirstChild("HumanoidRootPart") or getBasePart(animal)
+        -- Players (use replicated models in WORKSPACE_Entities)
+        local entitiesFolder = workspace:FindFirstChild("WORKSPACE_Entities")
+        local playersFolder = entitiesFolder and entitiesFolder:FindFirstChild("Players")
+        if playersFolder then
+            for _, model in ipairs(playersFolder:GetChildren()) do
+                if model.Name == LP.Name then continue end
+                local ref = model:FindFirstChild(State.SilentAimPart) or model:FindFirstChild("Head") or model:FindFirstChild("HumanoidRootPart")
                 if not ref then continue end
-                local pt, ok = Camera:WorldToViewportPoint(ref.Position)
-                if not ok or pt.Z <= 0 then continue end
+                local pt = Camera:WorldToViewportPoint(ref.Position)
+                if pt.Z <= 0 then continue end
                 local d = (Vector2.new(pt.X, pt.Y) - center).Magnitude
                 if d < bestDist then bestDist = d; bestPos = ref.Position end
+            end
+        end
+        -- Animals
+        if State.AnimalAutoLock then
+            local animalsFolder = entitiesFolder and entitiesFolder:FindFirstChild("Animals")
+            if animalsFolder then
+                for _, animal in ipairs(animalsFolder:GetChildren()) do
+                    local ref = animal:FindFirstChild("Head") or animal:FindFirstChild("HumanoidRootPart") or getBasePart(animal)
+                    if not ref then continue end
+                    local pt = Camera:WorldToViewportPoint(ref.Position)
+                    if pt.Z <= 0 then continue end
+                    local d = (Vector2.new(pt.X, pt.Y) - center).Magnitude
+                    if d < bestDist then bestDist = d; bestPos = ref.Position end
+                end
             end
         end
         return bestPos
@@ -1942,6 +1944,6 @@ return function(Window, runtimeInfo)
         end
     end
 
-    getgenv().__RAVEN_THE_WILD_WEST = {Version="v0.1.19",State=State,Destroy=destroy}
+    getgenv().__RAVEN_THE_WILD_WEST = {Version="v0.1.20",State=State,Destroy=destroy}
     if runtimeInfo and runtimeInfo.registerCleanup then runtimeInfo.registerCleanup(destroy) end
 end
