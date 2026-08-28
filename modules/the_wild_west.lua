@@ -687,61 +687,37 @@ return function(Window, runtimeInfo)
         recoilHookInstalled = true
     end
 
-    installNoRecoilHook()
-
-    local function getSilentAimTarget()
+    installNoRecoilHook()    local function getSilentAimTarget()
         if not State.SilentAim then return nil end
-        local weaponConfig = getCurrentProjectileConfig()
-        -- Try full pipeline first
-        local target = getClosestTarget(State.AutoLock or true, State.AnimalAutoLock)
-        if not target then
-            -- Fallback: find closest on-screen target without visibility check
-            local center = Camera.ViewportSize * 0.5
-            local bestDist = State.SilentAimFOV
-            do
-                for _, player in ipairs(Players:GetPlayers()) do
-                    if player == LP then continue end
-                    if State.IgnoreSameTeam and isSameTeam(player) then continue end
-                    if State.IgnoreSameFaction and isSameFaction(player) then continue end
-                    local model = getPlayerModel(player)
-                    local hum = getHumanoid(model)
-                    if not model or not hum or hum.Health <= 0 then continue end
-                    local ref = model:FindFirstChild("Head") or getRoot(model)
-                    if not ref then continue end
-                    local pt, ok = Camera:WorldToViewportPoint(ref.Position)
-                    if not ok or pt.Z <= 0 then continue end
-                    local d = (Vector2.new(pt.X, pt.Y) - center).Magnitude
-                    if d < bestDist then bestDist = d; target = player end
-                end
-            end
-            if State.AnimalAutoLock and animalFolder then
-                for _, animal in ipairs(animalFolder:GetChildren()) do
-                    if not isTargetAnimal(animal) then continue end
-                    local ref = animal:FindFirstChild("Head") or animal:FindFirstChild("HumanoidRootPart") or getBasePart(animal)
-                    if not ref then continue end
-                    local pt, ok = Camera:WorldToViewportPoint(ref.Position)
-                    if not ok or pt.Z <= 0 then continue end
-                    local d = (Vector2.new(pt.X, pt.Y) - center).Magnitude
-                    if d < bestDist then bestDist = d; target = animal end
-                end
+        local center = Camera.ViewportSize * 0.5
+        local bestPos, bestDist = nil, State.SilentAimFOV
+        -- Players
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player == LP then continue end
+            if State.IgnoreSameTeam and isSameTeam(player) then continue end
+            if State.IgnoreSameFaction and isSameFaction(player) then continue end
+            local model = getPlayerModel(player)
+            if not model then continue end
+            local ref = model:FindFirstChild(State.SilentAimPart) or model:FindFirstChild("Head") or getRoot(model)
+            if not ref then continue end
+            local pt, ok = Camera:WorldToViewportPoint(ref.Position)
+            if not ok or pt.Z <= 0 then continue end
+            local d = (Vector2.new(pt.X, pt.Y) - center).Magnitude
+            if d < bestDist then bestDist = d; bestPos = ref.Position end
+        end
+        -- Animals
+        if State.AnimalAutoLock and animalFolder then
+            for _, animal in ipairs(animalFolder:GetChildren()) do
+                if not isTargetAnimal(animal) then continue end
+                local ref = animal:FindFirstChild("Head") or animal:FindFirstChild("HumanoidRootPart") or getBasePart(animal)
+                if not ref then continue end
+                local pt, ok = Camera:WorldToViewportPoint(ref.Position)
+                if not ok or pt.Z <= 0 then continue end
+                local d = (Vector2.new(pt.X, pt.Y) - center).Magnitude
+                if d < bestDist then bestDist = d; bestPos = ref.Position end
             end
         end
-        if not target then return nil end
-        local model = getTargetModel(target)
-        if not model then return nil end
-        local part = model:FindFirstChild(State.SilentAimPart) or model:FindFirstChild("Head") or getBasePart(model)
-        if not part then return nil end
-        local aimPosition = part.Position
-        if State.AimPrediction and weaponConfig then
-            local sample = getSharedPrediction(target, weaponConfig, part)
-            if sample then aimPosition = sample.position end
-        end
-        local point, onScreen = Camera:WorldToViewportPoint(aimPosition)
-        if not onScreen or point.Z <= 0 then return nil end
-        local screenCenter = Camera.ViewportSize * 0.5
-        local dist = (Vector2.new(point.X, point.Y) - screenCenter).Magnitude
-        if dist > State.SilentAimFOV then return nil end
-        return aimPosition
+        return bestPos
     end
 
     local function adjustProjectileDirection(result, projectileType, projectileData, sharedData)
@@ -1966,6 +1942,6 @@ return function(Window, runtimeInfo)
         end
     end
 
-    getgenv().__RAVEN_THE_WILD_WEST = {Version="v0.1.18",State=State,Destroy=destroy}
+    getgenv().__RAVEN_THE_WILD_WEST = {Version="v0.1.19",State=State,Destroy=destroy}
     if runtimeInfo and runtimeInfo.registerCleanup then runtimeInfo.registerCleanup(destroy) end
 end
