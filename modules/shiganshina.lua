@@ -176,9 +176,14 @@ return function(Window, runtimeInfo)
             pcall(function() POST:FireServer("Attacks", "Reload", station) end)
         end
         task.wait(2)
-        -- Reload blades
+        -- Reload blades one by one
         if GET then
-            pcall(function() GET:InvokeServer("Blades", "Reload") end)
+            while Config.AutoReloadBlades do
+                local total, broken = getBladeCount()
+                if broken == 0 then break end
+                pcall(function() GET:InvokeServer("Blades", "Reload") end)
+                task.wait(0.3)
+            end
         end
         task.wait(0.3)
         -- Return to original position
