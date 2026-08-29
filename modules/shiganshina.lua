@@ -1,4 +1,4 @@
---// Shiganshina v5 — Auto Farm Script
+--// Shiganshina v6 — Auto Farm Script
 --// Game: Training Grounds (AoT)
 --// PlaceId: 13379349730
 --// Uses MacLib from RAVEN HUB
@@ -43,6 +43,16 @@ return function(Window, runtimeInfo)
 
     local ESPObjects = {}
     local ActiveThreads = {}
+    local RetryState = {
+        pending = false,
+        waitingForRound = false,
+        lastClickAt = -math.huge,
+        nextAttemptAt = 0,
+        clickMode = 1,
+        deathConnection = nil,
+    }
+    local RetryClickCooldown = 1.25
+    local RetryWaitTimeout = 5
 
     --// ==================== UTILITY ====================
 
@@ -53,6 +63,69 @@ return function(Window, runtimeInfo)
         Humanoid = Char:FindFirstChildOfClass("Humanoid")
         return Char, Root, Humanoid
     end
+
+    local function isGuiHierarchyVisible(gui)
+        local node = gui
+        while node do
+            if node:IsA("GuiObject") and not node.Visible then return false end
+            if node:IsA("ScreenGui") and not node.Enabled then return false end
+            node = node.Parent
+        end
+        return true
+    end
+
+    local function isGuiButtonUsable(button)
+        if not button or not button:IsA("GuiButton") then return false end
+        if not button.Visible or button.Active == false then return false end
+        local interactableOk, interactable = pcall(function() return button.Interactable end)
+        if interactableOk and interactable == false then return false end
+        return isGuiHierarchyVisible(button)
+    end
+
+    -- Use one activation mechanism per attempt. Executors differ in which
+    -- GuiButton signal they expose, so Auto Retry rotates through the safe
+    -- options and finally falls back to a real mouse click at the button.
+    local function clickButton(button, mode)
+        if not isGuiButtonUsable(button) then return false end
+        local clickMode = mode or 1
+        if clickMode == 1 then
+            return pcall(function() button:Activate() end)
+        elseif clickMode == 2 then
+            return pcall(function() button.MouseButton1Click:Fire() end)
+        elseif clickMode == 3 then
+            return pcall(function() button.Activated:Fire() end)
+        end
+
+        local virtualInput
+        local inputOk = pcall(function()
+            virtualInput = game:GetService("VirtualInputManager")
+        end)
+        if not inputOk or not virtualInput then return false end
+        local center = button.AbsolutePosition + (button.AbsoluteSize / 2)
+        return pcall(function()
+            virtualInput:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 0)
+            virtualInput:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 0)
+        end)
+    end
+
+    local function bindRetryDeath(character)
+        if RetryState.deathConnection then
+            pcall(function() RetryState.deathConnection:Disconnect() end)
+            RetryState.deathConnection = nil
+        end
+        if not character then return end
+        local hum = character:FindFirstChildOfClass("Humanoid")
+        if not hum then
+            hum = character:WaitForChild("Humanoid", 5)
+        end
+        if hum then
+            RetryState.deathConnection = hum.Died:Connect(function()
+                if Config.AutoRetry then RetryState.pending = true end
+            end)
+        end
+    end
+
+    bindRetryDeath(Char)
 
     local function getNape(titan)
         local hitboxes = titan:FindFirstChild("Hitboxes")
@@ -338,43 +411,60 @@ return function(Window, runtimeInfo)
 
     --// ==================== AUTO RETRY ====================
 
-    local function clickButton(btn)
-        pcall(function() btn.MouseButton1Click:Fire() end)
-        pcall(function() btn.Activated:Fire() end)
-        pcall(function() btn:Activate() end)
+    local function getVisibleRetryButton()
+        local pg = LP:FindFirstChild("PlayerGui")
+        if not pg then return nil end
+        local iface = pg:FindFirstChild("Interface")
+        if not iface then return nil end
+
+        -- The only retry control in this game is the mission-complete button:
+        -- Interface.Rewards.Main.Info.Main.Buttons.Retry.
+        local rewards = iface:FindFirstChild("Rewards")
+        if not rewards or not rewards.Visible then return nil end
+        local main = rewards:FindFirstChild("Main")
+        local info = main and main:FindFirstChild("Info")
+        local content = info and info:FindFirstChild("Main")
+        local buttons = content and content:FindFirstChild("Buttons")
+        local retry = buttons and buttons:FindFirstChild("Retry")
+        if isGuiButtonUsable(retry) then return retry end
+        return nil
     end
 
     local function autoRetryLoop()
         while Config.AutoRetry do
-            local pg = LP:FindFirstChild("PlayerGui")
-            if pg then
-                local iface = pg:FindFirstChild("Interface")
-                if iface then
-                    -- Case 1: Mission Completed screen (Rewards visible)
-                    local rewards = iface:FindFirstChild("Rewards")
-                    if rewards and rewards.Visible then
-                        -- Click RETRY button
-                        local buttons = rewards:FindFirstChild("Main")
-                        if buttons then buttons = buttons:FindFirstChild("Info") end
-                        if buttons then buttons = buttons:FindFirstChild("Main") end
-                        if buttons then buttons = buttons:FindFirstChild("Buttons") end
-                        if buttons then
-                            local retry = buttons:FindFirstChild("Retry")
-                            if retry then clickButton(retry) end
-                        end
-                    end
-                    -- Case 2: Death screen
-                    local death = iface:FindFirstChild("Death")
-                    if death and death.Visible then
-                        for _, v in death:GetDescendants() do
-                            if v:IsA("TextButton") or v:IsA("ImageButton") then
-                                clickButton(v)
-                            end
-                        end
-                    end
+            local now = os.clock()
+            local char, _, hum = getCharacter()
+
+            -- Death is a state transition, not a clickable screen in this
+            -- game. Remember it and wait for the Rewards screen to expose
+            -- its real Retry button after the server finishes the round.
+            if not char or not hum or hum.Health <= 0 then
+                RetryState.pending = true
+            end
+
+            local retry = getVisibleRetryButton()
+            if retry then RetryState.pending = true end
+            if RetryState.waitingForRound then
+                -- A successful retry normally hides Rewards and creates a
+                -- fresh character. If either signal is delayed, allow one
+                -- later fallback attempt instead of clicking every frame.
+                if not retry or now - RetryState.lastClickAt >= RetryWaitTimeout then
+                    RetryState.waitingForRound = false
                 end
             end
-            task.wait(0.3)
+
+            if retry and RetryState.pending and not RetryState.waitingForRound and now >= RetryState.nextAttemptAt then
+                local mode = RetryState.clickMode
+                local clicked = clickButton(retry, mode)
+                RetryState.clickMode = (mode % 4) + 1
+                RetryState.lastClickAt = now
+                RetryState.nextAttemptAt = now + RetryClickCooldown
+                if clicked then
+                    RetryState.pending = false
+                    RetryState.waitingForRound = true
+                end
+            end
+            task.wait(0.15)
         end
     end
 
@@ -558,7 +648,14 @@ return function(Window, runtimeInfo)
         Flag = "ShigAutoRetry",
         Callback = function(v)
             Config.AutoRetry = v
-            if v then startThread("AutoRetry", autoRetryLoop) else stopThread("AutoRetry") end
+            if v then
+                startThread("AutoRetry", autoRetryLoop)
+            else
+                stopThread("AutoRetry")
+                RetryState.pending = false
+                RetryState.waitingForRound = false
+                RetryState.nextAttemptAt = 0
+            end
         end,
     })
     FarmTab:CreateToggle({
@@ -686,6 +783,11 @@ return function(Window, runtimeInfo)
 
     LP.CharacterAdded:Connect(function(c)
         Char = c; Root = c:WaitForChild("HumanoidRootPart"); Humanoid = c:WaitForChild("Humanoid")
+        RetryState.pending = false
+        RetryState.waitingForRound = false
+        RetryState.nextAttemptAt = 0
+        RetryState.clickMode = 1
+        bindRetryDeath(c)
     end)
 
     --// Cleanup
@@ -693,6 +795,10 @@ return function(Window, runtimeInfo)
         runtimeInfo.registerCleanup(function()
             for name in pairs(ActiveThreads) do stopThread(name) end
             for titan in pairs(ESPObjects) do removeESP(titan) end
+            if RetryState.deathConnection then
+                pcall(function() RetryState.deathConnection:Disconnect() end)
+                RetryState.deathConnection = nil
+            end
         end)
     end
 end
