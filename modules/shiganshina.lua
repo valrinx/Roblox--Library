@@ -28,6 +28,7 @@ return function(Window, runtimeInfo)
     local Config = {
         AutoFarm = false,
         AutoGrabEscape = false,
+        AutoRetry = false,
         AutoReloadBlades = false,
         AutoFullReload = false,
         InfiniteSpear = false,
@@ -224,6 +225,47 @@ return function(Window, runtimeInfo)
         end
     end
 
+    --// ==================== AUTO RETRY ====================
+
+    local function autoRetryLoop()
+        while Config.AutoRetry do
+            local char, _, hum = getCharacter()
+            -- Detect death: no character or health <= 0
+            if not char or (hum and hum.Health <= 0) then
+                -- Try remote retry
+                if POST then
+                    pcall(function() POST:FireServer("Retry") end)
+                    pcall(function() POST:FireServer("Death", "Retry") end)
+                    pcall(function() POST:FireServer("Respawn") end)
+                end
+                if GET then
+                    pcall(function() GET:InvokeServer("Retry") end)
+                    pcall(function() GET:InvokeServer("Respawn") end)
+                end
+                -- Try clicking Death GUI retry button
+                local pg = LP:FindFirstChild("PlayerGui")
+                if pg then
+                    local iface = pg:FindFirstChild("Interface")
+                    if iface then
+                        local death = iface:FindFirstChild("Death")
+                        if death then
+                            -- Find any button/clickable in Death screen
+                            for _, v in death:GetDescendants() do
+                                if v:IsA("TextButton") or v:IsA("ImageButton") then
+                                    pcall(function() v.Activated:Fire() end)
+                                    pcall(function() v:Activate() end)
+                                end
+                            end
+                        end
+                    end
+                end
+                task.wait(1)
+            else
+                task.wait(0.5)
+            end
+        end
+    end
+
     --// ==================== LOOPS ====================
 
     local function autoFarmLoop()
@@ -398,6 +440,15 @@ return function(Window, runtimeInfo)
         Callback = function(v)
             Config.AutoGrabEscape = v
             if v then startThread("GrabEscape", autoGrabEscapeLoop) else stopThread("GrabEscape") end
+        end,
+    })
+    FarmTab:CreateToggle({
+        Name = "Auto Retry",
+        CurrentValue = false,
+        Flag = "ShigAutoRetry",
+        Callback = function(v)
+            Config.AutoRetry = v
+            if v then startThread("AutoRetry", autoRetryLoop) else stopThread("AutoRetry") end
         end,
     })
     FarmTab:CreateToggle({
