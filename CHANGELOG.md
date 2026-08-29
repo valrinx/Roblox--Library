@@ -1,5 +1,15 @@
 - **Dungeon Quest Reborn v0.1.0** - Added Raven Hub registration, dungeon state tracking, bounded enemy scanning, Auto Farm/Attack, boss preference, room progression, runtime cleanup, and status UI. Lobby selection, difficulty, rewards, and retry remain adapter hooks until the live game contract is confirmed.
 - **Train Your Fish to Race v1.2.0** - Added eligibility-gated Auto Online Rewards, Auto Daily Sign, Auto Spin/Free Spin, and event-driven Auto Race Reward with cooldown protection.
+
+## 2026-08-30 - Attack on Titan Revolution Family Roll v1.0.1
+
+- Fixed Auto Roll on Potassium by replacing unsupported `TextButton:Activate()` with `MouseButton1Click`/`Activated` signal fallbacks and a real UI mouse fallback.
+
+## 2026-08-30 - Attack on Titan Revolution Family Roll v1.0.0
+
+- Added a Rayfield-style Family Roll tab for the current Attack on Titan Revolution place.
+- Added quick-select and free-text Family targets, adjustable roll interval, UI-only roll activation, and automatic stop when the Family title matches.
+- Narrowed the existing Shiganshina registry match to its dedicated PlaceId so it does not load in the main customization place.
 # Changelog
 
 ## 2026-08-28 - The Wild West v0.1.12
