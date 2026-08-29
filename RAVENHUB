@@ -389,10 +389,16 @@ local SCRIPTS = {
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/steal_an_egg.lua",
     },
     {
+        name        = "Attack on Titan Revolution - Family Roll",
+        description = "Selectable Family target | UI Auto Roll | Auto Stop on match",
+        placeIds    = {13379208636},
+        version     = "v1.0.1",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/aotr_family_roll.lua?v=aotr-family-roll-1.0.1",
+    },
+    {
         name        = "Shiganshina (AoT)",
         description = "Auto Farm | Auto Reload | Multi Hit | Boss Burst | Titan ESP | Nape Extender",
         placeIds    = {13379349730},
-        gameIds     = {4658598196},
         version     = "v6.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/shiganshina.lua?v=shiganshina-6.0",
     },
