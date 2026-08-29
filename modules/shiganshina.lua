@@ -382,6 +382,7 @@ return function(Window, runtimeInfo)
     FarmTab:CreateToggle({
         Name = "Toggle Auto Farm",
         CurrentValue = false,
+        Flag = "ShigAutoFarm",
         Callback = function(v)
             Config.AutoFarm = v
             if v then StatusLabel:Set("Status: Farming..."); startThread("AutoFarm", autoFarmLoop)
@@ -393,6 +394,7 @@ return function(Window, runtimeInfo)
     FarmTab:CreateToggle({
         Name = "Auto Grab Escape",
         CurrentValue = false,
+        Flag = "ShigGrabEscape",
         Callback = function(v)
             Config.AutoGrabEscape = v
             if v then startThread("GrabEscape", autoGrabEscapeLoop) else stopThread("GrabEscape") end
@@ -401,6 +403,7 @@ return function(Window, runtimeInfo)
     FarmTab:CreateToggle({
         Name = "Auto Reload Blades",
         CurrentValue = false,
+        Flag = "ShigAutoReload",
         Callback = function(v)
             Config.AutoReloadBlades = v
             if v then startThread("AutoReload", autoReloadLoop) else stopThread("AutoReload") end
@@ -409,11 +412,13 @@ return function(Window, runtimeInfo)
     FarmTab:CreateToggle({
         Name = "Auto Full Reload",
         CurrentValue = false,
+        Flag = "ShigFullReload",
         Callback = function(v) Config.AutoFullReload = v end,
     })
     FarmTab:CreateToggle({
         Name = "Infinite Spear",
         CurrentValue = false,
+        Flag = "ShigInfiniteSpear",
         Callback = function(v)
             Config.InfiniteSpear = v
             if v then startThread("InfiniteSpear", infiniteSpearLoop) else stopThread("InfiniteSpear") end
@@ -422,6 +427,7 @@ return function(Window, runtimeInfo)
     FarmTab:CreateToggle({
         Name = "Auto Use Skill",
         CurrentValue = false,
+        Flag = "ShigAutoSkill",
         Callback = function(v)
             Config.AutoUseSkill = v
             if v then startThread("AutoSkill", autoSkillLoop) else stopThread("AutoSkill") end
@@ -433,6 +439,7 @@ return function(Window, runtimeInfo)
     CombatTab:CreateToggle({
         Name = "Multi Hit",
         CurrentValue = false,
+        Flag = "ShigMultiHit",
         Callback = function(v)
             Config.MultiHit = v
             if v then startThread("MultiHit", multiHitLoop) else stopThread("MultiHit") end
@@ -444,16 +451,19 @@ return function(Window, runtimeInfo)
         Increment = 5,
         Suffix = " studs",
         CurrentValue = 50,
+        Flag = "ShigMultiHitRadius",
         Callback = function(v) Config.MultiHitRadius = v end,
     })
     CombatTab:CreateToggle({
         Name = "Boss Burst",
         CurrentValue = false,
+        Flag = "ShigBossBurst",
         Callback = function(v) Config.BossBurst = v end,
     })
     CombatTab:CreateToggle({
         Name = "Nape Extender",
         CurrentValue = false,
+        Flag = "ShigNapeExtender",
         Callback = function(v) Config.NapeExtender = v end,
     })
 
@@ -462,6 +472,7 @@ return function(Window, runtimeInfo)
     ESPTab:CreateToggle({
         Name = "Titan ESP",
         CurrentValue = false,
+        Flag = "ShigTitanESP",
         Callback = function(v)
             Config.TitanESP = v
             if v then startThread("ESP", espLoop)
@@ -476,16 +487,19 @@ return function(Window, runtimeInfo)
         Range = {16, 100},
         Increment = 1,
         CurrentValue = 16,
+        Flag = "ShigWalkSpeed",
         Callback = function(v) local _, _, h = getCharacter(); if h then h.WalkSpeed = v end end,
     })
     MiscTab:CreateToggle({
         Name = "NoClip",
         CurrentValue = false,
+        Flag = "ShigNoClip",
         Callback = function(v) Config.NoClip = v end,
     })
     MiscTab:CreateToggle({
         Name = "Infinite Jump",
         CurrentValue = false,
+        Flag = "ShigInfJump",
         Callback = function(v) Config.InfiniteJump = v end,
     })
 
