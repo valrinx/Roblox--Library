@@ -172,56 +172,105 @@ return function(Window, runtimeInfo)
     --// ==================== GRAB ESCAPE ====================
 
     local function isGrabbed()
-        local _, _, hum = getCharacter()
-        if not hum then return false end
+        local char, root, hum = getCharacter()
+        if not char or not root or not hum then return false end
+        -- Check 1: PlatformStand set by server
         if hum.PlatformStand then return true end
-        if hum:GetState() == Enum.HumanoidStateType.PlatformStanding then return true end
+        -- Check 2: State is PlatformStanding or Seated
+        local state = hum:GetState()
+        if state == Enum.HumanoidStateType.PlatformStanding then return true end
+        if state == Enum.HumanoidStateType.Seated then return true end
+        -- Check 3: Weld connecting player to any Titan part
+        for _, v in char:GetDescendants() do
+            if v:IsA("Weld") or v:IsA("WeldConstraint") then
+                if (v.Part0 and v.Part0:IsDescendantOf(TitansFolder))
+                    or (v.Part1 and v.Part1:IsDescendantOf(TitansFolder)) then
+                    return true
+                end
+            end
+        end
+        -- Check 4: BodyPosition (not BodyVelocity which is always present)
+        for _, v in char:GetDescendants() do
+            if v:IsA("BodyPosition") then return true end
+        end
+        -- Check 5: Near titan hand AND velocity near zero despite WalkSpeed > 0
+        if hum.WalkSpeed > 0 then
+            local vel = root.Velocity
+            if vel.Magnitude < 1 and state ~= Enum.HumanoidStateType.Dead then
+                for _, titan in TitansFolder:GetChildren() do
+                    if titan:IsA("Model") then
+                        local rh = titan:FindFirstChild("RightHand")
+                        local lh = titan:FindFirstChild("LeftHand")
+                        if rh and (root.Position - rh.Position).Magnitude < 8 then return true end
+                        if lh and (root.Position - lh.Position).Magnitude < 8 then return true end
+                    end
+                end
+            end
+        end
         return false
     end
 
     local function doEscape()
         local char, root, hum = getCharacter()
         if not char or not hum then return end
-
-        -- Remove all movement constraints (BodyVelocity, BodyPosition, BodyGyro, AlignPosition)
+        -- Step 1: Remove ALL BodyMovers (BV is normal, remove extra ones)
+        local bvCount = 0
         for _, v in char:GetDescendants() do
-            if v:IsA("BodyVelocity") or v:IsA("BodyPosition") or v:IsA("BodyGyro")
-                or v:IsA("AlignPosition") or v:IsA("AlignOrientation") then
+            if v:IsA("BodyVelocity") then bvCount = bvCount + 1 end
+        end
+        -- Remove extra BodyVelocity (keep only 1 which is the normal one)
+        if bvCount > 1 then
+            local count = 0
+            for _, v in char:GetDescendants() do
+                if v:IsA("BodyVelocity") then
+                    count = count + 1
+                    if count > 1 then pcall(function() v:Destroy() end) end
+                end
+            end
+        end
+        -- Remove BodyPosition, BodyGyro, BodyForce (never normal)
+        for _, v in char:GetDescendants() do
+            if v:IsA("BodyPosition") or v:IsA("BodyGyro") or v:IsA("BodyForce") then
                 pcall(function() v:Destroy() end)
             end
         end
-
-        -- Reset humanoid state
+        -- Step 2: Remove welds connecting to Titans
+        for _, v in char:GetDescendants() do
+            if v:IsA("Weld") or v:IsA("WeldConstraint") then
+                if (v.Part0 and v.Part0:IsDescendantOf(TitansFolder))
+                    or (v.Part1 and v.Part1:IsDescendantOf(TitansFolder)) then
+                    pcall(function() v:Destroy() end)
+                end
+            end
+        end
+        -- Step 3: Reset humanoid
         hum.PlatformStand = false
-        hum:ChangeState(Enum.HumanoidStateType.Running)
+        hum.Sit = false
         hum:ChangeState(Enum.HumanoidStateType.GettingUp)
-
-        -- Try remote escape
+        task.wait(0.05)
+        hum:ChangeState(Enum.HumanoidStateType.Running)
+        -- Step 4: Try escape remote
         if POST then
             pcall(function() POST:FireServer("Escape") end)
             pcall(function() POST:FireServer("Grab", "Escape") end)
             pcall(function() POST:FireServer("Grab", false) end)
         end
-
-        -- Teleport up to break free
+        -- Step 5: Teleport far away
         if root then
-            root.CFrame = root.CFrame + Vector3.new(0, 10, 0)
+            root.CFrame = root.CFrame + Vector3.new(0, 20, 0)
         end
     end
 
     local function autoGrabEscapeLoop()
         while Config.AutoGrabEscape do
             if isGrabbed() then
-                doEscape()
-                task.wait(0.1)
-                -- Keep trying until not grabbed anymore
-                for _ = 1, 10 do
+                for _ = 1, 20 do
                     if not isGrabbed() then break end
                     doEscape()
                     task.wait(0.05)
                 end
             end
-            task.wait(0.1)
+            task.wait(0.05)
         end
     end
 
