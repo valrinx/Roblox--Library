@@ -107,19 +107,29 @@ return function(Window, runtimeInfo)
         return nearest, minDist
     end
 
-    local function needReload()
+    local function getBladeCount()
         local char = getCharacter()
-        if not char then return false end
+        if not char then return 0, 0 end
         local rig = Workspace:FindFirstChild("Rig_" .. char.Name, true)
         if not rig then rig = char end
-        local found = false
+        local total, broken = 0, 0
         for _, blade in rig:GetDescendants() do
             if blade.Name:sub(1, 6) == "Blade_" then
-                found = true
-                if blade:GetAttribute("Broken") == true then return true end
+                total = total + 1
+                if blade:GetAttribute("Broken") == true then broken = broken + 1 end
             end
         end
-        return not found
+        return total, broken
+    end
+
+    local function needReload()
+        local total, broken = getBladeCount()
+        return broken > 0
+    end
+
+    local function allBladesBroken()
+        local total, broken = getBladeCount()
+        return total > 0 and broken >= total
     end
 
     local function getRefillStation()
@@ -145,28 +155,35 @@ return function(Window, runtimeInfo)
         end
     end
 
-    local function doReload(station)
-        if not POST or not GET then return end
-        local _, root = getCharacter()
-        if not root then return end
-        local old = root.CFrame
-        if station then
-            root.CFrame = station.CFrame * CFrame.new(0, 5, 0)
-            task.wait(0.2)
-            POST:FireServer("Attacks", "Reload", station)
-            task.wait(2)
-        end
-        GET:InvokeServer("Blades", "Reload")
-        task.wait(0.1)
-        local _, root2 = getCharacter()
-        if root2 then root2.CFrame = old end
-    end
-
-    local function doFullReload()
+    local function doRemoteReload()
         if GET then
-            GET:InvokeServer("Blades", "Reload")
+            pcall(function() GET:InvokeServer("Blades", "Reload") end)
             task.wait(0.1)
         end
+    end
+
+    local function doStationReload()
+        local _, root = getCharacter()
+        if not root then return end
+        local station = getRefillStation()
+        if not station then return end
+        local old = root.CFrame
+        -- Teleport to station
+        root.CFrame = station.CFrame * CFrame.new(0, 5, 0)
+        task.wait(0.3)
+        -- Fire reload at station
+        if POST then
+            pcall(function() POST:FireServer("Attacks", "Reload", station) end)
+        end
+        task.wait(2)
+        -- Reload blades
+        if GET then
+            pcall(function() GET:InvokeServer("Blades", "Reload") end)
+        end
+        task.wait(0.3)
+        -- Return to original position
+        local _, root2 = getCharacter()
+        if root2 then root2.CFrame = old end
     end
 
     --// ==================== GRAB ESCAPE ====================
@@ -329,8 +346,14 @@ return function(Window, runtimeInfo)
                 continue
             end
             if Config.AutoReloadBlades and needReload() then
-                if Config.AutoFullReload then doFullReload()
-                else doReload(getRefillStation()) end
+                -- Reload remotely until depleted, then refill at station
+                while Config.AutoReloadBlades and needReload() and not allBladesBroken() do
+                    doRemoteReload()
+                    task.wait(0.2)
+                end
+                if Config.AutoReloadBlades and allBladesBroken() then
+                    doStationReload()
+                end
                 task.wait(0.2)
             end
             local info = getNearestTitan()
@@ -355,10 +378,17 @@ return function(Window, runtimeInfo)
     local function autoReloadLoop()
         while Config.AutoReloadBlades do
             if needReload() then
-                if Config.AutoFullReload then doFullReload()
-                else doReload(getRefillStation()) end
+                -- Step 1: Reload via remote until blades depleted (0/3)
+                while Config.AutoReloadBlades and needReload() and not allBladesBroken() do
+                    doRemoteReload()
+                    task.wait(0.2)
+                end
+                -- Step 2: All blades broken (0/3) — teleport to refill station
+                if Config.AutoReloadBlades and allBladesBroken() then
+                    doStationReload()
+                end
             end
-            task.wait(1)
+            task.wait(0.5)
         end
     end
 
