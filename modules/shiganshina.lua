@@ -190,7 +190,15 @@ return function(Window, runtimeInfo)
 
     local function isGrabbed()
         local char, root, hum = getCharacter()
-        if not char or not root or not hum then return false end
+        if not char or not root or not hum then return false endn        -- Check 0: QTE visible (grab mini game)
+        local pg = LP:FindFirstChild("PlayerGui")
+        if pg then
+            local iface = pg:FindFirstChild("Interface")
+            if iface then
+                local qte = iface:FindFirstChild("QTE")
+                if qte and qte.Visible then return true end
+            end
+        end
         -- Check 1: PlatformStand set by server
         if hum.PlatformStand then return true end
         -- Check 2: State is PlatformStanding or Seated
@@ -210,32 +218,84 @@ return function(Window, runtimeInfo)
         for _, v in char:GetDescendants() do
             if v:IsA("BodyPosition") then return true end
         end
-        -- Check 5: Near titan hand AND velocity near zero despite WalkSpeed > 0
-        if hum.WalkSpeed > 0 then
-            local vel = root.Velocity
-            if vel.Magnitude < 1 and state ~= Enum.HumanoidStateType.Dead then
-                for _, titan in TitansFolder:GetChildren() do
-                    if titan:IsA("Model") then
-                        local rh = titan:FindFirstChild("RightHand")
-                        local lh = titan:FindFirstChild("LeftHand")
-                        if rh and (root.Position - rh.Position).Magnitude < 8 then return true end
-                        if lh and (root.Position - lh.Position).Magnitude < 8 then return true end
-                    end
-                end
-            end
-        end
         return false
+    end
+
+    local function getQTEKey()
+        local pg = LP:FindFirstChild("PlayerGui")
+        if not pg then return nil end
+        local iface = pg:FindFirstChild("Interface")
+        if not iface then return nil end
+        local qte = iface:FindFirstChild("QTE")
+        if not qte or not qte.Visible then return nil end
+        local main = qte:FindFirstChild("Main")
+        if not main then return nil end
+        local button = main:FindFirstChild("Button")
+        if not button then return nil end
+        local key = button:FindFirstChild("Key")
+        if key and key:IsA("TextLabel") then
+            return key.Text
+        end
+        return nil
+    end
+
+    local function pressKey(keyName)
+        if not keyName or #keyName == 0 then return end
+        local key = keyName:upper()
+        -- Map key names to KeyCode
+        local keyMap = {
+            ["A"] = Enum.KeyCode.A, ["B"] = Enum.KeyCode.B, ["C"] = Enum.KeyCode.C,
+            ["D"] = Enum.KeyCode.D, ["E"] = Enum.KeyCode.E, ["F"] = Enum.KeyCode.F,
+            ["G"] = Enum.KeyCode.G, ["H"] = Enum.KeyCode.H, ["I"] = Enum.KeyCode.I,
+            ["J"] = Enum.KeyCode.J, ["K"] = Enum.KeyCode.K, ["L"] = Enum.KeyCode.L,
+            ["M"] = Enum.KeyCode.M, ["N"] = Enum.KeyCode.N, ["O"] = Enum.KeyCode.O,
+            ["P"] = Enum.KeyCode.P, ["Q"] = Enum.KeyCode.Q, ["R"] = Enum.KeyCode.R,
+            ["S"] = Enum.KeyCode.S, ["T"] = Enum.KeyCode.T, ["U"] = Enum.KeyCode.U,
+            ["V"] = Enum.KeyCode.V, ["W"] = Enum.KeyCode.W, ["X"] = Enum.KeyCode.X,
+            ["Y"] = Enum.KeyCode.Y, ["Z"] = Enum.KeyCode.Z,
+        }
+        local keyCode = keyMap[key]
+        if not keyCode then return end
+        -- Simulate key press
+        local vim = game:GetService("VirtualInputManager")
+        if vim then
+            pcall(function() vim:SendKeyEvent(true, keyCode, false, nil) end)
+            task.wait(0.05)
+            pcall(function() vim:SendKeyEvent(false, keyCode, false, nil) end)
+        end
     end
 
     local function doEscape()
         local char, root, hum = getCharacter()
         if not char or not hum then return end
-        -- Step 1: Remove ALL BodyMovers (BV is normal, remove extra ones)
+        -- Step 1: If QTE visible, press the key
+        local qteKey = getQTEKey()
+        if qteKey then
+            pressKey(qteKey)
+            -- Also try clicking the QTE button
+            local pg = LP:FindFirstChild("PlayerGui")
+            if pg then
+                local iface = pg:FindFirstChild("Interface")
+                if iface then
+                    local qte = iface:FindFirstChild("QTE")
+                    if qte then
+                        local main = qte:FindFirstChild("Main")
+                        if main then
+                            local btn = main:FindFirstChild("Button")
+                            if btn then
+                                pcall(function() btn.Activated:Fire() end)
+                                pcall(function() btn:Activate() end)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        -- Step 2: Remove extra BodyMovers
         local bvCount = 0
         for _, v in char:GetDescendants() do
             if v:IsA("BodyVelocity") then bvCount = bvCount + 1 end
         end
-        -- Remove extra BodyVelocity (keep only 1 which is the normal one)
         if bvCount > 1 then
             local count = 0
             for _, v in char:GetDescendants() do
@@ -245,13 +305,12 @@ return function(Window, runtimeInfo)
                 end
             end
         end
-        -- Remove BodyPosition, BodyGyro, BodyForce (never normal)
         for _, v in char:GetDescendants() do
             if v:IsA("BodyPosition") or v:IsA("BodyGyro") or v:IsA("BodyForce") then
                 pcall(function() v:Destroy() end)
             end
         end
-        -- Step 2: Remove welds connecting to Titans
+        -- Step 3: Remove welds to Titans
         for _, v in char:GetDescendants() do
             if v:IsA("Weld") or v:IsA("WeldConstraint") then
                 if (v.Part0 and v.Part0:IsDescendantOf(TitansFolder))
@@ -260,19 +319,19 @@ return function(Window, runtimeInfo)
                 end
             end
         end
-        -- Step 3: Reset humanoid
+        -- Step 4: Reset humanoid
         hum.PlatformStand = false
         hum.Sit = false
         hum:ChangeState(Enum.HumanoidStateType.GettingUp)
         task.wait(0.05)
         hum:ChangeState(Enum.HumanoidStateType.Running)
-        -- Step 4: Try escape remote
+        -- Step 5: Try escape remote
         if POST then
             pcall(function() POST:FireServer("Escape") end)
             pcall(function() POST:FireServer("Grab", "Escape") end)
             pcall(function() POST:FireServer("Grab", false) end)
         end
-        -- Step 5: Teleport far away
+        -- Step 6: Teleport up
         if root then
             root.CFrame = root.CFrame + Vector3.new(0, 20, 0)
         end
@@ -281,13 +340,13 @@ return function(Window, runtimeInfo)
     local function autoGrabEscapeLoop()
         while Config.AutoGrabEscape do
             if isGrabbed() then
-                for _ = 1, 20 do
+                for _ = 1, 30 do
                     if not isGrabbed() then break end
                     doEscape()
-                    task.wait(0.05)
+                    task.wait(0.03)
                 end
             end
-            task.wait(0.05)
+            task.wait(0.03)
         end
     end
 
