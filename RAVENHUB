@@ -393,7 +393,7 @@ local SCRIPTS = {
         description = "Auto Farm | Auto Reload | Multi Hit | Boss Burst | Titan ESP | Nape Extender",
         placeIds    = {13379349730},
         gameIds     = {4658598196},
-        version     = "v3.0",
+        version     = "v4.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/shiganshina.lua",
     },
     --[[

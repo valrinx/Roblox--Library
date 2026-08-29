@@ -1,4 +1,4 @@
---// Shiganshina v3 — Auto Farm Script
+--// Shiganshina v4 — Auto Farm Script
 --// Game: Training Grounds (AoT)
 --// PlaceId: 13379349730
 --// Uses MacLib from RAVEN HUB
@@ -276,10 +276,7 @@ return function(Window, runtimeInfo)
                         local main = qte:FindFirstChild("Main")
                         if main then
                             local btn = main:FindFirstChild("Button")
-                            if btn then
-                                pcall(function() btn.Activated:Fire() end)
-                                pcall(function() btn:Activate() end)
-                            end
+                            if btn then clickButton(btn) end
                         end
                     end
                 end
@@ -346,6 +343,12 @@ return function(Window, runtimeInfo)
 
     --// ==================== AUTO RETRY ====================
 
+    local function clickButton(btn)
+        pcall(function() btn.MouseButton1Click:Fire() end)
+        pcall(function() btn.Activated:Fire() end)
+        pcall(function() btn:Activate() end)
+    end
+
     local function autoRetryLoop()
         while Config.AutoRetry do
             local pg = LP:FindFirstChild("PlayerGui")
@@ -362,10 +365,7 @@ return function(Window, runtimeInfo)
                         if buttons then buttons = buttons:FindFirstChild("Buttons") end
                         if buttons then
                             local retry = buttons:FindFirstChild("Retry")
-                            if retry and retry:IsA("TextButton") then
-                                pcall(function() retry.Activated:Fire() end)
-                                pcall(function() retry:Activate() end)
-                            end
+                            if retry then clickButton(retry) end
                         end
                     end
                     -- Case 2: Death screen
@@ -373,8 +373,7 @@ return function(Window, runtimeInfo)
                     if death and death.Visible then
                         for _, v in death:GetDescendants() do
                             if v:IsA("TextButton") or v:IsA("ImageButton") then
-                                pcall(function() v.Activated:Fire() end)
-                                pcall(function() v:Activate() end)
+                                clickButton(v)
                             end
                         end
                     end
