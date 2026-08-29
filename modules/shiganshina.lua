@@ -168,6 +168,62 @@ return function(Window, runtimeInfo)
         end
     end
 
+    --// ==================== GRAB ESCAPE ====================
+
+    local function isGrabbed()
+        local _, _, hum = getCharacter()
+        if not hum then return false end
+        if hum.PlatformStand then return true end
+        if hum:GetState() == Enum.HumanoidStateType.PlatformStanding then return true end
+        return false
+    end
+
+    local function doEscape()
+        local char, root, hum = getCharacter()
+        if not char or not hum then return end
+
+        -- Remove all movement constraints (BodyVelocity, BodyPosition, BodyGyro, AlignPosition)
+        for _, v in char:GetDescendants() do
+            if v:IsA("BodyVelocity") or v:IsA("BodyPosition") or v:IsA("BodyGyro")
+                or v:IsA("AlignPosition") or v:IsA("AlignOrientation") then
+                pcall(function() v:Destroy() end)
+            end
+        end
+
+        -- Reset humanoid state
+        hum.PlatformStand = false
+        hum:ChangeState(Enum.HumanoidStateType.Running)
+        hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+
+        -- Try remote escape
+        if POST then
+            pcall(function() POST:FireServer("Escape") end)
+            pcall(function() POST:FireServer("Grab", "Escape") end)
+            pcall(function() POST:FireServer("Grab", false) end)
+        end
+
+        -- Teleport up to break free
+        if root then
+            root.CFrame = root.CFrame + Vector3.new(0, 10, 0)
+        end
+    end
+
+    local function autoGrabEscapeLoop()
+        while Config.AutoGrabEscape do
+            if isGrabbed() then
+                doEscape()
+                task.wait(0.1)
+                -- Keep trying until not grabbed anymore
+                for _ = 1, 10 do
+                    if not isGrabbed() then break end
+                    doEscape()
+                    task.wait(0.05)
+                end
+            end
+            task.wait(0.1)
+        end
+    end
+
     --// ==================== LOOPS ====================
 
     local function autoFarmLoop()
@@ -175,6 +231,12 @@ return function(Window, runtimeInfo)
             local char, root, humanoid = getCharacter()
             if not char or not root or not humanoid or humanoid.Health <= 0 then
                 task.wait(1); continue
+            end
+            -- Check grab during farm
+            if Config.AutoGrabEscape and isGrabbed() then
+                doEscape()
+                task.wait(0.2)
+                continue
             end
             if Config.AutoReloadBlades and needReload() then
                 if Config.AutoFullReload then doFullReload()
@@ -331,7 +393,10 @@ return function(Window, runtimeInfo)
     FarmTab:CreateToggle({
         Name = "Auto Grab Escape",
         CurrentValue = false,
-        Callback = function(v) Config.AutoGrabEscape = v end,
+        Callback = function(v)
+            Config.AutoGrabEscape = v
+            if v then startThread("GrabEscape", autoGrabEscapeLoop) else stopThread("GrabEscape") end
+        end,
     })
     FarmTab:CreateToggle({
         Name = "Auto Reload Blades",
