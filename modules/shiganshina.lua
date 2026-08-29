@@ -1,4 +1,4 @@
---// Shiganshina v1 — Auto Farm Script
+--// Shiganshina v2 — Auto Farm Script
 --// Game: Training Grounds (AoT)
 --// PlaceId: 13379349730
 --// Uses MacLib from RAVEN HUB
@@ -195,7 +195,8 @@ return function(Window, runtimeInfo)
 
     local function isGrabbed()
         local char, root, hum = getCharacter()
-        if not char or not root or not hum then return false endn        -- Check 0: QTE visible (grab mini game)
+        if not char or not root or not hum then return false end
+        -- Check 0: QTE visible (grab mini game)
         local pg = LP:FindFirstChild("PlayerGui")
         if pg then
             local iface = pg:FindFirstChild("Interface")
