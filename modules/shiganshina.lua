@@ -1,4 +1,4 @@
---// Shiganshina v4 — Auto Farm Script
+--// Shiganshina v5 — Auto Farm Script
 --// Game: Training Grounds (AoT)
 --// PlaceId: 13379349730
 --// Uses MacLib from RAVEN HUB
@@ -164,14 +164,9 @@ return function(Window, runtimeInfo)
             pcall(function() POST:FireServer("Attacks", "Reload", station) end)
         end
         task.wait(2)
-        -- Reload blades one by one
+        -- Reload blades
         if GET then
-            while Config.AutoReloadBlades do
-                local total, broken = getBladeCount()
-                if broken == 0 then break end
-                pcall(function() GET:InvokeServer("Blades", "Reload") end)
-                task.wait(0.3)
-            end
+            pcall(function() GET:InvokeServer("Blades", "Reload") end)
         end
         task.wait(0.3)
         -- Return to original position
