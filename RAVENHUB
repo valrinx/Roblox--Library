@@ -249,7 +249,7 @@ local SCRIPTS = {
         description = "FPS-safe Auto Lock/Prediction | Recovery | Player/Animal/Loot/Ore/Item ESP | Utility",
         placeIds    = {2317712696},
         gameIds     = {807930589},
-        version     = "v0.1.17",
+        version     = "v0.1.20",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/the_wild_west.lua",
     },
     {
@@ -267,6 +267,14 @@ local SCRIPTS = {
         gameIds     = {9910245722},
         version     = "v1.3.6",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/iron_soul.lua",
+    },
+    {
+        name        = "Dungeon Quest Reborn",
+        description = "Dungeon State | Enemy Scan | Auto Farm | Boss | Room Progress",
+        placeIds    = {77649408247578},
+        gameIds     = {9931749389},
+        version     = "v0.1.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/dungeon_quest_reborn.lua",
     },
     {
         name        = "DON'T LOOK BACK",
@@ -371,6 +379,22 @@ local SCRIPTS = {
         gameIds     = {9167377564},
         version     = "v1.2.5",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/the_sea.lua",
+    },
+    {
+        name        = "Steal An Egg",
+        description = "Auto Steal | Auto Hatch | Auto Place | Egg/Player/Chaser ESP | Anti-Kick",
+        placeIds    = {107778070777162},
+        gameIds     = {10563114921},
+        version     = "v1.0.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/steal_an_egg.lua",
+    },
+    {
+        name        = "Shiganshina (AoT)",
+        description = "Auto Farm | Auto Reload | Multi Hit | Boss Burst | Titan ESP | Nape Extender",
+        placeIds    = {13379349730},
+        gameIds     = {4658598196},
+        version     = "v1.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/shiganshina.lua",
     },
     --[[
     {
