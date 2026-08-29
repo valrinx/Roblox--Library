@@ -1,4 +1,4 @@
---// Shiganshina v2 — Auto Farm Script
+--// Shiganshina v3 — Auto Farm Script
 --// Game: Training Grounds (AoT)
 --// PlaceId: 13379349730
 --// Uses MacLib from RAVEN HUB
@@ -124,11 +124,6 @@ return function(Window, runtimeInfo)
 
     local function needReload()
         local total, broken = getBladeCount()
-        return broken > 0
-    end
-
-    local function allBladesBroken()
-        local total, broken = getBladeCount()
         return total > 0 and broken >= total
     end
 
@@ -152,13 +147,6 @@ return function(Window, runtimeInfo)
             POST:FireServer("Attacks", "Slash", true)
             task.wait(0.05)
             POST:FireServer("Hitboxes", "Register", nape, Config.MultiHit and Config.MultiHitRadius or 50, 0)
-        end
-    end
-
-    local function doRemoteReload()
-        if GET then
-            pcall(function() GET:InvokeServer("Blades", "Reload") end)
-            task.wait(0.1)
         end
     end
 
@@ -411,14 +399,7 @@ return function(Window, runtimeInfo)
                 continue
             end
             if Config.AutoReloadBlades and needReload() then
-                -- Reload remotely until depleted, then refill at station
-                while Config.AutoReloadBlades and needReload() and not allBladesBroken() do
-                    doRemoteReload()
-                    task.wait(0.2)
-                end
-                if Config.AutoReloadBlades and allBladesBroken() then
-                    doStationReload()
-                end
+                doStationReload()
                 task.wait(0.2)
             end
             local info = getNearestTitan()
@@ -443,15 +424,7 @@ return function(Window, runtimeInfo)
     local function autoReloadLoop()
         while Config.AutoReloadBlades do
             if needReload() then
-                -- Step 1: Reload via remote until blades depleted (0/3)
-                while Config.AutoReloadBlades and needReload() and not allBladesBroken() do
-                    doRemoteReload()
-                    task.wait(0.2)
-                end
-                -- Step 2: All blades broken (0/3) — teleport to refill station
-                if Config.AutoReloadBlades and allBladesBroken() then
-                    doStationReload()
-                end
+                doStationReload()
             end
             task.wait(0.5)
         end
