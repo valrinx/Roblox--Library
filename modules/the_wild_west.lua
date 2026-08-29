@@ -1,5 +1,5 @@
 --[[
-    RAVEN HUB Module - The Wild West v0.1.18
+    RAVEN HUB Module - The Wild West v0.1.20
     Game: The Wild West (PlaceId: 2317712696, GameId: 807930589)
     Developer: Starboard Studios
 
