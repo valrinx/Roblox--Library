@@ -398,9 +398,10 @@ local SCRIPTS = {
     {
         name        = "Shiganshina (AoT)",
         description = "Auto Farm | Auto Reload | Multi Hit | Boss Burst | Titan ESP | Nape Extender",
-        placeIds    = {13379349730},
-        version     = "v7.3",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/shiganshina.lua?v=shiganshina-7.3",
+        placeIds    = {13379349730, 126678335159530},
+        gameIds     = {4658598196},
+        version     = "v7.4",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/shiganshina.lua?v=shiganshina-7.4",
     },
     {
         name        = "Dungeon Lootr",

@@ -1,6 +1,7 @@
 --// Shiganshina v7 — Auto Farm Script
 --// Game: Training Grounds (AoT)
---// PlaceId: 13379349730
+--// PlaceIds: 13379349730, 126678335159530
+--// GameId: 4658598196
 --// Uses MacLib from RAVEN HUB
 
 local Players = game:GetService("Players")
@@ -22,7 +23,7 @@ return function(Window, runtimeInfo)
         if v.Name == "GET" and v:IsA("RemoteFunction") then GET = v end
     end
 
-    local TitansFolder = Workspace:WaitForChild("Titans")
+    local TitansFolder = Workspace:FindFirstChild("Titans") or Workspace:WaitForChild("Titans", 10)
 
     --// Config
     local Config = {
@@ -221,15 +222,34 @@ return function(Window, runtimeInfo)
     --   ใบดาบ (blade sets): 3 sets, shown in Sets.Text (e.g. "2 / 3")
     --     "0 / 3" → needs refill (station)
 
+    local function findBladesRecursive(parent, depth)
+        if depth > 8 then return nil end
+        for _, child in parent:GetChildren() do
+            if child.Name == "Blades" and child:IsA("GuiObject") then
+                -- Verify it has Inner/Bar structure
+                local inner = child:FindFirstChild("Inner")
+                local bar = inner and inner:FindFirstChild("Bar")
+                if bar then return child end
+            end
+            local found = findBladesRecursive(child, depth + 1)
+            if found then return found end
+        end
+        return nil
+    end
+
     local function getBladesUI()
         local pg = LP:FindFirstChild("PlayerGui")
         if not pg then return nil end
+        -- Primary path: Interface.HUD.Main.Top.7.Blades
         local iface = pg:FindFirstChild("Interface")
         local hud = iface and iface:FindFirstChild("HUD")
         local main = hud and hud:FindFirstChild("Main")
         local top = main and main:FindFirstChild("Top")
         local top7 = top and top:FindFirstChild("7")
-        return top7 and top7:FindFirstChild("Blades")
+        local blades = top7 and top7:FindFirstChild("Blades")
+        if blades and blades:FindFirstChild("Inner") then return blades end
+        -- Fallback: search entire PlayerGui tree for Blades with Bar structure
+        return findBladesRecursive(pg, 0)
     end
 
     --- Returns the durability bar fill as a 0-1 scale.
