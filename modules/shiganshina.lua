@@ -180,29 +180,68 @@ return function(Window, runtimeInfo)
         return nearest, minDist
     end
 
-    local function getBladeCount()
-        local char = getCharacter()
-        if not char then return 0, 0 end
-        local rig = Workspace:FindFirstChild("Rig_" .. char.Name, true)
-        if not rig then rig = char end
-        local total, broken = 0, 0
-        for _, blade in rig:GetDescendants() do
-            if blade.Name:sub(1, 6) == "Blade_" then
-                total = total + 1
-                if blade:GetAttribute("Broken") == true then broken = broken + 1 end
+    --// ==================== BLADE UI DETECTION ====================
+    -- The game has two separate blade systems:
+    --   หลอด (durability bar): 6 segments, controlled by Bar/Gradient.Offset.X
+    --     Offset.X = 1.0 → full (6/6)
+    --     Offset.X = 0.0 → empty (0/6) → needs reload (remote)
+    --   ใบดาบ (blade sets): 3 sets, shown in Sets.Text (e.g. "2 / 3")
+    --     "0 / 3" → needs refill (station)
+
+    local function getBladesUI()
+        local pg = LP:FindFirstChild("PlayerGui")
+        if not pg then return nil end
+        local iface = pg:FindFirstChild("Interface")
+        local hud = iface and iface:FindFirstChild("HUD")
+        local main = hud and hud:FindFirstChild("Main")
+        local top = main and main:FindFirstChild("Top")
+        local top7 = top and top:FindFirstChild("7")
+        return top7 and top7:FindFirstChild("Blades")
+    end
+
+    --- Returns the durability bar fill as a 0-1 scale.
+    --- 1.0 = full, 0.0 = empty.
+    local function getDurabilityBar()
+        local blades = getBladesUI()
+        if not blades then return 1 end
+        local inner = blades:FindFirstChild("Inner")
+        local bar = inner and inner:FindFirstChild("Bar")
+        local barInner = bar and bar:FindFirstChild("Inner")
+        if not barInner then return 1 end
+        -- The bar gradient Offset.X goes from 1 (full) to 0 (empty)
+        local gradient = bar:FindFirstChild("Gradient")
+        if gradient then
+            local ok, ox = pcall(function() return gradient.Offset.X end)
+            if ok and type(ox) == "number" then
+                -- Offset.X = 0 means full bar, Offset.X = 1 means empty
+                -- So durability = 1 - offsetX
+                return math.clamp(1 - ox, 0, 1)
             end
         end
-        return total, broken
+        return 1
     end
 
-    local function needReload()
-        local total, broken = getBladeCount()
-        return broken > 0
+    --- Returns the number of blade sets remaining and the max sets.
+    local function getBladeSets()
+        local blades = getBladesUI()
+        if not blades then return 3, 3 end
+        local sets = blades:FindFirstChild("Sets")
+        if not sets or not sets:IsA("TextLabel") then return 3, 3 end
+        local text = sets.Text or ""
+        local remaining, total = text:match("(%d+)%s*/%s*(%d+)")
+        if remaining and total then
+            return tonumber(remaining) or 0, tonumber(total) or 3
+        end
+        return 3, 3
     end
 
-    local function allBladesBroken()
-        local total, broken = getBladeCount()
-        return total > 0 and broken >= total
+    local function needsBarReload()
+        return getDurabilityBar() <= 0
+    end
+
+    local function needsSetRefill()
+        local remaining, _ = getBladeSets()
+        return remaining <= 0
     end
 
     local function doRemoteReload()
@@ -538,8 +577,15 @@ return function(Window, runtimeInfo)
 
     local function autoReloadLoop()
         while Config.AutoReloadBlades do
-            if allBladesBroken() then
+            local bar = getDurabilityBar()
+            local remaining, total = getBladeSets()
+            -- Durability bar empty → remote reload
+            if bar <= 0 then
                 doRemoteReload()
+            end
+            -- Blade sets empty → station refill
+            if remaining <= 0 then
+                doStationReload()
             end
             task.wait(0.5)
         end
