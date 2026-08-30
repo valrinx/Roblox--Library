@@ -406,9 +406,9 @@ local SCRIPTS = {
     {
         name        = "Dungeon Lootr",
         description = "Auto Queue | Kill Aura | Auto Skills | Farm | Sell | Forge | Webhook",
-        placeIds    = {106484206883664},
+        placeIds    = {132285059959516},
         gameIds     = {9656201728},
-        version     = "v1.0.0",
+        version     = "v2.0.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/dungeon_lootr.lua",
     },
     --[[
