@@ -79,7 +79,10 @@ return function(Window, runtimeInfo)
         if not button.Visible then return false end
         -- Don't reject on Active/Interactable — games often set these
         -- on retry/confirm buttons even when they are meant to be clicked.
-        return isGuiHierarchyVisible(button)
+        -- Also skip parent-frame visibility check: the Retry button often
+        -- exists inside a hidden Rewards frame that becomes clickable
+        -- independently once the mission ends.
+        return true
     end
 
     -- Use one activation mechanism per attempt. Executors differ in which
@@ -88,23 +91,53 @@ return function(Window, runtimeInfo)
     local function clickButton(button, mode)
         if not isGuiButtonUsable(button) then return false end
         local clickMode = mode or 1
+        local center = button.AbsolutePosition + (button.AbsoluteSize / 2)
+        local x, y = center.X, center.Y
         if clickMode == 1 then
             return pcall(function() button:Activate() end)
         elseif clickMode == 2 then
             return pcall(function() button.MouseButton1Click:Fire() end)
         elseif clickMode == 3 then
             return pcall(function() button.Activated:Fire() end)
+        elseif clickMode == 4 then
+            -- Fire MouseButton1Down then MouseButton1Up separately
+            return pcall(function()
+                button.MouseButton1Down:Fire()
+                button.MouseButton1Up:Fire()
+            end)
+        elseif clickMode == 5 then
+            -- Try executor-level mouse click (mouse1click) if available
+            local ok = pcall(function() mouse1click(x, y) end)
+            if ok then return true end
+            -- Fallback: try mouse1press + mouse1release
+            pcall(function() mouse1press(x, y) end)
+            pcall(function() task.wait(0.05) end)
+            pcall(function() mouse1release(x, y) end)
+            return true
+        elseif clickMode == 6 then
+            -- Try keyboard shortcut: press Enter/Return key
+            local ok1 = pcall(function() keypress(0x0D) end) -- VK_RETURN
+            pcall(function() task.wait(0.05) end)
+            local ok2 = pcall(function() keyrelease(0x0D) end)
+            return ok1 or ok2
+        elseif clickMode == 7 then
+            -- Use game:GetService("Players"):GetMouse() to click at position
+            local mouse = game:GetService("Players").LocalPlayer:GetMouse()
+            return pcall(function()
+                mouse.Button1Down = true
+                mouse.Button1Down = false
+            end)
         end
 
+        -- Fallback: VirtualInputManager mouse click
         local virtualInput
         local inputOk = pcall(function()
             virtualInput = game:GetService("VirtualInputManager")
         end)
         if not inputOk or not virtualInput then return false end
-        local center = button.AbsolutePosition + (button.AbsoluteSize / 2)
         return pcall(function()
-            virtualInput:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 0)
-            virtualInput:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 0)
+            virtualInput:SendMouseButtonEvent(x, y, 0, true, game, 0)
+            virtualInput:SendMouseButtonEvent(x, y, 0, false, game, 0)
         end)
     end
 
@@ -522,7 +555,13 @@ return function(Window, runtimeInfo)
                 -- A successful retry normally hides Rewards and creates a
                 -- fresh character. If either signal is delayed, allow one
                 -- later fallback attempt instead of clicking every frame.
-                if not retry or now - RetryState.lastClickAt >= RetryWaitTimeout then
+                -- If after waiting the rewards screen is STILL visible,
+                -- the click didn't work — keep retrying immediately.
+                if not retry then
+                    RetryState.waitingForRound = false
+                elseif now - RetryState.lastClickAt >= 1.5 then
+                    -- After 1.5s, check if rewards screen is still there
+                    -- If yes, the previous click failed — keep clicking
                     RetryState.waitingForRound = false
                 end
             end
@@ -530,7 +569,7 @@ return function(Window, runtimeInfo)
             if retry and RetryState.pending and not RetryState.waitingForRound and now >= RetryState.nextAttemptAt then
                 local mode = RetryState.clickMode
                 local clicked = clickButton(retry, mode)
-                RetryState.clickMode = (mode % 4) + 1
+                RetryState.clickMode = (mode % 7) + 1
                 RetryState.lastClickAt = now
                 RetryState.nextAttemptAt = now + RetryClickCooldown
                 if clicked then
