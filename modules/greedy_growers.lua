@@ -96,11 +96,8 @@ end
 
 function M.getSellStand()
     for _, pp in ipairs(Workspace:GetDescendants()) do
-        if pp:IsA("ProximityPrompt") and pp.ActionText == "Open" then
-            local parent = pp:FindFirstAncestorWhichIsA("Model")
-            if parent and parent.Name:lower():find("sell") then
-                return pp
-            end
+        if pp:IsA("ProximityPrompt") and pp.ActionText == "Sell" then
+            return pp
         end
     end
     return nil
@@ -116,7 +113,7 @@ function M.getSeedHolders()
                 table.insert(seeds, {
                     prompt = pp,
                     part = part,
-                    name = holder.Name
+                    name = pp.ObjectText
                 })
             end
         end
@@ -127,7 +124,7 @@ end
 function M.getPlantPrompts()
     local prompts = {}
     for _, pp in ipairs(Workspace:GetDescendants()) do
-        if pp:IsA("ProximityPrompt") and pp.ActionText == "Plant" then
+        if pp:IsA("ProximityPrompt") and pp.ActionText == "Plant Seed" then
             local part = pp:FindFirstAncestorWhichIsA("BasePart")
             if part then
                 table.insert(prompts, {prompt = pp, part = part})
@@ -139,7 +136,7 @@ end
 
 function M.getGrowAll()
     for _, obj in ipairs(Workspace:GetDescendants()) do
-        if obj:IsA("ProximityPrompt") and obj.ObjectText == "GrowAll" then
+        if obj:IsA("ProximityPrompt") and obj.ActionText == "Buy" and obj.ObjectText == "Grow All Fruits" then
             return obj
         end
     end
@@ -148,7 +145,7 @@ end
 
 function M.getCollectAll()
     for _, obj in ipairs(Workspace:GetDescendants()) do
-        if obj:IsA("ProximityPrompt") and obj.ObjectText == "CollectAll" then
+        if obj:IsA("ProximityPrompt") and obj.ActionText == "Buy" and obj.ObjectText == "Collect All Fruits" then
             return obj
         end
     end
@@ -354,7 +351,7 @@ M.Tabs[#M.Tabs + 1] = {
         type = "dropdown",
         label = "Seed Type",
         key = "selectedSeed",
-        options = {"Pine", "Oak", "Blooming", "Avocado", "Orange", "Lemon"},
+        options = {"Pine", "Oak", "Lemon", "Mango", "Apple", "Fig"},
         callback = function(v) M.Config.selectedSeed = v end
     },
     {
