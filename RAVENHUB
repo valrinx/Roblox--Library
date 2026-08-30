@@ -402,6 +402,14 @@ local SCRIPTS = {
         version     = "v7.3",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/shiganshina.lua?v=shiganshina-7.3",
     },
+    {
+        name        = "Dungeon Lootr",
+        description = "Auto Queue | Kill Aura | Auto Skills | Farm | Sell | Forge | Webhook",
+        placeIds    = {106484206883664},
+        gameIds     = {9656201728},
+        version     = "v1.0.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/dungeon_lootr.lua",
+    },
     --[[
     {
         name      = "Another Game",
