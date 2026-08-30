@@ -1,4 +1,4 @@
---// Shiganshina v6 — Auto Farm Script
+--// Shiganshina v7 — Auto Farm Script
 --// Game: Training Grounds (AoT)
 --// PlaceId: 13379349730
 --// Uses MacLib from RAVEN HUB
@@ -492,14 +492,6 @@ return function(Window, runtimeInfo)
                 doEscape()
                 task.wait(0.2)
                 continue
-            end
-            if Config.AutoReloadBlades and needReload() then
-                if allBladesBroken() then
-                    doStationReload()
-                else
-                    doRemoteReload()
-                end
-                task.wait(0.2)
             end
             local info = getNearestTitan()
             if not info then task.wait(0.5); continue end
