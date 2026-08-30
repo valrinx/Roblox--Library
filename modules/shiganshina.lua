@@ -634,18 +634,26 @@ return function(Window, runtimeInfo)
         end
     end
 
+    local lastRemoteReloadAt = 0
+    local REMOTE_RELOAD_COOLDOWN = 3
+
     local function autoReloadLoop()
         while Config.AutoReloadBlades do
             local bar = getDurabilityBar()
             local remaining, total = getBladeSets()
-            -- Flow: bar=0 → remote reload first
-            --       then check sets: sets=0 → station refill
-            if bar <= 0 then
-                doRemoteReload()
+            local now = os.clock()
+            -- Flow: bar=0 → remote reload (1 set at a time)
+            --       then wait for cooldown before next reload
+            --       sets=0 → station refill
+            if bar <= 0 and remaining > 0 then
+                if now - lastRemoteReloadAt >= REMOTE_RELOAD_COOLDOWN then
+                    doRemoteReload()
+                    lastRemoteReloadAt = now
+                    task.wait(1)
+                end
             elseif remaining <= 0 then
-                -- Only refill when sets empty AND bar is not empty
-                -- (bar already reloaded above)
                 doStationReload()
+                task.wait(2)
             end
             task.wait(0.5)
         end
