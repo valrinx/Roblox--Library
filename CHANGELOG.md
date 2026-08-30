@@ -1,3 +1,4 @@
+- **Shiganshina (AoT) v7.0** - Fixed double reload race condition that caused blades to be reloaded twice in rapid succession.
 - **Dungeon Quest Reborn v0.1.0** - Added Raven Hub registration, dungeon state tracking, bounded enemy scanning, Auto Farm/Attack, boss preference, room progression, runtime cleanup, and status UI. Lobby selection, difficulty, rewards, and retry remain adapter hooks until the live game contract is confirmed.
 - **Train Your Fish to Race v1.2.0** - Added eligibility-gated Auto Online Rewards, Auto Daily Sign, Auto Spin/Free Spin, and event-driven Auto Race Reward with cooldown protection.
 
