@@ -83,7 +83,7 @@ M.Config = {
 function M.getFruitSpawns()
     local fruits = {}
     -- Scan all ProximityPrompts with "Collect" action
-    for _, pp in ipairs(Workspace:GetDescendants()) do
+    for _, pp in ipairs(game:GetDescendants()) do
         if pp:IsA("ProximityPrompt") and pp.ActionText == "Collect" then
             local spawn = pp:FindFirstAncestorWhichIsA("BasePart")
             if spawn then
@@ -95,7 +95,7 @@ function M.getFruitSpawns()
 end
 
 function M.getSellStand()
-    for _, pp in ipairs(Workspace:GetDescendants()) do
+    for _, pp in ipairs(game:GetDescendants()) do
         if pp:IsA("ProximityPrompt") and pp.ActionText == "Sell" then
             return pp
         end
@@ -105,7 +105,7 @@ end
 
 function M.getSeedHolders()
     local seeds = {}
-    for _, pp in ipairs(Workspace:GetDescendants()) do
+    for _, pp in ipairs(game:GetDescendants()) do
         if pp:IsA("ProximityPrompt") and pp.ActionText == "Buy" then
             local holder = pp:FindFirstAncestorWhichIsA("Model")
             local part = pp:FindFirstAncestorWhichIsA("BasePart")
@@ -123,7 +123,7 @@ end
 
 function M.getPlantPrompts()
     local prompts = {}
-    for _, pp in ipairs(Workspace:GetDescendants()) do
+    for _, pp in ipairs(game:GetDescendants()) do
         if pp:IsA("ProximityPrompt") and pp.ActionText == "Plant Seed" then
             local part = pp:FindFirstAncestorWhichIsA("BasePart")
             if part then
@@ -135,7 +135,7 @@ function M.getPlantPrompts()
 end
 
 function M.getGrowAll()
-    for _, obj in ipairs(Workspace:GetDescendants()) do
+    for _, obj in ipairs(game:GetDescendants()) do
         if obj:IsA("ProximityPrompt") and obj.ActionText == "Buy" and obj.ObjectText == "Grow All Fruits" then
             return obj
         end
@@ -144,7 +144,7 @@ function M.getGrowAll()
 end
 
 function M.getCollectAll()
-    for _, obj in ipairs(Workspace:GetDescendants()) do
+    for _, obj in ipairs(game:GetDescendants()) do
         if obj:IsA("ProximityPrompt") and obj.ActionText == "Buy" and obj.ObjectText == "Collect All Fruits" then
             return obj
         end
@@ -174,7 +174,7 @@ function M.getCurrentWeather()
         end
     end
     -- Check surface gui on map
-    for _, desc in ipairs(Workspace:GetDescendants()) do
+    for _, desc in ipairs(game:GetDescendants()) do
         if desc:IsA("SurfaceGui") then
             for _, child in ipairs(desc:GetChildren()) do
                 if child:IsA("TextLabel") then
