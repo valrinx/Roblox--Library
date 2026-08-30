@@ -638,12 +638,13 @@ return function(Window, runtimeInfo)
         while Config.AutoReloadBlades do
             local bar = getDurabilityBar()
             local remaining, total = getBladeSets()
-            -- Durability bar empty → remote reload
+            -- Flow: bar=0 → remote reload first
+            --       then check sets: sets=0 → station refill
             if bar <= 0 then
                 doRemoteReload()
-            end
-            -- Blade sets empty → station refill
-            if remaining <= 0 then
+            elseif remaining <= 0 then
+                -- Only refill when sets empty AND bar is not empty
+                -- (bar already reloaded above)
                 doStationReload()
             end
             task.wait(0.5)
