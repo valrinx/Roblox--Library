@@ -134,7 +134,7 @@ if not character then
     if conn then pcall(function() conn:Disconnect() end) end
 end
 local camera    = game.Workspace.CurrentCamera
-local HUB_BUILD = "maclib-4"
+local HUB_BUILD = "maclib-5"
 
 -- ============================================================
 --   SCRIPT REGISTRY
@@ -408,8 +408,16 @@ local SCRIPTS = {
         description = "Auto Queue | Kill Aura | Auto Skills | Farm | Sell | Forge | Webhook",
         placeIds    = {132285059959516},
         gameIds     = {9656201728},
-        version     = "v2.0.0",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/dungeon_lootr.lua",
+        version     = "v2.0.1",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/dungeon_lootr.lua?v=dungeon-lootr-2.0.1",
+    },
+    {
+        name        = "Greedy Growers",
+        description = "Auto Collect | Auto Sell | Auto Plant | Auto Buy Seeds | Anti-Meteor | Speed",
+        placeIds    = {74102906764176},
+        gameIds     = {10440833423},
+        version     = "v1.0.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/greedy_growers.lua?v=greedy-growers-1.0.0",
     },
     --[[
     {
@@ -462,6 +470,40 @@ end
 --   HOME TAB
 -- ============================================================
 
+local activePlaceId = game.PlaceId
+local activeGameId = game.GameId
+
+local function containsManifestId(idList, value)
+    if not idList then return false end
+    local valueStr = tostring(value)
+    for _, id in ipairs(idList) do
+        if tostring(id) == valueStr then return true end
+    end
+    return false
+end
+
+local function isManifestCompatible(scriptInfo)
+    if scriptInfo.universal == true or scriptInfo.gameId == 0 then return true end
+    if scriptInfo.placeIds and containsManifestId(scriptInfo.placeIds, activePlaceId) then
+        return true
+    end
+    if scriptInfo.gameIds and containsManifestId(scriptInfo.gameIds, activeGameId) then
+        return true
+    end
+    return scriptInfo.gameId == activePlaceId or scriptInfo.gameId == activeGameId
+end
+
+local matchingScriptNames = {}
+for _, scriptInfo in ipairs(SCRIPTS) do
+    if isManifestCompatible(scriptInfo) then
+        table.insert(matchingScriptNames,
+            scriptInfo.name .. "  [" .. scriptInfo.version .. "]  |  " .. scriptInfo.description)
+    end
+end
+if #matchingScriptNames == 0 then
+    table.insert(matchingScriptNames, "No compatible module")
+end
+
 local HomeTab = Window:CreateTab("Overview", 4483362458)
 HomeTab:CreateSection("Experience")
 local ModuleStatusLabel = HomeTab:CreateStatus({
@@ -472,6 +514,7 @@ HomeTab:CreateLabel("PlaceId: " .. tostring(game.PlaceId))
 HomeTab:CreateLabel("Experience: " .. EXPERIENCE_NAME)
 HomeTab:CreateLabel("RAVEN HUB build: " .. HUB_BUILD)
 HomeTab:CreateLabel("Config scope: " .. tostring(CONFIG_SCOPE_ID))
+HomeTab:CreateLabel("Active compatible module: " .. matchingScriptNames[1])
 
 local function setModuleStatus(text)
     pcall(function()
@@ -479,16 +522,11 @@ local function setModuleStatus(text)
     end)
 end
 
-local scriptNames = {}
-for _, s in ipairs(SCRIPTS) do
-    table.insert(scriptNames, s.name .. "  [" .. s.version .. "]  |  " .. s.description)
-end
-
 HomeTab:CreateSection("Library")
 HomeTab:CreateDropdown({
-    Name            = "Scripts in this Hub",
-    Options         = scriptNames,
-    CurrentOption   = {scriptNames[1]},
+    Name            = "Active compatible module",
+    Options         = matchingScriptNames,
+    CurrentOption   = {matchingScriptNames[1]},
     MultipleOptions = false,
     Callback        = function() end,
 })
