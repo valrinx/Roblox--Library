@@ -76,9 +76,9 @@ return function(Window, runtimeInfo)
 
     local function isGuiButtonUsable(button)
         if not button or not button:IsA("GuiButton") then return false end
-        if not button.Visible or button.Active == false then return false end
-        local interactableOk, interactable = pcall(function() return button.Interactable end)
-        if interactableOk and interactable == false then return false end
+        if not button.Visible then return false end
+        -- Don't reject on Active/Interactable — games often set these
+        -- on retry/confirm buttons even when they are meant to be clicked.
         return isGuiHierarchyVisible(button)
     end
 
@@ -422,22 +422,47 @@ return function(Window, runtimeInfo)
 
     --// ==================== AUTO RETRY ====================
 
+    -- Walk the full GUI tree to find a Retry button regardless of
+    -- the exact hierarchy path, which the game may change between updates.
+    local function findRetryButtonRecursive(parent, depth)
+        if not parent or depth > 8 then return nil end
+        for _, child in parent:GetChildren() do
+            if child:IsA("GuiButton") and child.Visible
+                and child.Name:lower():find("retry") then
+                if isGuiHierarchyVisible(child) then return child end
+            end
+            local found = findRetryButtonRecursive(child, depth + 1)
+            if found then return found end
+        end
+        return nil
+    end
+
     local function getVisibleRetryButton()
         local pg = LP:FindFirstChild("PlayerGui")
         if not pg then return nil end
-        local iface = pg:FindFirstChild("Interface")
-        if not iface then return nil end
 
-        -- The only retry control in this game is the mission-complete button:
-        -- Interface.Rewards.Main.Info.Main.Buttons.Retry.
-        local rewards = iface:FindFirstChild("Rewards")
-        if not rewards or not rewards.Visible then return nil end
-        local main = rewards:FindFirstChild("Main")
-        local info = main and main:FindFirstChild("Info")
-        local content = info and info:FindFirstChild("Main")
-        local buttons = content and content:FindFirstChild("Buttons")
-        local retry = buttons and buttons:FindFirstChild("Retry")
-        if isGuiButtonUsable(retry) then return retry end
+        -- Primary path: Interface.Rewards.Main.Info.Main.Buttons.Retry
+        local iface = pg:FindFirstChild("Interface")
+        if iface then
+            local rewards = iface:FindFirstChild("Rewards")
+            local main = rewards and rewards:FindFirstChild("Main")
+            local info = main and main:FindFirstChild("Info")
+            local content = info and info:FindFirstChild("Main")
+            local buttons = content and content:FindFirstChild("Buttons")
+            local retry = buttons and buttons:FindFirstChild("Retry")
+            -- The Retry button is often visible and clickable even when
+            -- the Rewards parent frame is hidden by the game. Check the
+            -- button directly and skip parent-frame visibility.
+            if retry and retry:IsA("GuiButton") and retry.Visible then
+                return retry
+            end
+        end
+
+        -- Fallback: search the entire PlayerGui tree for any visible
+        -- button whose name contains "retry".
+        local fallback = findRetryButtonRecursive(pg, 0)
+        if fallback then return fallback end
+
         return nil
     end
 
@@ -446,9 +471,8 @@ return function(Window, runtimeInfo)
             local now = os.clock()
             local char, _, hum = getCharacter()
 
-            -- Death is a state transition, not a clickable screen in this
-            -- game. Remember it and wait for the Rewards screen to expose
-            -- its real Retry button after the server finishes the round.
+            -- Death is a state transition. Remember it and wait for the
+            -- Rewards screen to expose its Retry button.
             if not char or not hum or hum.Health <= 0 then
                 RetryState.pending = true
             end
@@ -514,12 +538,8 @@ return function(Window, runtimeInfo)
 
     local function autoReloadLoop()
         while Config.AutoReloadBlades do
-            if needReload() then
-                if allBladesBroken() then
-                    doStationReload()
-                else
-                    doRemoteReload()
-                end
+            if allBladesBroken() then
+                doRemoteReload()
             end
             task.wait(0.5)
         end
