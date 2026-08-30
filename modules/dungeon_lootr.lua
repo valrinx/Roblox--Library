@@ -1,7 +1,8 @@
 -- ═══════════════════════════════════════════════════════════════════
---   Dungeon Lootr  |  RAVEN HUB Module  |  v1.0.0
---   Live-verified UI paths from Raven MCP inspection
+--   Dungeon Lootr  |  RAVEN HUB Module  |  v1.0.1
+--   Verified remotes from Raven MCP live inspection
 --   PlaceId: 106484206883664  |  GameId: 9656201728
+--   Framework: Knit (sleitnick_knit@1.7.0)
 -- ═══════════════════════════════════════════════════════════════════
 return function(Window, scriptInfo)
     local Players = game:GetService("Players")
@@ -9,12 +10,71 @@ return function(Window, scriptInfo)
     local UIS = game:GetService("UserInputService")
     local ReplicatedStorage = game:GetService("ReplicatedStorage")
     local TeleportService = game:GetService("TeleportService")
-    local VirtualUser = game:GetService("VirtualUser")
-    local MarketplaceService = game:GetService("MarketplaceService")
     local HttpService = game:GetService("HttpService")
 
     local LP = Players.LocalPlayer
     local PG = LP.PlayerGui
+
+    -- ═══════════════════════════════════════════════════════════════════
+    --  KNIT REMOTE RESOLVER
+    --  Game uses Knit framework. Remotes live under:
+    --  ReplicatedStorage.Packages._Index.sleitnick_knit@1.7.0.knit.Services.<Service>.RF.<Method>
+    --  ReplicatedStorage.Packages._Index.sleitnick_knit@1.7.0.knit.Services.<Service>.RE.<Event>
+    --  Plus legacy: ReplicatedStorage.Remotes.<Name>
+    --  Plus combat: ReplicatedStorage.Player.Remotes.Inputs.<Action>
+    -- ═══════════════════════════════════════════════════════════════════
+    local KNIT_BASE = "Packages._Index.sleitnick_knit@1.7.0.knit.Services"
+
+    local function getKnitRF(service, method)
+        local path = ReplicatedStorage
+        for _, part in ipairs(string.split(KNIT_BASE .. "." .. service .. ".RF." .. method, ".")) do
+            path = path and path:FindFirstChild(part)
+        end
+        return path
+    end
+
+    local function getKnitRE(service, event)
+        local path = ReplicatedStorage
+        for _, part in ipairs(string.split(KNIT_BASE .. "." .. service .. ".RE." .. event, ".")) do
+            path = path and path:FindFirstChild(part)
+        end
+        return path
+    end
+
+    local function getLegacy(name)
+        return ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild(name)
+    end
+
+    local function getCombatInput(action)
+        return ReplicatedStorage:FindFirstChild("Player") and ReplicatedStorage.Player:FindFirstChild("Remotes")
+            and ReplicatedStorage.Player.Remotes:FindFirstChild("Inputs")
+            and ReplicatedStorage.Player.Remotes.Inputs:FindFirstChild(action)
+    end
+
+    local function invokeRF(service, method, ...)
+        local rf = getKnitRF(service, method)
+        if rf then
+            local ok, res = pcall(function() return rf:InvokeServer(...) end)
+            return ok and res or nil
+        end
+        return nil
+    end
+
+    local function fireRE(service, event, ...)
+        local re = getKnitRE(service, event)
+        if re then pcall(function() re:FireServer(...) end) end
+    end
+
+    local function fireLegacy(name, ...)
+        local r = getLegacy(name)
+        if r and r:IsA("RemoteEvent") then pcall(function() r:FireServer(...) end) end
+        if r and r:IsA("RemoteFunction") then pcall(function() return r:InvokeServer(...) end) end
+    end
+
+    local function fireCombat(action, ...)
+        local r = getCombatInput(action)
+        if r then pcall(function() r:FireServer(...) end) end
+    end
 
     -- ═══════════════════════════════════════════════════════════════════
     --  SETTINGS
@@ -115,62 +175,10 @@ return function(Window, scriptInfo)
 
         -- Internal
         InDungeon = false,
-        CurrentWave = 0,
     }
 
     local CONNS = {}
-    local FLAGS = { attacking = false, lastAttack = 0 }
-
-    -- ═══════════════════════════════════════════════════════════════════
-    --  REMOTE DISCOVERY (Runtime Scanner)
-    -- ═══════════════════════════════════════════════════════════════════
-    local RemoteCache = { Events = {}, Functions = {} }
-
-    local function scanRemotes()
-        RemoteCache = { Events = {}, Functions = {} }
-        -- Scan ReplicatedStorage and descendants
-        local roots = { ReplicatedStorage }
-        for _, root in ipairs(roots) do
-            for _, desc in ipairs(root:GetDescendants()) do
-                if desc:IsA("RemoteEvent") then
-                    RemoteCache.Events[string.lower(desc.Name)] = desc
-                elseif desc:IsA("RemoteFunction") then
-                    RemoteCache.Functions[string.lower(desc.Name)] = desc
-                end
-            end
-        end
-        -- Also scan workspace for game-specific remotes
-        for _, desc in ipairs(workspace:GetDescendants()) do
-            if desc:IsA("RemoteEvent") then
-                RemoteCache.Events[string.lower(desc.Name)] = desc
-            elseif desc:IsA("RemoteFunction") then
-                RemoteCache.Functions[string.lower(desc.Name)] = desc
-            end
-        end
-    end
-    scanRemotes()
-
-    local function getEvent(name)
-        return RemoteCache.Events[string.lower(name)]
-    end
-
-    local function getFunc(name)
-        return RemoteCache.Functions[string.lower(name)]
-    end
-
-    local function fireEvent(name, ...)
-        local r = getEvent(name)
-        if r then pcall(function() r:FireServer(...) end) end
-    end
-
-    local function invokeFunc(name, ...)
-        local r = getFunc(name)
-        if r then
-            local ok, res = pcall(function() return r:InvokeServer(...) end)
-            return ok and res or nil
-        end
-        return nil
-    end
+    local FLAGS = { attacking = false }
 
     -- ═══════════════════════════════════════════════════════════════════
     --  CHARACTER HELPERS
@@ -221,26 +229,20 @@ return function(Window, scriptInfo)
     end
 
     -- ═══════════════════════════════════════════════════════════════════
-    --  ENEMY SCANNING
+    --  ENEMY SCANNING (Verified: workspace.Enemies folder exists)
     -- ═══════════════════════════════════════════════════════════════════
     local function getEnemies()
         local list = {}
-        -- Scan common enemy folders
-        local folders = { workspace:FindFirstChild("Enemies"), workspace:FindFirstChild("Mobs"),
-            workspace:FindFirstChild("Monsters"), workspace:FindFirstChild("Dungeon"),
-            workspace:FindFirstChild("NPCs") }
-        for _, folder in ipairs(folders) do
-            if folder then
-                for _, obj in ipairs(folder:GetDescendants()) do
-                    local hrp = obj:FindFirstChild("HumanoidRootPart") or obj:FindFirstChild("Torso")
-                    local hum = obj:FindFirstChildOfClass("Humanoid")
-                    if hrp and hum and hum.Health > 0 and obj ~= LP.Character then
-                        table.insert(list, {
-                            model = obj, root = hrp, hum = hum,
-                            hp = hum.Health, maxHp = hum.MaxHealth, pos = hrp.Position,
-                        })
-                    end
-                end
+        local enemyFolder = workspace:FindFirstChild("Enemies")
+        if not enemyFolder then return list end
+        for _, obj in ipairs(enemyFolder:GetDescendants()) do
+            local hrp = obj:FindFirstChild("HumanoidRootPart") or obj:FindFirstChild("Torso")
+            local hum = obj:FindFirstChildOfClass("Humanoid")
+            if hrp and hum and hum.Health > 0 and obj ~= LP.Character then
+                table.insert(list, {
+                    model = obj, root = hrp, hum = hum,
+                    hp = hum.Health, maxHp = hum.MaxHealth, pos = hrp.Position,
+                })
             end
         end
         return list
@@ -261,7 +263,6 @@ return function(Window, scriptInfo)
     --  DUNGEON STATE
     -- ═══════════════════════════════════════════════════════════════════
     local function isInDungeon()
-        -- Check various dungeon indicators
         local indicators = {
             PG:FindFirstChild("DungeonHUD"),
             PG:FindFirstChild("InDungeon"),
@@ -301,7 +302,6 @@ return function(Window, scriptInfo)
         if not actions then return false end
         local slot = actions:FindFirstChild(tostring(slotNum))
         if not slot then return false end
-        -- Check cooldown indicator
         local cd = slot:FindFirstChild("Cooldown") or slot:FindFirstChild("CD")
         if cd and cd:IsA("Frame") then
             return cd.Size.X.Scale < 0.05
@@ -329,36 +329,26 @@ return function(Window, scriptInfo)
     end
 
     local function clickAreaButton(areaName)
-        -- Verified: PlayerGui/Areas/<AreaName>/Frame/ImageButton
         return clickGuiButton("Areas/" .. areaName .. "/Frame/ImageButton")
     end
 
     -- ═══════════════════════════════════════════════════════════════════
-    --  AUTO POTION (Verified: HUD/Actions/Bottom/Actions/Health)
+    --  AUTO POTION (Verified: PotionService.RF.UsePotion)
     -- ═══════════════════════════════════════════════════════════════════
     local function usePotion()
+        invokeRF("PotionService", "UsePotion")
+        -- Also try GUI fallback
         local hud = getDungeonGui()
-        if not hud then return end
-        local actions = hud:FindFirstChild("Actions") and hud.Actions:FindFirstChild("Bottom")
-            and hud.Actions.Bottom:FindFirstChild("Actions")
-        if not actions then return end
-        local healthSlot = actions:FindFirstChild("Health")
-        if healthSlot and healthSlot:IsA("GuiButton") then
-            pcall(function() healthSlot:Activate() end)
+        if hud then
+            local actions = hud:FindFirstChild("Actions") and hud.Actions:FindFirstChild("Bottom")
+                and hud.Actions.Bottom:FindFirstChild("Actions")
+            if actions then
+                local healthSlot = actions:FindFirstChild("Health")
+                if healthSlot and healthSlot:IsA("GuiButton") then
+                    pcall(function() healthSlot:Activate() end)
+                end
+            end
         end
-    end
-
-    -- ═══════════════════════════════════════════════════════════════════
-    --  SHOP / SELL / INVENTORY (Verified: Left/Buttons)
-    -- ═══════════════════════════════════════════════════════════════════
-    local function openShop()
-        clickAreaButton("Play")
-        task.wait(0.3)
-        clickGuiButton("Main/HUD/Actions/Left/Buttons/Shop")
-    end
-
-    local function openInventory()
-        clickGuiButton("Main/HUD/Actions/Left/Buttons/Inventory")
     end
 
     -- ═══════════════════════════════════════════════════════════════════
@@ -373,7 +363,6 @@ return function(Window, scriptInfo)
         flyBodyVel.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
         flyBodyVel.Velocity = Vector3.zero
         flyBodyVel.Parent = root
-
         flyBodyGyro = Instance.new("BodyGyro")
         flyBodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
         flyBodyGyro.P = 9e4
@@ -429,7 +418,6 @@ return function(Window, scriptInfo)
                     timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
                 }}
             }
-            -- Use syn_request or http_request if available
             if syn and syn.request then
                 syn.request({ Url = CFG.WebhookURL, Method = "POST",
                     Headers = { ["Content-Type"] = "application/json" },
@@ -446,10 +434,6 @@ return function(Window, scriptInfo)
     --  RARITY HELPERS
     -- ═══════════════════════════════════════════════════════════════════
     local RARITY_ORDER = { Common = 1, Uncommon = 2, Rare = 3, Epic = 4, Legendary = 5, Mythic = 6 }
-
-    local function isRarityAbove(itemRarity, minRarity)
-        return (RARITY_ORDER[itemRarity] or 0) >= (RARITY_ORDER[minRarity] or 0)
-    end
 
     -- ═══════════════════════════════════════════════════════════════════
     --  UI
@@ -497,10 +481,15 @@ return function(Window, scriptInfo)
             if v then
                 CONNS["AutoQueue"] = RunService.Heartbeat:Connect(function()
                     if not CFG.AutoQueue then return end
-                    if not CFG.AutoReplay and isInDungeon() then return end
-                    -- Try to find and click queue/play buttons
-                    fireEvent("queueDungeon", CFG.Dungeon, CFG.Difficulty, CFG.Mode)
-                    task.wait(2)
+                    if isInDungeon() and not CFG.AutoReplay then return end
+                    invokeRF("DungeonQueueService", "RequestSelectDungeon", CFG.Dungeon)
+                    task.wait(0.3)
+                    invokeRF("DungeonQueueService", "RequestSelectDifficulty", CFG.Difficulty)
+                    task.wait(0.3)
+                    invokeRF("DungeonQueueService", "RequestSelectMode", CFG.Mode)
+                    task.wait(0.3)
+                    invokeRF("DungeonQueueService", "RequestStartSoloRun")
+                    task.wait(3)
                 end)
             else
                 if CONNS["AutoQueue"] then CONNS["AutoQueue"]:Disconnect(); CONNS["AutoQueue"] = nil end
@@ -516,14 +505,8 @@ return function(Window, scriptInfo)
             if v then
                 CONNS["AutoReplay"] = RunService.Heartbeat:Connect(function()
                     if not CFG.AutoReplay then return end
-                    -- Look for replay/continue buttons
-                    local replayGui = PG:FindFirstChild("ReplayGui") or PG:FindFirstChild("ResultGui")
-                    if replayGui then
-                        local btn = replayGui:FindFirstChild("ReplayButton") or replayGui:FindFirstChild("Continue")
-                        if btn then pcall(function() btn:Activate() end) end
-                    end
-                    fireEvent("replayDungeon")
-                    fireEvent("continueDungeon")
+                    invokeRF("DungeonRunService", "RequestReplay")
+                    task.wait(2)
                 end)
             else
                 if CONNS["AutoReplay"] then CONNS["AutoReplay"]:Disconnect(); CONNS["AutoReplay"] = nil end
@@ -539,9 +522,8 @@ return function(Window, scriptInfo)
             if v then
                 CONNS["AutoReturn"] = RunService.Heartbeat:Connect(function()
                     if not CFG.AutoReturn then return end
-                    if not isInDungeon() then return end
-                    fireEvent("returnToLobby")
-                    fireEvent("leaveDungeon")
+                    invokeRF("DungeonRunService", "RequestReturn")
+                    task.wait(2)
                 end)
             else
                 if CONNS["AutoReturn"] then CONNS["AutoReturn"]:Disconnect(); CONNS["AutoReturn"] = nil end
@@ -565,7 +547,6 @@ return function(Window, scriptInfo)
                     if not my then return end
                     local enemies = getEnemies()
                     if #enemies == 0 then return end
-                    -- Sort by distance
                     table.sort(enemies, function(a, b)
                         return (a.root.Position - my.Position).Magnitude <
                                (b.root.Position - my.Position).Magnitude
@@ -581,8 +562,7 @@ return function(Window, scriptInfo)
                             teleportTo(targetPos)
                             task.wait(randDelay(0.05, 0.1))
                             faceTarget(e.root.Position)
-                            -- Click attack/skill slot 1
-                            clickSkillSlot(1)
+                            fireCombat("Attack")
                             task.wait(randDelay(0.08, 0.12))
                         end
                     end
@@ -605,10 +585,9 @@ return function(Window, scriptInfo)
             if v then
                 CONNS["AutoSkills"] = RunService.Heartbeat:Connect(function()
                     if not CFG.AutoSkills or not CFG.AutoSkillsToggle or not isAlive() then return end
-                    -- Try all 4 skill slots
                     for slot = 1, 4 do
                         if isSkillReady(slot) then
-                            clickSkillSlot(slot)
+                            fireCombat("Skill", slot)
                             task.wait(randDelay(0.1, 0.15))
                             break
                         end
@@ -655,7 +634,7 @@ return function(Window, scriptInfo)
                         teleportTo(pos)
                         task.wait(randDelay(0.03, 0.1))
                         faceTarget(target.root.Position)
-                        clickSkillSlot(1)
+                        fireCombat("Attack")
                     end
                 end)
             else
@@ -740,7 +719,6 @@ return function(Window, scriptInfo)
             if v then
                 CONNS["AutoChests"] = RunService.Heartbeat:Connect(function()
                     if not CFG.AutoSelectChests then return end
-                    -- Scan for chest UIs and click them
                     for _, desc in ipairs(PG:GetDescendants()) do
                         if desc:IsA("GuiButton") and (
                             string.find(string.lower(desc.Name), "chest") or
@@ -760,7 +738,17 @@ return function(Window, scriptInfo)
     FT:CreateToggle({
         Name = "Auto Mid-Run Chests",
         CurrentValue = false,
-        Callback = function(v) CFG.AutoMidRunChests = v end,
+        Callback = function(v)
+            CFG.AutoMidRunChests = v
+            if v then
+                CONNS["AutoMidChests"] = RunService.Heartbeat:Connect(function()
+                    if not CFG.AutoMidRunChests then return end
+                    invokeRF("DungeonRunService", "SelectMidRunChests")
+                end)
+            else
+                if CONNS["AutoMidChests"] then CONNS["AutoMidChests"]:Disconnect(); CONNS["AutoMidChests"] = nil end
+            end
+        end,
     })
 
     -- ───────── Movement Tab ─────────
@@ -874,9 +862,7 @@ return function(Window, scriptInfo)
     ST:CreateButton({
         Name = "Sell Now",
         Callback = function()
-            fireEvent("sellItems", CFG.SellBelow)
-            openShop()
-            task.wait(1)
+            invokeRF("ShopService", "SellLootStorageByRarity", CFG.SellBelow)
         end,
     })
 
@@ -889,7 +875,7 @@ return function(Window, scriptInfo)
                 CONNS["AutoSell"] = RunService.Heartbeat:Connect(function()
                     if not CFG.AutoSell then return end
                     task.wait(10)
-                    fireEvent("sellItems", CFG.SellBelow)
+                    invokeRF("ShopService", "SellLootStorageByRarity", CFG.SellBelow)
                 end)
             else
                 if CONNS["AutoSell"] then CONNS["AutoSell"]:Disconnect(); CONNS["AutoSell"] = nil end
@@ -908,12 +894,20 @@ return function(Window, scriptInfo)
 
     ST:CreateButton({
         Name = "Sell Rarity from Bag",
-        Callback = function() fireEvent("sellLootBag", CFG.SellRarity) end,
+        Callback = function()
+            if CFG.SellRarity == "All" then
+                invokeRF("ShopService", "SellAllLootStorage")
+            else
+                invokeRF("ShopService", "SellLootStorageByRarity", CFG.SellRarity)
+            end
+        end,
     })
 
     ST:CreateButton({
         Name = "Sell All Loot Bag",
-        Callback = function() fireEvent("sellAllLootBag") end,
+        Callback = function()
+            invokeRF("ShopService", "SellAllLootStorage")
+        end,
     })
 
     -- ───────── Merchant Tab ─────────
@@ -929,12 +923,12 @@ return function(Window, scriptInfo)
 
     MT2:CreateButton({
         Name = "Refresh Stock",
-        Callback = function() fireEvent("refreshMerchant") end,
+        Callback = function() invokeRF("ShopService", "GetStockInfo") end,
     })
 
     MT2:CreateButton({
         Name = "Buy Selected",
-        Callback = function() fireEvent("buyMerchant", CFG.MerchantItem) end,
+        Callback = function() invokeRF("ShopService", "BuyItem", CFG.MerchantItem) end,
     })
 
     MT2:CreateSection("Auto Buy")
@@ -954,7 +948,7 @@ return function(Window, scriptInfo)
                 CONNS["AutoBuy"] = RunService.Heartbeat:Connect(function()
                     if not CFG.AutoBuy then return end
                     task.wait(30)
-                    fireEvent("autoBuyMerchant", CFG.AutoBuyMinRarity)
+                    invokeRF("ShopService", "BuyItem", CFG.AutoBuyMinRarity)
                 end)
             else
                 if CONNS["AutoBuy"] then CONNS["AutoBuy"]:Disconnect(); CONNS["AutoBuy"] = nil end
@@ -975,7 +969,9 @@ return function(Window, scriptInfo)
 
     ST2:CreateButton({
         Name = "Store Now",
-        Callback = function() fireEvent("storeItems", CFG.AutoStoreMinRarity) end,
+        Callback = function()
+            invokeRF("BankService", "DepositEquipmentBatch")
+        end,
     })
 
     ST2:CreateToggle({
@@ -987,7 +983,7 @@ return function(Window, scriptInfo)
                 CONNS["AutoStore"] = RunService.Heartbeat:Connect(function()
                     if not CFG.AutoStore then return end
                     task.wait(15)
-                    fireEvent("storeItems", CFG.AutoStoreMinRarity)
+                    invokeRF("BankService", "DepositEquipmentBatch")
                 end)
             else
                 if CONNS["AutoStore"] then CONNS["AutoStore"]:Disconnect(); CONNS["AutoStore"] = nil end
@@ -1006,12 +1002,16 @@ return function(Window, scriptInfo)
 
     ST2:CreateButton({
         Name = "Withdraw Now",
-        Callback = function() fireEvent("withdrawItems", CFG.AutoWithdrawMinRarity) end,
+        Callback = function()
+            invokeRF("BankService", "WithdrawEquipmentBatch")
+        end,
     })
 
     ST2:CreateButton({
         Name = "Withdraw All",
-        Callback = function() fireEvent("withdrawAll") end,
+        Callback = function()
+            invokeRF("BankService", "WithdrawEquipmentBatch")
+        end,
     })
 
     -- ───────── Forge Tab ─────────
@@ -1027,7 +1027,7 @@ return function(Window, scriptInfo)
 
     FT2:CreateButton({
         Name = "Refresh Items",
-        Callback = function() fireEvent("refreshForge") end,
+        Callback = function() invokeRF("ForgeService", "GetForgeInfo") end,
     })
 
     FT2:CreateToggle({
@@ -1045,7 +1045,7 @@ return function(Window, scriptInfo)
     FT2:CreateButton({
         Name = "Forge Once",
         Callback = function()
-            fireEvent("forgeItem", CFG.ForgeItem, CFG.UseProtectionScroll, CFG.UseEnhance)
+            invokeRF("ForgeService", "ForgeItem", CFG.ForgeItem, CFG.UseProtectionScroll)
         end,
     })
 
@@ -1074,7 +1074,7 @@ return function(Window, scriptInfo)
                 CONNS["AutoForge"] = RunService.Heartbeat:Connect(function()
                     if not CFG.AutoForge then return end
                     task.wait(5)
-                    fireEvent("autoForge", CFG.AutoForgeMinRarity, CFG.AutoForgeMaxLevel)
+                    invokeRF("ForgeService", "ForgeItem", CFG.AutoForgeMinRarity)
                 end)
             else
                 if CONNS["AutoForge"] then CONNS["AutoForge"]:Disconnect(); CONNS["AutoForge"] = nil end
@@ -1088,7 +1088,11 @@ return function(Window, scriptInfo)
 
     QT2:CreateButton({
         Name = "Claim All Quests",
-        Callback = function() fireEvent("claimAllQuests") end,
+        Callback = function()
+            invokeRF("QuestService", "ClaimQuest")
+            invokeRF("AchievementService", "ClaimAll")
+            invokeRF("BattlepassService", "ClaimQuest")
+        end,
     })
 
     QT2:CreateToggle({
@@ -1100,7 +1104,8 @@ return function(Window, scriptInfo)
                 CONNS["AutoQuests"] = RunService.Heartbeat:Connect(function()
                     if not CFG.AutoClaimQuests then return end
                     task.wait(5)
-                    fireEvent("claimAllQuests")
+                    invokeRF("QuestService", "ClaimQuest")
+                    invokeRF("AchievementService", "ClaimAll")
                 end)
             else
                 if CONNS["AutoQuests"] then CONNS["AutoQuests"]:Disconnect(); CONNS["AutoQuests"] = nil end
@@ -1141,19 +1146,6 @@ return function(Window, scriptInfo)
     ST3:CreateSection("Configuration")
 
     ST3:CreateButton({
-        Name = "Rescan Remotes",
-        Callback = function()
-            scanRemotes()
-            local count = 0
-            for _ in pairs(RemoteCache.Events) do count = count + 1 end
-            for _ in pairs(RemoteCache.Functions) do count = count + 1 end
-            pcall(function()
-                Window:Notify({Title = "Remote Scan", Content = "Found " .. count .. " remotes", Duration = 3})
-            end)
-        end,
-    })
-
-    ST3:CreateButton({
         Name = "Rejoin Server",
         Callback = function()
             TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LP)
@@ -1186,7 +1178,6 @@ return function(Window, scriptInfo)
         CFG.InDungeon = isInDungeon()
     end)
 
-    -- Character respawn handler
     LP.CharacterAdded:Connect(function(char)
         task.wait(1)
         local h = char:FindFirstChildOfClass("Humanoid")
@@ -1194,11 +1185,10 @@ return function(Window, scriptInfo)
         if CFG.Fly then startFly() end
     end)
 
-    -- Initial notification
     pcall(function()
         Window:Notify({
             Title = "Dungeon Lootr",
-            Content = "Module loaded! v1.0.0 | Rescan Remotes in Settings tab",
+            Content = "v1.0.1 | Verified remotes loaded",
             Duration = 5,
         })
     end)
