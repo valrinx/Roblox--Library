@@ -399,8 +399,8 @@ local SCRIPTS = {
         name        = "Shiganshina (AoT)",
         description = "Auto Farm | Auto Reload | Multi Hit | Boss Burst | Titan ESP | Nape Extender",
         placeIds    = {13379349730},
-        version     = "v6.0",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/shiganshina.lua?v=shiganshina-6.0",
+        version     = "v7.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/shiganshina.lua?v=shiganshina-7.0",
     },
     --[[
     {
