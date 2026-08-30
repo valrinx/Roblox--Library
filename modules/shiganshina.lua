@@ -197,7 +197,18 @@ return function(Window, runtimeInfo)
 
     local function needReload()
         local total, broken = getBladeCount()
+        return broken > 0
+    end
+
+    local function allBladesBroken()
+        local total, broken = getBladeCount()
         return total > 0 and broken >= total
+    end
+
+    local function doRemoteReload()
+        if GET then
+            pcall(function() GET:InvokeServer("Blades", "Reload") end)
+        end
     end
 
     local function getRefillStation()
@@ -483,7 +494,11 @@ return function(Window, runtimeInfo)
                 continue
             end
             if Config.AutoReloadBlades and needReload() then
-                doStationReload()
+                if allBladesBroken() then
+                    doStationReload()
+                else
+                    doRemoteReload()
+                end
                 task.wait(0.2)
             end
             local info = getNearestTitan()
@@ -508,7 +523,11 @@ return function(Window, runtimeInfo)
     local function autoReloadLoop()
         while Config.AutoReloadBlades do
             if needReload() then
-                doStationReload()
+                if allBladesBroken() then
+                    doStationReload()
+                else
+                    doRemoteReload()
+                end
             end
             task.wait(0.5)
         end
