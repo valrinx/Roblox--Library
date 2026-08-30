@@ -52,28 +52,32 @@ return function(Window, scriptInfo)
     end
 
     local function invokeRF(service, method, ...)
+        local args = {...}
         local rf = getKnitRF(service, method)
         if rf then
-            local ok, res = pcall(function() return rf:InvokeServer(...) end)
+            local ok, res = pcall(function() return rf:InvokeServer(unpack(args)) end)
             return ok and res or nil
         end
         return nil
     end
 
     local function fireRE(service, event, ...)
+        local args = {...}
         local re = getKnitRE(service, event)
-        if re then pcall(function() re:FireServer(...) end) end
+        if re then pcall(function() re:FireServer(unpack(args)) end) end
     end
 
     local function fireLegacy(name, ...)
+        local args = {...}
         local r = getLegacy(name)
-        if r and r:IsA("RemoteEvent") then pcall(function() r:FireServer(...) end) end
-        if r and r:IsA("RemoteFunction") then pcall(function() return r:InvokeServer(...) end) end
+        if r and r:IsA("RemoteEvent") then pcall(function() r:FireServer(unpack(args)) end) end
+        if r and r:IsA("RemoteFunction") then pcall(function() return r:InvokeServer(unpack(args)) end) end
     end
 
     local function fireCombat(action, ...)
+        local args = {...}
         local r = getCombatInput(action)
-        if r then pcall(function() r:FireServer(...) end) end
+        if r then pcall(function() r:FireServer(unpack(args)) end) end
     end
 
     -- ═══════════════════════════════════════════════════════════════════
