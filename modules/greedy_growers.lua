@@ -55,7 +55,13 @@ return function(Window, scriptInfo)
                 local o = pp.ObjectText
                 if a == "Collect" then
                     local part = pp:FindFirstAncestorWhichIsA("BasePart")
-                    if part then table.insert(cache.fruits, {prompt=pp, part=part}) end
+                    if part then
+                        -- Parse multiplier from ObjectText e.g. "Starfruit Tree (452.7x)"
+                        local mult = 1
+                        local m = o:match(%((%d+%.?%d*)x%)%)
+                        if m then mult = tonumber(m) or 1 end
+                        table.insert(cache.fruits, {prompt=pp, part=part, value=mult})
+                    end
                 elseif a == "Sell" and not cache.sell then
                     cache.sell = pp
                 elseif a == "Harvest" and not cache.harvest then
@@ -75,6 +81,8 @@ return function(Window, scriptInfo)
                 end
             end
         end
+        -- Sort fruits by value descending (highest value first)
+        table.sort(cache.fruits, function(a, b) return a.value > b.value end)
     end
     cache.lastScan = 0
     refreshCache()
@@ -295,7 +303,7 @@ return function(Window, scriptInfo)
         end,
     })
 
-    FarmTab:CreateSection("6. Collect Fruits")
+    FarmTab:CreateSection("6. Collect Fruits (highest value first)")
     FarmTab:CreateToggle({
         Name = "Auto Collect",
         CurrentValue = false,
@@ -388,26 +396,26 @@ return function(Window, scriptInfo)
                             if cache.harvest then
                                 local part = cache.harvest:FindFirstAncestorWhichIsA("BasePart")
                                     or cache.harvest.Parent
-                                if part then tpTo(part.Position); task.wait(0.2) end
+                                if part then tpTo(part.Position); task.wait(0.15) end
                                 safeFire(cache.harvest)
-                                task.wait(0.5)
+                                task.wait(0.3)
                             end
-                            -- Step 2: Collect all fruits
+                            -- Step 2: Collect ALL fruits (highest value first)
                             refreshCache()
                             for _, f in ipairs(cache.fruits) do
-                                if not isActive() or not isMeteorActive() then break end
+                                if not isActive() then break end
                                 tpTo(f.part.Position)
                                 task.wait(0.1)
                                 safeFire(f.prompt)
-                                task.wait(0.15)
+                                task.wait(0.1)
                             end
-                            -- Step 3: Sell
+                            -- Step 3: SELL immediately after collecting
                             refreshCache()
                             if cache.sell then
                                 local part = cache.sell:FindFirstAncestorWhichIsA("BasePart")
-                                if part then tpTo(part.Position); task.wait(0.2) end
+                                if part then tpTo(part.Position); task.wait(0.15) end
                                 safeFire(cache.sell)
-                                task.wait(0.3)
+                                task.wait(0.2)
                             end
                             -- Step 4: Flee if still meteor
                             if isMeteorActive() then
