@@ -1,244 +1,209 @@
 -- ═══════════════════════════════════════════════════════════
--- Greedy Growers | RAVEN HUB Module
--- Features: Auto Collect, Auto Sell, Auto Plant, Anti-Meteor, Auto Buy
+-- Greedy Growers | RAVEN HUB Module v1.0.1
+-- Features: Auto Collect, Auto Sell, Auto Plant, Auto Buy Seeds,
+--           Anti-Meteor, Speed, Grow All, Collect All
+-- PlaceId: 74102906764176 | GameId: 10440833423
 -- ═══════════════════════════════════════════════════════════
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Workspace = game:GetService("Workspace")
-local HttpService = game:GetService("HttpService")
+return function(Window, scriptInfo)
+    local Players = game:GetService("Players")
+    local RunService = game:GetService("RunService")
+    local Workspace = game:GetService("Workspace")
+    local TeleportService = game:GetService("TeleportService")
+    local HttpService = game:GetService("HttpService")
 
-local Player = Players.LocalPlayer
-local PlayerGui = Player:WaitForChild("PlayerGui")
+    local Player = Players.LocalPlayer
+    local PlayerGui = Player:WaitForChild("PlayerGui")
 
-local M = { Tabs = {}, Connections = {} }
+    local running = true
+    local connections = {}
 
--- ═══════════ Utility ═══════════
-local function getChar()
-    return Player.Character or Player.CharacterAdded:Wait()
-end
+    -- ═══════════ Settings ═══════════
+    local settings = {
+        autoCollect = false,
+        collectDelay = 0.3,
+        autoSell = false,
+        sellInterval = 5,
+        autoPlant = false,
+        autoBuySeed = false,
+        selectedSeed = "Pine",
+        buyDelay = 2,
+        antiMeteor = false,
+        meteorFleeDist = 80,
+        autoSpeed = false,
+        walkSpeed = 32,
+    }
 
-local function getRoot()
-    local c = getChar()
-    return c and c:FindFirstChild("HumanoidRootPart")
-end
-
-local function getHumanoid()
-    local c = getChar()
-    return c and c:FindFirstChildOfClass("Humanoid")
-end
-
-local function tpTo(pos)
-    local root = getRoot()
-    if root then root.CFrame = CFrame.new(pos + Vector3.new(0, 3, 0)) end
-end
-
-local function distTo(pos)
-    local root = getRoot()
-    return root and (root.Position - pos).Magnitude or 999
-end
-
-local function safeFire(pp)
-    if not pp then return end
-    pcall(function()
-        fireproximityprompt(pp, 0)
-    end)
-end
-
-local function toggleConnection(key, enabled, func)
-    if M.Connections[key] then
-        M.Connections[key]:Disconnect()
-        M.Connections[key] = nil
+    -- ═══════════ Utility ═══════════
+    local function getChar()
+        return Player.Character or Player.CharacterAdded:Wait()
     end
-    if enabled and func then
-        M.Connections[key] = RunService.Heartbeat:Connect(func)
+
+    local function getRoot()
+        local c = getChar()
+        return c and c:FindFirstChild("HumanoidRootPart")
     end
-end
 
--- ═══════════ Config ═══════════
-M.Config = {
-    -- Collect
-    autoCollect = false,
-    collectDelay = 0.3,
-    -- Sell
-    autoSell = false,
-    sellInterval = 5,
-    -- Plant
-    autoPlant = false,
-    -- Anti-Meteor
-    antiMeteor = false,
-    meteorFleeDist = 80,
-    -- Buy
-    autoBuySeed = false,
-    selectedSeed = "Pine",
-    buyDelay = 2,
-    -- Misc
-    autoGrowAll = false,
-    collectAll = false,
-    walkSpeed = 32,
-    autoSpeed = false,
-}
+    local function getHumanoid()
+        local c = getChar()
+        return c and c:FindFirstChildOfClass("Humanoid")
+    end
 
--- ═══════════ Fruit / Tree Scanning ═══════════
-function M.getFruitSpawns()
-    local fruits = {}
-    -- Scan all ProximityPrompts with "Collect" action
-    for _, pp in ipairs(game:GetDescendants()) do
-        if pp:IsA("ProximityPrompt") and pp.ActionText == "Collect" then
-            local spawn = pp:FindFirstAncestorWhichIsA("BasePart")
-            if spawn then
-                table.insert(fruits, {prompt = pp, part = spawn})
-            end
+    local function tpTo(pos)
+        local root = getRoot()
+        if root then root.CFrame = CFrame.new(pos + Vector3.new(0, 3, 0)) end
+    end
+
+    local function safeFire(pp)
+        if not pp then return end
+        pcall(function()
+            fireproximityprompt(pp, 0)
+        end)
+    end
+
+    local function toggleConn(key, enabled, func)
+        if connections[key] then
+            connections[key]:Disconnect()
+            connections[key] = nil
+        end
+        if enabled and func then
+            connections[key] = RunService.Heartbeat:Connect(func)
         end
     end
-    return fruits
-end
 
-function M.getSellStand()
-    for _, pp in ipairs(game:GetDescendants()) do
-        if pp:IsA("ProximityPrompt") and pp.ActionText == "Sell" then
-            return pp
-        end
-    end
-    return nil
-end
-
-function M.getSeedHolders()
-    local seeds = {}
-    for _, pp in ipairs(game:GetDescendants()) do
-        if pp:IsA("ProximityPrompt") and pp.ActionText == "Buy" then
-            local holder = pp:FindFirstAncestorWhichIsA("Model")
-            local part = pp:FindFirstAncestorWhichIsA("BasePart")
-            if holder and part then
-                table.insert(seeds, {
-                    prompt = pp,
-                    part = part,
-                    name = pp.ObjectText
-                })
-            end
-        end
-    end
-    return seeds
-end
-
-function M.getPlantPrompts()
-    local prompts = {}
-    for _, pp in ipairs(game:GetDescendants()) do
-        if pp:IsA("ProximityPrompt") and pp.ActionText == "Plant Seed" then
-            local part = pp:FindFirstAncestorWhichIsA("BasePart")
-            if part then
-                table.insert(prompts, {prompt = pp, part = part})
-            end
-        end
-    end
-    return prompts
-end
-
-function M.getGrowAll()
-    for _, obj in ipairs(game:GetDescendants()) do
-        if obj:IsA("ProximityPrompt") and obj.ActionText == "Buy" and obj.ObjectText == "Grow All Fruits" then
-            return obj
-        end
-    end
-    return nil
-end
-
-function M.getCollectAll()
-    for _, obj in ipairs(game:GetDescendants()) do
-        if obj:IsA("ProximityPrompt") and obj.ActionText == "Buy" and obj.ObjectText == "Collect All Fruits" then
-            return obj
-        end
-    end
-    return nil
-end
-
--- ═══════════ Weather Detection ═══════════
-function M.getCurrentWeather()
-    -- Check Workspace for weather effects or surface GUI
-    for _, obj in ipairs(Workspace:GetChildren()) do
-        local name = obj.Name:lower()
-        if name:find("rain") or name:find("storm") or name:find("meteor") or name:find("weather") then
-            return obj.Name
-        end
-    end
-    -- Check ScreenGui for weather indicator
-    local gui = PlayerGui:FindFirstChild("MainUI") or PlayerGui:FindFirstChild("HUD")
-    if gui then
-        for _, label in ipairs(gui:GetDescendants()) do
-            if label:IsA("TextLabel") or label:IsA("Frame") then
-                local txt = label.Text or label.Name
-                if txt:lower():find("meteor") or txt:lower():find("storm") then
-                    return txt
+    -- ═══════════ Scanners (game:GetDescendants for full coverage) ═══════════
+    local function getFruitSpawns()
+        local fruits = {}
+        for _, pp in ipairs(game:GetDescendants()) do
+            if pp:IsA("ProximityPrompt") and pp.ActionText == "Collect" then
+                local part = pp:FindFirstAncestorWhichIsA("BasePart")
+                if part then
+                    table.insert(fruits, {prompt = pp, part = part})
                 end
             end
         end
+        return fruits
     end
-    -- Check surface gui on map
-    for _, desc in ipairs(game:GetDescendants()) do
-        if desc:IsA("SurfaceGui") then
-            for _, child in ipairs(desc:GetChildren()) do
-                if child:IsA("TextLabel") then
-                    local t = child.Text:lower()
-                    if t:find("meteor") or t:find("storm") or t:find("weather") then
-                        return child.Text
+
+    local function getSellStand()
+        for _, pp in ipairs(game:GetDescendants()) do
+            if pp:IsA("ProximityPrompt") and pp.ActionText == "Sell" then
+                return pp
+            end
+        end
+        return nil
+    end
+
+    local function getSeedHolders()
+        local seeds = {}
+        for _, pp in ipairs(game:GetDescendants()) do
+            if pp:IsA("ProximityPrompt") and pp.ActionText == "Buy" then
+                local objText = pp.ObjectText
+                if objText:find("Seed") then
+                    local part = pp:FindFirstAncestorWhichIsA("BasePart")
+                    if part then
+                        table.insert(seeds, {
+                            prompt = pp,
+                            part = part,
+                            name = objText,
+                        })
                     end
                 end
             end
         end
+        return seeds
     end
-    return nil
-end
 
-function M.isDangerousWeather()
-    local w = M.getCurrentWeather()
-    if not w then return false end
-    local wl = w:lower()
-    return wl:find("meteor") ~= nil or wl:find("storm") ~= nil or wl:find("lightning") ~= nil
-end
+    local function getPlantPrompts()
+        local prompts = {}
+        for _, pp in ipairs(game:GetDescendants()) do
+            if pp:IsA("ProximityPrompt") and pp.ActionText == "Plant Seed" then
+                local part = pp:FindFirstAncestorWhichIsA("BasePart")
+                if part then
+                    table.insert(prompts, {prompt = pp, part = part})
+                end
+            end
+        end
+        return prompts
+    end
 
--- ═══════════ TAB: Collect ═══════════
-M.Tabs[#M.Tabs + 1] = {
-    name = "Collect",
-    {
-        type = "toggle",
-        label = "Auto Collect",
-        key = "autoCollect",
-        callback = function(v)
-            M.Config.autoCollect = v
-            toggleConnection("autoCollect", v, function()
-                if not M.Config.autoCollect then return end
-                local fruits = M.getFruitSpawns()
+    local function getGrowAll()
+        for _, pp in ipairs(game:GetDescendants()) do
+            if pp:IsA("ProximityPrompt") and pp.ActionText == "Buy"
+                and pp.ObjectText == "Grow All Fruits" then
+                return pp
+            end
+        end
+        return nil
+    end
+
+    local function getCollectAll()
+        for _, pp in ipairs(game:GetDescendants()) do
+            if pp:IsA("ProximityPrompt") and pp.ActionText == "Buy"
+                and pp.ObjectText == "Collect All Fruits" then
+                return pp
+            end
+        end
+        return nil
+    end
+
+    local function isDangerousWeather()
+        for _, obj in ipairs(Workspace:GetChildren()) do
+            local n = obj.Name:lower()
+            if n:find("meteor") or n:find("storm") or n:find("lightning") then
+                return true
+            end
+        end
+        return false
+    end
+
+    -- ═══════════════════════════════════════════════════════════
+    --   UI TABS
+    -- ═══════════════════════════════════════════════════════════
+
+    -- ─── Tab 1: Collect ───
+    local CollectTab = Window:CreateTab("Collect", "apple")
+    CollectTab:CreateSection("Auto Collect Fruit")
+
+    CollectTab:CreateToggle({
+        Name = "Auto Collect",
+        CurrentValue = false,
+        Flag = "GGAutoCollect",
+        Callback = function(v)
+            settings.autoCollect = v
+            toggleConn("autoCollect", v, function()
+                if not settings.autoCollect then return end
+                local fruits = getFruitSpawns()
                 for _, f in ipairs(fruits) do
-                    if not M.Config.autoCollect then break end
+                    if not settings.autoCollect then break end
                     tpTo(f.part.Position)
                     task.wait(0.15)
                     safeFire(f.prompt)
-                    task.wait(M.Config.collectDelay)
+                    task.wait(settings.collectDelay)
                 end
             end)
-        end
-    },
-    {
-        type = "slider",
-        label = "Collect Delay",
-        key = "collectDelay",
-        min = 0.1,
-        max = 2,
-        default = 0.3,
-        callback = function(v) M.Config.collectDelay = v end
-    },
-    {
-        type = "button",
-        label = "Collect All (One-shot)",
-        callback = function()
-            local pp = M.getCollectAll()
+        end,
+    })
+
+    CollectTab:CreateSlider({
+        Name = "Collect Delay",
+        Range = {0.1, 2},
+        Increment = 0.1,
+        CurrentValue = 0.3,
+        Suffix = " s",
+        Flag = "GGCollectDelay",
+        Callback = function(v) settings.collectDelay = v end,
+    })
+
+    CollectTab:CreateButton({
+        Name = "Collect All (One-shot)",
+        Callback = function()
+            local pp = getCollectAll()
             if pp then
                 local part = pp:FindFirstAncestorWhichIsA("BasePart")
                 if part then tpTo(part.Position); task.wait(0.2) end
                 safeFire(pp)
             else
-                -- Fallback: collect each fruit
-                local fruits = M.getFruitSpawns()
+                local fruits = getFruitSpawns()
                 for _, f in ipairs(fruits) do
                     tpTo(f.part.Position)
                     task.wait(0.15)
@@ -246,290 +211,331 @@ M.Tabs[#M.Tabs + 1] = {
                     task.wait(0.2)
                 end
             end
-        end
-    },
-}
+        end,
+    })
 
--- ═══════════ TAB: Sell ═══════════
-M.Tabs[#M.Tabs + 1] = {
-    name = "Sell",
-    {
-        type = "toggle",
-        label = "Auto Sell",
-        key = "autoSell",
-        callback = function(v)
-            M.Config.autoSell = v
-            toggleConnection("autoSell", v, function()
-                if not M.Config.autoSell then return end
-                local pp = M.getSellStand()
+    -- ─── Tab 2: Sell ───
+    local SellTab = Window:CreateTab("Sell", "dollar-sign")
+    SellTab:CreateSection("Auto Sell")
+
+    SellTab:CreateToggle({
+        Name = "Auto Sell",
+        CurrentValue = false,
+        Flag = "GGAutoSell",
+        Callback = function(v)
+            settings.autoSell = v
+            toggleConn("autoSell", v, function()
+                if not settings.autoSell then return end
+                local pp = getSellStand()
                 if pp then
                     local part = pp:FindFirstAncestorWhichIsA("BasePart")
                     if part then tpTo(part.Position) end
                     task.wait(0.2)
                     safeFire(pp)
-                    task.wait(M.Config.sellInterval)
+                    task.wait(settings.sellInterval)
                 end
             end)
-        end
-    },
-    {
-        type = "slider",
-        label = "Sell Interval (s)",
-        key = "sellInterval",
-        min = 1,
-        max = 15,
-        default = 5,
-        callback = function(v) M.Config.sellInterval = v end
-    },
-    {
-        type = "button",
-        label = "Sell Now",
-        callback = function()
-            local pp = M.getSellStand()
+        end,
+    })
+
+    SellTab:CreateSlider({
+        Name = "Sell Interval",
+        Range = {1, 15},
+        Increment = 1,
+        CurrentValue = 5,
+        Suffix = " s",
+        Flag = "GGSellInterval",
+        Callback = function(v) settings.sellInterval = v end,
+    })
+
+    SellTab:CreateButton({
+        Name = "Sell Now",
+        Callback = function()
+            local pp = getSellStand()
             if pp then
                 local part = pp:FindFirstAncestorWhichIsA("BasePart")
                 if part then tpTo(part.Position); task.wait(0.2) end
                 safeFire(pp)
             end
-        end
-    },
-}
+        end,
+    })
 
--- ═══════════ TAB: Plant ═══════════
-M.Tabs[#M.Tabs + 1] = {
-    name = "Plant",
-    {
-        type = "toggle",
-        label = "Auto Plant",
-        key = "autoPlant",
-        callback = function(v)
-            M.Config.autoPlant = v
-            toggleConnection("autoPlant", v, function()
-                if not M.Config.autoPlant then return end
-                local prompts = M.getPlantPrompts()
+    -- ─── Tab 3: Plant ───
+    local PlantTab = Window:CreateTab("Plant", "sprout")
+    PlantTab:CreateSection("Auto Plant")
+
+    PlantTab:CreateToggle({
+        Name = "Auto Plant Seeds",
+        CurrentValue = false,
+        Flag = "GGAutoPlant",
+        Callback = function(v)
+            settings.autoPlant = v
+            toggleConn("autoPlant", v, function()
+                if not settings.autoPlant then return end
+                local prompts = getPlantPrompts()
                 for _, p in ipairs(prompts) do
-                    if not M.Config.autoPlant then break end
+                    if not settings.autoPlant then break end
                     tpTo(p.part.Position)
                     task.wait(0.15)
                     safeFire(p.prompt)
                     task.wait(0.5)
                 end
             end)
-        end
-    },
-    {
-        type = "button",
-        label = "Grow All",
-        callback = function()
-            local pp = M.getGrowAll()
+        end,
+    })
+
+    PlantTab:CreateButton({
+        Name = "Grow All",
+        Callback = function()
+            local pp = getGrowAll()
             if pp then
                 local part = pp:FindFirstAncestorWhichIsA("BasePart")
                 if part then tpTo(part.Position); task.wait(0.2) end
                 safeFire(pp)
             end
-        end
-    },
-    {
-        type = "button",
-        label = "Plant All (One-shot)",
-        callback = function()
-            local prompts = M.getPlantPrompts()
+        end,
+    })
+
+    PlantTab:CreateButton({
+        Name = "Plant All (One-shot)",
+        Callback = function()
+            local prompts = getPlantPrompts()
             for _, p in ipairs(prompts) do
                 tpTo(p.part.Position)
                 task.wait(0.15)
                 safeFire(p.prompt)
                 task.wait(0.5)
             end
-        end
-    },
-}
+        end,
+    })
 
--- ═══════════ TAB: Buy Seeds ═══════════
-M.Tabs[#M.Tabs + 1] = {
-    name = "Buy Seeds",
-    {
-        type = "dropdown",
-        label = "Seed Type",
-        key = "selectedSeed",
-        options = {"Pine", "Oak", "Lemon", "Mango", "Apple", "Fig"},
-        callback = function(v) M.Config.selectedSeed = v end
-    },
-    {
-        type = "toggle",
-        label = "Auto Buy Seed",
-        key = "autoBuySeed",
-        callback = function(v)
-            M.Config.autoBuySeed = v
-            toggleConnection("autoBuySeed", v, function()
-                if not M.Config.autoBuySeed then return end
-                local seeds = M.getSeedHolders()
+    -- ─── Tab 4: Buy Seeds ───
+    local BuyTab = Window:CreateTab("Buy Seeds", "shopping-cart")
+    BuyTab:CreateSection("Auto Buy Seeds")
+
+    BuyTab:CreateDropdown({
+        Name = "Seed Type",
+        Options = {"Pine", "Oak", "Lemon", "Mango", "Apple", "Fig"},
+        CurrentOption = {"Pine"},
+        MultipleOptions = false,
+        Flag = "GGSeedType",
+        Callback = function(value)
+            settings.selectedSeed = type(value) == "table" and value[1] or value
+        end,
+    })
+
+    BuyTab:CreateToggle({
+        Name = "Auto Buy Selected Seed",
+        CurrentValue = false,
+        Flag = "GGAutoBuySeed",
+        Callback = function(v)
+            settings.autoBuySeed = v
+            toggleConn("autoBuySeed", v, function()
+                if not settings.autoBuySeed then return end
+                local seeds = getSeedHolders()
                 for _, s in ipairs(seeds) do
-                    if not M.Config.autoBuySeed then break end
-                    if s.name:lower():find(M.Config.selectedSeed:lower()) then
+                    if not settings.autoBuySeed then break end
+                    if s.name:lower():find(settings.selectedSeed:lower()) then
                         tpTo(s.part.Position)
                         task.wait(0.15)
                         safeFire(s.prompt)
-                        task.wait(M.Config.buyDelay)
+                        task.wait(settings.buyDelay)
                     end
                 end
             end)
-        end
-    },
-    {
-        type = "slider",
-        label = "Buy Delay (s)",
-        key = "buyDelay",
-        min = 1,
-        max = 10,
-        default = 2,
-        callback = function(v) M.Config.buyDelay = v end
-    },
-    {
-        type = "button",
-        label = "Buy Selected Seed",
-        callback = function()
-            local seeds = M.getSeedHolders()
+        end,
+    })
+
+    BuyTab:CreateSlider({
+        Name = "Buy Delay",
+        Range = {1, 10},
+        Increment = 1,
+        CurrentValue = 2,
+        Suffix = " s",
+        Flag = "GGBuyDelay",
+        Callback = function(v) settings.buyDelay = v end,
+    })
+
+    BuyTab:CreateButton({
+        Name = "Buy Selected Seed Now",
+        Callback = function()
+            local seeds = getSeedHolders()
             for _, s in ipairs(seeds) do
-                if s.name:lower():find(M.Config.selectedSeed:lower()) then
+                if s.name:lower():find(settings.selectedSeed:lower()) then
                     tpTo(s.part.Position)
                     task.wait(0.15)
                     safeFire(s.prompt)
                     break
                 end
             end
-        end
-    },
-}
+        end,
+    })
 
--- ═══════════ TAB: Weather ═══════════
-M.Tabs[#M.Tabs + 1] = {
-    name = "Weather",
-    {
-        type = "toggle",
-        label = "Anti-Meteor (Auto Flee)",
-        key = "antiMeteor",
-        callback = function(v)
-            M.Config.antiMeteor = v
-            toggleConnection("antiMeteor", v, function()
-                if not M.Config.antiMeteor then return end
-                if M.isDangerousWeather() then
+    -- ─── Tab 5: Weather ───
+    local WeatherTab = Window:CreateTab("Weather", "cloud-lightning")
+    WeatherTab:CreateSection("Anti-Meteor")
+
+    WeatherTab:CreateToggle({
+        Name = "Anti-Meteor (Auto Flee)",
+        CurrentValue = false,
+        Flag = "GGAntiMeteor",
+        Callback = function(v)
+            settings.antiMeteor = v
+            toggleConn("antiMeteor", v, function()
+                if not settings.antiMeteor then return end
+                if isDangerousWeather() then
                     local root = getRoot()
                     if root then
-                        -- Flee by moving far away
-                        local fleeDir = root.CFrame.LookVector * M.Config.meteorFleeDist
+                        local fleeDir = root.CFrame.LookVector * settings.meteorFleeDist
                         tpTo(root.Position + fleeDir)
                     end
                 end
             end)
-        end
-    },
-    {
-        type = "label",
-        text = "Current Weather: Checking..."
-    },
-    {
-        type = "button",
-        label = "Refresh Weather",
-        callback = function()
-            local w = M.getCurrentWeather()
-            print("[GG] Weather: " .. (w or "None"))
-        end
-    },
-}
+        end,
+    })
 
--- ═══════════ TAB: Player ═══════════
-M.Tabs[#M.Tabs + 1] = {
-    name = "Player",
-    {
-        type = "toggle",
-        label = "Auto Set Speed",
-        key = "autoSpeed",
-        callback = function(v)
-            M.Config.autoSpeed = v
-            toggleConnection("autoSpeed", v, function()
-                if not M.Config.autoSpeed then return end
-                local hum = getHumanoid()
-                if hum then hum.WalkSpeed = M.Config.walkSpeed end
+    WeatherTab:CreateSlider({
+        Name = "Flee Distance",
+        Range = {20, 200},
+        Increment = 10,
+        CurrentValue = 80,
+        Suffix = " studs",
+        Flag = "GGFleeDist",
+        Callback = function(v) settings.meteorFleeDist = v end,
+    })
+
+    WeatherTab:CreateButton({
+        Name = "Check Weather",
+        Callback = function()
+            local danger = isDangerousWeather()
+            pcall(function()
+                Window:Notify({
+                    Title = "Weather",
+                    Content = danger and "DANGER: Meteor/Storm detected!" or "Safe: No danger weather",
+                    Duration = 3,
+                })
             end)
-        end
-    },
-    {
-        type = "slider",
-        label = "Walk Speed",
-        key = "walkSpeed",
-        min = 16,
-        max = 200,
-        default = 32,
-        callback = function(v)
-            M.Config.walkSpeed = v
+        end,
+    })
+
+    -- ─── Tab 6: Player ───
+    local PlayerTab = Window:CreateTab("Player", "user")
+    PlayerTab:CreateSection("Speed")
+
+    PlayerTab:CreateToggle({
+        Name = "Auto Set Speed",
+        CurrentValue = false,
+        Flag = "GGAutoSpeed",
+        Callback = function(v)
+            settings.autoSpeed = v
+            toggleConn("autoSpeed", v, function()
+                if not settings.autoSpeed then return end
+                local hum = getHumanoid()
+                if hum then hum.WalkSpeed = settings.walkSpeed end
+            end)
+        end,
+    })
+
+    PlayerTab:CreateSlider({
+        Name = "Walk Speed",
+        Range = {16, 200},
+        Increment = 1,
+        CurrentValue = 32,
+        Suffix = " spd",
+        Flag = "GGWalkSpeed",
+        Callback = function(v)
+            settings.walkSpeed = v
             local hum = getHumanoid()
             if hum then hum.WalkSpeed = v end
-        end
-    },
-    {
-        type = "button",
-        label = "Set Speed Now",
-        callback = function()
-            local hum = getHumanoid()
-            if hum then hum.WalkSpeed = M.Config.walkSpeed end
-        end
-    },
-}
+        end,
+    })
 
--- ═══════════ TAB: Settings ═══════════
-M.Tabs[#M.Tabs + 1] = {
-    name = "Settings",
-    {
-        type = "label",
-        text = "Greedy Growers v1.0 | RAVEN HUB"
-    },
-    {
-        type = "button",
-        label = "Scan Game (Debug)",
-        callback = function()
-            local fruits = M.getFruitSpawns()
-            local sell = M.getSellStand()
-            local seeds = M.getSeedHolders()
-            local plants = M.getPlantPrompts()
-            print(string.format("[GG] Fruits: %d | Sell: %s | Seeds: %d | Plants: %d",
-                #fruits, tostring(sell ~= nil), #seeds, #plants))
-        end
-    },
-    {
-        type = "button",
-        label = "Rejoin Server",
-        callback = function()
-            local ts = game:GetService("TeleportService")
-            ts:Teleport(game.PlaceId, Player)
-        end
-    },
-    {
-        type = "button",
-        label = "Server Hop",
-        callback = function()
+    PlayerTab:CreateButton({
+        Name = "Set Speed Now",
+        Callback = function()
+            local hum = getHumanoid()
+            if hum then hum.WalkSpeed = settings.walkSpeed end
+        end,
+    })
+
+    -- ─── Tab 7: Settings ───
+    local SettingsTab = Window:CreateTab("Settings", "settings")
+    SettingsTab:CreateSection("Info")
+
+    SettingsTab:CreateLabel("Greedy Growers v1.0.1 | RAVEN HUB")
+
+    SettingsTab:CreateSection("Debug")
+
+    SettingsTab:CreateButton({
+        Name = "Scan Game (Debug)",
+        Callback = function()
+            local fruits = getFruitSpawns()
+            local sell = getSellStand()
+            local seeds = getSeedHolders()
+            local plants = getPlantPrompts()
             pcall(function()
-                local HttpService = game:GetService("HttpService")
-                local tp = game:GetService("TeleportService")
+                Window:Notify({
+                    Title = "GG Debug",
+                    Content = string.format(
+                        "Fruits: %d | Sell: %s | Seeds: %d | Plants: %d",
+                        #fruits, tostring(sell ~= nil), #seeds, #plants
+                    ),
+                    Duration = 5,
+                })
+            end)
+        end,
+    })
+
+    SettingsTab:CreateSection("Server")
+
+    SettingsTab:CreateButton({
+        Name = "Rejoin Server",
+        Callback = function()
+            TeleportService:Teleport(game.PlaceId, Player)
+        end,
+    })
+
+    SettingsTab:CreateButton({
+        Name = "Server Hop",
+        Callback = function()
+            pcall(function()
                 local tps = HttpService:JSONDecode(
-                    game:HttpGet("https://games.roblox.com/v1/games/"..game.PlaceId.."/servers/Public?sortOrder=Asc&limit=10")
+                    game:HttpGet("https://games.roblox.com/v1/games/"
+                        .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=10")
                 )
                 if tps and tps.data then
                     for _, srv in ipairs(tps.data) do
                         if srv.id ~= game.JobId and srv.playing < srv.maxPlayers then
-                            tp:TeleportToPlaceInstance(game.PlaceId, srv.id, Player)
+                            TeleportService:TeleportToPlaceInstance(
+                                game.PlaceId, srv.id, Player
+                            )
                             break
                         end
                     end
                 end
             end)
+        end,
+    })
+
+    -- ═══════════ Cleanup ═══════════
+    local function destroy()
+        running = false
+        for key, conn in pairs(connections) do
+            pcall(function() conn:Disconnect() end)
         end
-    },
-}
+        connections = {}
+    end
 
--- ═══════════ Init ═══════════
-function M.init()
-    print("[GG] Greedy Growers module loaded!")
-    print("[GG] Fruits: " .. #M.getFruitSpawns())
+    if scriptInfo and type(scriptInfo.registerCleanup) == "function" then
+        scriptInfo.registerCleanup(destroy)
+    end
+
+    -- Notify loaded
+    pcall(function()
+        Window:Notify({
+            Title = "Greedy Growers",
+            Content = "v1.0.1 loaded! " .. #getFruitSpawns() .. " fruits detected",
+            Duration = 3,
+        })
+    end)
 end
-
-return M
