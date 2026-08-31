@@ -416,8 +416,8 @@ local SCRIPTS = {
         description = "Auto Collect | Auto Sell | Auto Plant | Auto Buy Seeds | Anti-Meteor | Speed",
         placeIds    = {74102906764176},
         gameIds     = {10440833423},
-        version     = "v1.0.2",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/greedy_growers.lua?v=greedy-growers-1.0.2",
+        version     = "v2.0.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/greedy_growers.lua?v=greedy-growers-2.0.0",
     },
     --[[
     {
