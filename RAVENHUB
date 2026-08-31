@@ -305,7 +305,7 @@ local SCRIPTS = {
         description = "Auto Crack | Fish/Pet/Egg ESP | Auto Sell | Stage Tracker | Teleport",
         placeIds    = {103883942725157},
         gameIds     = {10561352230},
-        version     = "v1.0.0",
+        version     = "v1.0.1",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/drain_water.lua",
     },
     {
@@ -416,8 +416,8 @@ local SCRIPTS = {
         description = "Auto Collect | Auto Sell | Auto Plant | Auto Buy Seeds | Anti-Meteor | Speed",
         placeIds    = {74102906764176},
         gameIds     = {10440833423},
-        version     = "v1.0.0",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/greedy_growers.lua?v=greedy-growers-1.0.0",
+        version     = "v1.0.1",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/greedy_growers.lua?v=greedy-growers-1.0.1",
     },
     --[[
     {
