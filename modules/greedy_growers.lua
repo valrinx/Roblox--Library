@@ -1,21 +1,17 @@
 -- ═══════════════════════════════════════════════════════════
--- Greedy Growers | RAVEN HUB Module v1.0.1
--- Features: Auto Collect, Auto Sell, Auto Plant, Auto Buy Seeds,
---           Anti-Meteor, Speed, Grow All, Collect All
+-- Greedy Growers | RAVEN HUB Module v1.0.2
 -- PlaceId: 74102906764176 | GameId: 10440833423
+-- FIX: task.wait loops instead of Heartbeat (no lag)
+-- FIX: cached scans refresh every 2s (not every frame)
 -- ═══════════════════════════════════════════════════════════
 return function(Window, scriptInfo)
     local Players = game:GetService("Players")
     local RunService = game:GetService("RunService")
-    local Workspace = game:GetService("Workspace")
     local TeleportService = game:GetService("TeleportService")
     local HttpService = game:GetService("HttpService")
 
     local Player = Players.LocalPlayer
-    local PlayerGui = Player:WaitForChild("PlayerGui")
-
     local running = true
-    local connections = {}
 
     -- ═══════════ Settings ═══════════
     local settings = {
@@ -33,18 +29,74 @@ return function(Window, scriptInfo)
         walkSpeed = 32,
     }
 
-    -- ═══════════ Utility ═══════════
-    local function getChar()
-        return Player.Character or Player.CharacterAdded:Wait()
+    -- ═══════════ Cached Scans ═══════════
+    local cache = {
+        fruits = {},
+        sell = nil,
+        seeds = {},
+        plants = {},
+        growAll = nil,
+        collectAll = nil,
+        lastScan = 0,
+        SCAN_INTERVAL = 2,
+    }
+
+    local function refreshCache()
+        local now = tick()
+        if now - cache.lastScan < cache.SCAN_INTERVAL then return end
+        cache.lastScan = now
+
+        cache.fruits = {}
+        cache.seeds = {}
+        cache.plants = {}
+        cache.sell = nil
+        cache.growAll = nil
+        cache.collectAll = nil
+
+        for _, pp in ipairs(game:GetDescendants()) do
+            if pp:IsA("ProximityPrompt") then
+                local action = pp.ActionText
+                local obj = pp.ObjectText
+                if action == "Collect" then
+                    local part = pp:FindFirstAncestorWhichIsA("BasePart")
+                    if part then
+                        table.insert(cache.fruits, {prompt = pp, part = part})
+                    end
+                elseif action == "Sell" and not cache.sell then
+                    cache.sell = pp
+                elseif action == "Buy" then
+                    if obj == "Grow All Fruits" and not cache.growAll then
+                        cache.growAll = pp
+                    elseif obj == "Collect All Fruits" and not cache.collectAll then
+                        cache.collectAll = pp
+                    elseif obj:find("Seed") then
+                        local part = pp:FindFirstAncestorWhichIsA("BasePart")
+                        if part then
+                            table.insert(cache.seeds, {prompt = pp, part = part, name = obj})
+                        end
+                    end
+                elseif action == "Plant Seed" then
+                    local part = pp:FindFirstAncestorWhichIsA("BasePart")
+                    if part then
+                        table.insert(cache.plants, {prompt = pp, part = part})
+                    end
+                end
+            end
+        end
     end
 
+    -- Force first scan immediately
+    cache.lastScan = 0
+    refreshCache()
+
+    -- ═══════════ Utility ═══════════
     local function getRoot()
-        local c = getChar()
+        local c = Player.Character
         return c and c:FindFirstChild("HumanoidRootPart")
     end
 
     local function getHumanoid()
-        local c = getChar()
+        local c = Player.Character
         return c and c:FindFirstChildOfClass("Humanoid")
     end
 
@@ -55,105 +107,24 @@ return function(Window, scriptInfo)
 
     local function safeFire(pp)
         if not pp then return end
-        pcall(function()
-            fireproximityprompt(pp, 0)
+        pcall(function() fireproximityprompt(pp, 0) end)
+    end
+
+    -- ═══════════ Thread Manager ═══════════
+    local threads = {}
+    local function startThread(key, func)
+        if threads[key] then
+            threads[key] = nil  -- signal old thread to stop
+        end
+        task.spawn(function()
+            threads[key] = true
+            func(function() return threads[key] == true and running end)
+            threads[key] = nil
         end)
     end
 
-    local function toggleConn(key, enabled, func)
-        if connections[key] then
-            connections[key]:Disconnect()
-            connections[key] = nil
-        end
-        if enabled and func then
-            connections[key] = RunService.Heartbeat:Connect(func)
-        end
-    end
-
-    -- ═══════════ Scanners (game:GetDescendants for full coverage) ═══════════
-    local function getFruitSpawns()
-        local fruits = {}
-        for _, pp in ipairs(game:GetDescendants()) do
-            if pp:IsA("ProximityPrompt") and pp.ActionText == "Collect" then
-                local part = pp:FindFirstAncestorWhichIsA("BasePart")
-                if part then
-                    table.insert(fruits, {prompt = pp, part = part})
-                end
-            end
-        end
-        return fruits
-    end
-
-    local function getSellStand()
-        for _, pp in ipairs(game:GetDescendants()) do
-            if pp:IsA("ProximityPrompt") and pp.ActionText == "Sell" then
-                return pp
-            end
-        end
-        return nil
-    end
-
-    local function getSeedHolders()
-        local seeds = {}
-        for _, pp in ipairs(game:GetDescendants()) do
-            if pp:IsA("ProximityPrompt") and pp.ActionText == "Buy" then
-                local objText = pp.ObjectText
-                if objText:find("Seed") then
-                    local part = pp:FindFirstAncestorWhichIsA("BasePart")
-                    if part then
-                        table.insert(seeds, {
-                            prompt = pp,
-                            part = part,
-                            name = objText,
-                        })
-                    end
-                end
-            end
-        end
-        return seeds
-    end
-
-    local function getPlantPrompts()
-        local prompts = {}
-        for _, pp in ipairs(game:GetDescendants()) do
-            if pp:IsA("ProximityPrompt") and pp.ActionText == "Plant Seed" then
-                local part = pp:FindFirstAncestorWhichIsA("BasePart")
-                if part then
-                    table.insert(prompts, {prompt = pp, part = part})
-                end
-            end
-        end
-        return prompts
-    end
-
-    local function getGrowAll()
-        for _, pp in ipairs(game:GetDescendants()) do
-            if pp:IsA("ProximityPrompt") and pp.ActionText == "Buy"
-                and pp.ObjectText == "Grow All Fruits" then
-                return pp
-            end
-        end
-        return nil
-    end
-
-    local function getCollectAll()
-        for _, pp in ipairs(game:GetDescendants()) do
-            if pp:IsA("ProximityPrompt") and pp.ActionText == "Buy"
-                and pp.ObjectText == "Collect All Fruits" then
-                return pp
-            end
-        end
-        return nil
-    end
-
-    local function isDangerousWeather()
-        for _, obj in ipairs(Workspace:GetChildren()) do
-            local n = obj.Name:lower()
-            if n:find("meteor") or n:find("storm") or n:find("lightning") then
-                return true
-            end
-        end
-        return false
+    local function stopThread(key)
+        threads[key] = nil
     end
 
     -- ═══════════════════════════════════════════════════════════
@@ -170,17 +141,23 @@ return function(Window, scriptInfo)
         Flag = "GGAutoCollect",
         Callback = function(v)
             settings.autoCollect = v
-            toggleConn("autoCollect", v, function()
-                if not settings.autoCollect then return end
-                local fruits = getFruitSpawns()
-                for _, f in ipairs(fruits) do
-                    if not settings.autoCollect then break end
-                    tpTo(f.part.Position)
-                    task.wait(0.15)
-                    safeFire(f.prompt)
-                    task.wait(settings.collectDelay)
-                end
-            end)
+            if v then
+                startThread("autoCollect", function(isActive)
+                    while isActive() do
+                        refreshCache()
+                        for _, f in ipairs(cache.fruits) do
+                            if not isActive() then break end
+                            tpTo(f.part.Position)
+                            task.wait(0.15)
+                            safeFire(f.prompt)
+                            task.wait(settings.collectDelay)
+                        end
+                        task.wait(1)
+                    end
+                end)
+            else
+                stopThread("autoCollect")
+            end
         end,
     })
 
@@ -197,14 +174,13 @@ return function(Window, scriptInfo)
     CollectTab:CreateButton({
         Name = "Collect All (One-shot)",
         Callback = function()
-            local pp = getCollectAll()
-            if pp then
-                local part = pp:FindFirstAncestorWhichIsA("BasePart")
+            refreshCache()
+            if cache.collectAll then
+                local part = cache.collectAll:FindFirstAncestorWhichIsA("BasePart")
                 if part then tpTo(part.Position); task.wait(0.2) end
-                safeFire(pp)
+                safeFire(cache.collectAll)
             else
-                local fruits = getFruitSpawns()
-                for _, f in ipairs(fruits) do
+                for _, f in ipairs(cache.fruits) do
                     tpTo(f.part.Position)
                     task.wait(0.15)
                     safeFire(f.prompt)
@@ -224,17 +200,22 @@ return function(Window, scriptInfo)
         Flag = "GGAutoSell",
         Callback = function(v)
             settings.autoSell = v
-            toggleConn("autoSell", v, function()
-                if not settings.autoSell then return end
-                local pp = getSellStand()
-                if pp then
-                    local part = pp:FindFirstAncestorWhichIsA("BasePart")
-                    if part then tpTo(part.Position) end
-                    task.wait(0.2)
-                    safeFire(pp)
-                    task.wait(settings.sellInterval)
-                end
-            end)
+            if v then
+                startThread("autoSell", function(isActive)
+                    while isActive() do
+                        refreshCache()
+                        if cache.sell then
+                            local part = cache.sell:FindFirstAncestorWhichIsA("BasePart")
+                            if part then tpTo(part.Position) end
+                            task.wait(0.2)
+                            safeFire(cache.sell)
+                        end
+                        task.wait(settings.sellInterval)
+                    end
+                end)
+            else
+                stopThread("autoSell")
+            end
         end,
     })
 
@@ -251,11 +232,11 @@ return function(Window, scriptInfo)
     SellTab:CreateButton({
         Name = "Sell Now",
         Callback = function()
-            local pp = getSellStand()
-            if pp then
-                local part = pp:FindFirstAncestorWhichIsA("BasePart")
+            refreshCache()
+            if cache.sell then
+                local part = cache.sell:FindFirstAncestorWhichIsA("BasePart")
                 if part then tpTo(part.Position); task.wait(0.2) end
-                safeFire(pp)
+                safeFire(cache.sell)
             end
         end,
     })
@@ -270,28 +251,34 @@ return function(Window, scriptInfo)
         Flag = "GGAutoPlant",
         Callback = function(v)
             settings.autoPlant = v
-            toggleConn("autoPlant", v, function()
-                if not settings.autoPlant then return end
-                local prompts = getPlantPrompts()
-                for _, p in ipairs(prompts) do
-                    if not settings.autoPlant then break end
-                    tpTo(p.part.Position)
-                    task.wait(0.15)
-                    safeFire(p.prompt)
-                    task.wait(0.5)
-                end
-            end)
+            if v then
+                startThread("autoPlant", function(isActive)
+                    while isActive() do
+                        refreshCache()
+                        for _, p in ipairs(cache.plants) do
+                            if not isActive() then break end
+                            tpTo(p.part.Position)
+                            task.wait(0.15)
+                            safeFire(p.prompt)
+                            task.wait(0.5)
+                        end
+                        task.wait(1)
+                    end
+                end)
+            else
+                stopThread("autoPlant")
+            end
         end,
     })
 
     PlantTab:CreateButton({
         Name = "Grow All",
         Callback = function()
-            local pp = getGrowAll()
-            if pp then
-                local part = pp:FindFirstAncestorWhichIsA("BasePart")
+            refreshCache()
+            if cache.growAll then
+                local part = cache.growAll:FindFirstAncestorWhichIsA("BasePart")
                 if part then tpTo(part.Position); task.wait(0.2) end
-                safeFire(pp)
+                safeFire(cache.growAll)
             end
         end,
     })
@@ -299,8 +286,8 @@ return function(Window, scriptInfo)
     PlantTab:CreateButton({
         Name = "Plant All (One-shot)",
         Callback = function()
-            local prompts = getPlantPrompts()
-            for _, p in ipairs(prompts) do
+            refreshCache()
+            for _, p in ipairs(cache.plants) do
                 tpTo(p.part.Position)
                 task.wait(0.15)
                 safeFire(p.prompt)
@@ -330,19 +317,25 @@ return function(Window, scriptInfo)
         Flag = "GGAutoBuySeed",
         Callback = function(v)
             settings.autoBuySeed = v
-            toggleConn("autoBuySeed", v, function()
-                if not settings.autoBuySeed then return end
-                local seeds = getSeedHolders()
-                for _, s in ipairs(seeds) do
-                    if not settings.autoBuySeed then break end
-                    if s.name:lower():find(settings.selectedSeed:lower()) then
-                        tpTo(s.part.Position)
-                        task.wait(0.15)
-                        safeFire(s.prompt)
-                        task.wait(settings.buyDelay)
+            if v then
+                startThread("autoBuySeed", function(isActive)
+                    while isActive() do
+                        refreshCache()
+                        for _, s in ipairs(cache.seeds) do
+                            if not isActive() then break end
+                            if s.name:lower():find(settings.selectedSeed:lower()) then
+                                tpTo(s.part.Position)
+                                task.wait(0.15)
+                                safeFire(s.prompt)
+                                task.wait(settings.buyDelay)
+                            end
+                        end
+                        task.wait(1)
                     end
-                end
-            end)
+                end)
+            else
+                stopThread("autoBuySeed")
+            end
         end,
     })
 
@@ -359,8 +352,8 @@ return function(Window, scriptInfo)
     BuyTab:CreateButton({
         Name = "Buy Selected Seed Now",
         Callback = function()
-            local seeds = getSeedHolders()
-            for _, s in ipairs(seeds) do
+            refreshCache()
+            for _, s in ipairs(cache.seeds) do
                 if s.name:lower():find(settings.selectedSeed:lower()) then
                     tpTo(s.part.Position)
                     task.wait(0.15)
@@ -381,16 +374,27 @@ return function(Window, scriptInfo)
         Flag = "GGAntiMeteor",
         Callback = function(v)
             settings.antiMeteor = v
-            toggleConn("antiMeteor", v, function()
-                if not settings.antiMeteor then return end
-                if isDangerousWeather() then
-                    local root = getRoot()
-                    if root then
-                        local fleeDir = root.CFrame.LookVector * settings.meteorFleeDist
-                        tpTo(root.Position + fleeDir)
+            if v then
+                startThread("antiMeteor", function(isActive)
+                    while isActive() do
+                        for _, obj in ipairs(game:GetService("Workspace"):GetChildren()) do
+                            if not isActive() then break end
+                            local n = obj.Name:lower()
+                            if n:find("meteor") or n:find("storm") or n:find("lightning") then
+                                local root = getRoot()
+                                if root then
+                                    local fleeDir = root.CFrame.LookVector * settings.meteorFleeDist
+                                    tpTo(root.Position + fleeDir)
+                                end
+                                break
+                            end
+                        end
+                        task.wait(0.5)
                     end
-                end
-            end)
+                end)
+            else
+                stopThread("antiMeteor")
+            end
         end,
     })
 
@@ -407,11 +411,17 @@ return function(Window, scriptInfo)
     WeatherTab:CreateButton({
         Name = "Check Weather",
         Callback = function()
-            local danger = isDangerousWeather()
+            local danger = false
+            for _, obj in ipairs(game:GetService("Workspace"):GetChildren()) do
+                local n = obj.Name:lower()
+                if n:find("meteor") or n:find("storm") or n:find("lightning") then
+                    danger = true; break
+                end
+            end
             pcall(function()
                 Window:Notify({
                     Title = "Weather",
-                    Content = danger and "DANGER: Meteor/Storm detected!" or "Safe: No danger weather",
+                    Content = danger and "DANGER: Meteor/Storm!" or "Safe",
                     Duration = 3,
                 })
             end)
@@ -428,11 +438,17 @@ return function(Window, scriptInfo)
         Flag = "GGAutoSpeed",
         Callback = function(v)
             settings.autoSpeed = v
-            toggleConn("autoSpeed", v, function()
-                if not settings.autoSpeed then return end
-                local hum = getHumanoid()
-                if hum then hum.WalkSpeed = settings.walkSpeed end
-            end)
+            if v then
+                startThread("autoSpeed", function(isActive)
+                    while isActive() do
+                        local hum = getHumanoid()
+                        if hum then hum.WalkSpeed = settings.walkSpeed end
+                        task.wait(1)
+                    end
+                end)
+            else
+                stopThread("autoSpeed")
+            end
         end,
     })
 
@@ -461,24 +477,20 @@ return function(Window, scriptInfo)
     -- ─── Tab 7: Settings ───
     local SettingsTab = Window:CreateTab("Settings", "settings")
     SettingsTab:CreateSection("Info")
-
-    SettingsTab:CreateLabel("Greedy Growers v1.0.1 | RAVEN HUB")
+    SettingsTab:CreateLabel("Greedy Growers v1.0.2 | RAVEN HUB")
 
     SettingsTab:CreateSection("Debug")
-
     SettingsTab:CreateButton({
-        Name = "Scan Game (Debug)",
+        Name = "Scan Game",
         Callback = function()
-            local fruits = getFruitSpawns()
-            local sell = getSellStand()
-            local seeds = getSeedHolders()
-            local plants = getPlantPrompts()
+            refreshCache()
             pcall(function()
                 Window:Notify({
                     Title = "GG Debug",
                     Content = string.format(
-                        "Fruits: %d | Sell: %s | Seeds: %d | Plants: %d",
-                        #fruits, tostring(sell ~= nil), #seeds, #plants
+                        "Fruits:%d Sell:%s Seeds:%d Plants:%d",
+                        #cache.fruits, tostring(cache.sell ~= nil),
+                        #cache.seeds, #cache.plants
                     ),
                     Duration = 5,
                 })
@@ -487,7 +499,6 @@ return function(Window, scriptInfo)
     })
 
     SettingsTab:CreateSection("Server")
-
     SettingsTab:CreateButton({
         Name = "Rejoin Server",
         Callback = function()
@@ -520,21 +531,19 @@ return function(Window, scriptInfo)
     -- ═══════════ Cleanup ═══════════
     local function destroy()
         running = false
-        for key, conn in pairs(connections) do
-            pcall(function() conn:Disconnect() end)
+        for key, _ in pairs(threads) do
+            threads[key] = nil
         end
-        connections = {}
     end
 
     if scriptInfo and type(scriptInfo.registerCleanup) == "function" then
         scriptInfo.registerCleanup(destroy)
     end
 
-    -- Notify loaded
     pcall(function()
         Window:Notify({
             Title = "Greedy Growers",
-            Content = "v1.0.1 loaded! " .. #getFruitSpawns() .. " fruits detected",
+            Content = "v1.0.2 loaded! " .. #cache.fruits .. " fruits",
             Duration = 3,
         })
     end)
