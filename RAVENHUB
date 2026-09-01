@@ -417,7 +417,7 @@ local SCRIPTS = {
         placeIds    = {74102906764176},
         gameIds     = {10440833423},
         version     = "v2.0.0",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/greedy_growers.lua?v=greedy-growers-2.0.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/bb224258e545f8c2832081c36e0c0bea1c3300ff/modules/greedy_growers.lua?v=greedy-growers-2.0.1",
     },
     --[[
     {
