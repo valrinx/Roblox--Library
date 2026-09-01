@@ -17,6 +17,12 @@
 - Narrowed the existing Shiganshina registry match to its dedicated PlaceId so it does not load in the main customization place.
 # Changelog
 
+## 2026-08-31 - Dungeon Lootr v2.0.1
+
+- Fixed live UI resolution for `PlayerGui.Main.HUD` and `Main.Frames`, including skill, health, chest, and quest actions.
+- Scoped enemy scanning to generated dungeon/NPC roots and added cooldowns to prevent overlapping automation loops.
+- Filtered the hub library list to modules compatible with the current PlaceId/GameId.
+
 ## 2026-08-28 - The Wild West v0.1.12
 
 - Added a short lock grace window so transient visibility scans do not drop a valid target.
