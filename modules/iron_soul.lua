@@ -1,7 +1,7 @@
 --[[
     RAVEN HUB | Iron Soul: Dungeon
     Lobby PlaceId: 117533937949084 | Starless Forest: 116456628154258
-    GameId: 9910245722 | Version: v1.4.0
+    GameId: 9910245722 | Version: v1.4.1
 ]]
 return function(Window, runtimeInfo)
     local Players = game:GetService("Players")
@@ -401,15 +401,24 @@ return function(Window, runtimeInfo)
         return enemies[1] and enemies[1].model or nil
     end
 
-    local Dashboard=Window:CreateTab("Dungeon", "activity")
-    Dashboard:CreateSection("Iron Soul v1.4.0")
+    -- MacLib creates a large batch of Instances for every tab.  Potassium can
+    -- temporarily revoke the Instance capability when several tabs are built
+    -- back-to-back in one scheduler slice.  Yield once per tab so the UI
+    -- builder gets a fresh slice and never aborts halfway through the module.
+    local function createTab(name, icon)
+        task.wait()
+        return Window:CreateTab(name, icon)
+    end
+
+    local Dashboard=createTab("Dungeon", "activity")
+    Dashboard:CreateSection("Iron Soul v1.4.1")
     local roundLabel=Dashboard:CreateLabel("Round: scanning...")
     local enemyCountLabel=Dashboard:CreateLabel("Enemies: scanning...")
     local targetLabel=Dashboard:CreateLabel("Target: none")
     local dodgeLabel=Dashboard:CreateLabel("Redzone: clear")
     local endActionLabel=Dashboard:CreateLabel("End action: waiting for dungeon result")
 
-    local Combat=Window:CreateTab("Combat Intel", "crosshair")
+    local Combat=createTab("Combat Intel", "crosshair")
     Combat:CreateSection("Enemy ESP")
     Combat:CreateToggle({Name="Enemy ESP",CurrentValue=true,Flag="IronSoulEnemyESP",Callback=function(v) settings.enemyEsp=v end})
     Combat:CreateToggle({Name="Show HP",CurrentValue=true,Flag="IronSoulShowHP",Callback=function(v) settings.showHp=v end})
@@ -419,7 +428,7 @@ return function(Window, runtimeInfo)
     Combat:CreateToggle({Name="Sticky Target",CurrentValue=true,Flag="IronSoulSticky",Callback=function(v) settings.stickyTarget=v if not v then selectedTarget=nil end end})
     Combat:CreateToggle({Name="Spectate Current Target",CurrentValue=false,Flag="IronSoulSpectate",Callback=function(v) spectating=v end})
 
-    local Farm=Window:CreateTab("Autofarm", "swords")
+    local Farm=createTab("Autofarm", "swords")
     Farm:CreateSection("Target Based Autofarm")
     Farm:CreateToggle({Name="Auto Farm Target",CurrentValue=false,Flag="IronSoulAutoFarm",Callback=function(v) settings.autoFarm=v end})
     Farm:CreateToggle({Name="Auto Base Attack",CurrentValue=true,Flag="IronSoulAutoAttack",Callback=function(v) settings.autoAttack=v end})
@@ -435,7 +444,7 @@ return function(Window, runtimeInfo)
     Farm:CreateToggle({Name="Auto Collect Chests",CurrentValue=false,Flag="IronSoulCollectChests",Callback=function(v) settings.autoCollectChests=v end})
     Farm:CreateToggle({Name="Auto Collect Dragon Eggs",CurrentValue=false,Flag="IronSoulCollectEggs",Callback=function(v) settings.autoCollectEggs=v end})
 
-    local Dodge=Window:CreateTab("Dodge", "shield")
+    local Dodge=createTab("Dodge", "shield")
     Dodge:CreateSection("RedShow Avoidance")
     Dodge:CreateToggle({Name="Auto Dodge Redzone",CurrentValue=false,Flag="IronSoulAutoDodge",Callback=function(v) settings.autoDodge=v end})
     Dodge:CreateDropdown({Name="Escape Mode",Options={"Underground","Air","Nearest Edge"},CurrentOption={"Air"},MultipleOptions=false,Flag="IronSoulDodgeMode",Callback=function(v) settings.dodgeMode=type(v)=="table"and v[1]or v end})
@@ -445,7 +454,7 @@ return function(Window, runtimeInfo)
     Dodge:CreateSlider({Name="Dodge Cooldown",Range={0.2,1.5},Increment=.05,CurrentValue=.55,Suffix="s",Flag="IronSoulDodgeCooldown",Callback=function(v) settings.dodgeCooldown=v end})
     Dodge:CreateSlider({Name="Dodge Hold",Range={0.5,3},Increment=.1,CurrentValue=1.4,Suffix="s",Flag="IronSoulDodgeHold",Callback=function(v) settings.dodgeHold=v end})
 
-    local Utility=Window:CreateTab("Utility", "settings")
+    local Utility=createTab("Utility", "settings")
     Utility:CreateSection("Movement")
     Utility:CreateToggle({Name="Custom WalkSpeed",CurrentValue=false,Flag="IronSoulWalkSpeed",Callback=function(v) settings.walkSpeed=v end})
     Utility:CreateSlider({Name="WalkSpeed Value",Range={1,100},Increment=1,CurrentValue=26,Suffix="",Flag="IronSoulWalkSpeedVal",Callback=function(v) settings.walkSpeedValue=v end})
@@ -453,7 +462,7 @@ return function(Window, runtimeInfo)
     Utility:CreateToggle({Name="Custom Camera (AFK View)",CurrentValue=false,Flag="IronSoulCamera",Callback=function(v) settings.cameraChange=v if not v then workspace.CurrentCamera.CameraType=Enum.CameraType.Custom workspace.CurrentCamera.CameraSubject=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid") end end})
     Utility:CreateSlider({Name="Camera Distance",Range={10,150},Increment=5,CurrentValue=70,Suffix=" studs",Flag="IronSoulCamDist",Callback=function(v) settings.cameraDistance=v end})
 
-    local Sell=Window:CreateTab("Auto Sell", "dollar-sign")
+    local Sell=createTab("Auto Sell", "dollar-sign")
     Sell:CreateSection("Sell by Rarity")
     local rarityOptions = getRarityTiers()
     Sell:CreateDropdown({Name="Equipment Rarity",Options=rarityOptions,CurrentOption={},MultipleOptions=true,Flag="IronSoulSellRarity",Callback=function(v) settings.sellEquipmentRarities=type(v)=="table"and v or{v} end})
@@ -461,7 +470,7 @@ return function(Window, runtimeInfo)
     Sell:CreateDropdown({Name="Crystals",Options=(function() local t={} for _,c in ipairs(getCrystals()) do table.insert(t,c.Name) end return t end)(),CurrentOption={},MultipleOptions=true,Flag="IronSoulSellCrystals",Callback=function(v) settings.sellCrystals=type(v)=="table"and v or{v} end})
     Sell:CreateToggle({Name="Auto Sell",CurrentValue=false,Flag="IronSoulAutoSell",Callback=function(v) settings.autoSell=v end})
 
-    local Progress=Window:CreateTab("Progress", "map")
+    local Progress=createTab("Progress", "map")
     Progress:CreateSection("Round / Portal")
     Progress:CreateToggle({Name="Portal ESP",CurrentValue=true,Flag="IronSoulPortalESP",Callback=function(v) settings.portalEsp=v end})
     Progress:CreateSlider({Name="Portal Distance",Range={250,6000},Increment=250,CurrentValue=2500,Suffix=" studs",Flag="IronSoulPortalDistance",Callback=function(v) settings.portalDistance=v end})
