@@ -265,7 +265,7 @@ local SCRIPTS = {
         description = "Enemy ESP | Autofarm | Auto Dodge | Round/Portal | Replay/Lobby",
         placeIds    = {117533937949084, 116456628154258},
         gameIds     = {9910245722},
-        version     = "v1.3.6",
+        version     = "v1.4.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/iron_soul.lua",
     },
     {

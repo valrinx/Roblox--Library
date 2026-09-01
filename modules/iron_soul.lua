@@ -1,7 +1,7 @@
 --[[
     RAVEN HUB | Iron Soul: Dungeon
     Lobby PlaceId: 117533937949084 | Starless Forest: 116456628154258
-    GameId: 9910245722 | Version: v1.3.6
+    GameId: 9910245722 | Version: v1.4.0
 ]]
 return function(Window, runtimeInfo)
     local Players = game:GetService("Players")
@@ -34,6 +34,11 @@ return function(Window, runtimeInfo)
         autoOpenDoor = false, autoNextPortal = false, progressOnlyWhenClear = true, progressCooldown = 2,
         progressMovement = "Teleport", progressOffset = 3, clearDelay = 2.5,
         endAction = "Off", endActionDelay = 3,
+        bringMobs = false, bringMobsRange = 100,
+        autoCollectChests = false, autoCollectEggs = false,
+        walkSpeed = false, walkSpeedValue = 26,
+        cameraChange = false, cameraDistance = 70, cameraBack = 50,
+        autoSell = false, sellEquipmentRarities = {}, sellOres = {}, sellCrystals = {},
     }
 
     local guiRoot = (type(gethui) == "function" and gethui()) or CoreGui
@@ -131,6 +136,153 @@ return function(Window, runtimeInfo)
         end
     end
 
+    -- Framework integration (from Potassium reference)
+    local Framework, DataUtil, EquipmentUtil, ForgeUtil, RarityTiers, TranslationUtil, MaterialUtil
+    pcall(function()
+        Framework = require(game:GetService("ReplicatedStorage"):WaitForChild("Framework"))
+        DataUtil = Framework.Modules.DataUtil
+        EquipmentUtil = Framework.Modules.EquipmentUtil
+        ForgeUtil = Framework.Modules.ForgeUtil
+        RarityTiers = Framework.Modules.RarityTiers
+        TranslationUtil = Framework.Modules.TranslationUtil
+        MaterialUtil = Framework.Modules.MaterialUtil
+    end)
+    local function getRarityTiers()
+        if not RarityTiers then return {} end
+        local t = {}
+        for _, v in pairs(RarityTiers.Tiers) do table.insert(t, v.Name) end
+        return t
+    end
+    local function getRarityName(rarity)
+        if not RarityTiers then return "Unknown" end
+        return RarityTiers.Tiers[rarity] and RarityTiers.Tiers[rarity].Name or "Unknown"
+    end
+    local function getEquipment()
+        if not DataUtil or not EquipmentUtil then return {} end
+        local result = {}
+        local ok, playerData = pcall(function() return DataUtil:GetPlayerData(LP) end)
+        if not ok or not playerData then return result end
+        local owned = playerData.Equipment and playerData.Equipment.Owned
+        if not owned then return result end
+        for uuid, itemData in pairs(owned) do
+            local def = EquipmentUtil:GetDef(itemData.ID)
+            if def then
+                local name = TranslationUtil:TranslateByKey("K_" .. string.upper(def.ID))
+                local rarity = EquipmentUtil:GetOreRarity(itemData.MaxOre)
+                table.insert(result, { UUID = uuid, ID = itemData.ID, Name = name, Rarity = getRarityName(rarity), Type = itemData.Type, Level = EquipmentUtil:GetLvByInfo(itemData, def) })
+            end
+        end
+        return result
+    end
+    local function getOres()
+        if not DataUtil or not ForgeUtil or not TranslationUtil then return {} end
+        local result = {}
+        local ok, playerData = pcall(function() return DataUtil:GetPlayerData(LP) end)
+        if not ok or not playerData or not playerData.Ores then return result end
+        for oreId, amount in pairs(playerData.Ores) do
+            local def = ForgeUtil:GetDef(oreId)
+            if def then
+                local name = TranslationUtil:TranslateByKey("K_" .. string.upper(def.ID))
+                local rarity = RarityTiers and RarityTiers.Tiers[def.Rarity] and RarityTiers.Tiers[def.Rarity].Name or "Unknown"
+                table.insert(result, { ID = oreId, Name = name, Amount = amount, Rarity = rarity })
+            end
+        end
+        return result
+    end
+    local function getCrystals()
+        if not DataUtil or not MaterialUtil or not TranslationUtil then return {} end
+        local result = {}
+        local ok, playerData = pcall(function() return DataUtil:GetPlayerData(LP) end)
+        if not ok or not playerData or not playerData.Crystals then return result end
+        for crystalId, amount in pairs(playerData.Crystals) do
+            local def = MaterialUtil:GetDef(crystalId)
+            if def then
+                local name = TranslationUtil:TranslateByKey("K_" .. string.upper(def.ID))
+                local rarity = RarityTiers and RarityTiers.Tiers[def.Rarity] and RarityTiers.Tiers[def.Rarity].Name or "Unknown"
+                table.insert(result, { ID = crystalId, Name = name, Amount = amount, Rarity = rarity })
+            end
+        end
+        return result
+    end
+    local function sellEquipmentByRarity(rarities)
+        if not EquipmentUtil then return end
+        local items = getEquipment()
+        for _, item in ipairs(items) do
+            for _, r in ipairs(rarities) do
+                if item.Rarity == r then
+                    pcall(function()
+                        game:GetService("ReplicatedStorage").Framework.Gameplay.EquipmentSystem.EquipmentRE:FireServer("Sell", { item.UUID })
+                    end)
+                    task.wait(0.1)
+                    break
+                end
+            end
+        end
+    end
+    local function sellOres(oreNames)
+        if not ForgeUtil then return end
+        local ores = getOres()
+        local toSell = {}
+        for _, ore in ipairs(ores) do
+            for _, name in ipairs(oreNames) do
+                if ore.Name == name then toSell[ore.ID] = 1; break end
+            end
+        end
+        if next(toSell) then
+            pcall(function()
+                game:GetService("ReplicatedStorage").Framework.Gameplay.EquipmentSystem.ForgeRF:InvokeServer("Sell", toSell)
+            end)
+        end
+    end
+    local function sellCrystals(crystalNames)
+        if not MaterialUtil then return end
+        local crystals = getCrystals()
+        local toSell = {}
+        for _, c in ipairs(crystals) do
+            for _, name in ipairs(crystalNames) do
+                if c.Name == name then toSell[c.ID] = 1; break end
+            end
+        end
+        if next(toSell) then
+            pcall(function()
+                game:GetService("ReplicatedStorage").Framework.Gameplay.EquipmentSystem.MaterialUtil.RemoteEvent:FireServer("Sell", toSell, {})
+            end)
+        end
+    end
+    local function collectChests()
+        local root = myRoot(); if not root then return end
+        for _, v in ipairs(workspace:GetChildren()) do
+            if v:IsA("Model") and v.Name:find("Chest") and v:FindFirstChild("Root") and (v:GetAttribute("HitCount") or 0) > 0 then
+                local chestRoot = v.Root
+                root.CFrame = chestRoot.CFrame
+                task.wait(0.15)
+            end
+        end
+    end
+    local function collectDragonEggs()
+        local root = myRoot(); if not root then return end
+        for _, v in ipairs(workspace:GetChildren()) do
+            if v:FindFirstChild("DragonEgg") and v.DragonEgg:FindFirstChild("EggModel") and v.DragonEgg.EggModel:FindFirstChild("Root") and v:FindFirstChild("Root") and not v:GetAttribute("Active") then
+                root.CFrame = v.DragonEgg.EggModel.Root.CFrame
+                task.wait(0.1)
+                if type(fireproximityprompt) == "function" and v.Root:FindFirstChild("Interact_ProximityPrompt") then
+                    pcall(fireproximityprompt, v.Root.Interact_ProximityPrompt)
+                end
+            end
+        end
+    end
+    local function bringMobsToTarget()
+        local root = myRoot(); if not root then return end
+        local targetPart = getPart(selectedTarget)
+        if not targetPart then return end
+        for _, v in ipairs(workspace.EnemyNpc:GetChildren()) do
+            if v:IsA("Model") and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 and v:FindFirstChild("HumanoidRootPart") then
+                if (targetPart.Position - v.HumanoidRootPart.Position).Magnitude <= settings.bringMobsRange then
+                    v.HumanoidRootPart.CFrame = targetPart.CFrame
+                end
+            end
+        end
+    end
     local function normalizedGuiText(button)
         local values={button.Name}
         if button:IsA("TextButton") then table.insert(values,button.Text) end
@@ -237,7 +389,7 @@ return function(Window, runtimeInfo)
     end
 
     local Dashboard=Window:CreateTab("Dungeon", "activity")
-    Dashboard:CreateSection("Iron Soul v1.3.6")
+    Dashboard:CreateSection("Iron Soul v1.4.0")
     local roundLabel=Dashboard:CreateLabel("Round: scanning...")
     local enemyCountLabel=Dashboard:CreateLabel("Enemies: scanning...")
     local targetLabel=Dashboard:CreateLabel("Target: none")
@@ -263,6 +415,12 @@ return function(Window, runtimeInfo)
     Farm:CreateSlider({Name="Attack Distance",Range={3,30},Increment=1,CurrentValue=7,Suffix=" studs",Flag="IronSoulFarmDistance",Callback=function(v) settings.farmDistance=v end})
     Farm:CreateSlider({Name="Height Above Target",Range={3,30},Increment=1,CurrentValue=8,Suffix=" studs",Flag="IronSoulFarmHeight",Callback=function(v) settings.heightAbove=v end})
     Farm:CreateSlider({Name="Action Delay",Range={0.1,0.8},Increment=.02,CurrentValue=.18,Suffix="s",Flag="IronSoulActionDelay",Callback=function(v) settings.actionDelay=v end})
+    Farm:CreateSection("Mob Management")
+    Farm:CreateToggle({Name="Bring Mobs to Target",CurrentValue=false,Flag="IronSoulBringMobs",Callback=function(v) settings.bringMobs=v end})
+    Farm:CreateSlider({Name="Bring Range",Range={20,200},Increment=10,CurrentValue=100,Suffix=" studs",Flag="IronSoulBringRange",Callback=function(v) settings.bringMobsRange=v end})
+    Farm:CreateSection("Collection")
+    Farm:CreateToggle({Name="Auto Collect Chests",CurrentValue=false,Flag="IronSoulCollectChests",Callback=function(v) settings.autoCollectChests=v end})
+    Farm:CreateToggle({Name="Auto Collect Dragon Eggs",CurrentValue=false,Flag="IronSoulCollectEggs",Callback=function(v) settings.autoCollectEggs=v end})
 
     local Dodge=Window:CreateTab("Dodge", "shield")
     Dodge:CreateSection("RedShow Avoidance")
@@ -273,6 +431,22 @@ return function(Window, runtimeInfo)
     Dodge:CreateSlider({Name="Vertical Escape",Range={15,80},Increment=5,CurrentValue=50,Suffix=" studs",Flag="IronSoulDodgeVertical",Callback=function(v) settings.dodgeVertical=v end})
     Dodge:CreateSlider({Name="Dodge Cooldown",Range={0.2,1.5},Increment=.05,CurrentValue=.55,Suffix="s",Flag="IronSoulDodgeCooldown",Callback=function(v) settings.dodgeCooldown=v end})
     Dodge:CreateSlider({Name="Dodge Hold",Range={0.5,3},Increment=.1,CurrentValue=1.4,Suffix="s",Flag="IronSoulDodgeHold",Callback=function(v) settings.dodgeHold=v end})
+
+    local Utility=Window:CreateTab("Utility", "settings")
+    Utility:CreateSection("Movement")
+    Utility:CreateToggle({Name="Custom WalkSpeed",CurrentValue=false,Flag="IronSoulWalkSpeed",Callback=function(v) settings.walkSpeed=v end})
+    Utility:CreateSlider({Name="WalkSpeed Value",Range={1,100},Increment=1,CurrentValue=26,Suffix="",Flag="IronSoulWalkSpeedVal",Callback=function(v) settings.walkSpeedValue=v end})
+    Utility:CreateSection("Camera")
+    Utility:CreateToggle({Name="Custom Camera (AFK View)",CurrentValue=false,Flag="IronSoulCamera",Callback=function(v) settings.cameraChange=v if not v then workspace.CurrentCamera.CameraType=Enum.CameraType.Custom workspace.CurrentCamera.CameraSubject=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid") end end})
+    Utility:CreateSlider({Name="Camera Distance",Range={10,150},Increment=5,CurrentValue=70,Suffix=" studs",Flag="IronSoulCamDist",Callback=function(v) settings.cameraDistance=v end})
+
+    local Sell=Window:CreateTab("Auto Sell", "dollar-sign")
+    Sell:CreateSection("Sell by Rarity")
+    local rarityOptions = getRarityTiers()
+    Sell:CreateDropdown({Name="Equipment Rarity",Options=rarityOptions,CurrentOption={},MultipleOptions=true,Flag="IronSoulSellRarity",Callback=function(v) settings.sellEquipmentRarities=type(v)=="table"and v or{v} end})
+    Sell:CreateDropdown({Name="Ores",Options=(function() local t={} for _,o in ipairs(getOres()) do table.insert(t,o.Name) end return t end)(),CurrentOption={},MultipleOptions=true,Flag="IronSoulSellOres",Callback=function(v) settings.sellOres=type(v)=="table"and v or{v} end})
+    Sell:CreateDropdown({Name="Crystals",Options=(function() local t={} for _,c in ipairs(getCrystals()) do table.insert(t,c.Name) end return t end)(),CurrentOption={},MultipleOptions=true,Flag="IronSoulSellCrystals",Callback=function(v) settings.sellCrystals=type(v)=="table"and v or{v} end})
+    Sell:CreateToggle({Name="Auto Sell",CurrentValue=false,Flag="IronSoulAutoSell",Callback=function(v) settings.autoSell=v end})
 
     local Progress=Window:CreateTab("Progress", "map")
     Progress:CreateSection("Round / Portal")
@@ -431,6 +605,24 @@ return function(Window, runtimeInfo)
             end
         else
             stopAttack()
+        end
+
+        if settings.bringMobs and selectedTarget and root then bringMobsToTarget() end
+        if settings.autoCollectChests and #cachedEnemies==0 then pcall(collectChests) end
+        if settings.autoCollectEggs and #cachedEnemies==0 then pcall(collectDragonEggs) end
+        if settings.walkSpeed then
+            local hum=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+            if hum then hum.WalkSpeed=settings.walkSpeedValue end
+        end
+        if settings.cameraChange and root then
+            local cam=workspace.CurrentCamera; cam.CameraType=Enum.CameraType.Scriptable; cam.CameraSubject=nil
+            local camPos=root.Position+Vector3.new(0,settings.cameraDistance,settings.cameraBack)
+            pcall(function() cam.CFrame=CFrame.lookAt(camPos,root.Position) end)
+        end
+        if settings.autoSell and now-lastAction>=2 then
+            if #settings.sellEquipmentRarities>0 then pcall(function() sellEquipmentByRarity(settings.sellEquipmentRarities) end) end
+            if #settings.sellOres>0 then pcall(function() sellOres(settings.sellOres) end) end
+            if #settings.sellCrystals>0 then pcall(function() sellCrystals(settings.sellCrystals) end) end
         end
 
         local officialRound,completedRound=roundState()
@@ -645,6 +837,6 @@ return function(Window, runtimeInfo)
         local camera=workspace.CurrentCamera; if camera and LP.Character then camera.CameraSubject=LP.Character:FindFirstChildOfClass("Humanoid") end
         if getgenv().__RAVEN_IRON_SOUL and getgenv().__RAVEN_IRON_SOUL.Settings==settings then getgenv().__RAVEN_IRON_SOUL=nil end
     end
-    getgenv().__RAVEN_IRON_SOUL={Version="v1.3.6",Settings=settings,Destroy=destroy}
+    getgenv().__RAVEN_IRON_SOUL={Version="v1.4.0",Settings=settings,Destroy=destroy}
     if runtimeInfo and type(runtimeInfo.registerCleanup)=="function" then runtimeInfo.registerCleanup(destroy) end
 end
