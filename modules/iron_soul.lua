@@ -1,13 +1,14 @@
 --[[
     RAVEN HUB | Iron Soul: Dungeon
     Lobby PlaceId: 117533937949084 | Starless Forest: 116456628154258
-    GameId: 9910245722 | Version: v1.4.1
+    GameId: 9910245722 | Version: v1.5.0
 ]]
 return function(Window, runtimeInfo)
     local Players = game:GetService("Players")
     local RunService = game:GetService("RunService")
     local CoreGui = game:GetService("CoreGui")
     local VirtualInputManager = game:GetService("VirtualInputManager")
+    local CollectionService = game:GetService("CollectionService")
     local LP = Players.LocalPlayer
     local running = true
     local connections, visuals = {}, {}
@@ -18,6 +19,9 @@ return function(Window, runtimeInfo)
     local clearObservedAt, lastCompletedRound, pendingProgressRound, handledCompletedRound = nil, nil, nil, nil
     local lastEndAction, endActionState = 0, "waiting for dungeon result"
     local dodgeLockUntil, dodgeSafePosition = 0, nil
+    local collectedChests, collectedEggs = setmetatable({}, {__mode="k"}), setmetatable({}, {__mode="k"})
+    local collectionCandidatesCache = {chests={}, eggs={}, expires={chests=0, eggs=0}}
+    local collectionNextAt = 0
 
     pcall(function()
         local old = getgenv().__RAVEN_IRON_SOUL
@@ -86,9 +90,40 @@ return function(Window, runtimeInfo)
         local respawns=workspace:FindFirstChild("PlayerRespawn")
         return respawns and respawns:FindFirstChild("Round"..tostring(round)) or nil
     end
-    local function progressPortals()
+    -- Round portals expose their interaction volume as Model/Root.  Do not use
+    -- getPart() here: the first decorative BasePart can be PortalBlue/FX and
+    -- does not carry TouchInterest or the RoundNum attribute.
+    local function portalRoot(model)
+        if not model then return nil end
+        local root=model:FindFirstChild("Root")
+        if root and root:IsA("BasePart") then return root end
+        return getPart(model)
+    end
+    local function portalRound(model)
+        local root=portalRoot(model)
+        local value=root and root:GetAttribute("RoundNum")
+        if value==nil and model then value=model:GetAttribute("RoundNum") end
+        return value~=nil and tonumber(value) or nil
+    end
+    local function portalRoundFromPart(part)
+        local value=part and part:GetAttribute("RoundNum")
+        if value==nil and part and part.Parent then value=part.Parent:GetAttribute("RoundNum") end
+        return value~=nil and tonumber(value) or nil
+    end
+    local function hasTouchTransmitter(part)
+        return part and (part:FindFirstChildOfClass("TouchTransmitter") or part:FindFirstChild("TouchInterest", true)) ~= nil
+    end
+    local function progressPortals(round)
         local out={}; local holder=workspace:FindFirstChild("RoundDoor")
-        if holder then for _,model in ipairs(holder:GetChildren()) do if model.Name=="Portal" and getPart(model) then table.insert(out,model) end end end
+        if not holder then return out end
+        for _,model in ipairs(holder:GetChildren()) do
+            if model:IsA("Model") and (model.Name=="Portal" or model.Name=="PortalD") then
+                local root=portalRoot(model); local modelRound=portalRound(model)
+                if root and hasTouchTransmitter(root) and (round==nil or modelRound==nil or modelRound==round) then
+                    table.insert(out,model)
+                end
+            end
+        end
         return out
     end
     local function tapKey(keyCode)
@@ -262,24 +297,107 @@ return function(Window, runtimeInfo)
             end)
         end
     end
+    local function interactableRoot(model)
+        if not model then return nil end
+        local root=model:FindFirstChild("Root")
+        if root and root:IsA("BasePart") then return root end
+        root=model:FindFirstChild("Root",true)
+        if root and root:IsA("BasePart") then return root end
+        return getPart(model)
+    end
+    local function interactionPrompt(model, root)
+        local prompt=root and root:FindFirstChildWhichIsA("ProximityPrompt", true)
+        if not prompt and model then prompt=model:FindFirstChildWhichIsA("ProximityPrompt", true) end
+        return prompt
+    end
+    local function isDragonEggModel(model)
+        if not model or not model:IsA("Model") then return false end
+        local tagged=false
+        pcall(function() tagged=CollectionService:HasTag(model,"DragonEgg") end)
+        return tagged or model.Name=="DragonEgg" or model:FindFirstChild("DragonEgg")~=nil
+    end
+    local function isChestModel(model)
+        if not model or not model:IsA("Model") then return false end
+        local tagged=false
+        pcall(function() tagged=CollectionService:HasTag(model,"TreasureChest") or CollectionService:HasTag(model,"Chest") end)
+        return tagged or string.lower(model.Name):find("chest",1,true)~=nil or model:FindFirstChild("Chest")~=nil
+    end
+    local function collectionCandidates(kind)
+        local now=os.clock()
+        if now<(collectionCandidatesCache.expires[kind] or 0) then return collectionCandidatesCache[kind] end
+        local result={}; local seen=setmetatable({}, {__mode="k"})
+        local function visit(value)
+            if not value or not value:IsA("Model") or seen[value] then return end
+            seen[value]=true
+            if kind=="chests" then
+                if isChestModel(value) then table.insert(result,value) end
+            elseif isDragonEggModel(value) then
+                table.insert(result,value)
+            end
+        end
+        local function scan(container)
+            if not container then return end
+            visit(container)
+            for _,value in ipairs(container:GetDescendants()) do visit(value) end
+        end
+        if kind=="chests" then
+            scan(workspace:FindFirstChild("TreasureChests"))
+            if #result==0 then scan(workspace:FindFirstChild("World")) end
+            for _,value in ipairs(CollectionService:GetTagged("TreasureChest")) do visit(value) end
+            for _,value in ipairs(CollectionService:GetTagged("Chest")) do visit(value) end
+        end
+        if kind=="eggs" then
+            scan(workspace:FindFirstChild("DragonEggs"))
+            for _,value in ipairs(CollectionService:GetTagged("DragonEgg")) do visit(value) end
+        end
+        for _,value in ipairs(workspace:GetChildren()) do
+            if value:IsA("Model") then visit(value) end
+        end
+        collectionCandidatesCache[kind]=result; collectionCandidatesCache.expires[kind]=now+0.35
+        return result
+    end
+    local function activateCollectable(model, root)
+        local prompt=interactionPrompt(model,root)
+        if prompt and prompt.Enabled and type(fireproximityprompt)=="function" then
+            pcall(fireproximityprompt,prompt)
+            return true
+        end
+        if root and hasTouchTransmitter(root) and type(firetouchinterest)=="function" then
+            pcall(firetouchinterest,myRoot(),root,0); pcall(firetouchinterest,myRoot(),root,1)
+            return true
+        end
+        return prompt==nil
+    end
     local function collectChests()
-        local root = myRoot(); if not root then return end
-        for _, v in ipairs(workspace:GetChildren()) do
-            if v:IsA("Model") and v.Name:find("Chest") and v:FindFirstChild("Root") and (v:GetAttribute("HitCount") or 0) > 0 then
-                local chestRoot = v.Root
-                root.CFrame = chestRoot.CFrame
-                task.wait(0.15)
+        local now=os.clock(); if now<collectionNextAt then return end
+        local root=myRoot(); if not root then return end
+        for _,v in ipairs(collectionCandidates("chests")) do
+            if v.Parent and not collectedChests[v] then
+                local chestRoot=interactableRoot(v); local hitCount=tonumber(v:GetAttribute("HitCount") or (chestRoot and chestRoot:GetAttribute("HitCount")))
+                local prompt=interactionPrompt(v,chestRoot)
+                if chestRoot and (hitCount==nil or hitCount>0) and (not prompt or prompt.Enabled) then
+                    root.CFrame=chestRoot.CFrame*CFrame.new(0,2,0)
+                    activateCollectable(v,chestRoot); collectedChests[v]=true; collectionNextAt=now+0.2
+                    return
+                end
             end
         end
     end
     local function collectDragonEggs()
-        local root = myRoot(); if not root then return end
-        for _, v in ipairs(workspace:GetChildren()) do
-            if v:FindFirstChild("DragonEgg") and v.DragonEgg:FindFirstChild("EggModel") and v.DragonEgg.EggModel:FindFirstChild("Root") and v:FindFirstChild("Root") and not v:GetAttribute("Active") then
-                root.CFrame = v.DragonEgg.EggModel.Root.CFrame
-                task.wait(0.1)
-                if type(fireproximityprompt) == "function" and v.Root:FindFirstChild("Interact_ProximityPrompt") then
-                    pcall(fireproximityprompt, v.Root.Interact_ProximityPrompt)
+        local now=os.clock(); if now<collectionNextAt then return end
+        local root=myRoot(); if not root then return end
+        for _,v in ipairs(collectionCandidates("eggs")) do
+            if v.Parent and not collectedEggs[v] then
+                local interactRoot=v:FindFirstChild("Root")
+                if not (interactRoot and interactRoot:IsA("BasePart")) then interactRoot=interactableRoot(v) end
+                local visualModel=v:FindFirstChild("EggModel",true); local visualRoot=visualModel and visualModel:FindFirstChild("Root") or interactRoot
+                local prompt=interactionPrompt(v,interactRoot)
+                local active=v:GetAttribute("Active")
+                if active==nil and interactRoot then active=interactRoot:GetAttribute("Active") end
+                if active~=true and interactRoot and visualRoot and visualRoot:IsA("BasePart") and (not prompt or prompt.Enabled) then
+                    root.CFrame=visualRoot.CFrame*CFrame.new(0,2,0)
+                    activateCollectable(v,interactRoot); collectedEggs[v]=true; collectionNextAt=now+0.2
+                    return
                 end
             end
         end
@@ -411,7 +529,7 @@ return function(Window, runtimeInfo)
     end
 
     local Dashboard=createTab("Dungeon", "activity")
-    Dashboard:CreateSection("Iron Soul v1.4.1")
+    Dashboard:CreateSection("Iron Soul v1.5.0")
     local roundLabel=Dashboard:CreateLabel("Round: scanning...")
     local enemyCountLabel=Dashboard:CreateLabel("Enemies: scanning...")
     local targetLabel=Dashboard:CreateLabel("Target: none")
@@ -671,16 +789,19 @@ return function(Window, runtimeInfo)
             local targetRound=officialRound
             local nearestPortal,portalDistance=nil,math.huge
             local fallbackPortal,fallbackDistance=nil,math.huge
-            for _,portal in ipairs(progressPortals()) do local pp=getPart(portal); if pp and pp:FindFirstChildOfClass("TouchTransmitter") then
-                local portalRound=pp:GetAttribute("RoundNum") or portal:GetAttribute("RoundNum")
-                local d=distance(pp)
-                if portalRound==targetRound and d<portalDistance then nearestPortal,portalDistance=pp,d end
-                if d<fallbackDistance then fallbackPortal,fallbackDistance=pp,d end
-            end end
+            for _,portal in ipairs(progressPortals(targetRound)) do
+                local pp=portalRoot(portal); local portalRoundValue=portalRound(portal)
+                if pp then
+                    local d=distance(pp)
+                    if portalRoundValue==targetRound and d<portalDistance then nearestPortal,portalDistance=pp,d end
+                    if d<fallbackDistance then fallbackPortal,fallbackDistance=pp,d end
+                end
+            end
             if not nearestPortal and fallbackPortal then nearestPortal=fallbackPortal; portalDistance=fallbackDistance end
-            local holder=workspace:FindFirstChild("RoundDoor"); local openDoorDistance=math.huge
-            if holder then for _,prompt in ipairs(holder:GetDescendants()) do if prompt:IsA("ProximityPrompt") and not prompt.Enabled then local parent=prompt.Parent; local part=parent and (parent:IsA("BasePart") and parent or parent.Parent); if part and part:IsA("BasePart") then openDoorDistance=math.min(openDoorDistance,distance(part)) end end end end
-            if nearestPortal and (portalDistance<=35 or (not nearestPortal:GetAttribute("RoundNum") and fallbackDistance<=60)) and openDoorDistance<=45 then
+            local holder=workspace:FindFirstChild("RoundDoor"); local openDoorDistance=math.huge; local hasLockedDoor=false
+            if holder then for _,prompt in ipairs(holder:GetDescendants()) do if prompt:IsA("ProximityPrompt") and not prompt.Enabled then local parent=prompt.Parent; local part=parent and (parent:IsA("BasePart") and parent or parent.Parent); if part and part:IsA("BasePart") then hasLockedDoor=true; openDoorDistance=math.min(openDoorDistance,distance(part)) end end end end
+            local portalRoundValue=nearestPortal and portalRoundFromPart(nearestPortal)
+            if nearestPortal and (portalDistance<=35 or (portalRoundValue==nil and fallbackDistance<=60)) and (not hasLockedDoor or openDoorDistance<=45) then
                 lastProgress=now; handledCompletedRound=completedRound
                 root.CFrame=nearestPortal.CFrame*CFrame.new(0,2,-math.min(settings.progressOffset,2))
                 local portalRoot,boundRoot=nearestPortal,root
@@ -721,8 +842,9 @@ return function(Window, runtimeInfo)
         else progressState=string.format("waiting for game clear | round %s, completed %s",tostring(officialRound or "?"),tostring(completedRound or "?")) end
         if canProgress and root and now-lastProgress>=settings.progressCooldown then
             local currentRound=pendingProgressRound or locationRound or officialRound
-            local roundSpawn=spawnForRound(currentRound)
-            if currentRound~=lastKnownRound then lastKnownRound=currentRound; doorHandledRound=nil; table.clear(usedDoors) end
+            local targetRound=officialRound or (currentRound and currentRound+1)
+            local roundSpawn=spawnForRound(targetRound) or spawnForRound(currentRound)
+            if targetRound~=lastKnownRound then lastKnownRound=targetRound; doorHandledRound=nil; table.clear(usedDoors) end
             local used=false
             local matchingDoorExists=false
             if settings.autoOpenDoor then
@@ -732,10 +854,10 @@ return function(Window, runtimeInfo)
                     for _,prompt in ipairs(doors:GetDescendants()) do
                         if prompt:IsA("ProximityPrompt") then
                             local parent=prompt.Parent; local part=parent and (parent:IsA("BasePart") and parent or parent.Parent)
-                            local doorRound=part and part:GetAttribute("RoundNum")
-                            if part and part:IsA("BasePart") and doorRound==currentRound then
+                            local doorRound=part and tonumber(part:GetAttribute("RoundNum"))
+                            if part and part:IsA("BasePart") and (doorRound==nil or doorRound==targetRound) then
                                 matchingDoorExists=true
-                                if prompt.Enabled and not usedDoors[prompt] and doorHandledRound~=currentRound then
+                                if prompt.Enabled and not usedDoors[prompt] and doorHandledRound~=targetRound then
                                     local d=(part.Position-reference).Magnitude; if d<bestDistance then bestPrompt,bestDistance=prompt,d end
                                 end
                             end
@@ -752,29 +874,29 @@ return function(Window, runtimeInfo)
                             if flat.Magnitude<.1 then flat=part.CFrame.LookVector end
                             local entryPos=part.Position+flat.Unit*18; entryPos=Vector3.new(entryPos.X,(roundSpawn and roundSpawn.Position.Y or root.Position.Y)+3,entryPos.Z)
                             local entryCFrame=CFrame.lookAt(entryPos,entryPos+flat.Unit)
-                            usedDoors[bestPrompt]=true; doorHandledRound=currentRound; handledCompletedRound=currentRound; used=true; lastProgress=now
+                            usedDoors[bestPrompt]=true; doorHandledRound=targetRound; handledCompletedRound=pendingProgressRound or currentRound; used=true; lastProgress=now
                             task.delay(.15,function() if running and bestPrompt.Parent and type(fireproximityprompt)=="function" then pcall(fireproximityprompt,bestPrompt) end end)
                             task.delay(.45,function() if running and root.Parent then root.CFrame=entryCFrame end end)
-                            progressState="opening and entering beyond Round"..tostring(currentRound).." door"
+                            progressState="opening and entering beyond Round"..tostring(targetRound).." door"
                         else
                             local humanoid=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
                             if humanoid then humanoid:MoveTo(part.Position) end
                             progressState=string.format("walking to door | %dm",math.floor(playerDistance))
                         end
                     elseif type(fireproximityprompt)=="function" then
-                        pcall(fireproximityprompt,bestPrompt); usedDoors[bestPrompt]=true; doorHandledRound=currentRound; used=true; progressState="opened Round"..tostring(currentRound).." door; waiting for room change"
+                        pcall(fireproximityprompt,bestPrompt); usedDoors[bestPrompt]=true; doorHandledRound=targetRound; used=true; progressState="opened Round"..tostring(targetRound).." door; waiting for room change"
                     end
-                elseif matchingDoorExists and doorHandledRound==currentRound then
+                elseif matchingDoorExists and doorHandledRound==targetRound then
                     progressState="door handled; waiting to enter next room"
                 end
             end
-            if not used and not matchingDoorExists and doorHandledRound~=currentRound and settings.autoNextPortal and type(firetouchinterest)=="function" then
+            if not used and not matchingDoorExists and doorHandledRound~=targetRound and settings.autoNextPortal and type(firetouchinterest)=="function" then
                 local bestPortal,bestDistance=nil,math.huge
                 local fallbackPortal,fallbackDistance=nil,math.huge; local reference=roundSpawn and roundSpawn.Position or root.Position
-                for _,portal in ipairs(progressPortals()) do
-                    local pp=getPart(portal); local round=pp and (pp:GetAttribute("RoundNum") or portal:GetAttribute("RoundNum")); local d=distance(pp)
-                    if pp and pp:FindFirstChildOfClass("TouchTransmitter") and round==currentRound and d<bestDistance then bestPortal,bestDistance=pp,d end
-                    if pp and pp:FindFirstChildOfClass("TouchTransmitter") then local rd=(pp.Position-reference).Magnitude; if rd<fallbackDistance then fallbackPortal,fallbackDistance=pp,rd end end
+                for _,portal in ipairs(progressPortals(targetRound)) do
+                    local pp=portalRoot(portal); local round=portalRound(portal); local d=distance(pp)
+                    if pp and round==targetRound and d<bestDistance then bestPortal,bestDistance=pp,d end
+                    if pp then local rd=(pp.Position-reference).Magnitude; if rd<fallbackDistance then fallbackPortal,fallbackDistance=pp,rd end end
                 end
                 if not bestPortal and fallbackPortal then bestPortal= fallbackPortal; bestDistance=distance(fallbackPortal); progressState="using nearest real portal fallback" end
                 if bestPortal then
@@ -789,15 +911,22 @@ return function(Window, runtimeInfo)
                                     handledCompletedRound=pendingProgressRound; pendingProgressRound=nil; clearObservedAt=nil
                                 end
                             end)
-                            progressState="teleported and entering portal R"..tostring(bestPortal:GetAttribute("RoundNum") or "?")
+                            progressState="teleported and entering portal R"..tostring(portalRoundFromPart(bestPortal) or "?")
                         else
                             local humanoid=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
                             if humanoid then humanoid:MoveTo(bestPortal.Position) end
-                            progressState=string.format("walking to portal R%s | %dm",tostring(bestPortal:GetAttribute("RoundNum") or "?"),math.floor(bestDistance))
+                            progressState=string.format("walking to portal R%s | %dm",tostring(portalRoundFromPart(bestPortal) or "?"),math.floor(bestDistance))
                         end
                     else
                         pcall(firetouchinterest,root,bestPortal,0); pcall(firetouchinterest,root,bestPortal,1); used=true; progressState="entered next portal"
                     end
+                end
+                local fallbackSpawn=spawnForRound(targetRound)
+                local allowSpawnFallback=pendingProgressRound~=nil or (officialRound and completedRound and completedRound==officialRound-1)
+                if not used and not bestPortal and allowSpawnFallback and fallbackSpawn and settings.progressMovement=="Teleport" and (fallbackSpawn.Position-root.Position).Magnitude>8 then
+                    root.CFrame=fallbackSpawn.CFrame*CFrame.new(0,3,0)
+                    used=true; lastProgress=now; handledCompletedRound=pendingProgressRound or currentRound; pendingProgressRound=nil; clearObservedAt=nil
+                    progressState="teleported to Round"..tostring(targetRound).." spawn fallback"
                 end
             end
             if used then lastProgress=now end
@@ -809,7 +938,7 @@ return function(Window, runtimeInfo)
             local nearestPortal,nearestDistance=nil,math.huge; local portalCount=0
             local activePortals={}
             for _,p in ipairs(progressPortals()) do
-                    local pp=getPart(p); local d=distance(pp)
+                    local pp=portalRoot(p); local d=distance(pp)
                     if d<nearestDistance then nearestPortal,nearestDistance=p,d end
                     if d<=settings.portalDistance then
                         portalCount+=1
@@ -817,7 +946,7 @@ return function(Window, runtimeInfo)
                             activePortals[p]=true
                             local color=Color3.fromRGB(95,190,255)
                             local v=ensureVisual(p,p,pp,color)
-                            local round=pp:GetAttribute("RoundNum") or p:GetAttribute("RoundNum")
+                            local round=portalRound(p)
                             if v then
                                 v.label.Text=string.format("Portal%s | %dm",round~=nil and " R"..tostring(round) or "",math.floor(d))
                                 v.label.TextColor3=color; v.highlight.FillColor=color; v.highlight.OutlineColor=color
@@ -826,7 +955,7 @@ return function(Window, runtimeInfo)
                     end
             end
             for key in pairs(visuals) do
-                local ok,isOld=pcall(function() return key.Name=="Portal" and not activePortals[key] and key.Parent==workspace:FindFirstChild("RoundDoor") end)
+                local ok,isOld=pcall(function() return (key.Name=="Portal" or key.Name=="PortalD") and not activePortals[key] and key.Parent==workspace:FindFirstChild("RoundDoor") end)
                 if ok and isOld then removeVisual(key) end
             end
             local doors=workspace:FindFirstChild("RoundDoor"); local gameRound,gameRoundComplete=roundState()
@@ -859,6 +988,6 @@ return function(Window, runtimeInfo)
         local camera=workspace.CurrentCamera; if camera and LP.Character then camera.CameraSubject=LP.Character:FindFirstChildOfClass("Humanoid") end
         if getgenv().__RAVEN_IRON_SOUL and getgenv().__RAVEN_IRON_SOUL.Settings==settings then getgenv().__RAVEN_IRON_SOUL=nil end
     end
-    getgenv().__RAVEN_IRON_SOUL={Version="v1.4.0",Settings=settings,Destroy=destroy}
+    getgenv().__RAVEN_IRON_SOUL={Version="v1.5.0",Settings=settings,Destroy=destroy}
     if runtimeInfo and type(runtimeInfo.registerCleanup)=="function" then runtimeInfo.registerCleanup(destroy) end
 end
