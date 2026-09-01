@@ -454,11 +454,19 @@ return function(Window, runtimeInfo)
             endActionState="dungeon active; waiting for victory"
         end
         if settings.autoNextPortal and #cachedEnemies==0 and root and officialRound and completedRound and completedRound==officialRound-1 and now-lastProgress>=settings.progressCooldown then
+            local targetRound=officialRound
             local nearestPortal,portalDistance=nil,math.huge
-            for _,portal in ipairs(progressPortals()) do local pp=getPart(portal); local d=distance(pp); if pp and pp:FindFirstChildOfClass("TouchTransmitter") and d<portalDistance then nearestPortal,portalDistance=pp,d end end
+            local fallbackPortal,fallbackDistance=nil,math.huge
+            for _,portal in ipairs(progressPortals()) do local pp=getPart(portal); if pp and pp:FindFirstChildOfClass("TouchTransmitter") then
+                local portalRound=pp:GetAttribute("RoundNum") or portal:GetAttribute("RoundNum")
+                local d=distance(pp)
+                if portalRound==targetRound and d<portalDistance then nearestPortal,portalDistance=pp,d end
+                if d<fallbackDistance then fallbackPortal,fallbackDistance=pp,d end
+            end end
+            if not nearestPortal and fallbackPortal then nearestPortal=fallbackPortal; portalDistance=fallbackDistance end
             local holder=workspace:FindFirstChild("RoundDoor"); local openDoorDistance=math.huge
             if holder then for _,prompt in ipairs(holder:GetDescendants()) do if prompt:IsA("ProximityPrompt") and not prompt.Enabled then local parent=prompt.Parent; local part=parent and (parent:IsA("BasePart") and parent or parent.Parent); if part and part:IsA("BasePart") then openDoorDistance=math.min(openDoorDistance,distance(part)) end end end end
-            if nearestPortal and portalDistance<=35 and openDoorDistance<=45 then
+            if nearestPortal and (portalDistance<=35 or (not nearestPortal:GetAttribute("RoundNum") and fallbackDistance<=60)) and openDoorDistance<=45 then
                 lastProgress=now; handledCompletedRound=completedRound
                 root.CFrame=nearestPortal.CFrame*CFrame.new(0,2,-math.min(settings.progressOffset,2))
                 local portalRoot,boundRoot=nearestPortal,root
