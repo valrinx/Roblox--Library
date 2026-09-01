@@ -125,13 +125,26 @@ return function(Window, runtimeInfo)
         local pc=input and input:FindFirstChild("PCInput"); local skills=pc and pc:FindFirstChild("Skills")
         if not skills then return end
         local controller=getController()
-        for _,name in ipairs({"Skill1","Skill2","SkillU","SkillAW"}) do
+        -- Priority 1: FullCharge → use SkillU (ultimate) only
+        local skillU=skills:FindFirstChild("SkillU")
+        if skillU and skillU.Visible and skillU:GetAttribute("OnCD")~=true and skillU:GetAttribute("FullCharge")==true then
+            if controller then pcall(function() controller:PerformAction("SkillU") end) end
+            task.wait(0.05)
+            return
+        end
+        -- Priority 2: use available skills sequentially with delay
+        for _,name in ipairs({"Skill1","Skill2","SkillAW"}) do
             local button=skills:FindFirstChild(name); local cool=button and button:FindFirstChild("Cool")
-            local key=button and button:FindFirstChild("Key",true); local text=key and key:FindFirstChildWhichIsA("TextLabel",true)
-            local keyCode=text and Enum.KeyCode[text.Text]
-            if button and button.Visible and button:GetAttribute("OnCD")~=true and not (cool and cool.Visible) and keyCode then
-                local performed=controller and pcall(function() controller:PerformAction(name) end)
-                if not performed then pcall(function() button:Activate() end); tapKey(keyCode) end
+            if button and button.Visible and button:GetAttribute("OnCD")~=true and not (cool and cool.Visible) then
+                if controller then
+                    pcall(function() controller:PerformAction(name) end)
+                else
+                    local key=button:FindFirstChild("Key",true); local text=key and key:FindFirstChildWhichIsA("TextLabel",true)
+                    local keyCode=text and Enum.KeyCode[text.Text]
+                    pcall(function() button:Activate() end)
+                    if keyCode then tapKey(keyCode) end
+                end
+                task.wait(0.05)
             end
         end
     end
