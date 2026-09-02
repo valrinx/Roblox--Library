@@ -17,6 +17,11 @@
 - Narrowed the existing Shiganshina registry match to its dedicated PlaceId so it does not load in the main customization place.
 # Changelog
 
+## 2026-09-02 - Ground War (o) v0.1.0
+
+- Added a Ground War module for PlaceId 76822114837453 with player/AIBot ESP, team-aware visibility checks, bounded ballistic prediction, optional smooth auto aim, tactical radar, match monitoring, fullbright, no fog, and custom FOV.
+- Registered the module in RAVENHUB and kept its runtime behavior local-only without invoking game remotes.
+
 ## 2026-08-31 - Dungeon Lootr v2.0.1
 
 - Fixed live UI resolution for `PlayerGui.Main.HUD` and `Main.Frames`, including skill, health, chest, and quest actions.

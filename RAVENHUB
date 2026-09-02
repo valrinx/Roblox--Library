@@ -300,6 +300,14 @@ local SCRIPTS = {
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/cold_war.lua",
     },
     {
+        name        = "Ground War (o)",
+        description = "Player/Bot ESP | Ballistic Aim Prediction | Smooth Auto Aim | Tactical Radar",
+        placeIds    = {76822114837453},
+        gameIds     = {6583326485},
+        version     = "v0.1.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/ground_war.lua",
+    },
+    {
         name        = "Iron Soul: Dungeon",
         description = "Enemy ESP | Reference Autofarm | Auto Dodge | Auto Weapon Cycle | Replay/Lobby",
         placeIds    = {117533937949084, 116456628154258},
