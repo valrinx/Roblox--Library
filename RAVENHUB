@@ -266,7 +266,7 @@ local SCRIPTS = {
         placeIds    = {117533937949084, 116456628154258},
         gameIds     = {9910245722},
         version     = "v1.6.0",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/0928e41/modules/iron_soul.lua",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/b0391be/modules/iron_soul.lua",
     },
     {
         name        = "Dungeon Quest Reborn",
@@ -531,6 +531,38 @@ HomeTab:CreateDropdown({
     Callback        = function() end,
 })
 
+-- Build hub-owned tabs before dispatching any experience module.  A module
+-- may yield while loading game services; keeping Settings on the loader's
+-- original call stack prevents MacLib from losing its Plugin capability.
+local scriptCleanupHandlers = {}
+local HubSettingsTab = Window:CreateTab("Settings", 4483362458)
+
+local cleanupFinished = false
+local function cleanupHubScripts()
+    if cleanupFinished then
+        return
+    end
+    cleanupFinished = true
+    for scriptName, cleanupFn in pairs(scriptCleanupHandlers) do
+        local ok, err = pcall(cleanupFn)
+        if not ok then
+            warn("[RAVEN HUB] Cleanup failed for '" .. tostring(scriptName) .. "': " .. tostring(err))
+        end
+    end
+end
+
+Window:OnUnload(cleanupHubScripts)
+
+HubSettingsTab:CreateButton({
+    Name = "Destroy Hub",
+    Callback = function()
+        cleanupHubScripts()
+        HubUI:Destroy()
+    end,
+})
+
+HubSettingsTab:InsertConfigSection("Right")
+
 -- ============================================================
 --   LAZY LOAD
 -- ============================================================
@@ -592,7 +624,6 @@ for _, scriptInfo in ipairs(SCRIPTS) do
 end
 
 local loadedScripts = {}
-local scriptCleanupHandlers = {}
 
 local function loadScriptModule(scriptInfo)
     if loadedScripts[scriptInfo.name] then return end
@@ -667,38 +698,6 @@ if not matchedAnyScript then
     Window:CreatePlaceholderTab("Visuals", "eye", unavailableMessage)
     Window:CreatePlaceholderTab("Movement", "walk", unavailableMessage)
 end
-
--- ============================================================
---   HUB SETTINGS
--- ============================================================
-
-local HubSettingsTab = Window:CreateTab("Settings", 4483362458)
-
-local cleanupFinished = false
-local function cleanupHubScripts()
-    if cleanupFinished then
-        return
-    end
-    cleanupFinished = true
-    for scriptName, cleanupFn in pairs(scriptCleanupHandlers) do
-        local ok, err = pcall(cleanupFn)
-        if not ok then
-            warn("[RAVEN HUB] Cleanup failed for '" .. tostring(scriptName) .. "': " .. tostring(err))
-        end
-    end
-end
-
-Window:OnUnload(cleanupHubScripts)
-
-HubSettingsTab:CreateButton({
-    Name = "Destroy Hub",
-    Callback = function()
-        cleanupHubScripts()
-        HubUI:Destroy()
-    end,
-})
-
-HubSettingsTab:InsertConfigSection("Right")
 
 pcall(function()
     HubUI:LoadAutoLoadConfig()
