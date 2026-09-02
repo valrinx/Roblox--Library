@@ -20,15 +20,18 @@ return function(Window, runtimeInfo)
     local controllerCharacter = nil
     local currentEnemy = nil
     local attackBusy = false
+    local skillActionBusy = false
     local farmWorkerToken = 0
     local combatWorkerToken = 0
     local collectionWorkerToken = 0
     local autoPlayWorkerToken = 0
+    local autoWeaponWorkerToken = 0
     local autoSellWorkerToken = 0
     local autoDungeonWorkerToken = 0
     local autoDungeonLastAttempt = 0
     local autoDungeonStatus = "Disabled"
     local autoDungeonStatusLabel = nil
+    local Framework, DataUtil, EquipmentUtil, ForgeUtil, RarityTiers, TranslationUtil, MaterialUtil
     local originalSetWalkSpeed = nil
     local dodgeLockUntil, dodgeSafePosition = 0, nil
     local redzoneDanger = false
@@ -48,7 +51,7 @@ return function(Window, runtimeInfo)
         autoFarm = false, autoUseSkill = false,
         distanceX = 0, distanceY = 0, distanceZ = 10, pitch = 45,
         autoDodge = false, dodgeMode = "Air", dodgeMargin = 3, dodgeDistance = 16, dodgeVertical = 50, dodgeCooldown = 0.55, dodgeHold = 1.4,
-        autoPlayAgain = false,
+        autoPlayAgain = false, autoSwitchWeapon = false,
         autoEnterDungeon = false, autoDungeonWorld = "World1", autoDungeonDifficulty = 1,
         bringMobs = false,
         autoCollectChests = false, autoCollectEggs = false,
@@ -104,6 +107,31 @@ return function(Window, runtimeInfo)
     local function tapKey(keyCode)
         VirtualInputManager:SendKeyEvent(true,keyCode,false,game)
         task.delay(.03,function() pcall(function() VirtualInputManager:SendKeyEvent(false,keyCode,false,game) end) end)
+    end
+    local function guiObjectVisible(object)
+        if not object or not object.Parent then return false end
+        if object:IsA("GuiObject") and not object.Visible then return false end
+        local parent=object.Parent
+        while parent and parent~=game do
+            if parent:IsA("GuiObject") and not parent.Visible then return false end
+            if parent:IsA("ScreenGui") and not parent.Enabled then return false end
+            parent=parent.Parent
+        end
+        return true
+    end
+    local function buttonKeyCode(button)
+        local key=button and button:FindFirstChild("Key",true)
+        local text=key and key:FindFirstChildWhichIsA("TextLabel",true)
+        local value=text and tostring(text.Text or ""):upper()
+        return value~="" and Enum.KeyCode[value] or nil
+    end
+    local function activateGuiButton(button)
+        if not button or not button:IsA("GuiButton") or not guiObjectVisible(button) then return false end
+        local ok=pcall(function() button:Activate() end)
+        if ok then return true end
+        local keyCode=buttonKeyCode(button)
+        if keyCode then tapKey(keyCode); return true end
+        return false
     end
     local function buildController()
         local character=LP.Character
@@ -168,43 +196,134 @@ return function(Window, runtimeInfo)
         local controller=getController()
         if controller then pcall(function() controller:StopAction("BaseAttack") end) end
     end
-    useReadySkills = function()
+    local skillOrder={"Skill1","Skill2","SkillU","SkillAW"}
+    local function getSkillButtons()
         local gui=LP:FindFirstChild("PlayerGui"); local input=gui and gui:FindFirstChild("ScreenInput")
         local pc=input and input:FindFirstChild("PCInput"); local skills=pc and pc:FindFirstChild("Skills")
-        if not skills then return end
+        if not skills then return nil end
+        local result={}
+        for _,name in ipairs(skillOrder) do
+            local button=skills:FindFirstChild(name)
+            if button then result[name]=button end
+        end
+        result.SwitchWpn=skills:FindFirstChild("SwitchWpn")
+        return result
+    end
+    local function skillIsReady(button,name)
+        if not button or not guiObjectVisible(button) or button:GetAttribute("OnCD")==true then return false end
+        local cool=button:FindFirstChild("Cool")
+        if cool and cool:IsA("GuiObject") and cool.Visible then return false end
+        return name~="SkillU" or button:GetAttribute("FullCharge")==true
+    end
+    local function performSkill(button,name)
         local controller=getController()
-        -- Potassium's original contract: a ready ImageButton with FullCharge
-        -- uses SkillU; otherwise the three normal skills are fired in order.
-        for _,button in ipairs(skills:GetChildren()) do
-            if button:IsA("ImageButton") and button:GetAttribute("OnCD")==false then
-                if button:GetAttribute("FullCharge")==true then
-                    if controller then pcall(function() controller:PerformAction("SkillU") end) end
-                    task.wait(0.05)
-                    return
-                end
-                for _,name in ipairs({"Skill1","Skill2","SkillAW"}) do
-                    local skill=skills:FindFirstChild(name); local cool=skill and skill:FindFirstChild("Cool")
-                    if skill and skill:GetAttribute("OnCD")~=true and not (cool and cool.Visible) then
-                        if controller then
-                            pcall(function() controller:PerformAction(name) end)
-                        else
-                            local key=skill:FindFirstChild("Key",true); local text=key and key:FindFirstChildWhichIsA("TextLabel",true)
-                            local keyCode=text and Enum.KeyCode[text.Text]
-                            pcall(function() skill:Activate() end)
-                            if keyCode then tapKey(keyCode) end
-                        end
-                        task.wait(0.05)
-                    end
-                end
-                return
+        if controller then
+            local ok=pcall(function() controller:PerformAction(name) end)
+            if ok then return true end
+        end
+        return activateGuiButton(button)
+    end
+    local function useAllReadySkills()
+        if skillActionBusy then return false end
+        skillActionBusy=true
+        local buttons=getSkillButtons()
+        if not buttons then skillActionBusy=false; return false end
+        local used=false
+        for _,name in ipairs(skillOrder) do
+            local button=buttons[name]
+            if skillIsReady(button,name) and performSkill(button,name) then
+                used=true
+                task.wait(0.05)
             end
         end
+        skillActionBusy=false
+        return used
+    end
+    useReadySkills = function()
+        useAllReadySkills()
+    end
+    local function getCurrentWeaponSlot(buttons)
+        local switch=buttons and buttons.SwitchWpn
+        local weapon2=switch and switch:FindFirstChild("Weapon2")
+        if weapon2 then return guiObjectVisible(weapon2) and 2 or 1 end
+        if DataUtil then
+            local ok,data=pcall(function() return DataUtil:GetPlayerData(LP) end)
+            local slot=ok and data and data.Equipment and data.Equipment.CurWeaponSlot
+            if slot=="Weapon2" or slot=="ExtraWeapon" then return 2 end
+        end
+        return 1
+    end
+    local function hasSecondWeapon(buttons)
+        if DataUtil then
+            local ok,data=pcall(function() return DataUtil:GetPlayerData(LP) end)
+            local slots=ok and data and data.Equipment and data.Equipment.EquipSlots
+            if slots then return slots.Weapon2~=nil end
+        end
+        local switch=buttons and buttons.SwitchWpn
+        local weapon2=switch and switch:FindFirstChild("Weapon2")
+        local image=weapon2 and weapon2:FindFirstChildWhichIsA("ImageLabel",true)
+        return image and image.Image~=""
+    end
+    local function switchWeapon(buttons,expectedSlot)
+        local switch=buttons and buttons.SwitchWpn
+        if not switch or not guiObjectVisible(switch) or getCurrentWeaponSlot(buttons)~=expectedSlot then return false end
+        local candidates={switch:FindFirstChild("Switch"),switch}
+        for _,button in ipairs(candidates) do
+            if activateGuiButton(button) then
+                local deadline=os.clock()+1.2
+                repeat
+                    task.wait(0.05)
+                until not running or getCurrentWeaponSlot(buttons)~=expectedSlot or os.clock()>=deadline
+                if getCurrentWeaponSlot(buttons)~=expectedSlot then return true end
+            end
+        end
+        local keyCode=buttonKeyCode(switch)
+        if keyCode then
+            tapKey(keyCode)
+            local deadline=os.clock()+1.2
+            repeat task.wait(0.05) until not running or getCurrentWeaponSlot(buttons)~=expectedSlot or os.clock()>=deadline
+        end
+        return getCurrentWeaponSlot(buttons)~=expectedSlot
+    end
+    local function runAutoWeaponWorker()
+        autoWeaponWorkerToken=autoWeaponWorkerToken+1
+        local token=autoWeaponWorkerToken
+        task.spawn(function()
+            local hasSecond=false
+            local nextWeaponDataAt=0
+            while running and token==autoWeaponWorkerToken do
+                if settings.autoSwitchWeapon then
+                    local buttons=getSkillButtons()
+                    if buttons and os.clock()>=nextWeaponDataAt then
+                        hasSecond=hasSecondWeapon(buttons)
+                        nextWeaponDataAt=os.clock()+0.75
+                    end
+                    if buttons and hasSecond then
+                        local currentSlot=getCurrentWeaponSlot(buttons)
+                        if useAllReadySkills() then
+                            task.wait(0.1)
+                            if currentSlot == 1 then
+                                if switchWeapon(buttons,1) then currentSlot = 2 end
+                            elseif currentSlot == 2 then
+                                if switchWeapon(buttons,2) then currentSlot = 1 end
+                            end
+                            task.wait(0.15)
+                        else
+                            task.wait(0.1)
+                        end
+                    else
+                        task.wait(0.5)
+                    end
+                else
+                    task.wait(0.25)
+                end
+            end
+        end)
     end
 
     -- Framework integration (from Potassium reference).  Loading a game
     -- ModuleScript can yield; defer it until after all MacLib tabs have been
     -- built so the loader thread retains its Plugin capability.
-    local Framework, DataUtil, EquipmentUtil, ForgeUtil, RarityTiers, TranslationUtil, MaterialUtil
     local function loadFramework()
         if Framework then return true end
         local replicated=game:GetService("ReplicatedStorage")
@@ -985,6 +1104,7 @@ return function(Window, runtimeInfo)
     Farm:CreateSection("Potassium Autofarm")
     Farm:CreateToggle({Name="Autofarm",CurrentValue=false,Flag="IronSoulAutoFarm",Callback=function(v) settings.autoFarm=v end})
     Farm:CreateToggle({Name="Auto Use Skill",CurrentValue=false,Flag="IronSoulAutoUseSkill",Callback=function(v) settings.autoUseSkill=v end})
+    Farm:CreateToggle({Name="Auto Switch Weapon",CurrentValue=false,Flag="IronSoulAutoSwitchWeapon",Callback=function(v) settings.autoSwitchWeapon=v end})
     Farm:CreateSlider({Name="Distance X",Range={-20,20},Increment=1,CurrentValue=0,Suffix=" studs",Flag="IronSoulDistanceX",Callback=function(v) settings.distanceX=v end})
     Farm:CreateSlider({Name="Distance Y",Range={-20,20},Increment=1,CurrentValue=0,Suffix=" studs",Flag="IronSoulDistanceY",Callback=function(v) settings.distanceY=v end})
     Farm:CreateSlider({Name="Distance Z",Range={-20,30},Increment=1,CurrentValue=10,Suffix=" studs",Flag="IronSoulDistanceZ",Callback=function(v) settings.distanceZ=v end})
@@ -1036,6 +1156,7 @@ return function(Window, runtimeInfo)
     runPotassiumAutofarm()
     runPotassiumCombat()
     runCollectionWorker()
+    runAutoWeaponWorker()
     runAutoPlayAgainWorker()
     runAutoSellWorker()
     runAutoDungeonWorker()
