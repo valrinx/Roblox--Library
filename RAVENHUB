@@ -10,6 +10,29 @@ local MarketplaceService = game:GetService("MarketplaceService")
 
 local function getExperienceName()
     local fallback = tostring(game.Name or "Roblox Experience")
+
+    -- A dungeon is a separate Place inside the same Roblox universe. Resolve
+    -- the universe metadata first so Frozen Valley and the lobby share one
+    -- config folder instead of being treated as separate games.
+    local okUniverse, universeName = pcall(function()
+        local universeId = tonumber(game.GameId)
+        if not universeId or universeId <= 0 then
+            return nil
+        end
+        local httpService = game:GetService("HttpService")
+        local response = game:HttpGet(
+            "https://games.roblox.com/v1/games?universeIds=" .. tostring(universeId)
+        )
+        local decoded = httpService:JSONDecode(response)
+        local records = type(decoded) == "table" and decoded.data
+        local first = type(records) == "table" and records[1]
+        local name = first and first.name
+        return type(name) == "string" and name ~= "" and name or nil
+    end)
+    if okUniverse and universeName then
+        return universeName
+    end
+
     local ok, info = pcall(function()
         return MarketplaceService:GetProductInfo(game.PlaceId)
     end)
