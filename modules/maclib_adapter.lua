@@ -10,7 +10,7 @@ return function(MacLib)
     assert(type(MacLib) == "table" and type(MacLib.Window) == "function", "MacLib is unavailable")
 
     local Adapter = {
-        Version = "maclib-adapter-1.1.1",
+        Version = "maclib-adapter-1.1.2",
         Flags = MacLib.Options or {},
         _maclib = MacLib,
         _window = nil,
@@ -112,6 +112,25 @@ return function(MacLib)
             return nil
         end
         return tostring(flag)
+    end
+
+    -- MacLib creates its configured folder and /settings child, but executor
+    -- makefolder implementations are not guaranteed to create missing parent
+    -- directories recursively. Build each relative path segment first.
+    local function ensureFolderTree(folder)
+        if type(isfolder) ~= "function" or type(makefolder) ~= "function" then
+            return
+        end
+
+        local path = ""
+        for segment in string.gmatch(tostring(folder or ""), "[^/\\\\]+") do
+            path = path == "" and segment or path .. "/" .. segment
+            pcall(function()
+                if not isfolder(path) then
+                    makefolder(path)
+                end
+            end)
+        end
     end
 
     local function installExactConfigLoader()
@@ -544,6 +563,7 @@ return function(MacLib)
 
         local saving = type(options.ConfigurationSaving) == "table" and options.ConfigurationSaving or {}
         if saving.Enabled ~= false then
+            ensureFolderTree(tostring(saving.FolderName or "RAVENHUB"))
             MacLib:SetFolder(tostring(saving.FolderName or "RAVENHUB"))
         end
         -- MacLib defines its config methods inside MacLib:Window, so install

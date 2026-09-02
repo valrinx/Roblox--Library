@@ -21,6 +21,22 @@ end
 
 local EXPERIENCE_NAME = getExperienceName()
 
+-- Experience names come from Roblox metadata and may contain characters that
+-- are not valid in executor filesystem paths. Keep the readable name while
+-- preventing accidental path traversal or invalid config folders.
+local function sanitizeConfigSegment(value, fallback)
+    local segment = tostring(value or fallback or "")
+    segment = segment:gsub("[%c]", "_")
+    segment = segment:gsub("[<>:\"/|?*]", "_")
+    segment = segment:gsub("\\", "_")
+    segment = segment:gsub("%s+$", "")
+    segment = segment:gsub("%.+$", "")
+    if segment == "" or segment == "." or segment == ".." then
+        segment = tostring(fallback or "Roblox Experience")
+    end
+    return segment
+end
+
 local function removeRetiredInterfaces()
     local roots = {}
     local seen = {}
@@ -100,7 +116,7 @@ local HubUI
 do
     local ok, result = pcall(function()
         local source = game:HttpGet(
-            "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/maclib_adapter.lua?v=maclib-adapter-1.1.1"
+            "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/maclib_adapter.lua?v=maclib-adapter-1.1.2"
         )
         assert(type(source) == "string" and #source > 1000, "MacLib adapter download was empty")
         local chunk, compileError = loadstring(source)
@@ -444,11 +460,11 @@ end)
 --   WINDOW
 -- ============================================================
 
--- Keep configuration profiles isolated per Roblox experience. Using GameId
--- intentionally lets every place inside the same experience share profiles,
--- while unrelated games no longer appear in one combined config list.
-local CONFIG_SCOPE_ID = game.GameId ~= 0 and game.GameId or game.PlaceId
-local CONFIG_FOLDER = "RAVENHUB-" .. tostring(CONFIG_SCOPE_ID)
+-- Keep configuration profiles isolated per Roblox experience while using a
+-- readable hierarchy. MacLib appends /settings/<name>.json to FolderName.
+local CONFIG_GAME_NAME = sanitizeConfigSegment(EXPERIENCE_NAME, "Roblox Experience")
+local CONFIG_FOLDER = "RAVENHUB/" .. CONFIG_GAME_NAME
+local CONFIG_FILE_NAME = "TEST"
 
 local windowOk, Window = pcall(function()
     return HubUI:CreateWindow({
@@ -458,7 +474,7 @@ local windowOk, Window = pcall(function()
         ConfigurationSaving = {
             Enabled    = true,
             FolderName = CONFIG_FOLDER,
-            FileName   = "HubConfig-" .. tostring(CONFIG_SCOPE_ID),
+            FileName   = CONFIG_FILE_NAME,
         },
     })
 end)
@@ -513,7 +529,8 @@ local ModuleStatusLabel = HomeTab:CreateStatus({
 HomeTab:CreateLabel("PlaceId: " .. tostring(game.PlaceId))
 HomeTab:CreateLabel("Experience: " .. EXPERIENCE_NAME)
 HomeTab:CreateLabel("RAVEN HUB build: " .. HUB_BUILD)
-HomeTab:CreateLabel("Config scope: " .. tostring(CONFIG_SCOPE_ID))
+HomeTab:CreateLabel("Config folder: " .. CONFIG_FOLDER .. "/settings")
+HomeTab:CreateLabel("Config filename: " .. CONFIG_FILE_NAME .. ".json")
 HomeTab:CreateLabel("Active compatible module: " .. matchingScriptNames[1])
 
 local function setModuleStatus(text)
