@@ -25,6 +25,10 @@ return function(Window, runtimeInfo)
     local collectionWorkerToken = 0
     local autoPlayWorkerToken = 0
     local autoSellWorkerToken = 0
+    local autoDungeonWorkerToken = 0
+    local autoDungeonLastAttempt = 0
+    local autoDungeonStatus = "Disabled"
+    local autoDungeonStatusLabel = nil
     local originalSetWalkSpeed = nil
     local dodgeLockUntil, dodgeSafePosition = 0, nil
     local redzoneDanger = false
@@ -45,6 +49,7 @@ return function(Window, runtimeInfo)
         distanceX = 0, distanceY = 0, distanceZ = 10, pitch = 45,
         autoDodge = false, dodgeMode = "Air", dodgeMargin = 3, dodgeDistance = 16, dodgeVertical = 50, dodgeCooldown = 0.55, dodgeHold = 1.4,
         autoPlayAgain = false,
+        autoEnterDungeon = false, autoDungeonWorld = "World1", autoDungeonDifficulty = 1,
         bringMobs = false,
         autoCollectChests = false, autoCollectEggs = false,
         changeWalkSpeed = false, walkSpeed = false, walkSpeedValue = 16,
@@ -508,6 +513,145 @@ return function(Window, runtimeInfo)
         local white=design and design:FindFirstChild("WhiteEffect")
         if white then pcall(function() white:Destroy() end) end
     end
+
+    local LOBBY_PLACE_ID = 117533937949084
+    local AUTO_DUNGEON_RETRY = 5
+    local function setAutoDungeonStatus(text)
+        autoDungeonStatus = tostring(text or "Idle")
+        if autoDungeonStatusLabel then
+            pcall(function() autoDungeonStatusLabel:Set("Auto Dungeon: " .. autoDungeonStatus) end)
+        end
+    end
+    local function isEmptyMatchRoom(room)
+        if not room then return false end
+        local playersCount = tonumber(room:GetAttribute("PlayersCount"))
+        if playersCount and playersCount > 0 then return false end
+        local roomState = room:GetAttribute("RoomState")
+        if roomState == nil or roomState == 0 or tostring(roomState) == "Empty" then return true end
+        return string.lower(tostring(roomState)) == "empty"
+    end
+    local function findTouchPart(room)
+        local touch = room and (room:FindFirstChild("Touch") or room:FindFirstChild("Touch", true))
+        if not touch then return nil end
+        if touch:IsA("BasePart") then return touch end
+        for _, value in ipairs(touch:GetDescendants()) do
+            if value:IsA("BasePart") then return value end
+        end
+        return nil
+    end
+    local function findFreeMatchRoom()
+        local matchRoom = workspace:FindFirstChild("MatchRoom")
+        if not matchRoom then return nil, nil end
+        for index=1,4 do
+            local room = matchRoom:FindFirstChild("Room" .. tostring(index))
+            local touch = room and isEmptyMatchRoom(room) and findTouchPart(room)
+            if room and touch then return room, touch end
+        end
+        return nil, nil
+    end
+    local function touchMatchRoom(room, touch)
+        local root=myRoot()
+        if not root or not room or not touch or not touch.Parent then return false end
+        local direction=touch.Position-root.Position
+        if direction.Magnitude<0.1 then direction=root.CFrame.LookVector else direction=direction.Unit end
+        if type(firetouchinterest)~="function" then
+            root.CFrame=CFrame.new(touch.Position+Vector3.new(0,1,0))
+            task.wait(.25)
+            return true
+        end
+        root.CFrame=CFrame.new(touch.Position-(direction*2)+Vector3.new(0,1,0))
+        root.AssemblyLinearVelocity=direction*12
+        task.wait(.05)
+        root.CFrame=CFrame.new(touch.Position+(direction*2)+Vector3.new(0,1,0))
+        pcall(firetouchinterest,root,touch,0)
+        task.wait(.2)
+        pcall(firetouchinterest,root,touch,1)
+        return true
+    end
+    local function guiObjectVisible(object)
+        if not object or not object.Parent then return false end
+        if object:IsA("GuiObject") and not object.Visible then return false end
+        local parent=object.Parent
+        while parent and parent~=game do
+            if parent:IsA("GuiObject") and not parent.Visible then return false end
+            parent=parent.Parent
+        end
+        return true
+    end
+    local function getScreenMatch()
+        local gui=LP:FindFirstChildOfClass("PlayerGui")
+        local main=gui and gui:FindFirstChild("MainGui")
+        local screen=main and main:FindFirstChild("ScreenMatch")
+        if not screen and gui then screen=gui:FindFirstChild("ScreenMatch",true) end
+        return screen
+    end
+    local function findDungeonRemotes()
+        local replicated=game:GetService("ReplicatedStorage")
+        local framework=replicated:FindFirstChild("Framework")
+        local gameplay=framework and framework:FindFirstChild("Gameplay")
+        local worldPlace=gameplay and gameplay:FindFirstChild("WorldPlace")
+        local worldUtil=worldPlace and worldPlace:FindFirstChild("WorldUtil")
+        local worldRemote=worldUtil and worldUtil:FindFirstChild("RemoteEvent")
+        local remotes=replicated:FindFirstChild("Remotes")
+        local matchRemote=remotes and remotes:FindFirstChild("GameMatchRE")
+        return worldRemote, matchRemote
+    end
+    local function requestDungeonEntry(force)
+        if not force and not settings.autoEnterDungeon then return false end
+        if game.PlaceId~=LOBBY_PLACE_ID then return false end
+        if LP:GetAttribute("EnterRoomId") then
+            setAutoDungeonStatus("Room assigned")
+            return false
+        end
+        local screen=getScreenMatch()
+        if not screen or not guiObjectVisible(screen) then
+            local room,touch=findFreeMatchRoom()
+            if not room or not touch then
+                setAutoDungeonStatus("Waiting empty room")
+                return false
+            end
+            setAutoDungeonStatus("Opening " .. room.Name)
+            touchMatchRoom(room,touch)
+            return false
+        end
+        local now=os.clock()
+        if now-autoDungeonLastAttempt<AUTO_DUNGEON_RETRY then return false end
+        local worldRemote,matchRemote=findDungeonRemotes()
+        if not worldRemote or not matchRemote then
+            setAutoDungeonStatus("Waiting dungeon remotes")
+            return false
+        end
+        autoDungeonLastAttempt=now
+        local worldOk=pcall(function()
+            worldRemote:FireServer("SelectWorld",settings.autoDungeonWorld,settings.autoDungeonDifficulty)
+        end)
+        if not worldOk then
+            setAutoDungeonStatus("Select failed")
+            return false
+        end
+        task.wait(.35)
+        local createOk=pcall(function()
+            matchRemote:FireServer("CreatRoom",settings.autoDungeonWorld,settings.autoDungeonDifficulty,1)
+        end)
+        setAutoDungeonStatus(createOk and ("Creating " .. settings.autoDungeonWorld .. " / " .. tostring(settings.autoDungeonDifficulty)) or "Create failed")
+        return createOk
+    end
+    local function runAutoDungeonWorker()
+        autoDungeonWorkerToken=autoDungeonWorkerToken+1
+        local token=autoDungeonWorkerToken
+        task.spawn(function()
+            while running and token==autoDungeonWorkerToken do
+                if game.PlaceId==117533937949084 and settings.autoEnterDungeon then
+                    pcall(requestDungeonEntry)
+                elseif not settings.autoEnterDungeon then
+                    if autoDungeonStatus~="Disabled" then setAutoDungeonStatus("Disabled") end
+                elseif game.PlaceId~=117533937949084 then
+                    if autoDungeonStatus~="In dungeon" then setAutoDungeonStatus("In dungeon") end
+                end
+                task.wait(.25)
+            end
+        end)
+    end
     local function runPotassiumAutofarm()
         farmWorkerToken=farmWorkerToken+1
         local token=farmWorkerToken
@@ -749,8 +893,24 @@ return function(Window, runtimeInfo)
     local enemyCountLabel=Dashboard:CreateLabel("Enemies: scanning...")
     local targetLabel=Dashboard:CreateLabel("Target: none")
     local dodgeLabel=Dashboard:CreateLabel("Redzone: clear")
+    Dashboard:CreateSection("Auto Dungeon")
+    autoDungeonStatusLabel=Dashboard:CreateLabel("Auto Dungeon: Disabled")
+    local autoWorldOptions={"World1 | Starless Forest","World2 | Frozen Valley","World3 | Oathlost Castle"}
+    local autoDifficultyOptions={"1 | Trial","2 | Challenge","3 | Penitent","4 | Torment","5 | Inferno","6 | Hell Trial","7 | Hell Challenge","8 | Hell Penitent","9 | Hell Torment","10 | Hell Inferno"}
+    Dashboard:CreateDropdown({Name="Dungeon World",Options=autoWorldOptions,CurrentOption={autoWorldOptions[1]},MultipleOptions=false,Flag="IronSoulAutoDungeonWorld",Callback=function(v)
+        local value=type(v)=="table" and v[1] or v
+        local world=tostring(value):match("^(World%d+)")
+        if world then settings.autoDungeonWorld=world end
+    end})
+    Dashboard:CreateDropdown({Name="Dungeon Difficulty",Options=autoDifficultyOptions,CurrentOption={autoDifficultyOptions[1]},MultipleOptions=false,Flag="IronSoulAutoDungeonDifficulty",Callback=function(v)
+        local value=type(v)=="table" and v[1] or v
+        local difficulty=tonumber(tostring(value):match("^(%d+)") or "")
+        if difficulty then settings.autoDungeonDifficulty=difficulty end
+    end})
+    Dashboard:CreateToggle({Name="Auto Enter Dungeon",CurrentValue=false,Flag="IronSoulAutoEnterDungeon",Callback=function(v) settings.autoEnterDungeon=v end})
+    Dashboard:CreateButton({Name="Enter Dungeon Now",Callback=function() requestDungeonEntry(true) end})
 
-    local Combat=createTab("Combat Intel", "crosshair")
+    local Combat=createTab("ESP", "crosshair")
     Combat:CreateSection("Enemy ESP")
     Combat:CreateToggle({Name="Enemy ESP",CurrentValue=true,Flag="IronSoulEnemyESP",Callback=function(v) settings.enemyEsp=v end})
     Combat:CreateToggle({Name="Show HP",CurrentValue=true,Flag="IronSoulShowHP",Callback=function(v) settings.showHp=v end})
@@ -790,10 +950,6 @@ return function(Window, runtimeInfo)
     Dodge:CreateSlider({Name="Dodge Cooldown",Range={0.2,1.5},Increment=.05,CurrentValue=.55,Suffix="s",Flag="IronSoulDodgeCooldown",Callback=function(v) settings.dodgeCooldown=v end})
     Dodge:CreateSlider({Name="Dodge Hold",Range={0.5,3},Increment=.1,CurrentValue=1.4,Suffix="s",Flag="IronSoulDodgeHold",Callback=function(v) settings.dodgeHold=v end})
 
-    local Utility=createTab("Utility", "settings")
-    Utility:CreateSection("Reference Runtime")
-    Utility:CreateLabel("Autofarm movement and recovery follow Potassium's IronDungeon flow")
-
     local Sell=createTab("Auto Sell", "dollar-sign")
     Sell:CreateSection("Sell by Rarity")
     local rarityOptions = getRarityTiers()
@@ -801,10 +957,6 @@ return function(Window, runtimeInfo)
     Sell:CreateDropdown({Name="Ores",Options=(function() local t={} for _,o in ipairs(getOres()) do table.insert(t,o.Name) end return t end)(),CurrentOption={},MultipleOptions=true,Flag="IronSoulSellOres",Callback=function(v) settings.sellOres=type(v)=="table"and v or{v} end})
     Sell:CreateDropdown({Name="Crystals",Options=(function() local t={} for _,c in ipairs(getCrystals()) do table.insert(t,c.Name) end return t end)(),CurrentOption={},MultipleOptions=true,Flag="IronSoulSellCrystals",Callback=function(v) settings.sellCrystals=type(v)=="table"and v or{v} end})
     Sell:CreateToggle({Name="Auto Sell",CurrentValue=false,Flag="IronSoulAutoSell",Callback=function(v) settings.autoSell=v end})
-
-    local Progress=createTab("Progress", "map")
-    Progress:CreateSection("Dungeon End")
-    Progress:CreateLabel("Use Auto Play Again in the Autofarm tab")
 
     local lastDodge,scanAt,statusAt=0,0,0
     connect(LP.CharacterAdded,function()
@@ -820,6 +972,7 @@ return function(Window, runtimeInfo)
     runCollectionWorker()
     runAutoPlayAgainWorker()
     runAutoSellWorker()
+    runAutoDungeonWorker()
     local cachedEnemies={}
     local redFolder=workspace:FindFirstChild("RedShow")
     if redFolder then

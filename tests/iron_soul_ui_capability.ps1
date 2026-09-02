@@ -16,8 +16,24 @@ if ([regex]::Matches($source, '(?m)^\s*(?!return\s+)Window:CreateTab\(').Count -
 }
 
 $tabCalls = [regex]::Matches($source, '\bcreateTab\(').Count
-if ($tabCalls -ne 8) {
-    throw "Expected createTab to be used for all 7 module tabs plus its definition; found $tabCalls"
+if ($tabCalls -ne 6) {
+    throw "Expected createTab to be used for all 5 module tabs plus its definition; found $tabCalls"
+}
+
+if ($source -match '(?m)^\s*local\s+Utility\s*=\s*createTab\(') {
+    throw 'Iron Soul Utility tab must be removed'
+}
+
+if ($source -match '(?m)^\s*local\s+Progress\s*=\s*createTab\(') {
+    throw 'Iron Soul Progress tab must be removed'
+}
+
+if ($source -match 'createTab\("Combat Intel"') {
+    throw 'Iron Soul Combat Intel tab must be renamed to ESP'
+}
+
+if ($source -notmatch 'createTab\("ESP"') {
+    throw 'Iron Soul must expose the combat intelligence tab as ESP'
 }
 
 if ($hub -notmatch 'moduleUrl\s*=\s*"https://raw\.githubusercontent\.com/valrinx/Roblox--Library/[0-9a-f]{7,40}/modules/iron_soul\.lua"') {
