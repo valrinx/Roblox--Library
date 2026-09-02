@@ -3,8 +3,8 @@ $ErrorActionPreference = 'Stop'
 $source = Get-Content -Raw (Join-Path $PSScriptRoot '..\modules\iron_soul.lua')
 
 $requiredPatterns = @(
-    'local function sourceFarmDistance\(model\)',
     'local function runPotassiumAutofarm\(\)',
+    'local function runPotassiumCombat\(\)',
     'local function collectChests\(\)',
     'local function collectDragonEggs\(\)',
     'LocalControlMgr',

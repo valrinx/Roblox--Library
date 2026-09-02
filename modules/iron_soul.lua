@@ -21,12 +21,11 @@ return function(Window, runtimeInfo)
     local currentEnemy = nil
     local attackBusy = false
     local farmWorkerToken = 0
+    local combatWorkerToken = 0
     local collectionWorkerToken = 0
     local autoPlayWorkerToken = 0
     local autoSellWorkerToken = 0
     local originalSetWalkSpeed = nil
-    local cameraNextAt = 0
-    local lastEndAction, endActionState = 0, "waiting for dungeon result"
     local dodgeLockUntil, dodgeSafePosition = 0, nil
     local redzoneDanger = false
     local collectedChests, collectedEggs = setmetatable({}, {__mode="k"}), setmetatable({}, {__mode="k"})
@@ -42,16 +41,14 @@ return function(Window, runtimeInfo)
     local settings = {
         enemyEsp = true, maxDistance = 1500, showHp = true,
         targetMode = "Nearest", stickyTarget = true,
-        autoFarm = false, autoAttack = true, autoSkills = false, autoUseSkill = false,
+        autoFarm = false, autoUseSkill = false,
         distanceX = 0, distanceY = 0, distanceZ = 10, pitch = 45,
-        farmMode = "Source", farmDistance = 7, heightAbove = 8, actionDelay = 0.18,
         autoDodge = false, dodgeMode = "Air", dodgeMargin = 3, dodgeDistance = 16, dodgeVertical = 50, dodgeCooldown = 0.55, dodgeHold = 1.4,
         autoPlayAgain = false,
-        endAction = "Off", endActionDelay = 3,
-        bringMobs = false, bringMobsRange = 100,
+        bringMobs = false,
         autoCollectChests = false, autoCollectEggs = false,
         changeWalkSpeed = false, walkSpeed = false, walkSpeedValue = 16,
-        cameraChange = false, allowCameraChange = false, cameraDistance = 70, cameraBack = 50,
+        cameraChange = false, allowCameraChange = false, cameraDistance = 70,
         autoSell = false, sellEquipmentRarities = {}, sellOres = {}, sellCrystals = {},
     }
 
@@ -142,22 +139,25 @@ return function(Window, runtimeInfo)
     end
     local useReadySkills
     local function Attack(bool)
-        if attackBusy then return end
+        bool=bool or false
+        if attackBusy then return false end
         attackBusy=true
-        task.spawn(function()
-            local controller=getController()
-            if controller and pcall(function() controller:PerformAction("BaseAttack") end) then
-                task.wait()
-                if running then pcall(function() controller:StopAction("BaseAttack") end) end
-            else
-                local camera=workspace.CurrentCamera; local size=camera and camera.ViewportSize or Vector2.new(960,540)
-                pcall(function() VirtualInputManager:SendMouseButtonEvent(size.X/2,size.Y/2,0,true,game,0) end)
-                task.wait(.03)
-                pcall(function() VirtualInputManager:SendMouseButtonEvent(size.X/2,size.Y/2,0,false,game,0) end)
-            end
-            if bool and running then useReadySkills() end
-            attackBusy=false
-        end)
+        local controller=getController()
+        local ok=false
+        if controller then ok=pcall(function() controller:PerformAction("BaseAttack") end) end
+        if ok then
+            task.wait()
+            if running then pcall(function() controller:StopAction("BaseAttack") end) end
+        else
+            local camera=workspace.CurrentCamera; local size=camera and camera.ViewportSize or Vector2.new(960,540)
+            pcall(function() VirtualInputManager:SendMouseButtonEvent(size.X/2,size.Y/2,0,true,game,0) end)
+            task.wait(.03)
+            pcall(function() VirtualInputManager:SendMouseButtonEvent(size.X/2,size.Y/2,0,false,game,0) end)
+            ok=true
+        end
+        if bool and running then task.spawn(useReadySkills) end
+        attackBusy=false
+        return ok
     end
     local function stopAttack()
         local controller=getController()
@@ -357,7 +357,9 @@ return function(Window, runtimeInfo)
         end
         if kind=="chests" then
             scan(workspace:FindFirstChild("TreasureChests"))
-            if #result==0 then scan(workspace:FindFirstChild("World")) end
+            -- Both containers can exist at once; scanning World only when the
+            -- first container is empty misses valid chests in mixed layouts.
+            scan(workspace:FindFirstChild("World"))
             for _,value in ipairs(CollectionService:GetTagged("TreasureChest")) do visit(value) end
             for _,value in ipairs(CollectionService:GetTagged("Chest")) do visit(value) end
         end
@@ -383,23 +385,46 @@ return function(Window, runtimeInfo)
         end
         return prompt==nil
     end
+    -- Chests consume one BaseAttack per hit.  Keep this bounded so a stale or
+    -- replicated HitCount cannot trap the worker on one chest forever.
+    local CHEST_HIT_LIMIT = 3
+    local function chestHitCount(model, root)
+        local value=model and model:GetAttribute("HitCount")
+        if value==nil and root then value=root:GetAttribute("HitCount") end
+        return tonumber(value) or 0
+    end
+    local function hitChest(model, root)
+        if not model or not root or not model.Parent or not root.Parent then return false end
+        -- Wait for an earlier attack to finish; otherwise Attack's busy guard
+        -- would silently drop one of the three required hits.
+        local deadline=os.clock()+0.75
+        while attackBusy and os.clock()<deadline do task.wait() end
+        if attackBusy then return false end
+        Attack(false)
+        deadline=os.clock()+0.75
+        while attackBusy and os.clock()<deadline do task.wait() end
+        return not attackBusy
+    end
     local function collectChests()
         local root=myRoot(); if not root then return end
         local finalDistance=CFrame.new(settings.distanceX,settings.distanceY,settings.distanceZ)*CFrame.Angles(math.rad(settings.pitch),math.rad(180),0)
         -- Potassium's chest contract scans the live workspace models and keeps
         -- the player on a chest until its HitCount reaches zero.
         for _,v in ipairs(workspace:GetChildren()) do
-            if v:IsA("Model") and string.find(v.Name,"Chest") then
+            if isChestModel(v) then
                 local chestRoot=v:FindFirstChild("Root") or interactableRoot(v)
-                local hitCount=tonumber(v:GetAttribute("HitCount") or (chestRoot and chestRoot:GetAttribute("HitCount")))
+                local hitCount=chestHitCount(v,chestRoot)
                 if chestRoot and hitCount and hitCount>0 then
                     CollectingChests=true
-                    repeat
+                    local chestHits=0
+                    while settings.autoCollectChests and hitCount>0 and chestHits<CHEST_HIT_LIMIT do
                         if not root.Parent or not v.Parent or not chestRoot.Parent then break end
                         root.CFrame=chestRoot.CFrame*finalDistance
+                        if not hitChest(v,chestRoot) then break end
+                        chestHits=chestHits+1
                         task.wait()
-                        hitCount=tonumber(v:GetAttribute("HitCount") or (chestRoot and chestRoot:GetAttribute("HitCount"))) or 0
-                    until not settings.autoCollectChests or hitCount<=0
+                        hitCount=chestHitCount(v,chestRoot)
+                    end
                     CollectingChests=false
                     collectedChests[v]=nil
                     collectionNextAt=os.clock()+0.1
@@ -413,8 +438,24 @@ return function(Window, runtimeInfo)
             if v.Parent and not collectedChests[v] then
                 local chestRoot=interactableRoot(v); local prompt=interactionPrompt(v,chestRoot)
                 if chestRoot and (not prompt or prompt.Enabled) then
-                    root.CFrame=chestRoot.CFrame*finalDistance
-                    activateCollectable(v,chestRoot); collectedChests[v]=true; collectionNextAt=now+0.2
+                    local hitCount=chestHitCount(v,chestRoot)
+                    if hitCount>0 then
+                        CollectingChests=true
+                        local chestHits=0
+                        while settings.autoCollectChests and hitCount>0 and chestHits<CHEST_HIT_LIMIT do
+                            if not root.Parent or not v.Parent or not chestRoot.Parent then break end
+                            root.CFrame=chestRoot.CFrame*finalDistance
+                            if not hitChest(v,chestRoot) then break end
+                            chestHits=chestHits+1
+                            task.wait()
+                            hitCount=chestHitCount(v,chestRoot)
+                        end
+                        CollectingChests=false
+                    else
+                        root.CFrame=chestRoot.CFrame*finalDistance
+                        activateCollectable(v,chestRoot)
+                    end
+                    collectedChests[v]=true; collectionNextAt=now+0.2
                     return
                 end
             end
@@ -461,117 +502,135 @@ return function(Window, runtimeInfo)
             end
         end
     end
-    local function bringMobsToTarget()
-        local root = myRoot(); if not root then return end
-        local targetPart = currentEnemy or getPart(selectedTarget)
-        if not targetPart then return end
-        local enemyFolder=workspace:FindFirstChild("EnemyNpc")
-        if not enemyFolder then return end
-        for _, v in ipairs(enemyFolder:GetChildren()) do
-            if v:IsA("Model") and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 and v:FindFirstChild("HumanoidRootPart") then
-                if (targetPart.Position - v.HumanoidRootPart.Position).Magnitude <= math.min(settings.bringMobsRange,100) then
-                    v.HumanoidRootPart.CFrame = targetPart.CFrame
-                end
-            end
-        end
-    end
     local function clearWhiteEffect()
         local playerGui=LP:FindFirstChildOfClass("PlayerGui")
         local design=playerGui and playerGui:FindFirstChild("ScreenDesign")
         local white=design and design:FindFirstChild("WhiteEffect")
         if white then pcall(function() white:Destroy() end) end
     end
-    local function sourceFarmDistance(model)
-        local x,y,z=settings.distanceX,settings.distanceY,settings.distanceZ
-        if model and model:GetAttribute("LevelType")=="Boss" then x,y,z=x*1.5,y*1.5,z*1.5 end
-        return CFrame.new(x,y,z)*CFrame.Angles(0,0,math.rad(settings.pitch))
-    end
-    local function farmCFrame(model,root,enemyRoot)
-        if settings.farmMode=="Source" then return enemyRoot.CFrame*sourceFarmDistance(model) end
-        if settings.farmMode=="Above Target" then
-            local desired=enemyRoot.Position+Vector3.new(0,settings.heightAbove,0)
-            return CFrame.lookAt(desired,enemyRoot.Position)
-        end
-        if settings.farmMode=="Below Target" then
-            local desired=enemyRoot.Position-Vector3.new(0,settings.heightAbove,0)
-            return CFrame.lookAt(desired,enemyRoot.Position)
-        end
-        local flat=Vector3.new(root.Position.X-enemyRoot.Position.X,0,root.Position.Z-enemyRoot.Position.Z)
-        if flat.Magnitude<.1 then flat=-enemyRoot.CFrame.LookVector end
-        local desired=enemyRoot.Position+flat.Unit*settings.farmDistance
-        return CFrame.lookAt(desired,enemyRoot.Position)
-    end
-    local function recoverWithoutEnemies(root)
-        if not root then return end
-        if workspace:GetAttribute("GameMode")=="" then
-            root.CFrame=CFrame.new(8561.28906,273.670654,-3727.4563,0.589069664,-2.59408957e-08,0.808082283,-6.4901144e-08,1,7.9412942e-08,-0.808082283,-9.92252183e-08,0.589069664)
-            return
-        end
-        local respawns=workspace:FindFirstChild("PlayerRespawn")
-        if not respawns then return end
-        local oldCFrame=root.CFrame
-        for _,spawnPart in ipairs(respawns:GetChildren()) do
-            if not running or not settings.autoFarm then break end
-            if spawnPart:IsA("BasePart") then
-                root.CFrame=spawnPart.CFrame
-                task.wait(1)
-            end
-        end
-        if root.Parent then root.CFrame=oldCFrame end
-    end
     local function runPotassiumAutofarm()
         farmWorkerToken=farmWorkerToken+1
         local token=farmWorkerToken
         task.spawn(function()
             while running and token==farmWorkerToken do
-                if not settings.autoFarm then
+                if game.PlaceId==117533937949084 then
                     SetCurrentEnemy(nil)
-                    task.wait(.1)
-                elseif game.PlaceId==117533937949084 then
-                    SetCurrentEnemy(nil)
-                    task.wait(.25)
-                elseif redzoneDanger and settings.autoDodge then
-                    task.wait(.05)
-                elseif CollectingChests or CollectingEggs then
-                    task.wait()
-                else
+                elseif settings.autoFarm then
                     local ok,err=pcall(function()
                         clearWhiteEffect()
-                        local enemyFolder=workspace.EnemyNpc or workspace:FindFirstChild("EnemyNpc")
-                        local models=enemyFolder and enemyFolder:GetChildren() or {}
-                        local found=false
-                        for _,v in ipairs(models) do
-                            local humanoid=getHumanoid(v); local enemyRoot=v:FindFirstChild("HumanoidRootPart")
-                            if v:IsA("Model") and humanoid and humanoid.Health>0 and enemyRoot then
-                                found=true; currentEnemy=enemyRoot; SetCurrentEnemy(v)
-                                local count=0
-                                repeat
-                                    if not running or not settings.autoFarm or CollectingChests or CollectingEggs or (redzoneDanger and settings.autoDodge) then break end
-                                    local rootNow=myRoot(); if not rootNow or not enemyRoot.Parent then break end
-                                    count=count+1
-                                    if count>1000 then
-                                        rootNow.CFrame=enemyRoot.CFrame
-                                        task.wait(.1)
-                                        count=0
-                                        break
+                        if CollectingChests then return end
+                        if CollectingEggs then return end
+                        if not workspace.EnemyNpc:FindFirstChildOfClass("Model") then
+                            local root=myRoot()
+                            if workspace:GetAttribute("GameMode")=="" then
+                                if root then
+                                    root.CFrame=CFrame.new(8561.28906,273.670654,-3727.4563,0.589069664,-2.59408957e-08,0.808082283,-6.4901144e-08,1,7.9412942e-08,-0.808082283,-9.92252183e-08,0.589069664)
+                                end
+                                return
+                            end
+                            local oldCFrame=root and root.CFrame
+                            local respawns=workspace:FindFirstChild("PlayerRespawn")
+                            if root and respawns then
+                                for _,v in ipairs(respawns:GetChildren()) do
+                                    if v:IsA("Part") then
+                                        root.CFrame=v.CFrame
+                                        task.wait(1)
                                     end
-                                    rootNow.CFrame=farmCFrame(v,rootNow,enemyRoot)
-                                    if settings.autoAttack then Attack(settings.autoUseSkill or settings.autoSkills) end
-                                    if settings.bringMobs then bringMobsToTarget() end
-                                    task.wait()
-                                    humanoid=getHumanoid(v); enemyRoot=v:FindFirstChild("HumanoidRootPart")
-                                until not settings.autoFarm or not humanoid or humanoid.Health<=0 or not enemyRoot
-                            elseif v and v:IsA("Model") and not v:FindFirstChild("HumanoidRootPart") then
-                                local rootNow=myRoot(); if rootNow then rootNow.CFrame=v:GetPivot() end
+                                end
+                                if root.Parent and oldCFrame then root.CFrame=oldCFrame end
                             end
                         end
-                        if not found then recoverWithoutEnemies(myRoot()) end
+                        for _,v in ipairs(workspace.EnemyNpc:GetChildren()) do
+                            if v:IsA("Model") and v:FindFirstChild("Humanoid") and v.Humanoid.Health>0 and v:FindFirstChild("HumanoidRootPart") then
+                                local MaxNum,MaxNum2=1000,100
+                                local Counting,Counting2=0,0
+                                repeat task.wait()
+                                    local FinalDistance=CFrame.new(settings.distanceX,settings.distanceY,settings.distanceZ)*CFrame.Angles(math.rad(0),math.rad(0),math.rad(settings.pitch))
+                                    if v:GetAttribute("LevelType")=="Boss" then
+                                        FinalDistance=CFrame.new(settings.distanceX*1.5,settings.distanceY*1.5,settings.distanceZ*1.5)*CFrame.Angles(math.rad(0),math.rad(0),math.rad(settings.pitch))
+                                    end
+                                    local root=myRoot(); local enemyRoot=v:FindFirstChild("HumanoidRootPart")
+                                    if root and enemyRoot and (root.Position-enemyRoot.Position).Magnitude<=math.huge then currentEnemy=enemyRoot end
+                                    if currentEnemy then SetCurrentEnemy(currentEnemy.Parent) end
+                                    Counting=Counting+1
+                                    if Counting>MaxNum then
+                                        if root and currentEnemy then root.CFrame=currentEnemy.CFrame end
+                                        task.wait(.1)
+                                        Counting=0
+                                        return
+                                    end
+                                    if root and currentEnemy then root.CFrame=currentEnemy.CFrame*FinalDistance end
+                                until not settings.autoFarm or v.Humanoid.Health<=0 or not v:FindFirstChild("HumanoidRootPart")
+                            elseif v and v:IsA("Model") and not v:FindFirstChild("HumanoidRootPart") then
+                                local root=myRoot(); if root then root.CFrame=v:GetPivot() end
+                            end
+                        end
                     end)
                     if not ok then warn(err) end
-                    task.wait()
+                else
+                    SetCurrentEnemy(nil)
                 end
+                task.wait()
             end
             SetCurrentEnemy(nil)
+        end)
+    end
+    local CAMERA_BACK = 50
+    local function runPotassiumCombat()
+        combatWorkerToken=combatWorkerToken+1
+        local token=combatWorkerToken
+        task.spawn(function()
+            while running and token==combatWorkerToken do
+                if game.PlaceId~=117533937949084 and settings.autoFarm then
+                    local ok,err=pcall(function()
+                        task.spawn(function()
+                            for _,v in ipairs(workspace.EnemyNpc:GetChildren()) do
+                                local enemyRoot=v:IsA("Model") and v:FindFirstChild("HumanoidRootPart")
+                                local humanoid=v:IsA("Model") and v:FindFirstChild("Humanoid")
+                                if currentEnemy and enemyRoot and humanoid and humanoid.Health>0 and (currentEnemy.Position-enemyRoot.Position).Magnitude<=100 and settings.bringMobs then
+                                    task.wait()
+                                    enemyRoot.CFrame=currentEnemy.CFrame
+                                end
+                            end
+                        end)
+                        task.spawn(function()
+                            for _,v in ipairs(workspace:GetChildren()) do
+                                local dragonEgg=v:FindFirstChild("DragonEgg")
+                                local eggModel=dragonEgg and dragonEgg:FindFirstChild("EggModel")
+                                local eggRoot=eggModel and eggModel:FindFirstChild("Root")
+                                local interactRoot=v:FindFirstChild("Root")
+                                if dragonEgg and eggRoot and interactRoot and not v:GetAttribute("Active") then
+                                    CollectingEggs=true
+                                    local root=myRoot()
+                                    if root then root.CFrame=eggRoot.CFrame end
+                                    task.wait(0.1)
+                                    local prompt=interactRoot:FindFirstChild("Interact_ProximityPrompt") or interactionPrompt(v,interactRoot)
+                                    if prompt and type(fireproximityprompt)=="function" then pcall(fireproximityprompt,prompt) end
+                                    CollectingEggs=false
+                                end
+                            end
+                        end)
+                        task.spawn(function()
+                            local success2,err2=pcall(function()
+                                if not (settings.allowCameraChange or settings.cameraChange) then return end
+                                local character=LP.Character; local root=character and character:FindFirstChild("HumanoidRootPart")
+                                local camera=workspace.CurrentCamera
+                                if not root or not camera then return end
+                                camera.CameraType=Enum.CameraType.Scriptable
+                                camera.CameraSubject=nil
+                                local targetPosition=root.Position
+                                local cameraPosition=targetPosition+Vector3.new(0,settings.cameraDistance,CAMERA_BACK)
+                                TweenService:Create(camera,TweenInfo.new(.3,Enum.EasingStyle.Quad),{CFrame=CFrame.lookAt(cameraPosition,targetPosition)}):Play()
+                                camera.Focus=CFrame.new(targetPosition)
+                            end)
+                            if not success2 then warn("Camera: ",err2) end
+                        end)
+                        task.spawn(function() Attack(settings.autoUseSkill) end)
+                    end)
+                    if not ok then warn(err) end
+                end
+                task.wait()
+            end
         end)
     end
     local function runCollectionWorker()
@@ -585,7 +644,7 @@ return function(Window, runtimeInfo)
         end)
         task.spawn(function()
             while running and token==collectionWorkerToken do
-                if settings.autoCollectEggs or settings.autoFarm then pcall(collectDragonEggs) end
+                if settings.autoCollectEggs and not settings.autoFarm then pcall(collectDragonEggs) end
                 task.wait()
             end
         end)
@@ -632,68 +691,6 @@ return function(Window, runtimeInfo)
             end
         end)
     end
-    local function normalizedGuiText(button)
-        local values={button.Name}
-        if button:IsA("TextButton") then table.insert(values,button.Text) end
-        for _,child in ipairs(button:GetDescendants()) do
-            if child:IsA("TextLabel") or child:IsA("TextButton") then table.insert(values,child.Text) end
-        end
-        return string.lower(table.concat(values," ")):gsub("[%p%s]+","")
-    end
-    local function guiIsVisible(gui)
-        if not gui:IsA("GuiObject") or not gui.Visible or gui.AbsoluteSize.X<2 or gui.AbsoluteSize.Y<2 then return false end
-        local parent=gui.Parent
-        while parent do
-            if parent:IsA("GuiObject") and not parent.Visible then return false end
-            if parent:IsA("ScreenGui") then return parent.Enabled end
-            parent=parent.Parent
-        end
-        return true
-    end
-    local function endActionButton(mode)
-        local playerGui=LP:FindFirstChildOfClass("PlayerGui"); if not playerGui then return nil end
-        local resultGui=playerGui:FindFirstChild("ResultGui")
-        local settlement=resultGui and resultGui:FindFirstChild("ScreenSettlement")
-        local group=settlement and settlement:FindFirstChild("BtnGroup")
-        local exact=group and group:FindFirstChild(mode=="Replay" and "PlayAgainBtn" or "ReturnToLobbyBtn")
-        if exact and exact:IsA("GuiButton") and guiIsVisible(exact) then return exact end
-        local replayWords={"replay","retry","playagain","again","rechallenge"}
-        local lobbyWords={"returnlobby","backtolobby","lobby","returnhome","backhome"}
-        local words=mode=="Replay" and replayWords or lobbyWords
-        local best,bestScore=nil,-math.huge
-        for _,button in ipairs(playerGui:GetDescendants()) do
-            if button:IsA("GuiButton") and guiIsVisible(button) then
-                local text=normalizedGuiText(button)
-                for index,word in ipairs(words) do
-                    if text:find(word,1,true) then
-                        local score=100-index*5+button.AbsoluteSize.X*button.AbsoluteSize.Y/10000
-                        if score>bestScore then best,bestScore=button,score end
-                        break
-                    end
-                end
-            end
-        end
-        return best
-    end
-    local function activateGuiButton(button)
-        if not button or not button.Parent then return false end
-        local activated=false
-        if type(firesignal)=="function" then
-            for _,signal in ipairs({button.MouseButton1Down,button.MouseButton1Click,button.MouseButton1Up,button.Activated}) do
-                if pcall(firesignal,signal) then activated=true end
-            end
-        end
-        if pcall(function() button:Activate() end) then activated=true end
-        local pos=button.AbsolutePosition+button.AbsoluteSize/2
-        if pcall(function()
-            VirtualInputManager:SendMouseMoveEvent(pos.X,pos.Y,game)
-            VirtualInputManager:SendMouseButtonEvent(pos.X,pos.Y,0,true,game,0)
-            task.wait(.04)
-            VirtualInputManager:SendMouseButtonEvent(pos.X,pos.Y,0,false,game,0)
-        end) then activated=true end
-        return activated
-    end
-
     local function removeVisual(key)
         local v=visuals[key]; if not v then return end
         pcall(function() v.highlight:Destroy() end); pcall(function() v.billboard:Destroy() end); visuals[key]=nil
@@ -752,7 +749,6 @@ return function(Window, runtimeInfo)
     local enemyCountLabel=Dashboard:CreateLabel("Enemies: scanning...")
     local targetLabel=Dashboard:CreateLabel("Target: none")
     local dodgeLabel=Dashboard:CreateLabel("Redzone: clear")
-    local endActionLabel=Dashboard:CreateLabel("End action: waiting for dungeon result")
 
     local Combat=createTab("Combat Intel", "crosshair")
     Combat:CreateSection("Enemy ESP")
@@ -765,25 +761,24 @@ return function(Window, runtimeInfo)
     Combat:CreateToggle({Name="Spectate Current Target",CurrentValue=false,Flag="IronSoulSpectate",Callback=function(v) spectating=v end})
 
     local Farm=createTab("Autofarm", "swords")
-    Farm:CreateSection("Target Based Autofarm")
-    Farm:CreateToggle({Name="Auto Farm Target",CurrentValue=false,Flag="IronSoulAutoFarm",Callback=function(v) settings.autoFarm=v end})
-    Farm:CreateToggle({Name="Auto Base Attack",CurrentValue=true,Flag="IronSoulAutoAttack",Callback=function(v) settings.autoAttack=v end})
-    Farm:CreateToggle({Name="Auto Use Skill",CurrentValue=false,Flag="IronSoulAutoUseSkill",Callback=function(v) settings.autoUseSkill=v settings.autoSkills=v end})
-    Farm:CreateToggle({Name="Auto Skills (Ready Only)",CurrentValue=false,Flag="IronSoulAutoSkills",Callback=function(v) settings.autoSkills=v settings.autoUseSkill=v end})
-    Farm:CreateDropdown({Name="Farm Position",Options={"Source","Approach","Above Target","Below Target"},CurrentOption={"Source"},MultipleOptions=false,Flag="IronSoulFarmMode",Callback=function(v) settings.farmMode=type(v)=="table"and v[1]or v end})
+    Farm:CreateSection("Potassium Autofarm")
+    Farm:CreateToggle({Name="Autofarm",CurrentValue=false,Flag="IronSoulAutoFarm",Callback=function(v) settings.autoFarm=v end})
+    Farm:CreateToggle({Name="Auto Use Skill",CurrentValue=false,Flag="IronSoulAutoUseSkill",Callback=function(v) settings.autoUseSkill=v end})
     Farm:CreateSlider({Name="Distance X",Range={-20,20},Increment=1,CurrentValue=0,Suffix=" studs",Flag="IronSoulDistanceX",Callback=function(v) settings.distanceX=v end})
     Farm:CreateSlider({Name="Distance Y",Range={-20,20},Increment=1,CurrentValue=0,Suffix=" studs",Flag="IronSoulDistanceY",Callback=function(v) settings.distanceY=v end})
     Farm:CreateSlider({Name="Distance Z",Range={-20,30},Increment=1,CurrentValue=10,Suffix=" studs",Flag="IronSoulDistanceZ",Callback=function(v) settings.distanceZ=v end})
     Farm:CreateSlider({Name="Pitch",Range={-180,180},Increment=1,CurrentValue=45,Suffix=" deg",Flag="IronSoulPitch",Callback=function(v) settings.pitch=v end})
-    Farm:CreateSlider({Name="Attack Distance",Range={3,30},Increment=1,CurrentValue=7,Suffix=" studs",Flag="IronSoulFarmDistance",Callback=function(v) settings.farmDistance=v end})
-    Farm:CreateSlider({Name="Height Above Target",Range={3,30},Increment=1,CurrentValue=8,Suffix=" studs",Flag="IronSoulFarmHeight",Callback=function(v) settings.heightAbove=v end})
-    Farm:CreateSlider({Name="Action Delay",Range={0.1,0.8},Increment=.02,CurrentValue=.18,Suffix="s",Flag="IronSoulActionDelay",Callback=function(v) settings.actionDelay=v end})
     Farm:CreateSection("Mob Management")
-    Farm:CreateToggle({Name="Bring Mobs to Target",CurrentValue=false,Flag="IronSoulBringMobs",Callback=function(v) settings.bringMobs=v end})
-    Farm:CreateSlider({Name="Bring Range",Range={20,200},Increment=10,CurrentValue=100,Suffix=" studs",Flag="IronSoulBringRange",Callback=function(v) settings.bringMobsRange=v end})
+    Farm:CreateToggle({Name="BringMobs",CurrentValue=false,Flag="IronSoulBringMobs",Callback=function(v) settings.bringMobs=v end})
+    Farm:CreateSection("Reference Controls")
+    Farm:CreateToggle({Name="Allow Camera Change",CurrentValue=false,Flag="IronSoulAllowCameraChange",Callback=function(v) settings.allowCameraChange=v settings.cameraChange=v if not v then workspace.CurrentCamera.CameraType=Enum.CameraType.Custom workspace.CurrentCamera.CameraSubject=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid") end end})
+    Farm:CreateSlider({Name="Camera Distance",Range={0,100},Increment=5,CurrentValue=70,Suffix=" studs",Flag="IronSoulCamDist",Callback=function(v) settings.cameraDistance=v end})
+    Farm:CreateToggle({Name="Change WalkSpeed",CurrentValue=false,Flag="IronSoulChangeWalkSpeed",Callback=function(v) settings.changeWalkSpeed=v settings.walkSpeed=v end})
+    Farm:CreateSlider({Name="WalkSpeed",Range={1,100},Increment=1,CurrentValue=16,Suffix="",Flag="IronSoulWalkSpeedVal",Callback=function(v) settings.walkSpeedValue=v end})
     Farm:CreateSection("Collection")
     Farm:CreateToggle({Name="Auto Collect Chests",CurrentValue=false,Flag="IronSoulCollectChests",Callback=function(v) settings.autoCollectChests=v end})
     Farm:CreateToggle({Name="Auto Collect Dragon Eggs",CurrentValue=false,Flag="IronSoulCollectEggs",Callback=function(v) settings.autoCollectEggs=v end})
+    Farm:CreateToggle({Name="Auto Play Again",CurrentValue=false,Flag="IronSoulAutoPlayAgain",Callback=function(v) settings.autoPlayAgain=v end})
 
     local Dodge=createTab("Dodge", "shield")
     Dodge:CreateSection("RedShow Avoidance")
@@ -796,15 +791,8 @@ return function(Window, runtimeInfo)
     Dodge:CreateSlider({Name="Dodge Hold",Range={0.5,3},Increment=.1,CurrentValue=1.4,Suffix="s",Flag="IronSoulDodgeHold",Callback=function(v) settings.dodgeHold=v end})
 
     local Utility=createTab("Utility", "settings")
-    Utility:CreateSection("Movement")
-    Utility:CreateToggle({Name="Change WalkSpeed",CurrentValue=false,Flag="IronSoulChangeWalkSpeed",Callback=function(v) settings.changeWalkSpeed=v settings.walkSpeed=v end})
-    Utility:CreateToggle({Name="Custom WalkSpeed",CurrentValue=false,Flag="IronSoulWalkSpeed",Callback=function(v) settings.walkSpeed=v settings.changeWalkSpeed=v end})
-    Utility:CreateSlider({Name="WalkSpeed Value",Range={1,100},Increment=1,CurrentValue=16,Suffix="",Flag="IronSoulWalkSpeedVal",Callback=function(v) settings.walkSpeedValue=v end})
-    Utility:CreateSection("Camera")
-    Utility:CreateToggle({Name="Allow Camera Change",CurrentValue=false,Flag="IronSoulAllowCameraChange",Callback=function(v) settings.allowCameraChange=v settings.cameraChange=v if not v then workspace.CurrentCamera.CameraType=Enum.CameraType.Custom workspace.CurrentCamera.CameraSubject=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid") end end})
-    Utility:CreateToggle({Name="Custom Camera (AFK View)",CurrentValue=false,Flag="IronSoulCamera",Callback=function(v) settings.cameraChange=v settings.allowCameraChange=v if not v then workspace.CurrentCamera.CameraType=Enum.CameraType.Custom workspace.CurrentCamera.CameraSubject=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid") end end})
-    Utility:CreateSlider({Name="Camera Distance",Range={0,100},Increment=5,CurrentValue=70,Suffix=" studs",Flag="IronSoulCamDist",Callback=function(v) settings.cameraDistance=v end})
-    Utility:CreateSlider({Name="Camera Back",Range={0,100},Increment=5,CurrentValue=50,Suffix=" studs",Flag="IronSoulCamBack",Callback=function(v) settings.cameraBack=v end})
+    Utility:CreateSection("Reference Runtime")
+    Utility:CreateLabel("Autofarm movement and recovery follow Potassium's IronDungeon flow")
 
     local Sell=createTab("Auto Sell", "dollar-sign")
     Sell:CreateSection("Sell by Rarity")
@@ -816,9 +804,7 @@ return function(Window, runtimeInfo)
 
     local Progress=createTab("Progress", "map")
     Progress:CreateSection("Dungeon End")
-    Progress:CreateToggle({Name="Auto Play Again",CurrentValue=false,Flag="IronSoulAutoPlayAgain",Callback=function(v) settings.autoPlayAgain=v end})
-    Progress:CreateDropdown({Name="After Dungeon",Options={"Off","Replay","Return Lobby"},CurrentOption={"Off"},MultipleOptions=false,Flag="IronSoulEndAction",Callback=function(v) settings.endAction=type(v)=="table"and v[1]or v end})
-    Progress:CreateSlider({Name="End Screen Delay",Range={1,12},Increment=.5,CurrentValue=3,Suffix="s",Flag="IronSoulEndActionDelay",Callback=function(v) settings.endActionDelay=v end})
+    Progress:CreateLabel("Use Auto Play Again in the Autofarm tab")
 
     local lastDodge,scanAt,statusAt=0,0,0
     connect(LP.CharacterAdded,function()
@@ -830,6 +816,7 @@ return function(Window, runtimeInfo)
         task.defer(function() if running then getController() end end)
     end)
     runPotassiumAutofarm()
+    runPotassiumCombat()
     runCollectionWorker()
     runAutoPlayAgainWorker()
     runAutoSellWorker()
@@ -968,34 +955,6 @@ return function(Window, runtimeInfo)
             if controllerOwner then controllerOwner.SetWalkSpeed=originalSetWalkSpeed end
             originalSetWalkSpeed=nil
         end
-        if (settings.allowCameraChange or settings.cameraChange) and root and now>=cameraNextAt then
-            cameraNextAt=now+.3
-            local cam=workspace.CurrentCamera; cam.CameraType=Enum.CameraType.Scriptable; cam.CameraSubject=nil
-            local camPos=root.Position+Vector3.new(0,settings.cameraDistance,settings.cameraBack)
-            pcall(function()
-                TweenService:Create(cam,TweenInfo.new(.3,Enum.EasingStyle.Quad),{CFrame=CFrame.lookAt(camPos,root.Position)}):Play()
-                cam.Focus=CFrame.new(root.Position)
-            end)
-        end
-        if settings.endAction~="Off" and #cachedEnemies==0 and now-lastEndAction>=math.max(settings.endActionDelay,1) then
-            local button=endActionButton(settings.endAction)
-            if button then
-                lastEndAction=now
-                local description=normalizedGuiText(button)
-                if activateGuiButton(button) then
-                    endActionState="activated "..settings.endAction.." ("..button.Name..")"
-                else
-                    endActionState="found result button but activation failed: "..description
-                end
-            else
-                endActionState="waiting for "..settings.endAction.." result button"
-            end
-        elseif settings.endAction=="Off" then
-            endActionState="off"
-        elseif #cachedEnemies>0 then
-            endActionState="dungeon active; waiting for victory"
-        end
-
         if now-statusAt>=.35 then
             statusAt=now
             local targetPart=getPart(selectedTarget); local targetHum=getHumanoid(selectedTarget)
@@ -1009,7 +968,6 @@ return function(Window, runtimeInfo)
                 enemyCountLabel:Set("Enemies alive: "..tostring(#cachedEnemies))
                 targetLabel:Set(targetText)
                 dodgeLabel:Set(danger and "Redzone: DODGING" or dodgeLocked and string.format("Redzone: holding safe %.1fs",math.max(0,dodgeLockUntil-now)) or "Redzone: clear")
-                endActionLabel:Set("End action: "..endActionState)
             end)
         end
     end)
