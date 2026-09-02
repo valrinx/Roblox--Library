@@ -262,11 +262,11 @@ local SCRIPTS = {
     },
     {
         name        = "Iron Soul: Dungeon",
-        description = "Enemy ESP | Autofarm | Auto Dodge | Round/Portal | Replay/Lobby",
+        description = "Enemy ESP | Reference Autofarm | Auto Dodge | Replay/Lobby",
         placeIds    = {117533937949084, 116456628154258},
         gameIds     = {9910245722},
-        version     = "v1.4.1",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/644fd59/modules/iron_soul.lua",
+        version     = "v1.6.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/eba47d7/modules/iron_soul.lua",
     },
     {
         name        = "Dungeon Quest Reborn",
