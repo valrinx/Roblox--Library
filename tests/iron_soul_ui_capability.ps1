@@ -24,6 +24,15 @@ if ($preTabSource -match ':WaitForChild\(') {
     throw 'Iron Soul must not yield on WaitForChild before building MacLib tabs'
 }
 
+$firstTabCall = $source.IndexOf('local Dashboard=createTab')
+if ($firstTabCall -lt 0) {
+    throw 'Iron Soul Dashboard tab definition is missing'
+}
+$preFirstTabSource = $source.Substring(0, $firstTabCall)
+if ($preFirstTabSource -match 'require\(frameworkModule\)') {
+    throw 'Iron Soul must not require Framework before building MacLib tabs'
+}
+
 if ([regex]::Matches($source, '(?m)^\s*(?!return\s+)Window:CreateTab\(').Count -gt 0) {
     throw 'Iron Soul must not bypass the createTab wrapper'
 }
@@ -51,6 +60,12 @@ if ($source -notmatch 'createTab\("ESP"') {
 
 if ($hub -notmatch 'moduleUrl\s*=\s*"https://raw\.githubusercontent\.com/valrinx/Roblox--Library/[0-9a-f]{7,40}/modules/iron_soul\.lua"') {
     throw 'RAVENHUB must pin Iron Soul to an immutable module revision to avoid stale client cache'
+}
+
+$settingsTabCall = $hub.IndexOf('local HubSettingsTab = Window:CreateTab("Settings"')
+$moduleDispatchLoop = $hub.IndexOf('local matchedAnyScript = false')
+if ($settingsTabCall -lt 0 -or $moduleDispatchLoop -lt 0 -or $settingsTabCall -gt $moduleDispatchLoop) {
+    throw 'RAVENHUB must create its Settings tab before dispatching experience modules'
 }
 
 Write-Output 'Iron Soul UI capability regression checks passed.'

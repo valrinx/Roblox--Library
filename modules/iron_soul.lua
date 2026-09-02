@@ -201,19 +201,27 @@ return function(Window, runtimeInfo)
         end
     end
 
-    -- Framework integration (from Potassium reference)
+    -- Framework integration (from Potassium reference).  Loading a game
+    -- ModuleScript can yield; defer it until after all MacLib tabs have been
+    -- built so the loader thread retains its Plugin capability.
     local Framework, DataUtil, EquipmentUtil, ForgeUtil, RarityTiers, TranslationUtil, MaterialUtil
-    pcall(function()
-        local frameworkModule=game:GetService("ReplicatedStorage"):FindFirstChild("Framework")
-        if not frameworkModule then return end
-        Framework = require(frameworkModule)
-        DataUtil = Framework.Modules.DataUtil
-        EquipmentUtil = Framework.Modules.EquipmentUtil
-        ForgeUtil = Framework.Modules.ForgeUtil
-        RarityTiers = Framework.Modules.RarityTiers
-        TranslationUtil = Framework.Modules.TranslationUtil
-        MaterialUtil = Framework.Modules.MaterialUtil
-    end)
+    local function loadFramework()
+        if Framework then return true end
+        local replicated=game:GetService("ReplicatedStorage")
+        local frameworkModule=replicated:FindFirstChild("Framework")
+        if not frameworkModule then return false end
+        local ok, loaded=pcall(require,frameworkModule)
+        if not ok or type(loaded)~="table" then return false end
+        Framework=loaded
+        local modules=Framework.Modules or {}
+        DataUtil=modules.DataUtil
+        EquipmentUtil=modules.EquipmentUtil
+        ForgeUtil=modules.ForgeUtil
+        RarityTiers=modules.RarityTiers
+        TranslationUtil=modules.TranslationUtil
+        MaterialUtil=modules.MaterialUtil
+        return true
+    end
     local function getRarityTiers()
         if not RarityTiers then return {} end
         local t = {}
@@ -957,6 +965,11 @@ return function(Window, runtimeInfo)
     Sell:CreateDropdown({Name="Ores",Options=(function() local t={} for _,o in ipairs(getOres()) do table.insert(t,o.Name) end return t end)(),CurrentOption={},MultipleOptions=true,Flag="IronSoulSellOres",Callback=function(v) settings.sellOres=type(v)=="table"and v or{v} end})
     Sell:CreateDropdown({Name="Crystals",Options=(function() local t={} for _,c in ipairs(getCrystals()) do table.insert(t,c.Name) end return t end)(),CurrentOption={},MultipleOptions=true,Flag="IronSoulSellCrystals",Callback=function(v) settings.sellCrystals=type(v)=="table"and v or{v} end})
     Sell:CreateToggle({Name="Auto Sell",CurrentValue=false,Flag="IronSoulAutoSell",Callback=function(v) settings.autoSell=v end})
+
+    -- Framework is only needed by selling/metadata helpers.  Require it now,
+    -- after the final MacLib tab/control has been created, so a yielding game
+    -- module cannot invalidate the capability used by CreateTab.
+    loadFramework()
 
     local lastDodge,scanAt,statusAt=0,0,0
     connect(LP.CharacterAdded,function()
