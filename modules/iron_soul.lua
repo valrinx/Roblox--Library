@@ -1,11 +1,12 @@
 --[[
     RAVEN HUB | Iron Soul: Dungeon
     Lobby PlaceId: 117533937949084 | Starless Forest: 116456628154258
-    GameId: 9910245722 | Version: v1.5.0
+    GameId: 9910245722 | Version: v1.6.0
 ]]
 return function(Window, runtimeInfo)
     local Players = game:GetService("Players")
     local RunService = game:GetService("RunService")
+    local TweenService = game:GetService("TweenService")
     local CoreGui = game:GetService("CoreGui")
     local VirtualInputManager = game:GetService("VirtualInputManager")
     local CollectionService = game:GetService("CollectionService")
@@ -13,15 +14,25 @@ return function(Window, runtimeInfo)
     local running = true
     local connections, visuals = {}, {}
     local selectedTarget, spectating = nil, false
-    local usedDoors = setmetatable({}, {__mode="k"})
     local controllerCache = nil
-    local lastKnownRound, doorHandledRound = nil, nil
-    local clearObservedAt, lastCompletedRound, pendingProgressRound, handledCompletedRound = nil, nil, nil, nil
+    local directController = nil
+    local controllerModuleRef = nil
+    local controllerCharacter = nil
+    local currentEnemy = nil
+    local attackBusy = false
+    local farmWorkerToken = 0
+    local collectionWorkerToken = 0
+    local autoPlayWorkerToken = 0
+    local autoSellWorkerToken = 0
+    local originalSetWalkSpeed = nil
+    local cameraNextAt = 0
     local lastEndAction, endActionState = 0, "waiting for dungeon result"
     local dodgeLockUntil, dodgeSafePosition = 0, nil
+    local redzoneDanger = false
     local collectedChests, collectedEggs = setmetatable({}, {__mode="k"}), setmetatable({}, {__mode="k"})
     local collectionCandidatesCache = {chests={}, eggs={}, expires={chests=0, eggs=0}}
     local collectionNextAt = 0
+    local CollectingChests, CollectingEggs = false, false
 
     pcall(function()
         local old = getgenv().__RAVEN_IRON_SOUL
@@ -31,17 +42,16 @@ return function(Window, runtimeInfo)
     local settings = {
         enemyEsp = true, maxDistance = 1500, showHp = true,
         targetMode = "Nearest", stickyTarget = true,
-        autoFarm = false, autoAttack = true, autoSkills = false,
-        farmMode = "Approach", farmDistance = 7, heightAbove = 8, actionDelay = 0.18,
+        autoFarm = false, autoAttack = true, autoSkills = false, autoUseSkill = false,
+        distanceX = 0, distanceY = 0, distanceZ = 10, pitch = 45,
+        farmMode = "Source", farmDistance = 7, heightAbove = 8, actionDelay = 0.18,
         autoDodge = false, dodgeMode = "Air", dodgeMargin = 3, dodgeDistance = 16, dodgeVertical = 50, dodgeCooldown = 0.55, dodgeHold = 1.4,
-        portalEsp = true, portalDistance = 2500,
-        autoOpenDoor = false, autoNextPortal = false, progressOnlyWhenClear = true, progressCooldown = 2,
-        progressMovement = "Teleport", progressOffset = 3, clearDelay = 2.5,
+        autoPlayAgain = false,
         endAction = "Off", endActionDelay = 3,
         bringMobs = false, bringMobsRange = 100,
         autoCollectChests = false, autoCollectEggs = false,
-        walkSpeed = false, walkSpeedValue = 26,
-        cameraChange = false, cameraDistance = 70, cameraBack = 50,
+        changeWalkSpeed = false, walkSpeed = false, walkSpeedValue = 16,
+        cameraChange = false, allowCameraChange = false, cameraDistance = 70, cameraBack = 50,
         autoSell = false, sellEquipmentRarities = {}, sellOres = {}, sellCrystals = {},
     }
 
@@ -49,6 +59,15 @@ return function(Window, runtimeInfo)
     local folder = Instance.new("Folder")
     folder.Name = "RavenIronSoul"
     folder.Parent = guiRoot
+    local TargetHighlight = Instance.new("Highlight")
+    TargetHighlight.Name = "AutofarmTarget"
+    TargetHighlight.Enabled = false
+    TargetHighlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    TargetHighlight.FillTransparency = 0.5
+    TargetHighlight.FillColor = Color3.fromRGB(0, 0, 255)
+    TargetHighlight.OutlineTransparency = 0
+    TargetHighlight.OutlineColor = Color3.fromRGB(0, 200, 40)
+    TargetHighlight.Parent = folder
 
     local function connect(signal, callback)
         local c = signal:Connect(callback); table.insert(connections, c); return c
@@ -70,67 +89,47 @@ return function(Window, runtimeInfo)
         local id = tostring(model:GetAttribute("NpcId") or "Enemy")
         return id:gsub("^NPC_", ""):gsub("_", " ")
     end
-    local function currentRoundInfo()
-        local root=myRoot(); local respawns=workspace:FindFirstChild("PlayerRespawn")
-        local bestPart,bestRound,bestDistance=nil,nil,math.huge
-        if root and respawns then
-            for _,part in ipairs(respawns:GetChildren()) do
-                local round=part:IsA("BasePart") and tonumber(part.Name:match("%d+"))
-                if round then local d=(part.Position-root.Position).Magnitude; if d<bestDistance then bestPart,bestRound,bestDistance=part,round,d end end
-            end
-        end
-        return bestRound,bestPart
+    local function SetCurrentEnemy(enemy)
+        currentEnemy=enemy and getPart(enemy) or nil
+        TargetHighlight.Adornee=enemy
+        TargetHighlight.Enabled=enemy~=nil
     end
     local function roundState()
         local cfg=game:GetService("ReplicatedStorage"):FindFirstChild("GameRoundCfg")
         local round=cfg and tonumber(cfg:GetAttribute("GameRound")); local complete=cfg and tonumber(cfg:GetAttribute("GameRoundComplete"))
         return round,complete
     end
-    local function spawnForRound(round)
-        local respawns=workspace:FindFirstChild("PlayerRespawn")
-        return respawns and respawns:FindFirstChild("Round"..tostring(round)) or nil
-    end
-    -- Round portals expose their interaction volume as Model/Root.  Do not use
-    -- getPart() here: the first decorative BasePart can be PortalBlue/FX and
-    -- does not carry TouchInterest or the RoundNum attribute.
-    local function portalRoot(model)
-        if not model then return nil end
-        local root=model:FindFirstChild("Root")
-        if root and root:IsA("BasePart") then return root end
-        return getPart(model)
-    end
-    local function portalRound(model)
-        local root=portalRoot(model)
-        local value=root and root:GetAttribute("RoundNum")
-        if value==nil and model then value=model:GetAttribute("RoundNum") end
-        return value~=nil and tonumber(value) or nil
-    end
-    local function portalRoundFromPart(part)
-        local value=part and part:GetAttribute("RoundNum")
-        if value==nil and part and part.Parent then value=part.Parent:GetAttribute("RoundNum") end
-        return value~=nil and tonumber(value) or nil
-    end
-    local function hasTouchTransmitter(part)
-        return part and (part:FindFirstChildOfClass("TouchTransmitter") or part:FindFirstChild("TouchInterest", true)) ~= nil
-    end
-    local function progressPortals(round)
-        local out={}; local holder=workspace:FindFirstChild("RoundDoor")
-        if not holder then return out end
-        for _,model in ipairs(holder:GetChildren()) do
-            if model:IsA("Model") and (model.Name=="Portal" or model.Name=="PortalD") then
-                local root=portalRoot(model); local modelRound=portalRound(model)
-                if root and hasTouchTransmitter(root) and (round==nil or modelRound==nil or modelRound==round) then
-                    table.insert(out,model)
-                end
-            end
-        end
-        return out
-    end
     local function tapKey(keyCode)
         VirtualInputManager:SendKeyEvent(true,keyCode,false,game)
         task.delay(.03,function() pcall(function() VirtualInputManager:SendKeyEvent(false,keyCode,false,game) end) end)
     end
+    local function buildController()
+        local character=LP.Character
+        if not character then return nil end
+        local manager=character:FindFirstChild("LocalControlMgr")
+        local ActionFolder=manager and manager:FindFirstChild("Action")
+        local controllerModule=manager and manager:FindFirstChild("Controller")
+        if not ActionFolder or not controllerModule then return nil end
+        local ActionModules={}
+        for _,module in ipairs(ActionFolder:GetChildren()) do
+            if module:IsA("ModuleScript") then
+                local ok,action=pcall(require,module)
+                if ok then ActionModules[module.Name]=action end
+            end
+        end
+        local ok,Controller=pcall(require,controllerModule)
+        if not ok or type(Controller)~="table" or type(Controller.new)~="function" then return nil end
+        local created,instance=pcall(function() return Controller.new(character,ActionModules) end)
+        if not created then return nil end
+        directController,controllerCharacter=instance,character
+        controllerModuleRef=Controller
+        controllerCache=instance
+        return instance
+    end
     local function getController()
+        if directController and controllerCharacter==LP.Character and type(directController.PerformAction)=="function" then return directController end
+        directController=nil; controllerCharacter=nil; controllerModuleRef=nil
+        local built=buildController(); if built then return built end
         if controllerCache and rawget(controllerCache,"Character")==LP.Character then return controllerCache end
         controllerCache=nil
         if type(getgc)~="function" then return nil end
@@ -141,45 +140,58 @@ return function(Window, runtimeInfo)
         end
         return controllerCache
     end
-    local function tapAttack()
-        local controller=getController()
-        if controller and pcall(function() controller:PerformAction("BaseAttack") end) then
-            task.delay(.08,function() if running and controller==controllerCache then pcall(function() controller:StopAction("BaseAttack") end) end end)
-            return
-        end
-        local camera=workspace.CurrentCamera; local size=camera and camera.ViewportSize or Vector2.new(960,540)
-        VirtualInputManager:SendMouseButtonEvent(size.X/2,size.Y/2,0,true,game,0)
-        task.delay(.03,function() pcall(function() VirtualInputManager:SendMouseButtonEvent(size.X/2,size.Y/2,0,false,game,0) end) end)
+    local useReadySkills
+    local function Attack(bool)
+        if attackBusy then return end
+        attackBusy=true
+        task.spawn(function()
+            local controller=getController()
+            if controller and pcall(function() controller:PerformAction("BaseAttack") end) then
+                task.wait()
+                if running then pcall(function() controller:StopAction("BaseAttack") end) end
+            else
+                local camera=workspace.CurrentCamera; local size=camera and camera.ViewportSize or Vector2.new(960,540)
+                pcall(function() VirtualInputManager:SendMouseButtonEvent(size.X/2,size.Y/2,0,true,game,0) end)
+                task.wait(.03)
+                pcall(function() VirtualInputManager:SendMouseButtonEvent(size.X/2,size.Y/2,0,false,game,0) end)
+            end
+            if bool and running then useReadySkills() end
+            attackBusy=false
+        end)
     end
     local function stopAttack()
         local controller=getController()
         if controller then pcall(function() controller:StopAction("BaseAttack") end) end
     end
-    local function useReadySkills()
+    useReadySkills = function()
         local gui=LP:FindFirstChild("PlayerGui"); local input=gui and gui:FindFirstChild("ScreenInput")
         local pc=input and input:FindFirstChild("PCInput"); local skills=pc and pc:FindFirstChild("Skills")
         if not skills then return end
         local controller=getController()
-        -- Priority 1: FullCharge → use SkillU (ultimate) only
-        local skillU=skills:FindFirstChild("SkillU")
-        if skillU and skillU.Visible and skillU:GetAttribute("OnCD")~=true and skillU:GetAttribute("FullCharge")==true then
-            if controller then pcall(function() controller:PerformAction("SkillU") end) end
-            task.wait(0.05)
-            return
-        end
-        -- Priority 2: use available skills sequentially with delay
-        for _,name in ipairs({"Skill1","Skill2","SkillAW"}) do
-            local button=skills:FindFirstChild(name); local cool=button and button:FindFirstChild("Cool")
-            if button and button.Visible and button:GetAttribute("OnCD")~=true and not (cool and cool.Visible) then
-                if controller then
-                    pcall(function() controller:PerformAction(name) end)
-                else
-                    local key=button:FindFirstChild("Key",true); local text=key and key:FindFirstChildWhichIsA("TextLabel",true)
-                    local keyCode=text and Enum.KeyCode[text.Text]
-                    pcall(function() button:Activate() end)
-                    if keyCode then tapKey(keyCode) end
+        -- Potassium's original contract: a ready ImageButton with FullCharge
+        -- uses SkillU; otherwise the three normal skills are fired in order.
+        for _,button in ipairs(skills:GetChildren()) do
+            if button:IsA("ImageButton") and button:GetAttribute("OnCD")==false then
+                if button:GetAttribute("FullCharge")==true then
+                    if controller then pcall(function() controller:PerformAction("SkillU") end) end
+                    task.wait(0.05)
+                    return
                 end
-                task.wait(0.05)
+                for _,name in ipairs({"Skill1","Skill2","SkillAW"}) do
+                    local skill=skills:FindFirstChild(name); local cool=skill and skill:FindFirstChild("Cool")
+                    if skill and skill:GetAttribute("OnCD")~=true and not (cool and cool.Visible) then
+                        if controller then
+                            pcall(function() controller:PerformAction(name) end)
+                        else
+                            local key=skill:FindFirstChild("Key",true); local text=key and key:FindFirstChildWhichIsA("TextLabel",true)
+                            local keyCode=text and Enum.KeyCode[text.Text]
+                            pcall(function() skill:Activate() end)
+                            if keyCode then tapKey(keyCode) end
+                        end
+                        task.wait(0.05)
+                    end
+                end
+                return
             end
         end
     end
@@ -310,6 +322,9 @@ return function(Window, runtimeInfo)
         if not prompt and model then prompt=model:FindFirstChildWhichIsA("ProximityPrompt", true) end
         return prompt
     end
+    local function hasTouchTransmitter(part)
+        return part and (part:FindFirstChildOfClass("TouchTransmitter") or part:FindFirstChild("TouchInterest", true)) ~= nil
+    end
     local function isDragonEggModel(model)
         if not model or not model:IsA("Model") then return false end
         local tagged=false
@@ -369,14 +384,36 @@ return function(Window, runtimeInfo)
         return prompt==nil
     end
     local function collectChests()
-        local now=os.clock(); if now<collectionNextAt then return end
         local root=myRoot(); if not root then return end
+        local finalDistance=CFrame.new(settings.distanceX,settings.distanceY,settings.distanceZ)*CFrame.Angles(math.rad(settings.pitch),math.rad(180),0)
+        -- Potassium's chest contract scans the live workspace models and keeps
+        -- the player on a chest until its HitCount reaches zero.
+        for _,v in ipairs(workspace:GetChildren()) do
+            if v:IsA("Model") and string.find(v.Name,"Chest") then
+                local chestRoot=v:FindFirstChild("Root") or interactableRoot(v)
+                local hitCount=tonumber(v:GetAttribute("HitCount") or (chestRoot and chestRoot:GetAttribute("HitCount")))
+                if chestRoot and hitCount and hitCount>0 then
+                    CollectingChests=true
+                    repeat
+                        if not root.Parent or not v.Parent or not chestRoot.Parent then break end
+                        root.CFrame=chestRoot.CFrame*finalDistance
+                        task.wait()
+                        hitCount=tonumber(v:GetAttribute("HitCount") or (chestRoot and chestRoot:GetAttribute("HitCount"))) or 0
+                    until not settings.autoCollectChests or hitCount<=0
+                    CollectingChests=false
+                    collectedChests[v]=nil
+                    collectionNextAt=os.clock()+0.1
+                    return
+                end
+            end
+        end
+        -- Keep the reference-compatible fallback for servers that nest chests.
+        local now=os.clock(); if now<collectionNextAt then return end
         for _,v in ipairs(collectionCandidates("chests")) do
             if v.Parent and not collectedChests[v] then
-                local chestRoot=interactableRoot(v); local hitCount=tonumber(v:GetAttribute("HitCount") or (chestRoot and chestRoot:GetAttribute("HitCount")))
-                local prompt=interactionPrompt(v,chestRoot)
-                if chestRoot and (hitCount==nil or hitCount>0) and (not prompt or prompt.Enabled) then
-                    root.CFrame=chestRoot.CFrame*CFrame.new(0,2,0)
+                local chestRoot=interactableRoot(v); local prompt=interactionPrompt(v,chestRoot)
+                if chestRoot and (not prompt or prompt.Enabled) then
+                    root.CFrame=chestRoot.CFrame*finalDistance
                     activateCollectable(v,chestRoot); collectedChests[v]=true; collectionNextAt=now+0.2
                     return
                 end
@@ -386,6 +423,29 @@ return function(Window, runtimeInfo)
     local function collectDragonEggs()
         local now=os.clock(); if now<collectionNextAt then return end
         local root=myRoot(); if not root then return end
+        -- Potassium's egg contract is a direct workspace scan.  The visible
+        -- EggModel is the teleport target, while the parent Root owns the
+        -- interaction prompt.
+        for _,v in ipairs(workspace:GetChildren()) do
+            local dragonEgg=v:IsA("Model") and v:FindFirstChild("DragonEgg")
+            local eggModel=dragonEgg and dragonEgg:FindFirstChild("EggModel")
+            local visualRoot=eggModel and eggModel:FindFirstChild("Root")
+            local interactRoot=v:FindFirstChild("Root") or (dragonEgg and dragonEgg:FindFirstChild("Root"))
+            local active=v:GetAttribute("Active")
+            if active==nil and dragonEgg then active=dragonEgg:GetAttribute("Active") end
+            local prompt=interactionPrompt(v,interactRoot)
+            if dragonEgg and visualRoot and interactRoot and active~=true and (not prompt or prompt.Enabled) then
+                CollectingEggs=true
+                root.CFrame=visualRoot.CFrame
+                task.wait(0.1)
+                local exactPrompt=interactRoot:FindFirstChild("Interact_ProximityPrompt") or prompt
+                if exactPrompt and type(fireproximityprompt)=="function" then pcall(fireproximityprompt,exactPrompt) end
+                CollectingEggs=false
+                collectionNextAt=os.clock()+0.15
+                return
+            end
+        end
+        -- Fallback for builds that expose DragonEgg as the top-level model.
         for _,v in ipairs(collectionCandidates("eggs")) do
             if v.Parent and not collectedEggs[v] then
                 local interactRoot=v:FindFirstChild("Root")
@@ -393,7 +453,6 @@ return function(Window, runtimeInfo)
                 local visualModel=v:FindFirstChild("EggModel",true); local visualRoot=visualModel and visualModel:FindFirstChild("Root") or interactRoot
                 local prompt=interactionPrompt(v,interactRoot)
                 local active=v:GetAttribute("Active")
-                if active==nil and interactRoot then active=interactRoot:GetAttribute("Active") end
                 if active~=true and interactRoot and visualRoot and visualRoot:IsA("BasePart") and (not prompt or prompt.Enabled) then
                     root.CFrame=visualRoot.CFrame*CFrame.new(0,2,0)
                     activateCollectable(v,interactRoot); collectedEggs[v]=true; collectionNextAt=now+0.2
@@ -404,15 +463,174 @@ return function(Window, runtimeInfo)
     end
     local function bringMobsToTarget()
         local root = myRoot(); if not root then return end
-        local targetPart = getPart(selectedTarget)
+        local targetPart = currentEnemy or getPart(selectedTarget)
         if not targetPart then return end
-        for _, v in ipairs(workspace.EnemyNpc:GetChildren()) do
+        local enemyFolder=workspace:FindFirstChild("EnemyNpc")
+        if not enemyFolder then return end
+        for _, v in ipairs(enemyFolder:GetChildren()) do
             if v:IsA("Model") and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 and v:FindFirstChild("HumanoidRootPart") then
-                if (targetPart.Position - v.HumanoidRootPart.Position).Magnitude <= settings.bringMobsRange then
+                if (targetPart.Position - v.HumanoidRootPart.Position).Magnitude <= math.min(settings.bringMobsRange,100) then
                     v.HumanoidRootPart.CFrame = targetPart.CFrame
                 end
             end
         end
+    end
+    local function clearWhiteEffect()
+        local playerGui=LP:FindFirstChildOfClass("PlayerGui")
+        local design=playerGui and playerGui:FindFirstChild("ScreenDesign")
+        local white=design and design:FindFirstChild("WhiteEffect")
+        if white then pcall(function() white:Destroy() end) end
+    end
+    local function sourceFarmDistance(model)
+        local x,y,z=settings.distanceX,settings.distanceY,settings.distanceZ
+        if model and model:GetAttribute("LevelType")=="Boss" then x,y,z=x*1.5,y*1.5,z*1.5 end
+        return CFrame.new(x,y,z)*CFrame.Angles(0,0,math.rad(settings.pitch))
+    end
+    local function farmCFrame(model,root,enemyRoot)
+        if settings.farmMode=="Source" then return enemyRoot.CFrame*sourceFarmDistance(model) end
+        if settings.farmMode=="Above Target" then
+            local desired=enemyRoot.Position+Vector3.new(0,settings.heightAbove,0)
+            return CFrame.lookAt(desired,enemyRoot.Position)
+        end
+        if settings.farmMode=="Below Target" then
+            local desired=enemyRoot.Position-Vector3.new(0,settings.heightAbove,0)
+            return CFrame.lookAt(desired,enemyRoot.Position)
+        end
+        local flat=Vector3.new(root.Position.X-enemyRoot.Position.X,0,root.Position.Z-enemyRoot.Position.Z)
+        if flat.Magnitude<.1 then flat=-enemyRoot.CFrame.LookVector end
+        local desired=enemyRoot.Position+flat.Unit*settings.farmDistance
+        return CFrame.lookAt(desired,enemyRoot.Position)
+    end
+    local function recoverWithoutEnemies(root)
+        if not root then return end
+        if workspace:GetAttribute("GameMode")=="" then
+            root.CFrame=CFrame.new(8561.28906,273.670654,-3727.4563,0.589069664,-2.59408957e-08,0.808082283,-6.4901144e-08,1,7.9412942e-08,-0.808082283,-9.92252183e-08,0.589069664)
+            return
+        end
+        local respawns=workspace:FindFirstChild("PlayerRespawn")
+        if not respawns then return end
+        local oldCFrame=root.CFrame
+        for _,spawnPart in ipairs(respawns:GetChildren()) do
+            if not running or not settings.autoFarm then break end
+            if spawnPart:IsA("BasePart") then
+                root.CFrame=spawnPart.CFrame
+                task.wait(1)
+            end
+        end
+        if root.Parent then root.CFrame=oldCFrame end
+    end
+    local function runPotassiumAutofarm()
+        farmWorkerToken=farmWorkerToken+1
+        local token=farmWorkerToken
+        task.spawn(function()
+            while running and token==farmWorkerToken do
+                if not settings.autoFarm then
+                    SetCurrentEnemy(nil)
+                    task.wait(.1)
+                elseif game.PlaceId==117533937949084 then
+                    SetCurrentEnemy(nil)
+                    task.wait(.25)
+                elseif redzoneDanger and settings.autoDodge then
+                    task.wait(.05)
+                elseif CollectingChests or CollectingEggs then
+                    task.wait()
+                else
+                    local ok,err=pcall(function()
+                        clearWhiteEffect()
+                        local enemyFolder=workspace.EnemyNpc or workspace:FindFirstChild("EnemyNpc")
+                        local models=enemyFolder and enemyFolder:GetChildren() or {}
+                        local found=false
+                        for _,v in ipairs(models) do
+                            local humanoid=getHumanoid(v); local enemyRoot=v:FindFirstChild("HumanoidRootPart")
+                            if v:IsA("Model") and humanoid and humanoid.Health>0 and enemyRoot then
+                                found=true; currentEnemy=enemyRoot; SetCurrentEnemy(v)
+                                local count=0
+                                repeat
+                                    if not running or not settings.autoFarm or CollectingChests or CollectingEggs or (redzoneDanger and settings.autoDodge) then break end
+                                    local rootNow=myRoot(); if not rootNow or not enemyRoot.Parent then break end
+                                    count=count+1
+                                    if count>1000 then
+                                        rootNow.CFrame=enemyRoot.CFrame
+                                        task.wait(.1)
+                                        count=0
+                                        break
+                                    end
+                                    rootNow.CFrame=farmCFrame(v,rootNow,enemyRoot)
+                                    if settings.autoAttack then Attack(settings.autoUseSkill or settings.autoSkills) end
+                                    if settings.bringMobs then bringMobsToTarget() end
+                                    task.wait()
+                                    humanoid=getHumanoid(v); enemyRoot=v:FindFirstChild("HumanoidRootPart")
+                                until not settings.autoFarm or not humanoid or humanoid.Health<=0 or not enemyRoot
+                            elseif v and v:IsA("Model") and not v:FindFirstChild("HumanoidRootPart") then
+                                local rootNow=myRoot(); if rootNow then rootNow.CFrame=v:GetPivot() end
+                            end
+                        end
+                        if not found then recoverWithoutEnemies(myRoot()) end
+                    end)
+                    if not ok then warn(err) end
+                    task.wait()
+                end
+            end
+            SetCurrentEnemy(nil)
+        end)
+    end
+    local function runCollectionWorker()
+        collectionWorkerToken=collectionWorkerToken+1
+        local token=collectionWorkerToken
+        task.spawn(function()
+            while running and token==collectionWorkerToken do
+                if settings.autoCollectChests then pcall(collectChests) end
+                task.wait()
+            end
+        end)
+        task.spawn(function()
+            while running and token==collectionWorkerToken do
+                if settings.autoCollectEggs or settings.autoFarm then pcall(collectDragonEggs) end
+                task.wait()
+            end
+        end)
+    end
+    local function runAutoPlayAgainWorker()
+        autoPlayWorkerToken=autoPlayWorkerToken+1
+        local token=autoPlayWorkerToken
+        task.spawn(function()
+            while running and token==autoPlayWorkerToken do
+                if settings.autoPlayAgain then
+                    pcall(function()
+                        local gui=LP:FindFirstChildOfClass("PlayerGui")
+                        local revive=gui and gui:FindFirstChild("BattleHUD") and gui.BattleHUD:FindFirstChild("PlayerRevive")
+                        local reviveFrame=revive and revive:FindFirstChild("ReviveFrame")
+                        if reviveFrame and reviveFrame.Visible then
+                            local remotes=game:GetService("ReplicatedStorage"):FindFirstChild("Remotes")
+                            local gamePlayer=remotes and remotes:FindFirstChild("GamePlayerRE")
+                            if gamePlayer then gamePlayer:FireServer("ExitSettlement") end
+                        end
+                        local result=gui and gui:FindFirstChild("ResultGui")
+                        local settlement=result and result:FindFirstChild("ScreenSettlement")
+                        if settlement and settlement.Visible then
+                            local remotes=game:GetService("ReplicatedStorage"):FindFirstChild("Remotes")
+                            local gameRound=remotes and remotes:FindFirstChild("GameRoundRE")
+                            if gameRound then gameRound:FireServer("VotePlayAgain") end
+                        end
+                    end)
+                end
+                task.wait(.25)
+            end
+        end)
+    end
+    local function runAutoSellWorker()
+        autoSellWorkerToken=autoSellWorkerToken+1
+        local token=autoSellWorkerToken
+        task.spawn(function()
+            while running and token==autoSellWorkerToken do
+                if settings.autoSell then
+                    if #settings.sellEquipmentRarities>0 then pcall(function() sellEquipmentByRarity(settings.sellEquipmentRarities) end) end
+                    if #settings.sellOres>0 then pcall(function() sellOres(settings.sellOres) end) end
+                    if #settings.sellCrystals>0 then pcall(function() sellCrystals(settings.sellCrystals) end) end
+                end
+                task.wait(2)
+            end
+        end)
     end
     local function normalizedGuiText(button)
         local values={button.Name}
@@ -529,7 +747,7 @@ return function(Window, runtimeInfo)
     end
 
     local Dashboard=createTab("Dungeon", "activity")
-    Dashboard:CreateSection("Iron Soul v1.5.0")
+    Dashboard:CreateSection("Iron Soul v1.6.0")
     local roundLabel=Dashboard:CreateLabel("Round: scanning...")
     local enemyCountLabel=Dashboard:CreateLabel("Enemies: scanning...")
     local targetLabel=Dashboard:CreateLabel("Target: none")
@@ -550,8 +768,13 @@ return function(Window, runtimeInfo)
     Farm:CreateSection("Target Based Autofarm")
     Farm:CreateToggle({Name="Auto Farm Target",CurrentValue=false,Flag="IronSoulAutoFarm",Callback=function(v) settings.autoFarm=v end})
     Farm:CreateToggle({Name="Auto Base Attack",CurrentValue=true,Flag="IronSoulAutoAttack",Callback=function(v) settings.autoAttack=v end})
-    Farm:CreateToggle({Name="Auto Skills (Ready Only)",CurrentValue=false,Flag="IronSoulAutoSkills",Callback=function(v) settings.autoSkills=v end})
-    Farm:CreateDropdown({Name="Farm Position",Options={"Approach","Above Target","Below Target"},CurrentOption={"Approach"},MultipleOptions=false,Flag="IronSoulFarmMode",Callback=function(v) settings.farmMode=type(v)=="table"and v[1]or v end})
+    Farm:CreateToggle({Name="Auto Use Skill",CurrentValue=false,Flag="IronSoulAutoUseSkill",Callback=function(v) settings.autoUseSkill=v settings.autoSkills=v end})
+    Farm:CreateToggle({Name="Auto Skills (Ready Only)",CurrentValue=false,Flag="IronSoulAutoSkills",Callback=function(v) settings.autoSkills=v settings.autoUseSkill=v end})
+    Farm:CreateDropdown({Name="Farm Position",Options={"Source","Approach","Above Target","Below Target"},CurrentOption={"Source"},MultipleOptions=false,Flag="IronSoulFarmMode",Callback=function(v) settings.farmMode=type(v)=="table"and v[1]or v end})
+    Farm:CreateSlider({Name="Distance X",Range={-20,20},Increment=1,CurrentValue=0,Suffix=" studs",Flag="IronSoulDistanceX",Callback=function(v) settings.distanceX=v end})
+    Farm:CreateSlider({Name="Distance Y",Range={-20,20},Increment=1,CurrentValue=0,Suffix=" studs",Flag="IronSoulDistanceY",Callback=function(v) settings.distanceY=v end})
+    Farm:CreateSlider({Name="Distance Z",Range={-20,30},Increment=1,CurrentValue=10,Suffix=" studs",Flag="IronSoulDistanceZ",Callback=function(v) settings.distanceZ=v end})
+    Farm:CreateSlider({Name="Pitch",Range={-180,180},Increment=1,CurrentValue=45,Suffix=" deg",Flag="IronSoulPitch",Callback=function(v) settings.pitch=v end})
     Farm:CreateSlider({Name="Attack Distance",Range={3,30},Increment=1,CurrentValue=7,Suffix=" studs",Flag="IronSoulFarmDistance",Callback=function(v) settings.farmDistance=v end})
     Farm:CreateSlider({Name="Height Above Target",Range={3,30},Increment=1,CurrentValue=8,Suffix=" studs",Flag="IronSoulFarmHeight",Callback=function(v) settings.heightAbove=v end})
     Farm:CreateSlider({Name="Action Delay",Range={0.1,0.8},Increment=.02,CurrentValue=.18,Suffix="s",Flag="IronSoulActionDelay",Callback=function(v) settings.actionDelay=v end})
@@ -574,11 +797,14 @@ return function(Window, runtimeInfo)
 
     local Utility=createTab("Utility", "settings")
     Utility:CreateSection("Movement")
-    Utility:CreateToggle({Name="Custom WalkSpeed",CurrentValue=false,Flag="IronSoulWalkSpeed",Callback=function(v) settings.walkSpeed=v end})
-    Utility:CreateSlider({Name="WalkSpeed Value",Range={1,100},Increment=1,CurrentValue=26,Suffix="",Flag="IronSoulWalkSpeedVal",Callback=function(v) settings.walkSpeedValue=v end})
+    Utility:CreateToggle({Name="Change WalkSpeed",CurrentValue=false,Flag="IronSoulChangeWalkSpeed",Callback=function(v) settings.changeWalkSpeed=v settings.walkSpeed=v end})
+    Utility:CreateToggle({Name="Custom WalkSpeed",CurrentValue=false,Flag="IronSoulWalkSpeed",Callback=function(v) settings.walkSpeed=v settings.changeWalkSpeed=v end})
+    Utility:CreateSlider({Name="WalkSpeed Value",Range={1,100},Increment=1,CurrentValue=16,Suffix="",Flag="IronSoulWalkSpeedVal",Callback=function(v) settings.walkSpeedValue=v end})
     Utility:CreateSection("Camera")
-    Utility:CreateToggle({Name="Custom Camera (AFK View)",CurrentValue=false,Flag="IronSoulCamera",Callback=function(v) settings.cameraChange=v if not v then workspace.CurrentCamera.CameraType=Enum.CameraType.Custom workspace.CurrentCamera.CameraSubject=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid") end end})
-    Utility:CreateSlider({Name="Camera Distance",Range={10,150},Increment=5,CurrentValue=70,Suffix=" studs",Flag="IronSoulCamDist",Callback=function(v) settings.cameraDistance=v end})
+    Utility:CreateToggle({Name="Allow Camera Change",CurrentValue=false,Flag="IronSoulAllowCameraChange",Callback=function(v) settings.allowCameraChange=v settings.cameraChange=v if not v then workspace.CurrentCamera.CameraType=Enum.CameraType.Custom workspace.CurrentCamera.CameraSubject=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid") end end})
+    Utility:CreateToggle({Name="Custom Camera (AFK View)",CurrentValue=false,Flag="IronSoulCamera",Callback=function(v) settings.cameraChange=v settings.allowCameraChange=v if not v then workspace.CurrentCamera.CameraType=Enum.CameraType.Custom workspace.CurrentCamera.CameraSubject=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid") end end})
+    Utility:CreateSlider({Name="Camera Distance",Range={0,100},Increment=5,CurrentValue=70,Suffix=" studs",Flag="IronSoulCamDist",Callback=function(v) settings.cameraDistance=v end})
+    Utility:CreateSlider({Name="Camera Back",Range={0,100},Increment=5,CurrentValue=50,Suffix=" studs",Flag="IronSoulCamBack",Callback=function(v) settings.cameraBack=v end})
 
     local Sell=createTab("Auto Sell", "dollar-sign")
     Sell:CreateSection("Sell by Rarity")
@@ -589,25 +815,24 @@ return function(Window, runtimeInfo)
     Sell:CreateToggle({Name="Auto Sell",CurrentValue=false,Flag="IronSoulAutoSell",Callback=function(v) settings.autoSell=v end})
 
     local Progress=createTab("Progress", "map")
-    Progress:CreateSection("Round / Portal")
-    Progress:CreateToggle({Name="Portal ESP",CurrentValue=true,Flag="IronSoulPortalESP",Callback=function(v) settings.portalEsp=v end})
-    Progress:CreateSlider({Name="Portal Distance",Range={250,6000},Increment=250,CurrentValue=2500,Suffix=" studs",Flag="IronSoulPortalDistance",Callback=function(v) settings.portalDistance=v end})
-    local portalLabel=Progress:CreateLabel("Nearest portal: scanning...")
-    local doorLabel=Progress:CreateLabel("Round doors: scanning...")
-    local progressStateLabel=Progress:CreateLabel("Automation: idle")
-    Progress:CreateSection("Progress Automation")
-    Progress:CreateToggle({Name="Auto Open Round Door",CurrentValue=false,Flag="IronSoulAutoDoor",Callback=function(v) settings.autoOpenDoor=v end})
-    Progress:CreateToggle({Name="Auto Next Round Portal",CurrentValue=false,Flag="IronSoulAutoPortal",Callback=function(v) settings.autoNextPortal=v end})
-    Progress:CreateToggle({Name="Only When Enemies Clear",CurrentValue=true,Flag="IronSoulProgressClear",Callback=function(v) settings.progressOnlyWhenClear=v end})
-    Progress:CreateDropdown({Name="Movement Mode",Options={"Teleport","Walk"},CurrentOption={"Teleport"},MultipleOptions=false,Flag="IronSoulProgressMovement",Callback=function(v) settings.progressMovement=type(v)=="table"and v[1]or v end})
-    Progress:CreateSlider({Name="Teleport Offset",Range={1,8},Increment=.5,CurrentValue=3,Suffix=" studs",Flag="IronSoulProgressOffset",Callback=function(v) settings.progressOffset=v end})
-    Progress:CreateSlider({Name="Clear Confirmation Delay",Range={0.5,6},Increment=.5,CurrentValue=2.5,Suffix="s",Flag="IronSoulClearDelay",Callback=function(v) settings.clearDelay=v end})
-    Progress:CreateSlider({Name="Progress Cooldown",Range={1,8},Increment=.5,CurrentValue=2,Suffix="s",Flag="IronSoulProgressCooldown",Callback=function(v) settings.progressCooldown=v end})
-    Progress:CreateSection("Dungeon End v1.3")
+    Progress:CreateSection("Dungeon End")
+    Progress:CreateToggle({Name="Auto Play Again",CurrentValue=false,Flag="IronSoulAutoPlayAgain",Callback=function(v) settings.autoPlayAgain=v end})
     Progress:CreateDropdown({Name="After Dungeon",Options={"Off","Replay","Return Lobby"},CurrentOption={"Off"},MultipleOptions=false,Flag="IronSoulEndAction",Callback=function(v) settings.endAction=type(v)=="table"and v[1]or v end})
     Progress:CreateSlider({Name="End Screen Delay",Range={1,12},Increment=.5,CurrentValue=3,Suffix="s",Flag="IronSoulEndActionDelay",Callback=function(v) settings.endActionDelay=v end})
 
-    local lastDodge,lastAction,lastProgress,lastEntryRecovery,scanAt,statusAt=0,0,0,0,0,0
+    local lastDodge,scanAt,statusAt=0,0,0
+    connect(LP.CharacterAdded,function()
+        directController=nil
+        controllerModuleRef=nil
+        controllerCharacter=nil
+        controllerCache=nil
+        currentEnemy=nil
+        task.defer(function() if running then getController() end end)
+    end)
+    runPotassiumAutofarm()
+    runCollectionWorker()
+    runAutoPlayAgainWorker()
+    runAutoSellWorker()
     local cachedEnemies={}
     local redFolder=workspace:FindFirstChild("RedShow")
     if redFolder then
@@ -700,6 +925,7 @@ return function(Window, runtimeInfo)
                 end
             end
         end
+        redzoneDanger=danger~=nil
         if danger and dodgePosition and settings.autoDodge and now-lastDodge>=settings.dodgeCooldown and root then
             lastDodge=now
             local humanoid=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
@@ -722,51 +948,35 @@ return function(Window, runtimeInfo)
             dodgeSafePosition=nil
         end
 
-        local farmPart=getPart(selectedTarget)
-        if settings.autoFarm and not danger and not dodgeLocked and root and farmPart then
-            local humanoid=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
-            if settings.farmMode=="Above Target" then
-                local desired=farmPart.Position+Vector3.new(0,settings.heightAbove,0)
-                root.CFrame=CFrame.lookAt(desired,farmPart.Position)
-            elseif settings.farmMode=="Below Target" then
-                local desired=farmPart.Position-Vector3.new(0,settings.heightAbove,0)
-                root.CFrame=CFrame.lookAt(desired,farmPart.Position)
-            else
-                local flat=Vector3.new(root.Position.X-farmPart.Position.X,0,root.Position.Z-farmPart.Position.Z)
-                if flat.Magnitude<.1 then flat=-farmPart.CFrame.LookVector end
-                local desired=farmPart.Position+flat.Unit*settings.farmDistance
-                if humanoid and (root.Position-desired).Magnitude>2 then humanoid:MoveTo(desired) end
-                root.CFrame=CFrame.lookAt(root.Position,Vector3.new(farmPart.Position.X,root.Position.Y,farmPart.Position.Z))
-            end
-            if distance(farmPart)<=math.max(settings.farmDistance+4,12) and now-lastAction>=settings.actionDelay then
-                lastAction=now
-                if settings.autoAttack then tapAttack() end
-                if settings.autoSkills then useReadySkills() end
-            end
-        else
-            stopAttack()
-        end
-
-        if settings.bringMobs and selectedTarget and root then bringMobsToTarget() end
-        if settings.autoCollectChests and #cachedEnemies==0 then pcall(collectChests) end
-        if settings.autoCollectEggs and #cachedEnemies==0 then pcall(collectDragonEggs) end
-        if settings.walkSpeed then
+        -- Autofarm, chest/egg collection and replay are driven by the
+        -- reference-compatible worker loops below.  Heartbeat remains a light
+        -- UI/ESP update path so it cannot stall on task.wait().
+        if not settings.autoFarm then stopAttack() end
+        if settings.changeWalkSpeed or settings.walkSpeed then
             local hum=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+            local controller=getController()
+            local controllerOwner=controllerModuleRef or controller
+            if controllerOwner and type(controllerOwner.SetWalkSpeed)=="function" and not originalSetWalkSpeed then
+                originalSetWalkSpeed=controllerOwner.SetWalkSpeed
+            end
+            if controllerOwner then
+                controllerOwner.SetWalkSpeed=function(_,_) if hum then hum.WalkSpeed=settings.walkSpeedValue end end
+            end
             if hum then hum.WalkSpeed=settings.walkSpeedValue end
+        elseif originalSetWalkSpeed then
+            local controllerOwner=controllerModuleRef or getController()
+            if controllerOwner then controllerOwner.SetWalkSpeed=originalSetWalkSpeed end
+            originalSetWalkSpeed=nil
         end
-        if settings.cameraChange and root then
+        if (settings.allowCameraChange or settings.cameraChange) and root and now>=cameraNextAt then
+            cameraNextAt=now+.3
             local cam=workspace.CurrentCamera; cam.CameraType=Enum.CameraType.Scriptable; cam.CameraSubject=nil
             local camPos=root.Position+Vector3.new(0,settings.cameraDistance,settings.cameraBack)
-            pcall(function() cam.CFrame=CFrame.lookAt(camPos,root.Position) end)
+            pcall(function()
+                TweenService:Create(cam,TweenInfo.new(.3,Enum.EasingStyle.Quad),{CFrame=CFrame.lookAt(camPos,root.Position)}):Play()
+                cam.Focus=CFrame.new(root.Position)
+            end)
         end
-        if settings.autoSell and now-lastAction>=2 then
-            if #settings.sellEquipmentRarities>0 then pcall(function() sellEquipmentByRarity(settings.sellEquipmentRarities) end) end
-            if #settings.sellOres>0 then pcall(function() sellOres(settings.sellOres) end) end
-            if #settings.sellCrystals>0 then pcall(function() sellCrystals(settings.sellCrystals) end) end
-        end
-
-        local officialRound,completedRound=roundState()
-        local locationRound=currentRoundInfo()
         if settings.endAction~="Off" and #cachedEnemies==0 and now-lastEndAction>=math.max(settings.endActionDelay,1) then
             local button=endActionButton(settings.endAction)
             if button then
@@ -785,188 +995,20 @@ return function(Window, runtimeInfo)
         elseif #cachedEnemies>0 then
             endActionState="dungeon active; waiting for victory"
         end
-        if settings.autoNextPortal and #cachedEnemies==0 and root and officialRound and completedRound and completedRound==officialRound-1 and now-lastProgress>=settings.progressCooldown then
-            local targetRound=officialRound
-            local nearestPortal,portalDistance=nil,math.huge
-            local fallbackPortal,fallbackDistance=nil,math.huge
-            for _,portal in ipairs(progressPortals(targetRound)) do
-                local pp=portalRoot(portal); local portalRoundValue=portalRound(portal)
-                if pp then
-                    local d=distance(pp)
-                    if portalRoundValue==targetRound and d<portalDistance then nearestPortal,portalDistance=pp,d end
-                    if d<fallbackDistance then fallbackPortal,fallbackDistance=pp,d end
-                end
-            end
-            if not nearestPortal and fallbackPortal then nearestPortal=fallbackPortal; portalDistance=fallbackDistance end
-            local holder=workspace:FindFirstChild("RoundDoor"); local openDoorDistance=math.huge; local hasLockedDoor=false
-            if holder then for _,prompt in ipairs(holder:GetDescendants()) do if prompt:IsA("ProximityPrompt") and not prompt.Enabled then local parent=prompt.Parent; local part=parent and (parent:IsA("BasePart") and parent or parent.Parent); if part and part:IsA("BasePart") then hasLockedDoor=true; openDoorDistance=math.min(openDoorDistance,distance(part)) end end end end
-            local portalRoundValue=nearestPortal and portalRoundFromPart(nearestPortal)
-            if nearestPortal and (portalDistance<=35 or (portalRoundValue==nil and fallbackDistance<=60)) and (not hasLockedDoor or openDoorDistance<=45) then
-                lastProgress=now; handledCompletedRound=completedRound
-                root.CFrame=nearestPortal.CFrame*CFrame.new(0,2,-math.min(settings.progressOffset,2))
-                local portalRoot,boundRoot=nearestPortal,root
-                task.delay(.15,function() if running and portalRoot.Parent and boundRoot.Parent and type(firetouchinterest)=="function" then pcall(firetouchinterest,boundRoot,portalRoot,0); pcall(firetouchinterest,boundRoot,portalRoot,1) end end)
-            end
-        end
-        if settings.autoOpenDoor and #cachedEnemies==0 and root and officialRound and now-lastEntryRecovery>=3 then
-            local holder=workspace:FindFirstChild("RoundDoor"); local nearestOpenDoor=math.huge
-            if holder then
-                for _,prompt in ipairs(holder:GetDescendants()) do
-                    if prompt:IsA("ProximityPrompt") and not prompt.Enabled then
-                        local parent=prompt.Parent; local part=parent and (parent:IsA("BasePart") and parent or parent.Parent)
-                        if part and part:IsA("BasePart") then nearestOpenDoor=math.min(nearestOpenDoor,distance(part)) end
-                    end
-                end
-            end
-            local destination=spawnForRound(officialRound)
-            if destination and nearestOpenDoor<=25 then
-                lastEntryRecovery=now; root.CFrame=destination.CFrame*CFrame.new(0,3,0)
-            end
-        end
-        if completedRound then
-            if lastCompletedRound==nil then lastCompletedRound=completedRound end
-            if completedRound>lastCompletedRound then
-                lastCompletedRound=completedRound; handledCompletedRound=nil; pendingProgressRound=completedRound; clearObservedAt=now
-            elseif not pendingProgressRound and handledCompletedRound~=completedRound and #cachedEnemies==0 and locationRound==completedRound and officialRound and completedRound<officialRound then
-                pendingProgressRound=completedRound; clearObservedAt=now
-            end
-        end
-        if pendingProgressRound and locationRound and locationRound~=pendingProgressRound and #cachedEnemies>0 then
-            pendingProgressRound=nil; clearObservedAt=nil
-        end
-        local clearConfirmed=pendingProgressRound~=nil and clearObservedAt~=nil and now-clearObservedAt>=settings.clearDelay
-        local canProgress=not settings.progressOnlyWhenClear or clearConfirmed
-        local progressState
-        if clearConfirmed then progressState="Round"..tostring(pendingProgressRound).." clear confirmed"
-        elseif pendingProgressRound then progressState=string.format("confirming Round%s clear | %.1fs",tostring(pendingProgressRound),math.max(0,settings.clearDelay-(now-(clearObservedAt or now))))
-        else progressState=string.format("waiting for game clear | round %s, completed %s",tostring(officialRound or "?"),tostring(completedRound or "?")) end
-        if canProgress and root and now-lastProgress>=settings.progressCooldown then
-            local currentRound=pendingProgressRound or locationRound or officialRound
-            local targetRound=officialRound or (currentRound and currentRound+1)
-            local roundSpawn=spawnForRound(targetRound) or spawnForRound(currentRound)
-            if targetRound~=lastKnownRound then lastKnownRound=targetRound; doorHandledRound=nil; table.clear(usedDoors) end
-            local used=false
-            local matchingDoorExists=false
-            if settings.autoOpenDoor then
-                local doors=workspace:FindFirstChild("RoundDoor"); local bestPrompt,bestDistance=nil,math.huge
-                local reference=roundSpawn and roundSpawn.Position or root.Position
-                if doors then
-                    for _,prompt in ipairs(doors:GetDescendants()) do
-                        if prompt:IsA("ProximityPrompt") then
-                            local parent=prompt.Parent; local part=parent and (parent:IsA("BasePart") and parent or parent.Parent)
-                            local doorRound=part and tonumber(part:GetAttribute("RoundNum"))
-                            if part and part:IsA("BasePart") and (doorRound==nil or doorRound==targetRound) then
-                                matchingDoorExists=true
-                                if prompt.Enabled and not usedDoors[prompt] and doorHandledRound~=targetRound then
-                                    local d=(part.Position-reference).Magnitude; if d<bestDistance then bestPrompt,bestDistance=prompt,d end
-                                end
-                            end
-                        end
-                    end
-                end
-                if bestPrompt then
-                    local parent=bestPrompt.Parent; local part=parent and (parent:IsA("BasePart") and parent or parent.Parent)
-                    local playerDistance=part and distance(part) or math.huge
-                    if playerDistance>10 and part and part:IsA("BasePart") then
-                        if settings.progressMovement=="Teleport" then
-                            root.CFrame=part.CFrame*CFrame.new(0,0,-settings.progressOffset)
-                            local flat=Vector3.new(part.Position.X-reference.X,0,part.Position.Z-reference.Z)
-                            if flat.Magnitude<.1 then flat=part.CFrame.LookVector end
-                            local entryPos=part.Position+flat.Unit*18; entryPos=Vector3.new(entryPos.X,(roundSpawn and roundSpawn.Position.Y or root.Position.Y)+3,entryPos.Z)
-                            local entryCFrame=CFrame.lookAt(entryPos,entryPos+flat.Unit)
-                            usedDoors[bestPrompt]=true; doorHandledRound=targetRound; handledCompletedRound=pendingProgressRound or currentRound; used=true; lastProgress=now
-                            task.delay(.15,function() if running and bestPrompt.Parent and type(fireproximityprompt)=="function" then pcall(fireproximityprompt,bestPrompt) end end)
-                            task.delay(.45,function() if running and root.Parent then root.CFrame=entryCFrame end end)
-                            progressState="opening and entering beyond Round"..tostring(targetRound).." door"
-                        else
-                            local humanoid=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
-                            if humanoid then humanoid:MoveTo(part.Position) end
-                            progressState=string.format("walking to door | %dm",math.floor(playerDistance))
-                        end
-                    elseif type(fireproximityprompt)=="function" then
-                        pcall(fireproximityprompt,bestPrompt); usedDoors[bestPrompt]=true; doorHandledRound=targetRound; used=true; progressState="opened Round"..tostring(targetRound).." door; waiting for room change"
-                    end
-                elseif matchingDoorExists and doorHandledRound==targetRound then
-                    progressState="door handled; waiting to enter next room"
-                end
-            end
-            if not used and not matchingDoorExists and doorHandledRound~=targetRound and settings.autoNextPortal and type(firetouchinterest)=="function" then
-                local bestPortal,bestDistance=nil,math.huge
-                local fallbackPortal,fallbackDistance=nil,math.huge; local reference=roundSpawn and roundSpawn.Position or root.Position
-                for _,portal in ipairs(progressPortals(targetRound)) do
-                    local pp=portalRoot(portal); local round=portalRound(portal); local d=distance(pp)
-                    if pp and round==targetRound and d<bestDistance then bestPortal,bestDistance=pp,d end
-                    if pp then local rd=(pp.Position-reference).Magnitude; if rd<fallbackDistance then fallbackPortal,fallbackDistance=pp,rd end end
-                end
-                if not bestPortal and fallbackPortal then bestPortal= fallbackPortal; bestDistance=distance(fallbackPortal); progressState="using nearest real portal fallback" end
-                if bestPortal then
-                    if bestDistance>8 then
-                        if settings.progressMovement=="Teleport" then
-                            root.CFrame=bestPortal.CFrame*CFrame.new(0,2,-settings.progressOffset)
-                            used=true; lastProgress=now
-                            local portalRoot,boundRoot=bestPortal,root
-                            task.delay(.15,function()
-                                if running and portalRoot.Parent and boundRoot.Parent and type(firetouchinterest)=="function" then
-                                    pcall(firetouchinterest,boundRoot,portalRoot,0); pcall(firetouchinterest,boundRoot,portalRoot,1)
-                                    handledCompletedRound=pendingProgressRound; pendingProgressRound=nil; clearObservedAt=nil
-                                end
-                            end)
-                            progressState="teleported and entering portal R"..tostring(portalRoundFromPart(bestPortal) or "?")
-                        else
-                            local humanoid=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
-                            if humanoid then humanoid:MoveTo(bestPortal.Position) end
-                            progressState=string.format("walking to portal R%s | %dm",tostring(portalRoundFromPart(bestPortal) or "?"),math.floor(bestDistance))
-                        end
-                    else
-                        pcall(firetouchinterest,root,bestPortal,0); pcall(firetouchinterest,root,bestPortal,1); used=true; progressState="entered next portal"
-                    end
-                end
-                local fallbackSpawn=spawnForRound(targetRound)
-                local allowSpawnFallback=pendingProgressRound~=nil or (officialRound and completedRound and completedRound==officialRound-1)
-                if not used and not bestPortal and allowSpawnFallback and fallbackSpawn and settings.progressMovement=="Teleport" and (fallbackSpawn.Position-root.Position).Magnitude>8 then
-                    root.CFrame=fallbackSpawn.CFrame*CFrame.new(0,3,0)
-                    used=true; lastProgress=now; handledCompletedRound=pendingProgressRound or currentRound; pendingProgressRound=nil; clearObservedAt=nil
-                    progressState="teleported to Round"..tostring(targetRound).." spawn fallback"
-                end
-            end
-            if used then lastProgress=now end
-        end
 
         if now-statusAt>=.35 then
             statusAt=now
             local targetPart=getPart(selectedTarget); local targetHum=getHumanoid(selectedTarget)
-            local nearestPortal,nearestDistance=nil,math.huge; local portalCount=0
-            local activePortals={}
-            for _,p in ipairs(progressPortals()) do
-                    local pp=portalRoot(p); local d=distance(pp)
-                    if d<nearestDistance then nearestPortal,nearestDistance=p,d end
-                    if d<=settings.portalDistance then
-                        portalCount+=1
-                        if settings.portalEsp and pp then
-                            activePortals[p]=true
-                            local color=Color3.fromRGB(95,190,255)
-                            local v=ensureVisual(p,p,pp,color)
-                            local round=portalRound(p)
-                            if v then
-                                v.label.Text=string.format("Portal%s | %dm",round~=nil and " R"..tostring(round) or "",math.floor(d))
-                                v.label.TextColor3=color; v.highlight.FillColor=color; v.highlight.OutlineColor=color
-                            end
-                        end
-                    end
+            local targetText="Target: none"
+            if selectedTarget and targetPart and targetHum then
+                targetText=string.format("Target: %s | HP %d/%d | %dm",enemyName(selectedTarget),math.floor(targetHum.Health),math.floor(targetHum.MaxHealth),math.floor(distance(targetPart)))
             end
-            for key in pairs(visuals) do
-                local ok,isOld=pcall(function() return (key.Name=="Portal" or key.Name=="PortalD") and not activePortals[key] and key.Parent==workspace:FindFirstChild("RoundDoor") end)
-                if ok and isOld then removeVisual(key) end
-            end
-            local doors=workspace:FindFirstChild("RoundDoor"); local gameRound,gameRoundComplete=roundState()
+            local gameRound,gameRoundComplete=roundState()
             pcall(function()
-                roundLabel:Set(string.format("Game round: %s | completed: %s%s",tostring(gameRound or "?"),tostring(gameRoundComplete or "?"),pendingProgressRound and " | MOVE R"..tostring(pendingProgressRound) or ""))
+                roundLabel:Set(string.format("Game round: %s | completed: %s",tostring(gameRound or "?"),tostring(gameRoundComplete or "?")))
                 enemyCountLabel:Set("Enemies alive: "..tostring(#cachedEnemies))
-                targetLabel:Set(selectedTarget and string.format("Target: %s | HP %d/%d | %dm",enemyName(selectedTarget),math.floor(targetHum.Health),math.floor(targetHum.MaxHealth),math.floor(distance(targetPart))) or "Target: none")
+                targetLabel:Set(targetText)
                 dodgeLabel:Set(danger and "Redzone: DODGING" or dodgeLocked and string.format("Redzone: holding safe %.1fs",math.max(0,dodgeLockUntil-now)) or "Redzone: clear")
-                portalLabel:Set(nearestPortal and string.format("Nearest portal: %dm | %d in range",math.floor(nearestDistance),portalCount) or "Nearest portal: none")
-                doorLabel:Set("Round doors: "..tostring(doors and #doors:GetChildren() or 0))
-                progressStateLabel:Set("Automation: "..progressState)
                 endActionLabel:Set("End action: "..endActionState)
             end)
         end
@@ -984,10 +1026,17 @@ return function(Window, runtimeInfo)
         stopAttack()
         for _,c in ipairs(connections) do pcall(function() c:Disconnect() end) end
         for key in pairs(visuals) do removeVisual(key) end
+        if originalSetWalkSpeed then
+            local controllerOwner=controllerModuleRef or getController()
+            if controllerOwner then controllerOwner.SetWalkSpeed=originalSetWalkSpeed end
+            originalSetWalkSpeed=nil
+        end
+        TargetHighlight.Adornee=nil
+        TargetHighlight.Enabled=false
         pcall(function() folder:Destroy() end)
         local camera=workspace.CurrentCamera; if camera and LP.Character then camera.CameraSubject=LP.Character:FindFirstChildOfClass("Humanoid") end
         if getgenv().__RAVEN_IRON_SOUL and getgenv().__RAVEN_IRON_SOUL.Settings==settings then getgenv().__RAVEN_IRON_SOUL=nil end
     end
-    getgenv().__RAVEN_IRON_SOUL={Version="v1.5.0",Settings=settings,Destroy=destroy}
+    getgenv().__RAVEN_IRON_SOUL={Version="v1.6.0",Settings=settings,Destroy=destroy}
     if runtimeInfo and type(runtimeInfo.registerCleanup)=="function" then runtimeInfo.registerCleanup(destroy) end
 end
