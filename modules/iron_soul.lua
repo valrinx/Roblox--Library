@@ -552,9 +552,23 @@ return function(Window, runtimeInfo)
     local function findFreeMatchRoom()
         local matchRoom = workspace:FindFirstChild("MatchRoom")
         if not matchRoom then return nil, nil end
-        for index=1,4 do
-            local room = matchRoom:FindFirstChild("Room" .. tostring(index))
-            local touch = room and isEmptyMatchRoom(room) and findTouchPart(room)
+        local rooms={}
+        for _,room in ipairs(matchRoom:GetChildren()) do
+            local index=tonumber(tostring(room.Name):match("^Room(%d+)$"))
+            if index then table.insert(rooms,{index=index,room=room}) end
+        end
+        table.sort(rooms,function(a,b) return a.index<b.index end)
+        local modeKnown=false
+        for _,entry in ipairs(rooms) do
+            if entry.room:GetAttribute("Mode")~=nil then
+                modeKnown=true
+                break
+            end
+        end
+        for _,entry in ipairs(rooms) do
+            local room = entry.room
+            local isStory = (not modeKnown) or tostring(room:GetAttribute("Mode"))=="Story"
+            local touch = room and isStory and isEmptyMatchRoom(room) and findTouchPart(room)
             if room and touch then return room, touch end
         end
         return nil, nil
@@ -595,6 +609,12 @@ return function(Window, runtimeInfo)
         if not screen and gui then screen=gui:FindFirstChild("ScreenMatch",true) end
         return screen
     end
+    local function getDungeonMatchCount(screen)
+        local countLabel=screen and screen:FindFirstChild("MatchCount",true)
+        local count=countLabel and tonumber(countLabel.Text)
+        if not count then return 1 end
+        return math.max(1,math.floor(count))
+    end
     local function findDungeonRemotes()
         local replicated=game:GetService("ReplicatedStorage")
         local framework=replicated:FindFirstChild("Framework")
@@ -606,15 +626,35 @@ return function(Window, runtimeInfo)
         local matchRemote=remotes and remotes:FindFirstChild("GameMatchRE")
         return worldRemote, matchRemote
     end
+    local function closeDungeonScreen(screen)
+        local replicated=game:GetService("ReplicatedStorage")
+        local framework=replicated:FindFirstChild("Framework")
+        local systems=framework and framework:FindFirstChild("Systems")
+        local guiLib=systems and systems:FindFirstChild("GUILib")
+        local windowModule=guiLib and guiLib:FindFirstChild("WindowUtil")
+        local closed=false
+        if windowModule then
+            local ok,WindowUtil=pcall(require,windowModule)
+            if ok and WindowUtil and type(WindowUtil.Close)=="function" then
+                closed=pcall(function() WindowUtil:Close("ScreenMatch") end)
+            end
+        end
+        if not closed and screen then
+            pcall(function()
+                screen.Visible=false
+                screen.Active=false
+            end)
+        end
+    end
     local function requestDungeonEntry(force)
         if not force and not settings.autoEnterDungeon then return false end
         if game.PlaceId~=LOBBY_PLACE_ID then return false end
-        if LP:GetAttribute("EnterRoomId") then
-            setAutoDungeonStatus("Room assigned")
-            return false
-        end
         local screen=getScreenMatch()
         if not screen or not guiObjectVisible(screen) then
+            if LP:GetAttribute("EnterRoomId") then
+                setAutoDungeonStatus("Room assigned")
+                return false
+            end
             local room,touch=findFreeMatchRoom()
             if not room or not touch then
                 setAutoDungeonStatus("Waiting empty room")
@@ -640,10 +680,23 @@ return function(Window, runtimeInfo)
             return false
         end
         task.wait(.35)
-        local createOk=pcall(function()
-            matchRemote:FireServer("CreatRoom",settings.autoDungeonWorld,settings.autoDungeonDifficulty,1)
+        local matchCount=getDungeonMatchCount(screen)
+        local sharedStart=nil
+        pcall(function()
+            if shared and type(shared.ProServer_StartMatch)=="function" then
+                sharedStart=shared.ProServer_StartMatch
+            end
         end)
+        local createOk
+        if sharedStart then
+            createOk=pcall(sharedStart,settings.autoDungeonWorld,settings.autoDungeonDifficulty)
+        else
+            createOk=pcall(function()
+                matchRemote:FireServer("CreatRoom",settings.autoDungeonWorld,settings.autoDungeonDifficulty,matchCount)
+            end)
+        end
         setAutoDungeonStatus(createOk and ("Creating " .. settings.autoDungeonWorld .. " / " .. tostring(settings.autoDungeonDifficulty)) or "Create failed")
+        if createOk then closeDungeonScreen(screen) end
         return createOk
     end
     local function runAutoDungeonWorker()
