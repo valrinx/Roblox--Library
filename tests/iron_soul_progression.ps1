@@ -18,7 +18,7 @@ $requiredPatterns = @(
     'DragonEgg',
     'EggModel',
     'SetWalkSpeed',
-    'Version="v1\.6\.0"'
+    'Version="v1\.6\.1"'
 )
 
 foreach ($pattern in $requiredPatterns) {

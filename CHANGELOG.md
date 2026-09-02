@@ -17,6 +17,10 @@
 - Narrowed the existing Shiganshina registry match to its dedicated PlaceId so it does not load in the main customization place.
 # Changelog
 
+## 2026-09-03 - Iron Soul: Dungeon v1.6.1
+
+- Expanded the `Dodge Hold` control from a 3-second maximum to a 10-second maximum.
+
 ## 2026-09-02 - Ground War (o) v0.1.0
 
 - Added a Ground War module for PlaceId 76822114837453 with player/AIBot ESP, team-aware visibility checks, bounded ballistic prediction, optional smooth auto aim, tactical radar, match monitoring, fullbright, no fog, and custom FOV.
