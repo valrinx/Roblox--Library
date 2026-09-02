@@ -305,7 +305,7 @@ local SCRIPTS = {
         placeIds    = {117533937949084, 116456628154258},
         gameIds     = {9910245722},
         version     = "v1.6.0",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/401633cc12d67e6aac1211a28bbbe44a864467ca/modules/iron_soul.lua",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/0bd743ade6f44cc13a681f3b3b9b8dfbe5068549/modules/iron_soul.lua",
     },
     {
         name        = "Dungeon Quest Reborn",
