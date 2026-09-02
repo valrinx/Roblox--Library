@@ -123,10 +123,28 @@ return function(Window, runtimeInfo)
         local key=button and button:FindFirstChild("Key",true)
         local text=key and key:FindFirstChildWhichIsA("TextLabel",true)
         local value=text and tostring(text.Text or ""):upper()
-        return value~="" and Enum.KeyCode[value] or nil
+        if not value or value=="" then return nil end
+        local enumOk,enumValue=pcall(function() return Enum.KeyCode[value] end)
+        return enumOk and enumValue or nil
     end
     local function activateGuiButton(button)
         if not button or not button:IsA("GuiButton") or not guiObjectVisible(button) then return false end
+        if type(firesignal)=="function" then
+            local ok=pcall(function() firesignal(button.MouseButton1Down) end)
+            if ok then
+                task.wait(0.02)
+                pcall(function() firesignal(button.MouseButton1Up) end)
+                return true
+            end
+        end
+        local pos=button.AbsolutePosition+button.AbsoluteSize/2
+        local clicked=pcall(function()
+            VirtualInputManager:SendMouseMoveEvent(pos.X,pos.Y,game)
+            VirtualInputManager:SendMouseButtonEvent(pos.X,pos.Y,0,true,game,0)
+            task.wait(0.02)
+            VirtualInputManager:SendMouseButtonEvent(pos.X,pos.Y,0,false,game,0)
+        end)
+        if clicked then return true end
         local ok=pcall(function() button:Activate() end)
         if ok then return true end
         local keyCode=buttonKeyCode(button)
@@ -267,7 +285,14 @@ return function(Window, runtimeInfo)
     local function switchWeapon(buttons,expectedSlot)
         local switch=buttons and buttons.SwitchWpn
         if not switch or not guiObjectVisible(switch) or getCurrentWeaponSlot(buttons)~=expectedSlot then return false end
-        local candidates={switch:FindFirstChild("Switch"),switch}
+        local keyCode=buttonKeyCode(switch)
+        if keyCode then
+            tapKey(keyCode)
+            local deadline=os.clock()+1.2
+            repeat task.wait(0.05) until not running or getCurrentWeaponSlot(buttons)~=expectedSlot or os.clock()>=deadline
+            if getCurrentWeaponSlot(buttons)~=expectedSlot then return true end
+        end
+        local candidates={switch,switch:FindFirstChild("Switch")}
         for _,button in ipairs(candidates) do
             if activateGuiButton(button) then
                 local deadline=os.clock()+1.2
@@ -277,7 +302,6 @@ return function(Window, runtimeInfo)
                 if getCurrentWeaponSlot(buttons)~=expectedSlot then return true end
             end
         end
-        local keyCode=buttonKeyCode(switch)
         if keyCode then
             tapKey(keyCode)
             local deadline=os.clock()+1.2
