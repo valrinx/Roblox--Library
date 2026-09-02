@@ -204,7 +204,9 @@ return function(Window, runtimeInfo)
     -- Framework integration (from Potassium reference)
     local Framework, DataUtil, EquipmentUtil, ForgeUtil, RarityTiers, TranslationUtil, MaterialUtil
     pcall(function()
-        Framework = require(game:GetService("ReplicatedStorage"):WaitForChild("Framework"))
+        local frameworkModule=game:GetService("ReplicatedStorage"):FindFirstChild("Framework")
+        if not frameworkModule then return end
+        Framework = require(frameworkModule)
         DataUtil = Framework.Modules.DataUtil
         EquipmentUtil = Framework.Modules.EquipmentUtil
         ForgeUtil = Framework.Modules.ForgeUtil
@@ -878,12 +880,10 @@ return function(Window, runtimeInfo)
         return enemies[1] and enemies[1].model or nil
     end
 
-    -- MacLib creates a large batch of Instances for every tab.  Potassium can
-    -- temporarily revoke the Instance capability when several tabs are built
-    -- back-to-back in one scheduler slice.  Yield once per tab so the UI
-    -- builder gets a fresh slice and never aborts halfway through the module.
+    -- Keep tab creation on the loader's original call stack.  Yielding here
+    -- can drop the executor's Plugin capability before RAVENHUB creates its
+    -- own Settings tab.
     local function createTab(name, icon)
-        task.wait()
         return Window:CreateTab(name, icon)
     end
 

@@ -7,12 +7,25 @@ if ($source -notmatch 'local function createTab\(name, icon\)') {
     throw 'Iron Soul must centralize module tab creation behind createTab'
 }
 
-if ($source -notmatch 'local function createTab\(name, icon\)\s*task\.wait\(\)\s*return Window:CreateTab\(name, icon\)') {
-    throw 'Iron Soul createTab must yield before calling MacLib CreateTab'
+if ($source -match 'local function createTab\(name, icon\)\s*task\.wait\(\)') {
+    throw 'Iron Soul createTab must not yield before calling MacLib CreateTab'
+}
+
+if ($source -notmatch 'local function createTab\(name, icon\)\s*return Window:CreateTab\(name, icon\)') {
+    throw 'Iron Soul createTab must call MacLib CreateTab on the original loader thread'
+}
+
+$tabDefinition = $source.IndexOf('local function createTab')
+if ($tabDefinition -lt 0) {
+    throw 'Iron Soul createTab definition is missing'
+}
+$preTabSource = $source.Substring(0, $tabDefinition)
+if ($preTabSource -match ':WaitForChild\(') {
+    throw 'Iron Soul must not yield on WaitForChild before building MacLib tabs'
 }
 
 if ([regex]::Matches($source, '(?m)^\s*(?!return\s+)Window:CreateTab\(').Count -gt 0) {
-    throw 'Iron Soul must not bypass the yielding createTab wrapper'
+    throw 'Iron Soul must not bypass the createTab wrapper'
 }
 
 $tabCalls = [regex]::Matches($source, '\bcreateTab\(').Count
