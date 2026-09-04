@@ -123,7 +123,7 @@ return function(Window, scriptInfo)
         autoFarm = false,
         selectedField = "Dandylion Field",
         forceEquipShovel = true,
-        movementMode = "Lawn Mower",
+        movementMode = "Pollen Hunter",
         roamRadius = 18,
         roamSpeed = 1.6,
         fieldMargin = 0.85,
@@ -215,6 +215,7 @@ return function(Window, scriptInfo)
                 if base and base:IsA("BasePart") then
                     local margin = settings.fieldMargin or 0.85
                     return {
+                        folderName = folder.Name,
                         cframe = base.CFrame,
                         position = base.Position,
                         size = base.Size,
@@ -227,12 +228,71 @@ return function(Window, scriptInfo)
         local fallbackPos = FIELDS[fieldName] or Vector3.new(1315.0, -24.1, 425.6)
         local margin = settings.fieldMargin or 0.85
         return {
+            folderName = stripped,
             cframe = CFrame.new(fallbackPos),
             position = fallbackPos,
             size = Vector3.new(60, 0, 40),
             halfW = 30 * margin,
             halfL = 20 * margin
         }
+    end
+
+    -- ═══════════ Smart Pollen / Flower Detection ═══════════
+    local function findBestAliveFlower(folderName)
+        if not clientController then findControllers() end
+        local sg = clientController and clientController.SkinnedGrass
+        if not sg then return nil, 0 end
+
+        if not sg.fieldByName or not sg.fieldByName[folderName] then
+            pcall(function() sg:syncFields() end)
+        end
+
+        local grassObj = nil
+        if sg.fieldByName and sg.fieldByName[folderName] then
+            grassObj = sg.fieldByName[folderName]
+        elseif sg.grassObjects then
+            for _, g in ipairs(sg.grassObjects) do
+                if g.fieldFolder and g.fieldFolder.Name == folderName then
+                    grassObj = g
+                    break
+                end
+            end
+        end
+
+        if not grassObj or not grassObj.BoneInitialPositions then
+            return nil, 0
+        end
+
+        local root = getRoot()
+        local charPos = root and root.Position or Vector3.zero
+        local now = tick()
+        local bhs = grassObj.BoneHarvestState or {}
+        local bip = grassObj.BoneInitialPositions
+
+        local nearestFlowerPos = nil
+        local shortestDist = math.huge
+        local totalAlive = 0
+
+        for bone, pos in pairs(bip) do
+            local state = bhs[bone]
+            local isAlive = true
+            if state and state.dead == true then
+                if not state.respawnAt or now < state.respawnAt then
+                    isAlive = false
+                end
+            end
+
+            if isAlive then
+                totalAlive = totalAlive + 1
+                local dist = (Vector3.new(pos.X, 0, pos.Z) - Vector3.new(charPos.X, 0, charPos.Z)).Magnitude
+                if dist < shortestDist then
+                    shortestDist = dist
+                    nearestFlowerPos = pos
+                end
+            end
+        end
+
+        return nearestFlowerPos, totalAlive
     end
 
     local function ensureShovelEquipped()
@@ -590,7 +650,17 @@ return function(Window, scriptInfo)
                                     local hum = getHumanoid()
                                     local speed = settings.roamSpeed or 1.6
 
-                                    if mode == "Lawn Mower" then
+                                    if mode == "Pollen Hunter" then
+                                        -- Detect alive flowers with pollen in the field and navigate to them
+                                        local flowerPos, aliveCount = findBestAliveFlower(fData.folderName)
+                                        if flowerPos and hum then
+                                            hum:MoveTo(flowerPos)
+                                        elseif hum then
+                                            -- If all flowers temporarily harvested, stay near center
+                                            hum:MoveTo(fData.position)
+                                        end
+
+                                    elseif mode == "Lawn Mower" then
                                         -- Systematic snake / boustrophedon sweep across the entire field
                                         local periodX = math.max(2.5, 5.0 / speed)
                                         local numLanes = 5
@@ -679,14 +749,20 @@ return function(Window, scriptInfo)
             local chosen = type(option) == "table" and option[1] or option
             if FIELDS[chosen] then
                 settings.selectedField = chosen
+                if settings.autoFarm then
+                    local fData = getFieldData(chosen)
+                    if fData then
+                        tpTo(fData.position + Vector3.new(0, 3, 0))
+                    end
+                end
             end
         end,
     })
 
     FarmTab:CreateDropdown({
         Name = "Movement Mode",
-        Options = {"Lawn Mower", "Smooth Sweep", "Circle Walk", "Glide Roam", "Random Bounce", "Stay Center"},
-        CurrentOption = "Lawn Mower",
+        Options = {"Pollen Hunter", "Lawn Mower", "Smooth Sweep", "Circle Walk", "Glide Roam", "Random Bounce", "Stay Center"},
+        CurrentOption = "Pollen Hunter",
         Flag = "BeeMoveMode",
         Callback = function(opt)
             local chosen = type(opt) == "table" and opt[1] or opt
