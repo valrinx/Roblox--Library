@@ -1,7 +1,8 @@
 -- ═══════════════════════════════════════════════════════════
--- Beeconomy! | RAVEN HUB Module v1.3.0
+-- Beeconomy! | RAVEN HUB Module v1.4.0
 -- PlaceId: 101558830312092 | GameId: 7000989941
--- Features: Auto Farm Pollen (Smart Pollen Hunter across all 23 fields, Lawn Mower, Sweep),
+-- Features: Auto Farm Pollen (Smart Pollen Hunter across all 23 fields with Anti-Sticking Watchdog, Lawn Mower, Sweep),
+--           Universal Auto Equip (All Pollen Tools: Shovels, Rakes, Wands, Vacuums),
 --           Auto Orbs Magnet, Auto Honey Convert, Infinite Stamina, Auto Fish, ESP
 -- Tested live on client via Raven MCP
 -- ═══════════════════════════════════════════════════════════
@@ -122,6 +123,7 @@ return function(Window, scriptInfo)
     local settings = {
         autoFarm = false,
         selectedField = "Dandylion Field",
+        forceEquipTool = true,
         forceEquipShovel = true,
         movementMode = "Pollen Hunter",
         roamRadius = 18,
@@ -260,7 +262,7 @@ return function(Window, scriptInfo)
         end
 
         if not grassObj or not grassObj.BoneInitialPositions then
-            return nil, 0
+            return nil, nil, 0
         end
 
         local root = getRoot()
@@ -270,32 +272,57 @@ return function(Window, scriptInfo)
         local bip = grassObj.BoneInitialPositions
 
         local nearestFlowerPos = nil
+        local nearestBone = nil
         local shortestDist = math.huge
         local totalAlive = 0
 
         for bone, pos in pairs(bip) do
-            local state = bhs[bone]
-            local isAlive = true
-            if state and state.dead == true then
-                if not state.respawnAt or now < state.respawnAt then
-                    isAlive = false
+            if not blacklist or not blacklist[bone] or now >= blacklist[bone] then
+                local state = bhs[bone]
+                local isAlive = true
+                if state and state.dead == true then
+                    if not state.respawnAt or now < state.respawnAt then
+                        isAlive = false
+                    end
                 end
-            end
 
-            if isAlive then
-                totalAlive = totalAlive + 1
-                local dist = (Vector3.new(pos.X, 0, pos.Z) - Vector3.new(charPos.X, 0, charPos.Z)).Magnitude
-                if dist < shortestDist then
-                    shortestDist = dist
-                    nearestFlowerPos = pos
+                if isAlive then
+                    totalAlive = totalAlive + 1
+                    local dist = (Vector3.new(pos.X, 0, pos.Z) - Vector3.new(charPos.X, 0, charPos.Z)).Magnitude
+                    if dist < shortestDist then
+                        shortestDist = dist
+                        nearestFlowerPos = pos
+                        nearestBone = bone
+                    end
                 end
             end
         end
 
-        return nearestFlowerPos, totalAlive
+        return nearestFlowerPos, nearestBone, totalAlive
     end
 
-    local function ensureShovelEquipped()
+    -- Universal Pollen Tool Detector (supports Shovels, Rakes, Wands, Vacuums, etc.)
+    local function getPollenToolFrom(container)
+        if not container then return nil end
+        local btk = clientController and clientController.BackpackToolKinds
+        for _, item in ipairs(container:GetChildren()) do
+            if item:IsA("Tool") then
+                if btk and btk.isPollenCollectionTool then
+                    if btk.isPollenCollectionTool(item) then
+                        return item
+                    end
+                else
+                    local name = item.Name:lower()
+                    if not name:find("axe") and not name:find("pickaxe") and not name:find("rod") and not name:find("net") and not name:find("wand") and not name:find("laser") then
+                        return item
+                    end
+                end
+            end
+        end
+        return nil
+    end
+
+    local function ensurePollenToolEquipped()
         local char = getCharacter()
         if not char then return end
         local hum = getHumanoid()
@@ -303,6 +330,7 @@ return function(Window, scriptInfo)
         local st = clientController and clientController.ScooperTool
         local hud = clientController and clientController.HudVisibility
         local im = clientController and (clientController.InteractablesManager or clientController.MachineActivation)
+        local pd = clientController and clientController.PlayerData
 
         -- 1. Ensure convert prompt / hud lock is completely dismissed
         if im and im.pollenConvertorPromptVisible then
@@ -325,27 +353,29 @@ return function(Window, scriptInfo)
             pcall(function() Player:SetAttribute("GripHoldKind", "shovel") end)
         end
 
-        -- 3. Equip through ToolsManager
+        -- 3. Equip through ToolsManager with player's active tool gear ID (e.g. elite_rake, super_scooper, etc.)
+        local activeToolId = (pd and pd.equipment and pd.equipment.tool) or (tm and tm.confirmedGearId) or "basic_shovel"
         if tm then
             if tm.isScooperInputEquipped and not tm:isScooperInputEquipped() then
                 pcall(function() tm:equipTool() end)
                 pcall(function() tm:setHeldKind("tool", true) end)
                 if tm.selectHotbarGear then
-                    pcall(function() tm:selectHotbarGear("tool", tm.confirmedGearId or "basic_shovel") end)
+                    pcall(function() tm:selectHotbarGear("tool", activeToolId) end)
                 end
             end
             tm.confirmedKind = "tool"
         end
 
-        -- 4. Equip tool from Backpack fallback
-        local tool = char:FindFirstChild("Scooper") or char:FindFirstChildWhichIsA("Tool")
-        if not tool or tool.Name ~= "Scooper" then
-            local bpScooper = Player.Backpack:FindFirstChild("Scooper")
-            if bpScooper and hum then
-                hum:EquipTool(bpScooper)
+        -- 4. Equip pollen tool from Backpack if not already holding one in Character
+        local equippedTool = getPollenToolFrom(char)
+        if not equippedTool then
+            local bpTool = getPollenToolFrom(Player.Backpack)
+            if bpTool and hum then
+                hum:EquipTool(bpTool)
             end
             if tm and tm.equipTool then
                 pcall(function() tm:equipTool() end)
+                pcall(function() tm:setHeldKind("tool", true) end)
             end
         end
 
@@ -355,6 +385,7 @@ return function(Window, scriptInfo)
             st.stamina = 100
         end
     end
+    local ensureShovelEquipped = ensurePollenToolEquipped
 
     -- ═══════════ Active Orbs Access ═══════════
     local function getActiveOrbsTable()
@@ -440,8 +471,8 @@ return function(Window, scriptInfo)
             task.wait(0.2)
         end
 
-        -- Immediately re-equip shovel and restore ToolsManager state
-        ensureShovelEquipped()
+        -- Immediately re-equip pollen tool and restore ToolsManager state
+        ensurePollenToolEquipped()
         if tm and tm.equipTool then
             pcall(function() tm:equipTool() end)
             pcall(function() tm:setHeldKind("tool", true) end)
@@ -616,6 +647,10 @@ return function(Window, scriptInfo)
             if v then
                 local lastRandomTarget = nil
                 local lastRandomTime = 0
+                local flowerBlacklist = {}
+                local currentTargetBone = nil
+                local targetStickTime = 0
+
                 startThread("autoFarm", function(isActive)
                     while isActive() do
                         if not isConverting then
@@ -623,9 +658,9 @@ return function(Window, scriptInfo)
                             local st = clientController and clientController.ScooperTool
                             local root = getRoot()
 
-                            -- 1. Force Equip Shovel
-                            if settings.forceEquipShovel then
-                                ensureShovelEquipped()
+                            -- 1. Force Equip Pollen Tool (Shovels, Rakes, Wands, etc.)
+                            if settings.forceEquipTool or settings.forceEquipShovel then
+                                ensurePollenToolEquipped()
                             end
 
                             -- 2. Auto Convert if bag full
@@ -652,12 +687,53 @@ return function(Window, scriptInfo)
 
                                     if mode == "Pollen Hunter" then
                                         -- Detect alive flowers with pollen in the field and navigate to them
-                                        local flowerPos, aliveCount = findBestAliveFlower(fData.folderName)
+                                        local flowerPos, flowerBone, aliveCount = findBestAliveFlower(fData.folderName, flowerBlacklist)
+
+                                        -- Anti-Sticking Watchdog:
+                                        -- If player is standing within 4.5 studs of the target flower for >= 0.8s without it being harvested,
+                                        -- blacklist this flower for 30s so the bot immediately retargets without freezing!
+                                        if flowerBone and flowerPos then
+                                            local myDist = (Vector3.new(root.Position.X, 0, root.Position.Z) - Vector3.new(flowerPos.X, 0, flowerPos.Z)).Magnitude
+                                            if currentTargetBone == flowerBone then
+                                                if myDist <= 4.5 then
+                                                    targetStickTime = targetStickTime + (settings.farmDelay or 0.22)
+                                                    if targetStickTime >= 0.8 then
+                                                        flowerBlacklist[flowerBone] = tick() + 30
+                                                        flowerPos, flowerBone, aliveCount = findBestAliveFlower(fData.folderName, flowerBlacklist)
+                                                        currentTargetBone = flowerBone
+                                                        targetStickTime = 0
+                                                    end
+                                                else
+                                                    targetStickTime = 0
+                                                end
+                                            else
+                                                currentTargetBone = flowerBone
+                                                targetStickTime = 0
+                                            end
+                                        else
+                                            currentTargetBone = nil
+                                            targetStickTime = 0
+                                        end
+
                                         if flowerPos and hum then
                                             hum:MoveTo(flowerPos)
                                         elseif hum then
-                                            -- If all flowers temporarily harvested, stay near center
-                                            hum:MoveTo(fData.position)
+                                            -- Fallback: If all unblacklisted flowers are harvested/blacklisted, sweep field so player never stands still
+                                            local periodX = math.max(2.5, 5.0 / speed)
+                                            local numLanes = 5
+                                            local t = tick()
+                                            local progressX = (t % periodX) / periodX
+                                            local dirX = math.floor(t / periodX) % 2
+                                            local normX = dirX == 0 and (-1 + progressX * 2) or (1 - progressX * 2)
+
+                                            local laneT = (t % (periodX * numLanes)) / (periodX * numLanes)
+                                            local laneDir = math.floor(t / (periodX * numLanes)) % 2
+                                            local normZ = -1 + laneT * 2
+                                            if laneDir == 1 then normZ = -normZ end
+
+                                            local localPos = Vector3.new(normX * fData.halfW, 0, normZ * fData.halfL)
+                                            local targetPos = fData.cframe:PointToWorldSpace(localPos)
+                                            hum:MoveTo(targetPos)
                                         end
 
                                     elseif mode == "Lawn Mower" then
@@ -812,12 +888,13 @@ return function(Window, scriptInfo)
     })
 
     FarmTab:CreateToggle({
-        Name = "Force Equip Shovel",
+        Name = "Force Equip Pollen Tool",
         CurrentValue = true,
-        Flag = "BeeForceShovel",
+        Flag = "BeeForcePollenTool",
         Callback = function(v)
+            settings.forceEquipTool = v
             settings.forceEquipShovel = v
-            if v then ensureShovelEquipped() end
+            if v then ensurePollenToolEquipped() end
         end,
     })
 
