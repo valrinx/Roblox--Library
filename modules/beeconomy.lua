@@ -1,8 +1,8 @@
 -- ═══════════════════════════════════════════════════════════
--- Beeconomy! | RAVEN HUB Module v1.2.0
+-- Beeconomy! | RAVEN HUB Module v1.3.0
 -- PlaceId: 101558830312092 | GameId: 7000989941
--- Features: Auto Farm Pollen (Whole-Field Lawn Mower / Sweep / Orbit), Auto Orbs Magnet,
---           Auto Honey Convert (Auto Re-equip Shovel), Infinite Stamina, Auto Fish, ESP
+-- Features: Auto Farm Pollen (Smart Pollen Hunter across all 23 fields, Lawn Mower, Sweep),
+--           Auto Orbs Magnet, Auto Honey Convert, Infinite Stamina, Auto Fish, ESP
 -- Tested live on client via Raven MCP
 -- ═══════════════════════════════════════════════════════════
 return function(Window, scriptInfo)
