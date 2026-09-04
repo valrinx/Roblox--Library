@@ -181,6 +181,14 @@ local HUB_BUILD = "maclib-5"
 
 local SCRIPTS = {
     {
+        name        = "Illegal Soccer",
+        description = "Infinite Stamina | Instant Max Power | Auto Pass | Auto GK | ESP",
+        placeIds    = {126987974021910},
+        gameIds     = {10155360168},
+        version     = "v1.2.1",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/illegal_soccer.lua",
+    },
+    {
         name        = "Dueling Grounds ?????????????",
         description = "Marker Auto Parry | Auto Face | Target Assist",
         placeIds    = {94217045453265},
@@ -465,6 +473,14 @@ local SCRIPTS = {
         gameIds     = {10440833423},
         version     = "v2.0.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/bb224258e545f8c2832081c36e0c0bea1c3300ff/modules/greedy_growers.lua?v=greedy-growers-2.0.1",
+    },
+    {
+        name        = "Beeconomy!",
+        description = "Auto Farm | Auto Orbs | Auto Convert | Infinite Stamina | Auto Fish | Teleports",
+        placeIds    = {101558830312092},
+        gameIds     = {7000989941},
+        version     = "v1.0.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/beeconomy.lua?v=beeconomy-1.0.0",
     },
     --[[
     {
