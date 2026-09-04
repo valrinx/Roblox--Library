@@ -1,9 +1,12 @@
 -- ═══════════════════════════════════════════════════════════
--- Beeconomy! | RAVEN HUB Module v1.4.0
+-- Beeconomy! | RAVEN HUB Module v2.1.0 (Zone-Lock + Smart Gather Edition)
 -- PlaceId: 101558830312092 | GameId: 7000989941
--- Features: Auto Farm Pollen (Smart Pollen Hunter across all 23 fields with Anti-Sticking Watchdog, Lawn Mower, Sweep),
---           Universal Auto Equip (All Pollen Tools: Shovels, Rakes, Wands, Vacuums),
---           Auto Orbs Magnet, Auto Honey Convert, Infinite Stamina, Auto Fish, ESP
+-- Features: Universal Future-Proof Tool Engine (Supports all 110+ tools & future updates across 5 categories),
+--           Auto Farm Pollen (Smart Hunter, Anti-Sticking Watchdog, Lawn Mower sweep fallback across all 23 fields),
+--           Auto Mine Rocks (Pickaxe, Zone-Lock, TP movement, felled blacklist),
+--           Auto Chop Trees (Axe, Zone-Lock, TP movement, felled blacklist),
+--           Auto Catch Beetles (Net, TP movement),
+--           Auto Orbs Magnet, Auto Honey Convert, Infinite Stamina, Auto Fish 100% Win, ESP
 -- Tested live on client via Raven MCP
 -- ═══════════════════════════════════════════════════════════
 return function(Window, scriptInfo)
@@ -136,6 +139,12 @@ return function(Window, scriptInfo)
         autoWinFishing = true,
         autoFish = false,
         unlockFishPass = true,
+        autoMine = false,
+        mineMaxDist = 300,
+        autoChop = false,
+        chopMaxDist = 300,
+        autoCatch = false,
+        catchMaxDist = 200,
         walkSpeed = 16,
         autoSpeed = false,
         infiniteJump = false,
@@ -143,6 +152,8 @@ return function(Window, scriptInfo)
         fieldEsp = false,
         chestEsp = false,
         playerEsp = false,
+        zoneLock = true,         -- restrict gather to player's current region
+        gatherMoveMode = "Teleport", -- "Teleport", "Walk"
     }
 
     -- ═══════════ Thread Helpers ═══════════
@@ -239,6 +250,30 @@ return function(Window, scriptInfo)
         }
     end
 
+    -- ═══════════ Zone Detection (Region-Lock) ═══════════
+    -- Maps any world position → the region folder name it belongs to.
+    -- Uses workspace.World1.Regions bounding parts (accurate 3D AABB check).
+    local function getRegionForPos(pos)
+        local regionsFolder = workspace:FindFirstChild("World1") and workspace.World1:FindFirstChild("Regions")
+        if not regionsFolder then return nil end
+        for _, regionFolder in ipairs(regionsFolder:GetChildren()) do
+            for _, part in ipairs(regionFolder:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    local local3 = part.CFrame:PointToObjectSpace(pos)
+                    local half = part.Size * 0.5
+                    if math.abs(local3.X) <= half.X and math.abs(local3.Y) <= half.Y and math.abs(local3.Z) <= half.Z then
+                        return regionFolder.Name
+                    end
+                end
+            end
+        end
+        return nil -- not inside any known region
+    end
+
+    -- Felled/dead tracking: keyed by Model reference, value = expiry tick()
+    local felledTrees = {} -- tree model → tick() when it respawns (safe to re-target)
+    local felledRocks = {} -- rock model → tick() when it respawns
+
     -- ═══════════ Smart Pollen / Flower Detection ═══════════
     local function findBestAliveFlower(folderName)
         if not clientController then findControllers() end
@@ -301,28 +336,50 @@ return function(Window, scriptInfo)
         return nearestFlowerPos, nearestBone, totalAlive
     end
 
-    -- Universal Pollen Tool Detector (supports Shovels, Rakes, Wands, Vacuums, etc.)
-    local function getPollenToolFrom(container)
+    -- ═══════════ Universal Future-Proof Tool Engine ═══════════
+    -- Dynamically detects and equips ALL 5 categories of tools:
+    -- "tool" (pollen tools), "axe", "pickaxe", "fishing_rod", "net"
+    -- Directly binds with PlayerData.equipment, BackpackToolKinds, GripKinds, and ToolsManager
+    -- Any new tools added in future game updates are automatically discovered and supported!
+
+    local TOOL_KIND_FALLBACKS = {
+        tool = "basic_shovel",
+        axe = "wooden_axe",
+        pickaxe = "wooden_pickaxe",
+        fishing_rod = "wooden_fishing_rod",
+        net = "basic_net",
+    }
+
+    local function getToolFromContainer(container, kind)
         if not container then return nil end
         local btk = clientController and clientController.BackpackToolKinds
         for _, item in ipairs(container:GetChildren()) do
             if item:IsA("Tool") then
-                if btk and btk.isPollenCollectionTool then
-                    if btk.isPollenCollectionTool(item) then
-                        return item
+                if kind == "tool" then
+                    if btk and btk.isPollenCollectionTool then
+                        if btk.isPollenCollectionTool(item) then return item end
+                    else
+                        local name = item.Name:lower()
+                        if not name:find("axe") and not name:find("pickaxe") and not name:find("rod") and not name:find("net") and not name:find("wand") and not name:find("laser") then
+                            return item
+                        end
                     end
-                else
-                    local name = item.Name:lower()
-                    if not name:find("axe") and not name:find("pickaxe") and not name:find("rod") and not name:find("net") and not name:find("wand") and not name:find("laser") then
-                        return item
-                    end
+                elseif kind == "axe" then
+                    if btk and btk.isAxeTool and btk.isAxeTool(item) then return item end
+                elseif kind == "pickaxe" then
+                    if btk and btk.isPickaxeTool and btk.isPickaxeTool(item) then return item end
+                elseif kind == "fishing_rod" then
+                    if btk and btk.isFishingRodTool and btk.isFishingRodTool(item) then return item end
+                elseif kind == "net" then
+                    if btk and btk.isNetTool and btk.isNetTool(item) then return item end
                 end
             end
         end
         return nil
     end
 
-    local function ensurePollenToolEquipped()
+    local function ensureToolEquipped(kind)
+        kind = kind or "tool"
         local char = getCharacter()
         if not char then return end
         local hum = getHumanoid()
@@ -331,6 +388,23 @@ return function(Window, scriptInfo)
         local hud = clientController and clientController.HudVisibility
         local im = clientController and (clientController.InteractablesManager or clientController.MachineActivation)
         local pd = clientController and clientController.PlayerData
+
+        -- 0. Check if already equipped to completely prevent audio spam
+        local isAlreadyEquipped = false
+        if kind == "tool" then
+            local toolInChar = char:FindFirstChildWhichIsA("Tool")
+            if toolInChar and Player:GetAttribute("ShovelEquipped") == true then
+                isAlreadyEquipped = true
+            end
+        else
+            if tm and tm.isHoldingKind and tm:isHoldingKind(kind) and Player:GetAttribute("GripHoldKind") == kind then
+                isAlreadyEquipped = true
+            end
+        end
+
+        if isAlreadyEquipped then
+            return (pd and pd.equipment and pd.equipment[kind]) or (tm and tm.confirmedGearId) or TOOL_KIND_FALLBACKS[kind] or "basic_shovel"
+        end
 
         -- 1. Ensure convert prompt / hud lock is completely dismissed
         if im and im.pollenConvertorPromptVisible then
@@ -345,47 +419,207 @@ return function(Window, scriptInfo)
             workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
         end
 
-        -- 2. Ensure Player attributes expected by ToolsManager
-        if Player:GetAttribute("ShovelEquipped") ~= true then
-            pcall(function() Player:SetAttribute("ShovelEquipped", true) end)
-        end
-        if Player:GetAttribute("GripHoldKind") ~= "shovel" then
-            pcall(function() Player:SetAttribute("GripHoldKind", "shovel") end)
-        end
+        -- 2. Dynamically resolve player's active gear ID from PlayerData.equipment
+        local activeGearId = (pd and pd.equipment and pd.equipment[kind]) or (tm and tm.confirmedGearId) or TOOL_KIND_FALLBACKS[kind] or "basic_shovel"
 
-        -- 3. Equip through ToolsManager with player's active tool gear ID (e.g. elite_rake, super_scooper, etc.)
-        local activeToolId = (pd and pd.equipment and pd.equipment.tool) or (tm and tm.confirmedGearId) or "basic_shovel"
-        if tm then
-            if tm.isScooperInputEquipped and not tm:isScooperInputEquipped() then
-                pcall(function() tm:equipTool() end)
-                pcall(function() tm:setHeldKind("tool", true) end)
-                if tm.selectHotbarGear then
-                    pcall(function() tm:selectHotbarGear("tool", activeToolId) end)
-                end
+        -- 3. Set Player attributes expected by ToolsManager
+        if kind == "tool" then
+            if Player:GetAttribute("ShovelEquipped") ~= true then
+                pcall(function() Player:SetAttribute("ShovelEquipped", true) end)
             end
-            tm.confirmedKind = "tool"
+            if Player:GetAttribute("GripHoldKind") ~= "shovel" then
+                pcall(function() Player:SetAttribute("GripHoldKind", "shovel") end)
+            end
+        else
+            pcall(function() Player:SetAttribute("GripHoldKind", kind) end)
         end
 
-        -- 4. Equip pollen tool from Backpack if not already holding one in Character
-        local equippedTool = getPollenToolFrom(char)
-        if not equippedTool then
-            local bpTool = getPollenToolFrom(Player.Backpack)
-            if bpTool and hum then
+        -- 4. Equip through ToolsManager
+        if tm then
+            pcall(function() tm:selectHotbarGear(kind, activeGearId) end)
+            pcall(function() tm:setHeldKind(kind, true) end)
+            if kind == "tool" and tm.equipTool then
+                pcall(function() tm:equipTool() end)
+            end
+            tm.confirmedKind = kind
+        end
+
+        -- 5. Fallback: Equip from Backpack if not currently held
+        local equipped = getToolFromContainer(char, kind)
+        if not equipped and Player.Backpack and hum then
+            local bpTool = getToolFromContainer(Player.Backpack, kind)
+            if bpTool then
                 hum:EquipTool(bpTool)
             end
-            if tm and tm.equipTool then
-                pcall(function() tm:equipTool() end)
-                pcall(function() tm:setHeldKind("tool", true) end)
+            if tm then
+                pcall(function() tm:setHeldKind(kind, true) end)
+                if kind == "tool" and tm.equipTool then
+                    pcall(function() tm:equipTool() end)
+                end
             end
         end
 
-        -- 5. Sync ScooperTool internal state
-        if st then
+        -- 6. Sync ScooperTool internal state if tool kind is pollen tool
+        if kind == "tool" and st then
             st.scooperEquippedCache = true
             st.stamina = 100
         end
+
+        return activeGearId
     end
+
+    local ensurePollenToolEquipped = function() return ensureToolEquipped("tool") end
     local ensureShovelEquipped = ensurePollenToolEquipped
+
+    -- ═══════════ Auto Mine Rocks (Pickaxe) ═══════════
+    local function getNearestRock(maxDist)
+        local root = getRoot()
+        local combat = workspace:FindFirstChild("World1") and workspace.World1:FindFirstChild("Combat")
+        local rockFolder = combat and combat:FindFirstChild("BreakableRocks")
+        if not rockFolder or not root then return nil, math.huge end
+
+        local br = clientController and clientController.BreakableRocks
+        local bIds = clientController and clientController.BreakableIds
+
+        -- Zone of the player (nil = unknown, skip zone filter)
+        local playerZone = settings.zoneLock and getRegionForPos(root.Position) or nil
+        local now = tick()
+
+        local nearest = nil
+        local shortest = maxDist or (settings.mineMaxDist or 300)
+        for _, rock in ipairs(rockFolder:GetChildren()) do
+            if rock.Parent then
+                -- Skip rocks that are still in their felled-cooldown window
+                if felledRocks[rock] and now < felledRocks[rock] then
+                    continue
+                elseif felledRocks[rock] then
+                    felledRocks[rock] = nil -- expired, clear entry
+                end
+
+                local isDead = false
+                if br and br.stateByKey and bIds and bIds.rockKey then
+                    local rKey = bIds.rockKey(rock)
+                    if rKey then
+                        local compositeKey = rock.Name .. "\0" .. tostring(rKey)
+                        local state = br.stateByKey[compositeKey]
+                        if state and state.dead then
+                            isDead = true
+                            -- Mark in felled table so we skip fast next iteration
+                            if not felledRocks[rock] then
+                                felledRocks[rock] = now + 40
+                            end
+                        end
+                    end
+                end
+
+                if not isDead then
+                    local part = rock.PrimaryPart or rock:FindFirstChildWhichIsA("BasePart")
+                    if part then
+                        -- Zone-lock: skip rocks outside player's region
+                        if playerZone and getRegionForPos(part.Position) ~= playerZone then
+                            continue
+                        end
+                        local dist = (part.Position - root.Position).Magnitude
+                        if dist < shortest then
+                            shortest = dist
+                            nearest = rock
+                        end
+                    end
+                end
+            end
+        end
+        return nearest, shortest
+    end
+
+    -- ═══════════ Auto Chop Trees (Axe) ═══════════
+    local function getNearestTree(maxDist)
+        local root = getRoot()
+        local combat = workspace:FindFirstChild("World1") and workspace.World1:FindFirstChild("Combat")
+        local treeFolder = combat and combat:FindFirstChild("BreakableTrees")
+        if not treeFolder or not root then return nil, math.huge end
+
+        local bt = clientController and clientController.BreakableTrees
+        local bIds = clientController and clientController.BreakableIds
+
+        -- Zone of the player (nil = unknown, skip zone filter)
+        local playerZone = settings.zoneLock and getRegionForPos(root.Position) or nil
+        local now = tick()
+
+        local nearest = nil
+        local shortest = maxDist or (settings.chopMaxDist or 300)
+        for _, tree in ipairs(treeFolder:GetChildren()) do
+            if tree.Parent then
+                -- Skip trees still in felled-cooldown window
+                if felledTrees[tree] and now < felledTrees[tree] then
+                    continue
+                elseif felledTrees[tree] then
+                    felledTrees[tree] = nil
+                end
+
+                local isDead = false
+
+                -- Check 1: Game-native break highlight (most reliable)
+                if tree:FindFirstChild("TreeBreakHighlight") then
+                    isDead = true
+                end
+
+                -- Check 2: Internal stateByKey dead flag
+                if not isDead and bt and bt.stateByKey and bIds and bIds.treeKey then
+                    local tKey = bIds.treeKey(tree)
+                    if tKey then
+                        local compositeKey = tree.Name .. "\0" .. tostring(tKey)
+                        local state = bt.stateByKey[compositeKey]
+                        if state and state.dead then
+                            isDead = true
+                        end
+                    end
+                end
+
+                if isDead then
+                    -- Register in felled blacklist for ~45s so we never re-target stumps
+                    if not felledTrees[tree] then
+                        felledTrees[tree] = now + 45
+                    end
+                else
+                    local part = tree.PrimaryPart or tree:FindFirstChildWhichIsA("BasePart")
+                    if part then
+                        -- Zone-lock: skip trees outside player's region
+                        if playerZone and getRegionForPos(part.Position) ~= playerZone then
+                            continue
+                        end
+                        local dist = (part.Position - root.Position).Magnitude
+                        if dist < shortest then
+                            shortest = dist
+                            nearest = tree
+                        end
+                    end
+                end
+            end
+        end
+        return nearest, shortest
+    end
+
+    -- ═══════════ Auto Catch Beetles (Net) ═══════════
+    local function getNearestBeetle(maxDist)
+        local root = getRoot()
+        local netCatch = clientController and clientController.NetCatchingMinigame
+        if not netCatch or not netCatch.mobVisuals or not root then return nil, math.huge end
+
+        local nearest = nil
+        local shortest = maxDist or (settings.catchMaxDist or 200)
+        for _, visual in pairs(netCatch.mobVisuals) do
+            local model = visual and (visual.model or visual.rootPart or visual.primaryPart)
+            local part = typeof(model) == "Instance" and (model:IsA("BasePart") and model or model:FindFirstChildWhichIsA("BasePart"))
+            if part then
+                local dist = (part.Position - root.Position).Magnitude
+                if dist < shortest then
+                    shortest = dist
+                    nearest = visual
+                end
+            end
+        end
+        return nearest, shortest
+    end
 
     -- ═══════════ Active Orbs Access ═══════════
     local function getActiveOrbsTable()
@@ -1070,7 +1304,339 @@ return function(Window, scriptInfo)
         })
     end
 
-    -- ═══════════ Tab 3: Teleports ═══════════
+    -- ═══════════ Tab 3: Gathering & Multi-Tool ═══════════
+    local GatherTab = Window:CreateTab("Gathering", "hammer")
+    GatherTab:CreateSection("Universal Multi-Tool Auto-Equip")
+
+    GatherTab:CreateButton({
+        Name = "🌾 Equip Pollen Tool",
+        Callback = function()
+            ensureToolEquipped("tool")
+            notify("Multi-Tool", "Equipped active Pollen Tool!")
+        end,
+    })
+
+    GatherTab:CreateButton({
+        Name = "🪓 Equip Axe",
+        Callback = function()
+            ensureToolEquipped("axe")
+            notify("Multi-Tool", "Equipped active Axe!")
+        end,
+    })
+
+    GatherTab:CreateButton({
+        Name = "⛏️ Equip Pickaxe",
+        Callback = function()
+            ensureToolEquipped("pickaxe")
+            notify("Multi-Tool", "Equipped active Pickaxe!")
+        end,
+    })
+
+    GatherTab:CreateButton({
+        Name = "🎣 Equip Fishing Rod",
+        Callback = function()
+            ensureToolEquipped("fishing_rod")
+            notify("Multi-Tool", "Equipped active Fishing Rod!")
+        end,
+    })
+
+    GatherTab:CreateButton({
+        Name = "🕸️ Equip Bug Net",
+        Callback = function()
+            ensureToolEquipped("net")
+            notify("Multi-Tool", "Equipped active Bug Net!")
+        end,
+    })
+
+    GatherTab:CreateSection("Gather Settings")
+
+    GatherTab:CreateToggle({
+        Name = "Zone Lock (Current Region Only)",
+        CurrentValue = true,
+        Flag = "BeeZoneLock",
+        Callback = function(v)
+            settings.zoneLock = v
+            notify("Zone Lock", v and "✅ Targets restricted to your current region." or "⚠️ Zone lock OFF — targeting all regions.")
+        end,
+    })
+
+    GatherTab:CreateDropdown({
+        Name = "Gather Movement Mode",
+        Options = {"Teleport", "Walk"},
+        CurrentOption = "Teleport",
+        Flag = "BeeGatherMoveMode",
+        Callback = function(opt)
+            settings.gatherMoveMode = type(opt) == "table" and opt[1] or opt
+        end,
+    })
+
+    GatherTab:CreateSection("Auto Mining Rocks (Pickaxe)")
+
+    GatherTab:CreateToggle({
+        Name = "Auto Mine Rocks",
+        CurrentValue = false,
+        Flag = "BeeAutoMine",
+        Callback = function(v)
+            settings.autoMine = v
+            if v then
+                startThread("autoMine", function(isActive)
+                    while isActive() do
+                        if not isConverting then
+                            ensureToolEquipped("pickaxe")
+                            local rock, dist = getNearestRock(settings.mineMaxDist)
+                            local root = getRoot()
+                            if rock and root then
+                                local part = rock.PrimaryPart or rock:FindFirstChildWhichIsA("BasePart")
+                                if part then
+                                    local rockPos = part.Position
+                                    local myPos = root.Position
+                                    local dir = (Vector3.new(myPos.X, 0, myPos.Z) - Vector3.new(rockPos.X, 0, rockPos.Z))
+                                    local standOffset = (dir.Magnitude > 0.1) and (dir.Unit * 4.5) or Vector3.new(4.5, 0, 0)
+                                    local standPos = Vector3.new(rockPos.X + standOffset.X, myPos.Y + 0.5, rockPos.Z + standOffset.Z)
+
+                                    -- TP to stand position (bypasses collision with props/fences)
+                                    if dist > 6 then
+                                        if settings.gatherMoveMode == "Teleport" then
+                                            tpTo(CFrame.lookAt(standPos, Vector3.new(rockPos.X, standPos.Y, rockPos.Z)))
+                                            task.wait(0.05)
+                                        else
+                                            local hum = getHumanoid()
+                                            if hum then hum:MoveTo(standPos) end
+                                        end
+                                    end
+
+                                    -- Face & hit when close enough
+                                    local curDist = (part.Position - root.Position).Magnitude
+                                    if curDist <= 9.5 then
+                                        local br = clientController and clientController.BreakableRocks
+                                        local tm = clientController and clientController.ToolsManager
+                                        local net = clientController and clientController.Network
+                                        local bIds = clientController and clientController.BreakableIds
+
+                                        root.CFrame = CFrame.new(root.Position, Vector3.new(rockPos.X, root.Position.Y, rockPos.Z))
+
+                                        -- 1. Try standard module method with hit score 1 (100% perfect hit)
+                                        if br and br.tryMineRockTarget then
+                                            pcall(function() br:tryMineRockTarget(1, rock) end)
+                                        end
+                                        -- 2. Direct network backup
+                                        local rKey
+                                        if net and bIds and bIds.rockKey then
+                                            pcall(function()
+                                                rKey = bIds.rockKey(rock)
+                                                net:send("MineRock", rock.Name, rKey, 1)
+                                            end)
+                                        end
+                                        -- 3. Visual pickaxe swing
+                                        if tm and tm.playPickaxeAction then
+                                            pcall(function() tm:playPickaxeAction() end)
+                                        end
+
+                                        -- 4. Check if now dead → blacklist so we skip instantly next frame
+                                        if br and br.stateByKey and bIds and bIds.rockKey then
+                                            local rk = rKey or (bIds.rockKey and bIds.rockKey(rock))
+                                            if rk then
+                                                local state = br.stateByKey[rock.Name .. "\0" .. tostring(rk)]
+                                                if state and state.dead and not felledRocks[rock] then
+                                                    felledRocks[rock] = tick() + 40
+                                                end
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                        task.wait(0.25)
+                    end
+                end)
+            else
+                stopThread("autoMine")
+            end
+        end,
+    })
+
+    GatherTab:CreateSlider({
+        Name = "Mining Scan Reach",
+        Range = {50, 600},
+        Increment = 25,
+        CurrentValue = 300,
+        Suffix = " studs",
+        Flag = "BeeMineReach",
+        Callback = function(v)
+            settings.mineMaxDist = v
+        end,
+    })
+
+    GatherTab:CreateSection("Auto Chopping Trees (Axe)")
+
+    GatherTab:CreateToggle({
+        Name = "Auto Chop Trees",
+        CurrentValue = false,
+        Flag = "BeeAutoChop",
+        Callback = function(v)
+            settings.autoChop = v
+            if v then
+                startThread("autoChop", function(isActive)
+                    while isActive() do
+                        if not isConverting then
+                            ensureToolEquipped("axe")
+                            local tree, dist = getNearestTree(settings.chopMaxDist)
+                            local root = getRoot()
+                            if tree and root then
+                                local part = tree.PrimaryPart or tree:FindFirstChildWhichIsA("BasePart")
+                                if part then
+                                    local treePos = part.Position
+                                    local myPos = root.Position
+                                    local dir = (Vector3.new(myPos.X, 0, myPos.Z) - Vector3.new(treePos.X, 0, treePos.Z))
+                                    local standOffset = (dir.Magnitude > 0.1) and (dir.Unit * 5.0) or Vector3.new(5.0, 0, 0)
+                                    local standPos = Vector3.new(treePos.X + standOffset.X, myPos.Y + 0.5, treePos.Z + standOffset.Z)
+
+                                    -- TP to stand position (bypasses collision with props/fences)
+                                    if dist > 6.5 then
+                                        if settings.gatherMoveMode == "Teleport" then
+                                            tpTo(CFrame.lookAt(standPos, Vector3.new(treePos.X, standPos.Y, treePos.Z)))
+                                            task.wait(0.05)
+                                        else
+                                            local hum = getHumanoid()
+                                            if hum then hum:MoveTo(standPos) end
+                                        end
+                                    end
+
+                                    -- Face & chop when close enough
+                                    local curDist = (part.Position - root.Position).Magnitude
+                                    if curDist <= 10 then
+                                        local bt = clientController and clientController.BreakableTrees
+                                        local tm = clientController and clientController.ToolsManager
+                                        local net = clientController and clientController.Network
+                                        local bIds = clientController and clientController.BreakableIds
+
+                                        root.CFrame = CFrame.new(root.Position, Vector3.new(treePos.X, root.Position.Y, treePos.Z))
+
+                                        local tKey
+                                        if bt and bt.tryChopTarget then
+                                            pcall(function() bt:tryChopTarget(tree) end)
+                                        end
+                                        if net and bIds and bIds.treeKey then
+                                            pcall(function()
+                                                tKey = bIds.treeKey(tree)
+                                                net:send("ChopTree", tree.Name, tKey)
+                                            end)
+                                        end
+                                        if tm and tm.playAxeSwing then
+                                            pcall(function() tm:playAxeSwing() end)
+                                        end
+
+                                        -- Check if tree just died → blacklist for 45s
+                                        local isDead = tree:FindFirstChild("TreeBreakHighlight") ~= nil
+                                        if not isDead and bt and bt.stateByKey and bIds and bIds.treeKey then
+                                            local tk = tKey or (bIds.treeKey and bIds.treeKey(tree))
+                                            if tk then
+                                                local state = bt.stateByKey[tree.Name .. "\0" .. tostring(tk)]
+                                                if state and state.dead then isDead = true end
+                                            end
+                                        end
+                                        if isDead and not felledTrees[tree] then
+                                            felledTrees[tree] = tick() + 45
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                        task.wait(0.25)
+                    end
+                end)
+            else
+                stopThread("autoChop")
+            end
+        end,
+    })
+
+    GatherTab:CreateSlider({
+        Name = "Chopping Scan Reach",
+        Range = {50, 600},
+        Increment = 25,
+        CurrentValue = 300,
+        Suffix = " studs",
+        Flag = "BeeChopReach",
+        Callback = function(v)
+            settings.chopMaxDist = v
+        end,
+    })
+
+    GatherTab:CreateSection("Auto Catching Beetles (Net)")
+
+    GatherTab:CreateToggle({
+        Name = "Auto Catch Beetles / Bugs",
+        CurrentValue = false,
+        Flag = "BeeAutoCatch",
+        Callback = function(v)
+            settings.autoCatch = v
+            if v then
+                startThread("autoCatch", function(isActive)
+                    while isActive() do
+                        if not isConverting then
+                            ensureToolEquipped("net")
+                            local beetle, dist = getNearestBeetle(settings.catchMaxDist)
+                            local root = getRoot()
+                            if beetle and root then
+                                local model = beetle.model or beetle.rootPart or beetle.primaryPart
+                                local part = typeof(model) == "Instance" and (model:IsA("BasePart") and model or model:FindFirstChildWhichIsA("BasePart"))
+                                if part then
+                                    local beetlePos = part.Position
+                                    local myPos = root.Position
+                                    local dir = (Vector3.new(myPos.X, 0, myPos.Z) - Vector3.new(beetlePos.X, 0, beetlePos.Z))
+                                    local standOffset = (dir.Magnitude > 0.1) and (dir.Unit * 4.0) or Vector3.new(4.0, 0, 0)
+                                    local standPos = Vector3.new(beetlePos.X + standOffset.X, myPos.Y + 0.5, beetlePos.Z + standOffset.Z)
+
+                                    if dist > 5 then
+                                        if settings.gatherMoveMode == "Teleport" then
+                                            tpTo(CFrame.lookAt(standPos, Vector3.new(beetlePos.X, standPos.Y, beetlePos.Z)))
+                                            task.wait(0.05)
+                                        else
+                                            local hum = getHumanoid()
+                                            if hum then hum:MoveTo(standPos) end
+                                        end
+                                    end
+
+                                    local curDist = (part.Position - root.Position).Magnitude
+                                    if curDist <= 8.5 then
+                                        local nc = clientController and clientController.NetCatchingMinigame
+                                        local tm = clientController and clientController.ToolsManager
+
+                                        root.CFrame = CFrame.new(root.Position, Vector3.new(beetlePos.X, root.Position.Y, beetlePos.Z))
+
+                                        if nc and nc.tryCatchMob then
+                                            pcall(function() nc:tryCatchMob(beetle) end)
+                                        end
+                                        if tm and tm.playNetSwing then
+                                            pcall(function() tm:playNetSwing() end)
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                        task.wait(0.3)
+                    end
+                end)
+            else
+                stopThread("autoCatch")
+            end
+        end,
+    })
+
+    GatherTab:CreateSlider({
+        Name = "Catching Scan Reach",
+        Range = {50, 500},
+        Increment = 25,
+        CurrentValue = 200,
+        Suffix = " studs",
+        Flag = "BeeCatchReach",
+        Callback = function(v)
+            settings.catchMaxDist = v
+        end,
+    })
+
+    -- ═══════════ Tab 4: Teleports ═══════════
     local TpTab = Window:CreateTab("Teleports", "movement")
 
     TpTab:CreateSection("Fields (23 Areas)")
@@ -1125,7 +1691,7 @@ return function(Window, scriptInfo)
         })
     end
 
-    -- ═══════════ Tab 4: Movement & World ═══════════
+    -- ═══════════ Tab 5: Movement & World ═══════════
     local MoveTab = Window:CreateTab("Movement", "player")
     MoveTab:CreateSection("Player Speed")
 
@@ -1187,7 +1753,7 @@ return function(Window, scriptInfo)
         end,
     })
 
-    -- ═══════════ Tab 5: Visuals / ESP ═══════════
+    -- ═══════════ Tab 6: Visuals / ESP ═══════════
     local VisualTab = Window:CreateTab("Visuals", "visual")
     VisualTab:CreateSection("World & Object ESP")
 
@@ -1251,11 +1817,11 @@ return function(Window, scriptInfo)
         end,
     })
 
-    -- ═══════════ Tab 6: Info & Utilities ═══════════
+    -- ═══════════ Tab 7: Info & Utilities ═══════════
     local InfoTab = Window:CreateTab("Overview", "overview")
     InfoTab:CreateSection("Game Info")
     InfoTab:CreateLabel("Experience: [🔥UPDATE 1] Beeconomy!")
-    InfoTab:CreateLabel("Module Version: v1.0.0")
+    InfoTab:CreateLabel("Module Version: v2.1.0 (Zone-Lock + Smart Gather Edition)")
     InfoTab:CreateLabel("Author: valrinx | RAVEN HUB")
 
     InfoTab:CreateSection("Server Actions")
@@ -1305,5 +1871,5 @@ return function(Window, scriptInfo)
         scriptInfo.registerCleanup(destroy)
     end
 
-    notify("Beeconomy!", "v1.0.0 Loaded successfully! Enjoy farming.")
+    notify("Beeconomy!", "v2.1.0 Loaded! Zone-Lock + Smart Gather Edition ready.")
 end
