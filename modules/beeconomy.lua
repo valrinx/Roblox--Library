@@ -271,8 +271,11 @@ return function(Window, scriptInfo)
     end
 
     -- Felled/dead tracking: keyed by Model reference, value = expiry tick()
-    local felledTrees = {} -- tree model → tick() when it respawns (safe to re-target)
-    local felledRocks = {} -- rock model → tick() when it respawns
+    local felledTrees = {}      -- tree model → tick() when it respawns (safe to re-target)
+    local felledRocks = {}      -- rock model → tick() when it respawns
+    -- Short-lived hit cooldown: skip a tree for ~3s after each chop attempt
+    -- This prevents re-targeting the SAME tree before the server confirms it's dead
+    local recentlyHitTrees = {} -- tree model → tick() cooldown expiry
 
     -- ═══════════ Smart Pollen / Flower Detection ═══════════
     local function findBestAliveFlower(folderName)
@@ -554,6 +557,15 @@ return function(Window, scriptInfo)
                     continue
                 elseif felledTrees[tree] then
                     felledTrees[tree] = nil
+                end
+
+                -- Skip trees in short-lived hit cooldown (3s after each chop attempt)
+                if recentlyHitTrees[tree] then
+                    if now < recentlyHitTrees[tree] then
+                        continue
+                    else
+                        recentlyHitTrees[tree] = nil
+                    end
                 end
 
                 local isDead = false
@@ -1526,7 +1538,12 @@ return function(Window, scriptInfo)
                                             pcall(function() tm:playAxeSwing() end)
                                         end
 
-                                        -- Check if tree just died → blacklist for 45s
+                                        -- Mark tree as recently-hit IMMEDIATELY (before server confirms)
+                                        -- This prevents re-targeting the same tree next frame
+                                        recentlyHitTrees[tree] = tick() + 3.0
+
+                                        -- Then check if it's fully dead → promote to long felled blacklist
+                                        task.wait(0.15) -- tiny wait to let server state propagate
                                         local isDead = tree:FindFirstChild("TreeBreakHighlight") ~= nil
                                         if not isDead and bt and bt.stateByKey and bIds and bIds.treeKey then
                                             local tk = tKey or (bIds.treeKey and bIds.treeKey(tree))
@@ -1535,8 +1552,9 @@ return function(Window, scriptInfo)
                                                 if state and state.dead then isDead = true end
                                             end
                                         end
-                                        if isDead and not felledTrees[tree] then
+                                        if isDead then
                                             felledTrees[tree] = tick() + 45
+                                            recentlyHitTrees[tree] = nil -- no longer needed, felled list takes over
                                         end
                                     end
                                 end
