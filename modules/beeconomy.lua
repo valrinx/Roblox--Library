@@ -273,9 +273,112 @@ return function(Window, scriptInfo)
     -- Felled/dead tracking: keyed by Model reference, value = expiry tick()
     local felledTrees = {}      -- tree model → tick() when it respawns (safe to re-target)
     local felledRocks = {}      -- rock model → tick() when it respawns
-    -- Short-lived hit cooldown: skip a tree for ~3s after each chop attempt
-    -- This prevents re-targeting the SAME tree before the server confirms it's dead
-    local recentlyHitTrees = {} -- tree model → tick() cooldown expiry
+
+    local function isTreeDead(tree)
+        if not tree or not tree.Parent then return true end
+
+        -- 1. Reject any stump or breakable debris visual model
+        local tName = tree.Name:lower()
+        if tName:find("stump") then
+            return true
+        end
+
+        -- 2. Must have valid BreakableTreeId attribute (real trees always have this)
+        local tKey = tree:GetAttribute("BreakableTreeId")
+        if not tKey or tostring(tKey) == "" then
+            return true
+        end
+
+        local now = tick()
+        if felledTrees[tree] and now < felledTrees[tree] then return true end
+        if tree:FindFirstChild("TreeBreakHighlight") then return true end
+
+        -- 3. Game controller stateByKey check
+        if not clientController then findControllers() end
+        local bt = clientController and clientController.BreakableTrees
+        if bt and bt.stateByKey then
+            local compositeKey = tree.Name .. "\0" .. tostring(tKey)
+            local state = bt.stateByKey[compositeKey]
+            if state then
+                local serverNow = workspace:GetServerTimeNow()
+                if state.dead == true or (state.health and state.health <= 0) or (state.respawnAt and state.respawnAt > serverNow) then
+                    return true
+                end
+            end
+        end
+
+        -- 4. HealthGui check (0/4, 0/7, 0/14, 0/24)
+        local stump = tree:FindFirstChild("StumpSpawn")
+        local gui = stump and stump:FindFirstChild("BreakableHealthGui")
+        local healthLabel = gui and gui:FindFirstChild("Health", true)
+        if healthLabel and healthLabel:IsA("TextLabel") and healthLabel.Text:find("^0/") then
+            return true
+        end
+
+        -- 5. Visual check: when broken, trunk and leaves BaseParts have Transparency = 1
+        local hasTrunkOrLeaves = false
+        for _, desc in ipairs(tree:GetDescendants()) do
+            if desc:IsA("BasePart") and desc.Transparency < 0.5 then
+                local lname = desc.Name:lower()
+                if lname:find("trunk") or lname:find("leaves") then
+                    hasTrunkOrLeaves = true
+                    break
+                end
+            end
+        end
+        if not hasTrunkOrLeaves then
+            return true -- No visible trunk or leaves means it's a stump!
+        end
+
+        return false
+    end
+
+    local function isRockDead(rock)
+        if not rock or not rock.Parent then return true end
+
+        -- 1. Reject any debris / rubble / client visual objects
+        local rName = rock.Name:lower()
+        if rName:find("stump") or rName:find("debris") or rName:find("client") then
+            return true
+        end
+
+        -- 2. Must have BreakableRockId attribute
+        local rKey = rock:GetAttribute("BreakableRockId")
+        if not rKey or tostring(rKey) == "" then
+            return true
+        end
+
+        local now = tick()
+        if felledRocks[rock] and now < felledRocks[rock] then return true end
+
+        -- 3. BreakableRocks controller stateByKey
+        if not clientController then findControllers() end
+        local br = clientController and clientController.BreakableRocks
+        if br and br.stateByKey then
+            local compositeKey = rock.Name .. "\0" .. tostring(rKey)
+            local state = br.stateByKey[compositeKey]
+            if state then
+                local serverNow = workspace:GetServerTimeNow()
+                if state.dead == true or (state.health and state.health <= 0) or (state.respawnAt and state.respawnAt > serverNow) then
+                    return true
+                end
+            end
+        end
+
+        -- 4. Visual check: The game's Visual.apply sets all BaseParts in the rock to Transparency = 1 when broken
+        local hasVisible = false
+        for _, desc in ipairs(rock:GetDescendants()) do
+            if desc:IsA("BasePart") and desc.Name ~= "RockSpawn" and desc.Transparency < 0.5 then
+                hasVisible = true
+                break
+            end
+        end
+        if not hasVisible then
+            return true
+        end
+
+        return false
+    end
 
     -- ═══════════ Smart Pollen / Flower Detection ═══════════
     local function findBestAliveFlower(folderName)
@@ -481,52 +584,21 @@ return function(Window, scriptInfo)
         local rockFolder = combat and combat:FindFirstChild("BreakableRocks")
         if not rockFolder or not root then return nil, math.huge end
 
-        local br = clientController and clientController.BreakableRocks
-        local bIds = clientController and clientController.BreakableIds
-
-        -- Zone of the player (nil = unknown, skip zone filter)
         local playerZone = settings.zoneLock and getRegionForPos(root.Position) or nil
-        local now = tick()
-
         local nearest = nil
         local shortest = maxDist or (settings.mineMaxDist or 300)
+
         for _, rock in ipairs(rockFolder:GetChildren()) do
-            if rock.Parent then
-                -- Skip rocks that are still in their felled-cooldown window
-                if felledRocks[rock] and now < felledRocks[rock] then
-                    continue
-                elseif felledRocks[rock] then
-                    felledRocks[rock] = nil -- expired, clear entry
-                end
-
-                local isDead = false
-                if br and br.stateByKey and bIds and bIds.rockKey then
-                    local rKey = bIds.rockKey(rock)
-                    if rKey then
-                        local compositeKey = rock.Name .. "\0" .. tostring(rKey)
-                        local state = br.stateByKey[compositeKey]
-                        if state and state.dead then
-                            isDead = true
-                            -- Mark in felled table so we skip fast next iteration
-                            if not felledRocks[rock] then
-                                felledRocks[rock] = now + 40
-                            end
-                        end
+            if rock.Parent and not isRockDead(rock) then
+                local part = rock:FindFirstChild("RockSpawn") or rock.PrimaryPart or rock:FindFirstChildWhichIsA("BasePart")
+                if part then
+                    if playerZone and getRegionForPos(part.Position) ~= playerZone then
+                        continue
                     end
-                end
-
-                if not isDead then
-                    local part = rock.PrimaryPart or rock:FindFirstChildWhichIsA("BasePart")
-                    if part then
-                        -- Zone-lock: skip rocks outside player's region
-                        if playerZone and getRegionForPos(part.Position) ~= playerZone then
-                            continue
-                        end
-                        local dist = (part.Position - root.Position).Magnitude
-                        if dist < shortest then
-                            shortest = dist
-                            nearest = rock
-                        end
+                    local dist = (part.Position - root.Position).Magnitude
+                    if dist < shortest then
+                        shortest = dist
+                        nearest = rock
                     end
                 end
             end
@@ -541,69 +613,21 @@ return function(Window, scriptInfo)
         local treeFolder = combat and combat:FindFirstChild("BreakableTrees")
         if not treeFolder or not root then return nil, math.huge end
 
-        local bt = clientController and clientController.BreakableTrees
-        local bIds = clientController and clientController.BreakableIds
-
-        -- Zone of the player (nil = unknown, skip zone filter)
         local playerZone = settings.zoneLock and getRegionForPos(root.Position) or nil
-        local now = tick()
-
         local nearest = nil
         local shortest = maxDist or (settings.chopMaxDist or 300)
+
         for _, tree in ipairs(treeFolder:GetChildren()) do
-            if tree.Parent then
-                -- Skip trees still in felled-cooldown window
-                if felledTrees[tree] and now < felledTrees[tree] then
-                    continue
-                elseif felledTrees[tree] then
-                    felledTrees[tree] = nil
-                end
-
-                -- Skip trees in short-lived hit cooldown (3s after each chop attempt)
-                if recentlyHitTrees[tree] then
-                    if now < recentlyHitTrees[tree] then
+            if tree.Parent and not isTreeDead(tree) then
+                local part = tree:FindFirstChild("StumpSpawn") or tree.PrimaryPart or tree:FindFirstChildWhichIsA("BasePart")
+                if part then
+                    if playerZone and getRegionForPos(part.Position) ~= playerZone then
                         continue
-                    else
-                        recentlyHitTrees[tree] = nil
                     end
-                end
-
-                local isDead = false
-
-                -- Check 1: Game-native break highlight (most reliable)
-                if tree:FindFirstChild("TreeBreakHighlight") then
-                    isDead = true
-                end
-
-                -- Check 2: Internal stateByKey dead flag
-                if not isDead and bt and bt.stateByKey and bIds and bIds.treeKey then
-                    local tKey = bIds.treeKey(tree)
-                    if tKey then
-                        local compositeKey = tree.Name .. "\0" .. tostring(tKey)
-                        local state = bt.stateByKey[compositeKey]
-                        if state and state.dead then
-                            isDead = true
-                        end
-                    end
-                end
-
-                if isDead then
-                    -- Register in felled blacklist for ~45s so we never re-target stumps
-                    if not felledTrees[tree] then
-                        felledTrees[tree] = now + 45
-                    end
-                else
-                    local part = tree.PrimaryPart or tree:FindFirstChildWhichIsA("BasePart")
-                    if part then
-                        -- Zone-lock: skip trees outside player's region
-                        if playerZone and getRegionForPos(part.Position) ~= playerZone then
-                            continue
-                        end
-                        local dist = (part.Position - root.Position).Magnitude
-                        if dist < shortest then
-                            shortest = dist
-                            nearest = tree
-                        end
+                    local dist = (part.Position - root.Position).Magnitude
+                    if dist < shortest then
+                        shortest = dist
+                        nearest = tree
                     end
                 end
             end
@@ -1392,19 +1416,45 @@ return function(Window, scriptInfo)
             settings.autoMine = v
             if v then
                 startThread("autoMine", function(isActive)
+                    local currentRock = nil
+                    local rockStartTime = 0
+
                     while isActive() do
                         if not isConverting then
                             ensureToolEquipped("pickaxe")
-                            local rock, dist = getNearestRock(settings.mineMaxDist)
                             local root = getRoot()
-                            if rock and root then
-                                local part = rock.PrimaryPart or rock:FindFirstChildWhichIsA("BasePart")
+
+                            -- 1. Validate locked rock target
+                            if currentRock then
+                                local dead = isRockDead(currentRock)
+                                local timedOut = (tick() - rockStartTime) > 15
+                                if dead or timedOut or not root then
+                                    if dead then
+                                        felledRocks[currentRock] = tick() + 30
+                                    end
+                                    currentRock = nil
+                                end
+                            end
+
+                            -- 2. Pick new rock target if none currently locked
+                            if not currentRock and root then
+                                local rock, dist = getNearestRock(settings.mineMaxDist)
+                                if rock then
+                                    currentRock = rock
+                                    rockStartTime = tick()
+                                end
+                            end
+
+                            -- 3. Mine the locked rock repeatedly until broken
+                            if currentRock and root then
+                                local part = currentRock:FindFirstChild("RockSpawn") or currentRock.PrimaryPart or currentRock:FindFirstChildWhichIsA("BasePart")
                                 if part then
                                     local rockPos = part.Position
                                     local myPos = root.Position
                                     local dir = (Vector3.new(myPos.X, 0, myPos.Z) - Vector3.new(rockPos.X, 0, rockPos.Z))
                                     local standOffset = (dir.Magnitude > 0.1) and (dir.Unit * 4.5) or Vector3.new(4.5, 0, 0)
-                                    local standPos = Vector3.new(rockPos.X + standOffset.X, myPos.Y + 0.5, rockPos.Z + standOffset.Z)
+                                    local standPos = Vector3.new(rockPos.X + standOffset.X, rockPos.Y + 2.5, rockPos.Z + standOffset.Z)
+                                    local dist = (Vector3.new(myPos.X, 0, myPos.Z) - Vector3.new(rockPos.X, 0, rockPos.Z)).Magnitude
 
                                     -- TP to stand position (bypasses collision with props/fences)
                                     if dist > 6 then
@@ -1424,19 +1474,18 @@ return function(Window, scriptInfo)
                                         local tm = clientController and clientController.ToolsManager
                                         local net = clientController and clientController.Network
                                         local bIds = clientController and clientController.BreakableIds
+                                        local rKey = currentRock:GetAttribute("BreakableRockId") or (bIds and bIds.rockKey and bIds.rockKey(currentRock))
 
                                         root.CFrame = CFrame.new(root.Position, Vector3.new(rockPos.X, root.Position.Y, rockPos.Z))
 
                                         -- 1. Try standard module method with hit score 1 (100% perfect hit)
                                         if br and br.tryMineRockTarget then
-                                            pcall(function() br:tryMineRockTarget(1, rock) end)
+                                            pcall(function() br:tryMineRockTarget(1, currentRock) end)
                                         end
                                         -- 2. Direct network backup
-                                        local rKey
-                                        if net and bIds and bIds.rockKey then
+                                        if net and rKey then
                                             pcall(function()
-                                                rKey = bIds.rockKey(rock)
-                                                net:send("MineRock", rock.Name, rKey, 1)
+                                                net:send("MineRock", currentRock.Name, rKey, 1)
                                             end)
                                         end
                                         -- 3. Visual pickaxe swing
@@ -1444,21 +1493,18 @@ return function(Window, scriptInfo)
                                             pcall(function() tm:playPickaxeAction() end)
                                         end
 
-                                        -- 4. Check if now dead → blacklist so we skip instantly next frame
-                                        if br and br.stateByKey and bIds and bIds.rockKey then
-                                            local rk = rKey or (bIds.rockKey and bIds.rockKey(rock))
-                                            if rk then
-                                                local state = br.stateByKey[rock.Name .. "\0" .. tostring(rk)]
-                                                if state and state.dead and not felledRocks[rock] then
-                                                    felledRocks[rock] = tick() + 40
-                                                end
-                                            end
+                                        -- 4. Check if rock broke from this hit
+                                        if isRockDead(currentRock) then
+                                            felledRocks[currentRock] = tick() + 20
+                                            currentRock = nil
                                         end
                                     end
+                                else
+                                    currentRock = nil
                                 end
                             end
                         end
-                        task.wait(0.25)
+                        task.wait(0.18)
                     end
                 end)
             else
@@ -1489,19 +1535,45 @@ return function(Window, scriptInfo)
             settings.autoChop = v
             if v then
                 startThread("autoChop", function(isActive)
+                    local currentTree = nil
+                    local treeStartTime = 0
+
                     while isActive() do
                         if not isConverting then
                             ensureToolEquipped("axe")
-                            local tree, dist = getNearestTree(settings.chopMaxDist)
                             local root = getRoot()
-                            if tree and root then
-                                local part = tree.PrimaryPart or tree:FindFirstChildWhichIsA("BasePart")
+
+                            -- 1. Validate locked tree target
+                            if currentTree then
+                                local dead = isTreeDead(currentTree)
+                                local timedOut = (tick() - treeStartTime) > 15
+                                if dead or timedOut or not root then
+                                    if dead and currentTree then
+                                        felledTrees[currentTree] = tick() + 20
+                                    end
+                                    currentTree = nil
+                                end
+                            end
+
+                            -- 2. Pick new tree target if none currently locked
+                            if not currentTree and root then
+                                local tree, dist = getNearestTree(settings.chopMaxDist)
+                                if tree then
+                                    currentTree = tree
+                                    treeStartTime = tick()
+                                end
+                            end
+
+                            -- 3. Chop the locked tree repeatedly until felled
+                            if currentTree and root then
+                                local part = currentTree:FindFirstChild("StumpSpawn") or currentTree.PrimaryPart or currentTree:FindFirstChildWhichIsA("BasePart")
                                 if part then
                                     local treePos = part.Position
                                     local myPos = root.Position
                                     local dir = (Vector3.new(myPos.X, 0, myPos.Z) - Vector3.new(treePos.X, 0, treePos.Z))
-                                    local standOffset = (dir.Magnitude > 0.1) and (dir.Unit * 5.0) or Vector3.new(5.0, 0, 0)
-                                    local standPos = Vector3.new(treePos.X + standOffset.X, myPos.Y + 0.5, treePos.Z + standOffset.Z)
+                                    local standOffset = (dir.Magnitude > 0.1) and (dir.Unit * 4.5) or Vector3.new(4.5, 0, 0)
+                                    local standPos = Vector3.new(treePos.X + standOffset.X, treePos.Y + 2.5, treePos.Z + standOffset.Z)
+                                    local dist = (Vector3.new(myPos.X, 0, myPos.Z) - Vector3.new(treePos.X, 0, treePos.Z)).Magnitude
 
                                     -- TP to stand position (bypasses collision with props/fences)
                                     if dist > 6.5 then
@@ -1521,46 +1593,34 @@ return function(Window, scriptInfo)
                                         local tm = clientController and clientController.ToolsManager
                                         local net = clientController and clientController.Network
                                         local bIds = clientController and clientController.BreakableIds
+                                        local tKey = currentTree:GetAttribute("BreakableTreeId") or (bIds and bIds.treeKey and bIds.treeKey(currentTree))
 
                                         root.CFrame = CFrame.new(root.Position, Vector3.new(treePos.X, root.Position.Y, treePos.Z))
 
-                                        local tKey
                                         if bt and bt.tryChopTarget then
-                                            pcall(function() bt:tryChopTarget(tree) end)
+                                            pcall(function() bt:tryChopTarget(currentTree) end)
                                         end
-                                        if net and bIds and bIds.treeKey then
+                                        if net and tKey then
                                             pcall(function()
-                                                tKey = bIds.treeKey(tree)
-                                                net:send("ChopTree", tree.Name, tKey)
+                                                net:send("ChopTree", currentTree.Name, tKey)
                                             end)
                                         end
                                         if tm and tm.playAxeSwing then
                                             pcall(function() tm:playAxeSwing() end)
                                         end
 
-                                        -- Mark tree as recently-hit IMMEDIATELY (before server confirms)
-                                        -- This prevents re-targeting the same tree next frame
-                                        recentlyHitTrees[tree] = tick() + 3.0
-
-                                        -- Then check if it's fully dead → promote to long felled blacklist
-                                        task.wait(0.15) -- tiny wait to let server state propagate
-                                        local isDead = tree:FindFirstChild("TreeBreakHighlight") ~= nil
-                                        if not isDead and bt and bt.stateByKey and bIds and bIds.treeKey then
-                                            local tk = tKey or (bIds.treeKey and bIds.treeKey(tree))
-                                            if tk then
-                                                local state = bt.stateByKey[tree.Name .. "\0" .. tostring(tk)]
-                                                if state and state.dead then isDead = true end
-                                            end
-                                        end
-                                        if isDead then
-                                            felledTrees[tree] = tick() + 45
-                                            recentlyHitTrees[tree] = nil -- no longer needed, felled list takes over
+                                        -- Check if tree died from this hit
+                                        if isTreeDead(currentTree) then
+                                            felledTrees[currentTree] = tick() + 20
+                                            currentTree = nil
                                         end
                                     end
+                                else
+                                    currentTree = nil
                                 end
                             end
                         end
-                        task.wait(0.25)
+                        task.wait(0.18)
                     end
                 end)
             else
@@ -1604,7 +1664,7 @@ return function(Window, scriptInfo)
                                     local myPos = root.Position
                                     local dir = (Vector3.new(myPos.X, 0, myPos.Z) - Vector3.new(beetlePos.X, 0, beetlePos.Z))
                                     local standOffset = (dir.Magnitude > 0.1) and (dir.Unit * 4.0) or Vector3.new(4.0, 0, 0)
-                                    local standPos = Vector3.new(beetlePos.X + standOffset.X, myPos.Y + 0.5, beetlePos.Z + standOffset.Z)
+                                    local standPos = Vector3.new(beetlePos.X + standOffset.X, beetlePos.Y + 2.0, beetlePos.Z + standOffset.Z)
 
                                     if dist > 5 then
                                         if settings.gatherMoveMode == "Teleport" then
