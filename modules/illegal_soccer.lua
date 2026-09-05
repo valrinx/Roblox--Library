@@ -27,6 +27,7 @@ return function(Window, scriptInfo)
         autoGoalkeeper = false,
         gkAutoPosition = true,
         gkAutoDive = true,
+        gkAutoJump = true,
         gkAutoPunch = true,
         gkDiveReach = 22,
         noBallSlowdown = true,
@@ -515,22 +516,294 @@ return function(Window, scriptInfo)
     -- ============================================================
 
     -- ============================================================
-    --   GOALKEEPER AUTOMATION ENGINE
+    --   GOALKEEPER AUTOMATION & BALL RESOLUTION ENGINE
     -- ============================================================
+    local Renderer = nil
+    local PracticeSession = nil
+    local GoalkeeperRole = nil
+    local GoalkeeperPrediction = nil
+    local ActorTeams = nil
+    local GoalkeeperDive = nil
+    local ActionMotion = nil
+
+    pcall(function()
+        Renderer = require(ReplicatedStorage.Client.Gameplay.Ball.Renderer)
+    end)
+    pcall(function()
+        PracticeSession = require(ReplicatedStorage.Client.Gameplay.PracticeSession)
+    end)
+    pcall(function()
+        GoalkeeperRole = require(ReplicatedStorage.Client.Gameplay.Player.GoalkeeperRole)
+    end)
+    pcall(function()
+        GoalkeeperPrediction = require(ReplicatedStorage.Modules.Gameplay.GoalkeeperPrediction)
+    end)
+    pcall(function()
+        ActorTeams = require(ReplicatedStorage.Client.Gameplay.ActorTeams)
+    end)
+    pcall(function()
+        GoalkeeperDive = require(ReplicatedStorage.Modules.Actions.GoalkeeperDive)
+    end)
+    pcall(function()
+        ActionMotion = require(ReplicatedStorage.Modules.Actions.ActionMotion)
+    end)
+
+    local forcedDiveChoice = nil
+    if GoalkeeperDive and type(GoalkeeperDive.GetDirectionChoice) == "function" then
+        local origGetChoice = GoalkeeperDive.GetDirectionChoice
+        GoalkeeperDive.GetDirectionChoice = function(moveVec, camCF, lookVec)
+            if forcedDiveChoice then
+                local choice = forcedDiveChoice
+                forcedDiveChoice = nil
+                return choice
+            end
+            return origGetChoice(moveVec, camCF, lookVec)
+        end
+    end
+
     local lastDiveTime = 0
     local lastPunchTime = 0
+    local lastBallPos = nil
+    local lastBallPosTime = 0
+    local trackedBallVel = Vector3.zero
 
-    local function getMyGoalTeam()
+    local function getActiveBall(rootPos)
+        -- Priority 1: Game's authoritative Ball Renderer
+        if Renderer and type(Renderer.GetBall) == "function" then
+            local s, b = pcall(Renderer.GetBall)
+            if s and b and b:IsA("BasePart") and b.Parent then
+                return b
+            end
+        end
+
+        local visuals = workspace:FindFirstChild("Misc") and workspace.Misc:FindFirstChild("Visuals")
+        if not visuals then return nil end
+
+        -- Priority 2: Practice Session local ball
+        if PracticeSession and type(PracticeSession.IsActive) == "function" and PracticeSession.IsActive() then
+            local sId, pId = pcall(PracticeSession.GetLocalPracticeBallId)
+            if sId and pId then
+                local pBall = visuals:FindFirstChild("ClientBall_" .. tostring(pId))
+                if pBall and pBall:IsA("BasePart") then return pBall end
+            end
+        end
+
+        -- Priority 3: Main match ball if within reasonable range
+        local mainBall = visuals:FindFirstChild("ClientBall_MainMatch")
+        if mainBall and mainBall:IsA("BasePart") then
+            if not rootPos or (mainBall.Position - rootPos).Magnitude < 350 then
+                return mainBall
+            end
+        end
+
+        -- Priority 4: Closest ball part in Visuals
+        local bestBall = nil
+        local bestDist = math.huge
+        for _, child in ipairs(visuals:GetChildren()) do
+            if child:IsA("BasePart") and string.find(string.lower(child.Name), "ball") then
+                local d = rootPos and (child.Position - rootPos).Magnitude or 0
+                if d < bestDist then
+                    bestDist = d
+                    bestBall = child
+                end
+            end
+        end
+        return bestBall
+    end
+
+    local function getDefendedGoalInfo(rootPos)
+        local isPractice = false
+        if PracticeSession and type(PracticeSession.IsActive) == "function" then
+            pcall(function() isPractice = PracticeSession.IsActive() end)
+        end
+        if not isPractice and rootPos and rootPos.X > 300 then
+            isPractice = true
+        end
+
+        if isPractice then
+            -- Practice Mode (Defense Goal in Lobby)
+            local defGoal = nil
+            if PracticeSession and type(PracticeSession.GetDefendedGoalPart) == "function" then
+                pcall(function() defGoal = PracticeSession.GetDefendedGoalPart() end)
+            end
+            if not defGoal then
+                local lobby = workspace:FindFirstChild("Lobby")
+                defGoal = lobby and lobby:FindFirstChild("Practice")
+                    and lobby.Practice:FindFirstChild("Goals")
+                    and lobby.Practice.Goals:FindFirstChild("Defence")
+                    and lobby.Practice.Goals.Defence:FindFirstChild("Goal")
+            end
+
+            local goalPos = defGoal and defGoal.Position or Vector3.new(583.5, 39.2, -0.2)
+            local goalForward = Vector3.new(-1, 0, 0)
+            local goalRight = Vector3.new(0, 0, 1)
+
+            local homePart = workspace:FindFirstChild("Lobby") and workspace.Lobby:FindFirstChild("Practice") and workspace.Lobby.Practice:FindFirstChild("Goalkeeper")
+            local homePos = homePart and homePart.Position or Vector3.new(574.2, 34.0, -0.3)
+
+            return goalPos, goalForward, goalRight, homePos, true
+        else
+            -- Main Match Stadium Mode
+            local mapData = workspace:FindFirstChild("Map") and workspace.Map:FindFirstChild("Data")
+            local teamName = nil
+            if ActorTeams and type(ActorTeams.GetCharacterTeamName) == "function" then
+                pcall(function() teamName = ActorTeams.GetCharacterTeamName(localPlayer.Character) end)
+            end
+            if not teamName and localPlayer.Team then
+                teamName = localPlayer.Team.Name
+            end
+            if not teamName and rootPos then
+                local t1Dist = (rootPos - Vector3.new(0, 7, -155)).Magnitude
+                local t2Dist = (rootPos - Vector3.new(0, 7, 155)).Magnitude
+                teamName = (t2Dist < t1Dist) and "Team2" or "Team1"
+            end
+
+            if teamName == "Team2" then
+                local goalPart = mapData and mapData:FindFirstChild("Team2") and mapData.Team2:FindFirstChild("Goal")
+                local goalPos = goalPart and goalPart.Position or Vector3.new(0, 7, 155)
+                local goalForward = Vector3.new(0, 0, -1)
+                local goalRight = Vector3.new(-1, 0, 0)
+                local homePart = mapData and mapData:FindFirstChild("Team2") and mapData.Team2:FindFirstChild("Positions") and mapData.Team2.Positions:FindFirstChild("Goalkeeper")
+                local homePos = homePart and homePart.Position or Vector3.new(0, 1.5, 145.5)
+                return goalPos, goalForward, goalRight, homePos, false
+            else
+                local goalPart = mapData and mapData:FindFirstChild("Team1") and mapData.Team1:FindFirstChild("Goal")
+                local goalPos = goalPart and goalPart.Position or Vector3.new(0, 7, -155)
+                local goalForward = Vector3.new(0, 0, 1)
+                local goalRight = Vector3.new(1, 0, 0)
+                local homePart = mapData and mapData:FindFirstChild("Team1") and mapData.Team1:FindFirstChild("Positions") and mapData.Team1.Positions:FindFirstChild("Goalkeeper")
+                local homePos = homePart and homePart.Position or Vector3.new(0, 1.5, -145.5)
+                return goalPos, goalForward, goalRight, homePos, false
+            end
+        end
+    end
+
+    local function triggerDive(targetLookPos, isHighShot)
         local char = localPlayer.Character
         local root = getRoot(char)
-        if not root then return "Team1", Vector3.new(0, 1.5, -145.5) end
-        local t1Dist = (root.Position - Vector3.new(0, 7, -155)).Magnitude
-        local t2Dist = (root.Position - Vector3.new(0, 7, 155)).Magnitude
-        if t2Dist < t1Dist then
-            return "Team2", Vector3.new(0, 1.5, 145.5)
+        local hum = getHumanoid(char)
+        if not root or not hum then return false end
+
+        local cam = workspace.CurrentCamera
+        local camCF = cam and cam.CFrame or root.CFrame
+        local camFlatForward = Vector3.new(camCF.LookVector.X, 0, camCF.LookVector.Z)
+        if camFlatForward.Magnitude > 0.01 then
+            camFlatForward = camFlatForward.Unit
         else
-            return "Team1", Vector3.new(0, 1.5, -145.5)
+            camFlatForward = Vector3.new(0, 0, 1)
         end
+        local camFlatRight = Vector3.new(-camFlatForward.Z, 0, camFlatForward.X)
+
+        -- Calculate flat directional vector from keeper to target intercept position
+        local toTarget = targetLookPos - root.Position
+        local flatToTarget = Vector3.new(toTarget.X, 0, toTarget.Z)
+        local targetDir = camFlatForward
+        if flatToTarget.Magnitude > 0.1 then
+            targetDir = flatToTarget.Unit
+        end
+
+        -- Project target direction onto camera plane to find relative dive direction (L, R, LF, RF, F, B)
+        local forwardDot = targetDir:Dot(camFlatForward)
+        local rightDot = targetDir:Dot(camFlatRight)
+
+        local dirName = "F"
+        if ActionMotion and type(ActionMotion.GetDirectionName) == "function" then
+            pcall(function()
+                dirName = ActionMotion.GetDirectionName(forwardDot, rightDot)
+            end)
+        else
+            if math.abs(rightDot) > 0.38 then
+                if forwardDot > 0.38 then
+                    dirName = (rightDot > 0) and "RF" or "LF"
+                elseif forwardDot < -0.38 then
+                    dirName = (rightDot > 0) and "RB" or "LB"
+                else
+                    dirName = (rightDot > 0) and "R" or "L"
+                end
+            else
+                dirName = (forwardDot >= 0) and "F" or "B"
+            end
+        end
+
+        -- Prime the game's dive direction choice
+        if GoalkeeperDive and type(GoalkeeperDive.GetDirectionChoiceByName) == "function" then
+            pcall(function()
+                forcedDiveChoice = GoalkeeperDive.GetDirectionChoiceByName(dirName)
+            end)
+        end
+
+        -- Set humanoid movement towards target so native move direction aligns
+        pcall(function()
+            hum:Move(targetDir, false)
+        end)
+
+        -- If ball is elevated, initiate a jump right before dive so character gains vertical lift (+6-8 studs)
+        if isHighShot and settings.gkAutoJump then
+            pcall(function()
+                hum.Jump = true
+            end)
+            task.wait(0.11)
+        end
+
+        -- Execute dive
+        local triggered = false
+        if type(mouse2click) == "function" then
+            local s = pcall(mouse2click)
+            if s then triggered = true end
+        end
+        if not triggered and type(keyclick) == "function" then
+            pcall(function() keyclick(Enum.KeyCode.E.Value); triggered = true end)
+        end
+        if not triggered and type(keypress) == "function" then
+            pcall(function()
+                keypress(0x45)
+                task.delay(0.05, function() pcall(keyrelease, 0x45) end)
+                triggered = true
+            end)
+        end
+        if not triggered and GoalkeeperRole and type(GoalkeeperRole.Dive) == "function" then
+            pcall(function() triggered = GoalkeeperRole.Dive() end)
+        end
+        if not triggered then
+            pcall(function()
+                local vim = game:GetService("VirtualInputManager")
+                vim:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+                task.delay(0.05, function() vim:SendKeyEvent(false, Enum.KeyCode.E, false, game) end)
+            end)
+        end
+
+        -- Clean up movement direction after brief impulse
+        task.delay(0.15, function()
+            pcall(function()
+                hum:Move(Vector3.zero, false)
+            end)
+        end)
+
+        return triggered
+    end
+
+    local function triggerPunch(targetLookPos)
+        local char = localPlayer.Character
+        local root = getRoot(char)
+        if root and targetLookPos then
+            pcall(function()
+                root.CFrame = CFrame.lookAt(root.Position, Vector3.new(targetLookPos.X, root.Position.Y, targetLookPos.Z))
+            end)
+        end
+
+        local triggered = false
+        if type(mouse1click) == "function" then
+            local s = pcall(mouse1click)
+            if s then triggered = true end
+        end
+        if not triggered then
+            pcall(function()
+                local vim = game:GetService("VirtualInputManager")
+                vim:SendMouseButtonEvent(0, 0, 0, true, game, 1)
+                task.delay(0.05, function() vim:SendMouseButtonEvent(0, 0, 0, false, game, 1) end)
+            end)
+        end
+        return triggered
     end
 
     local function updateAutoGoalkeeper()
@@ -540,66 +813,76 @@ return function(Window, scriptInfo)
         local hum = getHumanoid(char)
         if not root or not hum or hum.Health <= 0 then return end
 
-        local visuals = workspace:FindFirstChild("Misc") and workspace.Misc:FindFirstChild("Visuals")
-        local ball = visuals and visuals:FindFirstChild("ClientBall_MainMatch")
+        local ball = getActiveBall(root.Position)
         if not ball or not ball:IsA("BasePart") then return end
 
-        local myTeam, homePos = getMyGoalTeam()
-        local goalZ = (myTeam == "Team1") and -155 or 155
         local ballPos = ball.Position
-        local ballVel = ball.AssemblyLinearVelocity
-        local distToBall = (ballPos - root.Position).Magnitude
         local now = os.clock()
 
-        -- 1. Check for incoming shot on goal (Shot Prediction)
-        local isShotIncoming = false
-        local timeToGoal = 0
-        if myTeam == "Team1" and ballVel.Z < -6 then
-            timeToGoal = (goalZ - ballPos.Z) / ballVel.Z
-            isShotIncoming = (timeToGoal > 0 and timeToGoal < 1.6)
-        elseif myTeam == "Team2" and ballVel.Z > 6 then
-            timeToGoal = (goalZ - ballPos.Z) / ballVel.Z
-            isShotIncoming = (timeToGoal > 0 and timeToGoal < 1.6)
+        -- Measure velocity from delta position (studs/sec)
+        if lastBallPos and lastBallPosTime > 0 then
+            local dt = now - lastBallPosTime
+            if dt > 0.005 and dt < 0.25 then
+                local rawVel = (ballPos - lastBallPos) / dt
+                if rawVel.Magnitude > 1.5 then
+                    trackedBallVel = rawVel
+                else
+                    trackedBallVel = trackedBallVel * 0.88
+                end
+            end
+        end
+        lastBallPos = ballPos
+        lastBallPosTime = now
+
+        -- Query authoritative physics velocity if available
+        local ballVel = trackedBallVel
+        if Renderer and type(Renderer.GetMovementState) == "function" then
+            pcall(function()
+                local mv = Renderer.GetMovementState()
+                if mv and mv.Velocity and mv.Velocity.Magnitude > 2 then
+                    ballVel = mv.Velocity
+                end
+            end)
         end
 
-        local interceptX = ballPos.X + ballVel.X * timeToGoal
+        local goalPos, goalForward, goalRight, homePos, isPractice = getDefendedGoalInfo(root.Position)
+        local distToBall = (ballPos - root.Position).Magnitude
 
-        -- Auto Dive / Save
-        if settings.gkAutoDive and isShotIncoming and math.abs(interceptX) <= 24 and distToBall <= settings.gkDiveReach then
-            if (now - lastDiveTime) > 1.8 then
+        -- Shot Prediction Vector Mathematics
+        local forwardSpeed = ballVel:Dot(-goalForward)
+        local distToGoalPlane = (ballPos - goalPos):Dot(goalForward)
+        local timeToGoal = (forwardSpeed > 2.5) and (distToGoalPlane / forwardSpeed) or 999
+        local interceptPos = ballPos + (ballVel * timeToGoal)
+        local lateralOffset = (interceptPos - goalPos):Dot(goalRight)
+
+        local isShotIncoming = (forwardSpeed > 2.5) and (distToGoalPlane > 0) and (timeToGoal > 0 and timeToGoal < 1.9) and (math.abs(lateralOffset) <= 24)
+        local isHighShot = (interceptPos.Y - root.Position.Y > 2.8) or (ballPos.Y - root.Position.Y > 3.2)
+
+        -- 1. Auto Dive / Save incoming shot
+        if settings.gkAutoDive and isShotIncoming and distToBall <= settings.gkDiveReach then
+            if (now - lastDiveTime) > 1.2 then
                 lastDiveTime = now
-                pcall(function()
-                    root.CFrame = CFrame.lookAt(root.Position, Vector3.new(ballPos.X, root.Position.Y, ballPos.Z))
-                    local vim = game:GetService("VirtualInputManager")
-                    vim:SendKeyEvent(true, Enum.KeyCode.E, false, game)
-                    task.delay(0.08, function()
-                        vim:SendKeyEvent(false, Enum.KeyCode.E, false, game)
-                    end)
-                end)
+                triggerDive(interceptPos, isHighShot)
                 return
             end
         end
 
-        -- Auto Punch / Clear loose ball
-        if settings.gkAutoPunch and distToBall <= 8 and (now - lastPunchTime) > 0.8 then
+        -- 2. Auto Punch / Clear loose ball
+        if settings.gkAutoPunch and distToBall <= 9 and (now - lastPunchTime) > 0.6 then
             lastPunchTime = now
-            pcall(function()
-                root.CFrame = CFrame.lookAt(root.Position, Vector3.new(ballPos.X, root.Position.Y, ballPos.Z))
-                local vim = game:GetService("VirtualInputManager")
-                vim:SendMouseButtonEvent(0, 0, 0, true, game, 1)
-                task.delay(0.05, function()
-                    vim:SendMouseButtonEvent(0, 0, 0, false, game, 1)
-                end)
-            end)
+            triggerPunch(ballPos)
             return
         end
 
-        -- Auto Positioning along the net
-        if settings.gkAutoPosition then
-            local clampedX = math.clamp(ballPos.X * 0.7, -18, 18)
-            local zOffset = (ballPos.Z - homePos.Z) * 0.08
-            local targetPos = Vector3.new(clampedX, homePos.Y, homePos.Z + zOffset)
-            if (root.Position - targetPos).Magnitude > 2 then
+        -- 3. Auto Positioning along the net
+        if settings.gkAutoPosition and not isShotIncoming then
+            local ballLateral = (ballPos - homePos):Dot(goalRight)
+            local keeperLateral = math.clamp(ballLateral * 0.7, -18, 18)
+            local ballForwardDist = (ballPos - homePos):Dot(goalForward)
+            local keeperDepth = math.clamp(ballForwardDist * 0.06, -1, 5)
+
+            local targetPos = homePos + (goalRight * keeperLateral) + (goalForward * keeperDepth)
+            if (root.Position - targetPos).Magnitude > 1.5 then
                 hum:MoveTo(targetPos)
             end
         end
@@ -681,17 +964,7 @@ return function(Window, scriptInfo)
 
         -- 1. Ball ESP
         if settings.ballEsp then
-            local visuals = workspace:FindFirstChild("Misc") and workspace.Misc:FindFirstChild("Visuals")
-            local ball = visuals and visuals:FindFirstChild("ClientBall_MainMatch")
-            if not ball and visuals then
-                for _, child in ipairs(visuals:GetChildren()) do
-                    if string.find(string.lower(child.Name), "ball") and child:IsA("BasePart") then
-                        ball = child
-                        break
-                    end
-                end
-            end
-
+            local ball = getActiveBall(myPos)
             if ball and ball:IsA("BasePart") and ball.Parent then
                 local dist = math.floor((ball.Position - myPos).Magnitude)
                 local id = "Ball_Main"
@@ -711,29 +984,56 @@ return function(Window, scriptInfo)
 
         -- 2. Goal ESP
         if settings.goalEsp then
-            local mapData = workspace:FindFirstChild("Map") and workspace.Map:FindFirstChild("Data")
-            if mapData then
-                for _, teamName in ipairs({"Team1", "Team2"}) do
-                    local teamFolder = mapData:FindFirstChild(teamName)
-                    local goal = teamFolder and teamFolder:FindFirstChild("Goal")
-                    local id = "Goal_" .. teamName
-                    if goal and goal:IsA("BasePart") then
-                        local dist = math.floor((goal.Position - myPos).Magnitude)
-                        local col = (teamName == "Team1") and Color3.fromRGB(0, 170, 255) or Color3.fromRGB(255, 85, 85)
-                        if not espObjects[id] then
-                            local bb, lbl = createBillboard(id, goal, col, "🥅 " .. teamName .. " Goal", Vector3.new(0, 6, 0))
-                            espObjects[id] = { billboard = bb, label = lbl }
+            local isPractice = (PracticeSession and PracticeSession.IsActive and PracticeSession.IsActive()) or (myPos.X > 300)
+            if isPractice then
+                local lobby = workspace:FindFirstChild("Lobby")
+                local pGoals = lobby and lobby:FindFirstChild("Practice") and lobby.Practice:FindFirstChild("Goals")
+                if pGoals then
+                    for _, side in ipairs({"Defence", "Offense"}) do
+                        local sideFolder = pGoals:FindFirstChild(side)
+                        local goal = sideFolder and sideFolder:FindFirstChild("Goal")
+                        local id = "Goal_Practice_" .. side
+                        if goal and goal:IsA("BasePart") then
+                            local dist = math.floor((goal.Position - myPos).Magnitude)
+                            local col = (side == "Defence") and Color3.fromRGB(0, 170, 255) or Color3.fromRGB(255, 85, 85)
+                            if not espObjects[id] then
+                                local bb, lbl = createBillboard(id, goal, col, "🥅 " .. side .. " Goal", Vector3.new(0, 6, 0))
+                                espObjects[id] = { billboard = bb, label = lbl }
+                            else
+                                espObjects[id].label.Text = string.format("🥅 <b>%s Goal</b>\n<font size='11' color='#FFFFFF'>[%d studs]</font>", side, dist)
+                            end
                         else
-                            espObjects[id].label.Text = string.format("🥅 <b>%s Goal</b>\n<font size='11' color='#FFFFFF'>[%d studs]</font>", teamName, dist)
+                            clearEspEntry(id)
                         end
-                    else
-                        clearEspEntry(id)
+                    end
+                end
+            else
+                local mapData = workspace:FindFirstChild("Map") and workspace.Map:FindFirstChild("Data")
+                if mapData then
+                    for _, teamName in ipairs({"Team1", "Team2"}) do
+                        local teamFolder = mapData:FindFirstChild(teamName)
+                        local goal = teamFolder and teamFolder:FindFirstChild("Goal")
+                        local id = "Goal_" .. teamName
+                        if goal and goal:IsA("BasePart") then
+                            local dist = math.floor((goal.Position - myPos).Magnitude)
+                            local col = (teamName == "Team1") and Color3.fromRGB(0, 170, 255) or Color3.fromRGB(255, 85, 85)
+                            if not espObjects[id] then
+                                local bb, lbl = createBillboard(id, goal, col, "🥅 " .. teamName .. " Goal", Vector3.new(0, 6, 0))
+                                espObjects[id] = { billboard = bb, label = lbl }
+                            else
+                                espObjects[id].label.Text = string.format("🥅 <b>%s Goal</b>\n<font size='11' color='#FFFFFF'>[%d studs]</font>", teamName, dist)
+                            end
+                        else
+                            clearEspEntry(id)
+                        end
                     end
                 end
             end
         else
             clearEspEntry("Goal_Team1")
             clearEspEntry("Goal_Team2")
+            clearEspEntry("Goal_Practice_Defence")
+            clearEspEntry("Goal_Practice_Offense")
         end
 
         -- 3. Player ESP
@@ -963,6 +1263,15 @@ return function(Window, scriptInfo)
         Flag = "Soccer_GKDive",
         Callback = function(value)
             settings.gkAutoDive = value
+        end,
+    })
+
+    GKTab:CreateToggle({
+        Name = "Auto Jump on High Balls",
+        CurrentValue = settings.gkAutoJump,
+        Flag = "Soccer_GKAutoJump",
+        Callback = function(value)
+            settings.gkAutoJump = value
         end,
     })
 
