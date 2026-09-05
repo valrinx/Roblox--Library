@@ -465,8 +465,8 @@ local SCRIPTS = {
         description = "Auto Queue | Kill Aura | Auto Skills | Farm | Sell | Forge | Webhook",
         placeIds    = {132285059959516, 135245842886361},
         gameIds     = {9656201728, 8410525651},
-        version     = "v2.1.2",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/DungeonLootr.lua?v=dungeon-lootr-2.1.2",
+        version     = "v2.1.3",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/DungeonLootr.lua?v=dungeon-lootr-2.1.3",
     },
     {
         name        = "Greedy Growers",

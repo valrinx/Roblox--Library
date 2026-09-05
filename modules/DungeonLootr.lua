@@ -40,6 +40,8 @@ local State = {
     StatMode = "Game Recommended (Auto)",
     StatTarget = "Strength (STR)",
     AutoEquipBest = false,
+    MobESP = false,
+    ChestESP = false,
     AutoReplay = false,
     AutoReturn = false,
     CreateDungeon = "Bandits Den",
@@ -1426,10 +1428,183 @@ local function setAutoBest(enabled)
 end
 
     -- =================================================================
+    --   ESP SYSTEM (Mob ESP & Chest ESP)
+    -- =================================================================
+    local CoreGui = game:GetService("CoreGui")
+    local espFolder = Instance.new("Folder")
+    espFolder.Name = "RavenDungeonLootrESP"
+    pcall(function()
+        espFolder.Parent = (type(gethui) == "function" and gethui()) or CoreGui
+    end)
+    if not espFolder.Parent then espFolder.Parent = LocalPlayer:FindFirstChildOfClass("PlayerGui") or CoreGui end
+
+    local activeEspObjects = {}
+
+    local function clearEsp(category)
+        for obj, data in pairs(activeEspObjects) do
+            if not category or data.category == category then
+                if data.highlight then pcall(function() data.highlight:Destroy() end) end
+                if data.billboard then pcall(function() data.billboard:Destroy() end) end
+                activeEspObjects[obj] = nil
+            end
+        end
+    end
+
+    local function createEsp(object, category, title, color, getDynamicText)
+        if activeEspObjects[object] or not object.Parent then return end
+        local adornee = object:IsA("Model") and object or object:FindFirstAncestorOfClass("Model") or object
+        local part = object:IsA("BasePart") and object or (object:IsA("Model") and (object.PrimaryPart or object:FindFirstChild("HumanoidRootPart") or object:FindFirstChildWhichIsA("BasePart", true)))
+        if not part then return end
+
+        local highlight = Instance.new("Highlight")
+        highlight.Adornee = adornee
+        highlight.FillColor = color
+        highlight.FillTransparency = 0.75
+        highlight.OutlineColor = color
+        highlight.OutlineTransparency = 0.2
+        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        pcall(function() highlight.Parent = espFolder end)
+
+        local billboard = Instance.new("BillboardGui")
+        billboard.Adornee = part
+        billboard.Size = UDim2.fromOffset(200, 36)
+        billboard.StudsOffset = Vector3.new(0, 3.5, 0)
+        billboard.AlwaysOnTop = true
+        billboard.MaxDistance = 1000
+        pcall(function() billboard.Parent = espFolder end)
+
+        local label = Instance.new("TextLabel")
+        label.Size = UDim2.fromScale(1, 1)
+        label.BackgroundTransparency = 1
+        label.Font = Enum.Font.GothamBold
+        label.TextSize = 13
+        label.TextColor3 = color
+        label.TextStrokeColor3 = Color3.new(0, 0, 0)
+        label.TextStrokeTransparency = 0.2
+        label.Text = title
+        label.Parent = billboard
+
+        activeEspObjects[object] = {
+            category = category,
+            highlight = highlight,
+            billboard = billboard,
+            label = label,
+            part = part,
+            getDynamicText = getDynamicText
+        }
+    end
+
+    local espThread = nil
+    local function updateEspLoop()
+        while (State.MobESP or State.ChestESP) and running do
+            local char = LocalPlayer.Character
+            local myHrp = char and char:FindFirstChild("HumanoidRootPart")
+            local myPos = myHrp and myHrp.Position or Vector3.zero
+
+            -- Clean up deleted or dead objects
+            for obj, data in pairs(activeEspObjects) do
+                local alive = false
+                if obj and obj.Parent then
+                    if data.category == "mob" then
+                        local hum = obj:FindFirstChildOfClass("Humanoid")
+                        local hp = hum and hum.Health or obj:GetAttribute("HealthOverride")
+                        if (hp and hp > 0) or (hp == nil and obj:GetAttribute("IsFodder") == true) then
+                            alive = true
+                        end
+                    elseif data.category == "chest" then
+                        local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
+                        if prompt and prompt.Enabled and prompt.Parent then
+                            alive = true
+                        end
+                    end
+                end
+
+                if not alive then
+                    if data.highlight then pcall(function() data.highlight:Destroy() end) end
+                    if data.billboard then pcall(function() data.billboard:Destroy() end) end
+                    activeEspObjects[obj] = nil
+                else
+                    if data.getDynamicText and data.label and data.part then
+                        local dist = math.floor((data.part.Position - myPos).Magnitude)
+                        pcall(function()
+                            data.label.Text = data.getDynamicText(obj, dist)
+                        end)
+                    end
+                end
+            end
+
+            -- Scan for Mobs if enabled
+            if State.MobESP then
+                local monsters = getMonsters()
+                for _, m in ipairs(monsters) do
+                    if not activeEspObjects[m] then
+                        local isBoss = m:GetAttribute("IsBoss") == true or m:GetAttribute("IsMapBoss") == true or m:GetAttribute("BossType") ~= nil
+                        local color = isBoss and Color3.fromRGB(255, 60, 60) or Color3.fromRGB(255, 140, 40)
+                        local prefix = isBoss and "[BOSS] " or "[MOB] "
+                        createEsp(m, "mob", prefix .. m.Name, color, function(model, dist)
+                            local hum = model:FindFirstChildOfClass("Humanoid")
+                            local hp = hum and math.floor(hum.Health) or model:GetAttribute("HealthOverride") or "?"
+                            local rIdx = model:GetAttribute("RoomIndex")
+                            local roomStr = rIdx and (" (R" .. tostring(rIdx) .. ")") or ""
+                            return string.format("%s%s%s [%s HP] [%dm]", prefix, model.Name, roomStr, tostring(hp), dist)
+                        end)
+                    end
+                end
+            else
+                clearEsp("mob")
+            end
+
+            -- Scan for Chests if enabled
+            if State.ChestESP then
+                local gen = getGeneratedFolder()
+                if gen then
+                    for _, obj in ipairs(gen:GetChildren()) do
+                        if obj:IsA("Model") and (obj.Name:find("DungeonChest") or obj:GetAttribute("DungeonChest") == true) then
+                            local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
+                            if prompt and prompt.Enabled and not activeEspObjects[obj] then
+                                createEsp(obj, "chest", "[CHEST] " .. obj.Name, Color3.fromRGB(255, 215, 0), function(chestModel, dist)
+                                    local rIdx = chestModel:GetAttribute("RoomIndex")
+                                    local roomStr = rIdx and (" (R" .. tostring(rIdx) .. ")") or ""
+                                    return string.format("[CHEST] %s%s [%dm]", chestModel.Name, roomStr, dist)
+                                end)
+                            end
+                        end
+                    end
+                end
+            else
+                clearEsp("chest")
+            end
+
+            task.wait(0.4)
+        end
+        clearEsp()
+        espThread = nil
+    end
+
+    local function setMobESP(enabled)
+        State.MobESP = enabled
+        if enabled then
+            if not espThread then espThread = task.spawn(updateEspLoop) end
+        else
+            clearEsp("mob")
+        end
+    end
+
+    local function setChestESP(enabled)
+        State.ChestESP = enabled
+        if enabled then
+            if not espThread then espThread = task.spawn(updateEspLoop) end
+        else
+            clearEsp("chest")
+        end
+    end
+
+    -- =================================================================
     --   UI SETUP (MacLib Adapter)
     -- =================================================================
     local MainTab = Window:CreateTab("Main", "swords")
     local DungeonTab = Window:CreateTab("Dungeon", "map")
+    local ESPTab = Window:CreateTab("ESP", "esp")
     local MiscTab = Window:CreateTab("Misc", "misc")
 
     -- Main Tab: Auto Farm
@@ -1710,6 +1885,21 @@ end
         end
     })
 
+    -- ESP Tab: Visuals
+    ESPTab:CreateSection("ESP Visuals")
+    ESPTab:CreateToggle({
+        Name = "ESP Mob",
+        CurrentValue = State.MobESP,
+        Flag = "DungeonLootrMobESP",
+        Callback = function(v) setMobESP(v) end
+    })
+    ESPTab:CreateToggle({
+        Name = "ESP Chest (กล่อง)",
+        CurrentValue = State.ChestESP,
+        Flag = "DungeonLootrChestESP",
+        Callback = function(v) setChestESP(v) end
+    })
+
     MiscTab:CreateSection("Auto Equip best")
     MiscTab:CreateToggle({
         Name = "Auto Equip Best",
@@ -1730,6 +1920,12 @@ end
         State.AutoCreateChallenger = false
         State.AutoCreateBossRush = false
         State.AutoEquipBest = false
+        State.MobESP = false
+        State.ChestESP = false
+        setMobESP(false)
+        setChestESP(false)
+        clearEsp()
+        if espFolder then pcall(function() espFolder:Destroy() end) end
         stopFarm()
         stopSkill()
         setSkipChest(false)
