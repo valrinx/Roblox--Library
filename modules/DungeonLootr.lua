@@ -1453,7 +1453,15 @@ end
     local function createEsp(object, category, title, color, getDynamicText)
         if activeEspObjects[object] or not object.Parent then return end
         local adornee = object:IsA("Model") and object or object:FindFirstAncestorOfClass("Model") or object
-        local part = object:IsA("BasePart") and object or (object:IsA("Model") and (object.PrimaryPart or object:FindFirstChild("HumanoidRootPart") or object:FindFirstChildWhichIsA("BasePart", true)))
+        local part = object:IsA("BasePart") and object
+            or (object:IsA("Model") and (object.PrimaryPart or object:FindFirstChild("HumanoidRootPart") or object:FindFirstChildWhichIsA("BasePart", true)))
+        if not part and object:IsA("Model") then
+            -- Fallback: check attachments if parts are streaming
+            local att = object:FindFirstChildWhichIsA("Attachment", true)
+            if att and att.Parent and att.Parent:IsA("BasePart") then
+                part = att.Parent
+            end
+        end
         if not part then return end
 
         local highlight = Instance.new("Highlight")
@@ -1512,8 +1520,9 @@ end
                             alive = true
                         end
                     elseif data.category == "chest" then
+                        -- Chest is alive if model exists and has prompt or hasn't been collected
                         local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
-                        if prompt and prompt.Enabled and prompt.Parent then
+                        if prompt and prompt.Parent then
                             alive = true
                         end
                     end
@@ -1561,7 +1570,7 @@ end
                     for _, obj in ipairs(gen:GetChildren()) do
                         if obj:IsA("Model") and (obj.Name:find("DungeonChest") or obj:GetAttribute("DungeonChest") == true) then
                             local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
-                            if prompt and prompt.Enabled and not activeEspObjects[obj] then
+                            if prompt and not activeEspObjects[obj] then
                                 createEsp(obj, "chest", "[CHEST] " .. obj.Name, Color3.fromRGB(255, 215, 0), function(chestModel, dist)
                                     local rIdx = chestModel:GetAttribute("RoomIndex")
                                     local roomStr = rIdx and (" (R" .. tostring(rIdx) .. ")") or ""
@@ -1935,8 +1944,12 @@ end
     end
     applyTabOrder()
     task.defer(applyTabOrder)
-    task.delay(0.5, applyTabOrder)
-    task.delay(1.5, applyTabOrder)
+    task.spawn(function()
+        for i = 1, 10 do
+            task.wait(0.3)
+            applyTabOrder()
+        end
+    end)
 
     -- =================================================================
     --   LIFECYCLE & CLEANUP
