@@ -1233,7 +1233,6 @@ end
     -- =================================================================
     local MainTab = Window:CreateTab("Main", "swords")
     local DungeonTab = Window:CreateTab("Dungeon", "map")
-    local SettingsTab = Window:CreateTab("Settings", "settings")
 
     -- Main Tab: Auto Farm
     MainTab:CreateSection("Auto Farm")
@@ -1468,14 +1467,6 @@ end
         Flag = "DungeonLootrAutoCreateBossRush",
         Callback = function(v) setAutoCreateBossRush(v) end
     })
-
-    -- Settings Tab: Config
-    SettingsTab:CreateSection("Configuration")
-    pcall(function()
-        if type(SettingsTab.InsertConfigSection) == "function" then
-            SettingsTab:InsertConfigSection("Left")
-        end
-    end)
 
     -- =================================================================
     --   LIFECYCLE & CLEANUP
