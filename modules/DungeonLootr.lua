@@ -1909,8 +1909,28 @@ end
     })
 
     local function applyTabOrder()
+        local desired = {"Overview", "Main", "Dungeon", "ESP", "Misc", "Settings"}
+        pcall(function()
+            local root = type(gethui) == "function" and gethui() or game:GetService("CoreGui")
+            for _, child in ipairs(root:GetChildren()) do
+                if child:IsA("ScreenGui") and (child.Name == "RavenMacLib" or child:FindFirstChild("Base")) then
+                    for _, desc in ipairs(child:GetDescendants()) do
+                        if desc:IsA("TextLabel") and desc.Name == "TabSwitcherName" then
+                            local btn = desc.Parent
+                            local txt = desc.Text
+                            for idx, name in ipairs(desired) do
+                                if txt == name or txt:lower() == name:lower() then
+                                    btn.LayoutOrder = idx
+                                    break
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end)
         if Window and type(Window.SortTabs) == "function" then
-            Window:SortTabs({"Overview", "Main", "Dungeon", "ESP", "Misc", "Settings"})
+            pcall(function() Window:SortTabs(desired) end)
         end
     end
     applyTabOrder()
