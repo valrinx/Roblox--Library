@@ -35,6 +35,9 @@ local State = {
     AutoPotion = false,
     PotionHealthPercent = 60,
     AutoRefillPotion = false,
+    AutoStats = false,
+    StatMode = "Game Recommended (Auto)",
+    StatTarget = "Strength (STR)",
     AutoReplay = false,
     AutoReturn = false,
     CreateDungeon = "Bandits Den",
@@ -699,6 +702,43 @@ local function setAutoPotion(enabled)
     end
 end
 
+local statsThread = nil
+local statKeyMap = {
+    ["Strength (STR)"] = "STR",
+    ["Dexterity (DEX)"] = "DEX",
+    ["Intelligence (INT)"] = "INT",
+    ["Vitality (VIT)"] = "VIT"
+}
+
+local function setAutoStats(enabled)
+    State.AutoStats = enabled
+    if enabled then
+        if statsThread then pcall(function() task.cancel(statsThread) end) end
+        statsThread = task.spawn(function()
+            while State.AutoStats and running do
+                pcall(function()
+                    local pd = Knit.Registry:Get("PlayerData")
+                    local unspent = pd and pd.Data and (pd.Data.UnspentSkillPoints or pd.Data.SP or 0) or 0
+                    if unspent > 0 then
+                        local svc = Knit.GetService("StatService")
+                        if svc then
+                            if State.StatMode == "Game Recommended (Auto)" then
+                                svc:AutoAllocate():await()
+                            else
+                                local key = statKeyMap[State.StatTarget] or "STR"
+                                svc:AllocatePoints(key, unspent):await()
+                            end
+                        end
+                    end
+                end)
+                task.wait(2)
+            end
+        end)
+    else
+        if statsThread then pcall(function() task.cancel(statsThread) end) statsThread = nil end
+    end
+end
+
 local continueConn=nil
 local function setAutoContinue(enabled)
     State.AutoContinue=enabled
@@ -1339,6 +1379,35 @@ end
         Suffix = "%",
         Flag = "DungeonLootrPotionHealthPercent",
         Callback = function(v) State.PotionHealthPercent = tonumber(v) or 60 end
+    })
+
+    -- Main Tab: Stats Upgrade
+    MainTab:CreateSection("Stats Upgrade")
+    MainTab:CreateToggle({
+        Name = "Auto Stat Upgrades",
+        CurrentValue = State.AutoStats,
+        Flag = "DungeonLootrAutoStats",
+        Callback = function(v) setAutoStats(v) end
+    })
+    MainTab:CreateDropdown({
+        Name = "Upgrade Mode",
+        Options = {"Game Recommended (Auto)", "Custom Specific Stat"},
+        CurrentOption = {State.StatMode},
+        MultipleOptions = false,
+        Flag = "DungeonLootrStatMode",
+        Callback = function(v)
+            State.StatMode = type(v) == "table" and v[1] or v
+        end
+    })
+    MainTab:CreateDropdown({
+        Name = "Select Specific Stat",
+        Options = {"Strength (STR)", "Dexterity (DEX)", "Intelligence (INT)", "Vitality (VIT)"},
+        CurrentOption = {State.StatTarget},
+        MultipleOptions = false,
+        Flag = "DungeonLootrStatTarget",
+        Callback = function(v)
+            State.StatTarget = type(v) == "table" and v[1] or v
+        end
     })
 
     -- Dungeon Tab: Create Dungeon
@@ -1496,7 +1565,8 @@ end
         setAutoContinue(false)
         setAutoReplay(false)
         setAutoReturn(false)
-        setAutoPotion(false)
+        setAutoPotion(false)
+        setAutoStats(false)
         setAutoBest(false)
         setAutoCreateChallenger(false)
         setAutoCreateBossRush(false)
