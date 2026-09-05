@@ -1908,6 +1908,10 @@ end
         Callback = function(v) setAutoEquipBest(v) end
     })
 
+    if Window and type(Window.SortTabs) == "function" then
+        Window:SortTabs({"Overview", "Main", "Dungeon", "ESP", "Misc", "Settings"})
+    end
+
     -- =================================================================
     --   LIFECYCLE & CLEANUP
     -- =================================================================
