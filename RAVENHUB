@@ -466,7 +466,7 @@ local SCRIPTS = {
         placeIds    = {132285059959516, 135245842886361},
         gameIds     = {9656201728, 8410525651},
         version     = "v2.1.3",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/78abc7140da316dbfc5cbb668393e50daec3f9f3/modules/DungeonLootr.lua",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/78abc71873a77d9a18f24ea2600c0fee41691fbd/modules/DungeonLootr.lua",
     },
     {
         name        = "Greedy Growers",
