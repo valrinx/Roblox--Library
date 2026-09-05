@@ -67,9 +67,14 @@ local function getMonsters()
         local hasHealth = model:GetAttribute("HealthOverride") ~= nil or model:GetAttribute("IsFodder")==true or model:GetAttribute("IsBoss")==true or model:FindFirstChildOfClass("Humanoid") ~= nil
         if not hasHealth then return false end
         if model.Parent and model.Parent.Name=="PlayerModels" then return false end
+        -- StreamingEnabled Fix: ถ้ามอนอยู่ใน NPCs folder แม้ HRP ยัง stream-in ไม่เสร็จ ไม่ discard ทิ้ง
         local hrp = model:FindFirstChild("HumanoidRootPart", true)
         if not hrp then hrp = model:FindFirstChild("HumanoidRootPart") end
-        if not hrp then return false end
+        if not hrp then
+            local isInNpcFolder = model.Parent and model.Parent.Name == "NPCs"
+            local anyPart = model:FindFirstChildWhichIsA("BasePart", true)
+            if not isInNpcFolder and not anyPart then return false end
+        end
         local hum = model:FindFirstChildOfClass("Humanoid")
         if hum then return hum.Health > 0
         else local hp = model:GetAttribute("HealthOverride") if hp ~= nil then return hp > 0 end return true end
@@ -187,7 +192,9 @@ local nextRoomPointer=2
 local function getHRP(model)
     local hrp = model:FindFirstChild("HumanoidRootPart") if hrp then return hrp end
     hrp = model:FindFirstChild("HumanoidRootPart", true) if hrp then return hrp end
-    return model.PrimaryPart or model:FindFirstChild("Torso", true) or model:FindFirstChild("Head", true)
+    local fallback = model.PrimaryPart or model:FindFirstChild("Torso", true) or model:FindFirstChild("Head", true)
+    if fallback then return fallback end
+    return model:FindFirstChildWhichIsA("BasePart", true)
 end
 
 local function getClosest(list, fromPos)
@@ -427,7 +434,10 @@ local function startFarm()
             if not hrp then task.wait(0.5) continue end
             local centers=getRoomCenters()
             if #centers==0 then task.wait(1) continue end
-            if nextRoomPointer>#centers then nextRoomPointer=2 end
+            if nextRoomPointer>#centers then
+                clearedRooms={}
+                nextRoomPointer=1
+            end
             if not _G.__farmStarted then
                 _G.__farmStarted=true
                 local bestDist=math.huge local bestIdx=nextRoomPointer
@@ -438,10 +448,55 @@ local function startFarm()
                 nextRoomPointer=bestIdx
             end
             local allMons=getMonsters()
+            -- Smart Target: ถ้ามีมอนสเตอร์ที่ยังมีชีวิตอยู่ใน NPCs แต่ห้องปัจจุบันไม่มีมอน ให้วาร์ปไปหาห้องที่มีมอนก่อน
+            local targetMobRoom = nil
+            for _, m in ipairs(allMons) do
+                local rIdx = m:GetAttribute("RoomIndex")
+                if rIdx and not isCleared(rIdx) then
+                    for i, c in ipairs(centers) do
+                        if c.idx == rIdx then
+                            targetMobRoom = i
+                            break
+                        end
+                    end
+                end
+                if targetMobRoom then break end
+            end
+            if targetMobRoom and targetMobRoom ~= nextRoomPointer then
+                local curHasMob = false
+                local curC = centers[nextRoomPointer]
+                if curC then
+                    for _, m in ipairs(allMons) do
+                        if m:GetAttribute("RoomIndex") == curC.idx then curHasMob = true break end
+                    end
+                end
+                if not curHasMob then
+                    nextRoomPointer = targetMobRoom
+                end
+            end
             -- Boss ธรรมดาถือเป็นมอนแต่ต้องวาร์ปหาได้แม้อยู่คนละ RoomIndex (Boss arena ไม่ใช่ Room_*) เลย priority ทั้ง IsBoss/IsMapBoss
             local boss=nil for _,m in ipairs(allMons) do if m:GetAttribute("IsBoss")==true or m:GetAttribute("IsMapBoss")==true or m:GetAttribute("BossType")~=nil then boss=m break end end
             if boss then
                 local targetHRP=getHRP(boss)
+                if not targetHRP then
+                    -- Streaming fallback: ถ้า Boss อยู่ไกลเกินจน HRP unstream ให้วาร์ปไปตำแหน่ง BoundingBox หรือ Center ก่อน
+                    local bRoomIdx = boss:GetAttribute("RoomIndex")
+                    local bDest = nil
+                    if bRoomIdx then
+                        for _, c in ipairs(centers) do
+                            if c.idx == bRoomIdx then bDest = c.cf break end
+                        end
+                    end
+                    if not bDest then
+                        local ok, cf = pcall(function() return boss:GetBoundingBox() end)
+                        if ok and cf then bDest = cf end
+                    end
+                    if bDest then
+                        safeWarp(bDest + Vector3.new(0, 10, 0))
+                        task.wait(0.3)
+                        targetHRP = getHRP(boss)
+                    end
+                end
                 if targetHRP then
                     lastRoomIndex=nil
                     startLock(targetHRP)
@@ -455,8 +510,8 @@ local function startFarm()
                     stopLock()
                     task.wait(0.5)
                     collectRoomChests(nil, nil)
-                    -- บอสตายรีเซ็ตให้เริ่มเวฟใหม่ที่ Room_2
-                    nextRoomPointer=2 clearedRooms={} lastRoomIndex=nil
+                    -- บอสตายรีเซ็ตให้เริ่มเวฟใหม่
+                    nextRoomPointer=1 clearedRooms={} lastRoomIndex=nil
                     continue
                 end
             end
@@ -506,17 +561,25 @@ local function startFarm()
                         end
                         local chk2=getMonsters() local stillEmpty=true for _,m in ipairs(chk2) do if isInRoom(m, curIdx, curCenter) then stillEmpty=false break end end
                         if stillEmpty then
+                            markCleared(curIdx)
                             nextRoomPointer+=1
-                    if nextRoomPointer>#centers then nextRoomPointer=2 end
-                    continue
+                            if nextRoomPointer>#centers then
+                                clearedRooms={}
+                                nextRoomPointer=1
+                            end
+                            continue
                         end
                         -- มีมอนเกิดแล้วให้ไปตีต่อ ไม่ข้าม
                         monsInRoom={}
                         for _,m in ipairs(chk2) do if isInRoom(m, curIdx, curCenter) then table.insert(monsInRoom, m) end end
                         if #monsInRoom==0 then
+                            markCleared(curIdx)
                             nextRoomPointer+=1
-                    if nextRoomPointer>#centers then nextRoomPointer=2 end
-                    continue
+                            if nextRoomPointer>#centers then
+                                clearedRooms={}
+                                nextRoomPointer=1
+                            end
+                            continue
                         end
                     end
                 else
@@ -525,7 +588,10 @@ local function startFarm()
                         safeWarp(groundCF) task.wait(0.3)
                     end
                     nextRoomPointer+=1
-                    if nextRoomPointer>#centers then nextRoomPointer=2 end
+                    if nextRoomPointer>#centers then
+                        clearedRooms={}
+                        nextRoomPointer=1
+                    end
                     continue
                 end
             end
@@ -612,7 +678,8 @@ local function startFarm()
                 nextRoomPointer+=1
                 if nextRoomPointer>#centers then
                     task.wait(0.1)
-                    nextRoomPointer=2
+                    clearedRooms={}
+                    nextRoomPointer=1
                 else
                     local nxt=centers[nextRoomPointer]
                     -- หาพื้นจริงจาก BoundingBox กันโดนหลังคา (Raycast โดนเพดานก่อน)
