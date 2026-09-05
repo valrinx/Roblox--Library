@@ -32,6 +32,7 @@ local State = {
     Skill3 = true,
     Skill4 = true,
     SkipChest = false,
+    AutoLootChests = true,
     AutoPotion = false,
     PotionHealthPercent = 60,
     AutoRefillPotion = false,
@@ -339,6 +340,69 @@ local function safeWarp(cf)
     startHover(hoverCF)
 end
 
+local function collectRoomChests(roomIdx, roomCenter)
+    if not State.AutoLootChests then return end
+    local gen = getGeneratedFolder()
+    if not gen then return end
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    local chestsToLoot = {}
+    for _, obj in ipairs(gen:GetChildren()) do
+        if obj:IsA("Model") and (obj.Name:find("DungeonChest") or obj:GetAttribute("DungeonChest") == true) then
+            local chestRoomIdx = obj:GetAttribute("RoomIndex")
+            local cf = nil
+            pcall(function() cf = obj:GetBoundingBox() end)
+            local inRoom = false
+            if chestRoomIdx and roomIdx and chestRoomIdx == roomIdx then
+                inRoom = true
+            elseif roomCenter and cf and (cf.Position - roomCenter.cf.Position).Magnitude < 100 then
+                inRoom = true
+            elseif not roomIdx and not roomCenter then
+                inRoom = true
+            end
+
+            if inRoom then
+                local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
+                if prompt and prompt.Enabled then
+                    table.insert(chestsToLoot, {model = obj, cf = cf, prompt = prompt})
+                end
+            end
+        end
+    end
+
+    if #chestsToLoot == 0 then return end
+
+    stopLock()
+    stopHover()
+
+    for _, cData in ipairs(chestsToLoot) do
+        if not State.AutoFarm or not State.AutoLootChests then break end
+        if cData.prompt and cData.prompt.Parent and cData.prompt.Enabled then
+            local promptPos = nil
+            local pPart = cData.prompt.Parent
+            if pPart:IsA("BasePart") then
+                promptPos = pPart.Position
+            elseif pPart:IsA("Attachment") then
+                promptPos = pPart.WorldPosition
+            elseif cData.cf then
+                promptPos = cData.cf.Position
+            end
+
+            if promptPos then
+                local standPos = promptPos + Vector3.new(0, 2, 3)
+                safeWarp(CFrame.new(standPos, promptPos))
+                task.wait(0.2)
+                pcall(function()
+                    fireproximityprompt(cData.prompt)
+                end)
+                task.wait(0.35)
+            end
+        end
+    end
+end
+
 local farmThread=nil
 -- ใหม่: เคลียร์ครบทุกห้องสปอนก่อน Boss จะเกิด (ห้ามข้าม / ห้ามรอเวฟมั่ว)
 local function startFarm()
@@ -390,6 +454,7 @@ local function startFarm()
                     end
                     stopLock()
                     task.wait(0.5)
+                    collectRoomChests(nil, nil)
                     -- บอสตายรีเซ็ตให้เริ่มเวฟใหม่ที่ Room_2
                     nextRoomPointer=2 clearedRooms={} lastRoomIndex=nil
                     continue
@@ -512,6 +577,7 @@ local function startFarm()
                     end
                     task.wait(0.5) waited+=0.5
                 end
+                collectRoomChests(curIdx, curCenter)
                 markCleared(curIdx)
                 if allSpawnCleared() then
                     local waitedBoss=0
@@ -1361,6 +1427,12 @@ end
 
     -- Main Tab: Chest & Run
     MainTab:CreateSection("Chest")
+    MainTab:CreateToggle({
+        Name = "Auto Loot Dropped Chests",
+        CurrentValue = State.AutoLootChests,
+        Flag = "DungeonLootrAutoLootChests",
+        Callback = function(v) State.AutoLootChests = v end
+    })
     MainTab:CreateToggle({
         Name = "Skip Chest",
         CurrentValue = State.SkipChest,
