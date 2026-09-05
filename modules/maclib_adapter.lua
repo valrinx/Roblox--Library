@@ -10,7 +10,7 @@ return function(MacLib)
     assert(type(MacLib) == "table" and type(MacLib.Window) == "function", "MacLib is unavailable")
 
     local Adapter = {
-        Version = "maclib-adapter-1.1.3",
+        Version = "maclib-adapter-1.1.4",
         Flags = MacLib.Options or {},
         _maclib = MacLib,
         _window = nil,
@@ -117,6 +117,16 @@ return function(MacLib)
     -- MacLib creates its configured folder and /settings child, but executor
     -- makefolder implementations are not guaranteed to create missing parent
     -- directories recursively. Build each relative path segment first.
+    local function sanitizePath(str)
+        local s = tostring(str or "")
+        s = s:gsub("[^\x20-\x7E]", "")
+        s = s:gsub("[<>:\"/\\|?*%[%]%(%)]", "_")
+        s = s:gsub("%s+", " ")
+        s = s:gsub("^%s+", ""):gsub("%s+$", "")
+        s = s:gsub("%.+$", "")
+        return s
+    end
+
     local function ensureFolderTree(folder)
         if type(isfolder) ~= "function" or type(makefolder) ~= "function" then
             return
@@ -124,12 +134,15 @@ return function(MacLib)
 
         local path = ""
         for segment in string.gmatch(tostring(folder or ""), "[^/\\\\]+") do
-            path = path == "" and segment or path .. "/" .. segment
-            pcall(function()
-                if not isfolder(path) then
-                    makefolder(path)
-                end
-            end)
+            local clean = sanitizePath(segment)
+            if clean ~= "" then
+                path = path == "" and clean or path .. "/" .. clean
+                pcall(function()
+                    if not isfolder(path) then
+                        makefolder(path)
+                    end
+                end)
+            end
         end
     end
 
@@ -140,12 +153,13 @@ return function(MacLib)
             if type(writefile) ~= "function" then
                 return false, "Config system unavailable."
             end
-            if path == nil or tostring(path) == "" then
+            local cleanName = sanitizePath(path)
+            if cleanName == "" then
                 return false, "Please select a config file."
             end
 
             ensureFolderTree(self.Folder .. "/settings")
-            local fullPath = self.Folder .. "/settings/" .. tostring(path) .. ".json"
+            local fullPath = self.Folder .. "/settings/" .. cleanName .. ".json"
 
             local data = {
                 objects = {}
@@ -228,11 +242,12 @@ return function(MacLib)
             if type(isfile) ~= "function" or type(readfile) ~= "function" then
                 return false, "Config system unavailable."
             end
-            if path == nil or tostring(path) == "" then
+            local cleanName = sanitizePath(path)
+            if cleanName == "" then
                 return false, "Please select a config file."
             end
 
-            local file = self.Folder .. "/settings/" .. tostring(path) .. ".json"
+            local file = self.Folder .. "/settings/" .. cleanName .. ".json"
             if not isfile(file) then
                 return false, "Invalid file"
             end
@@ -288,6 +303,34 @@ return function(MacLib)
             end
 
             return true
+        end
+
+        function MacLib:RefreshConfigList()
+            local ok, res = pcall(function()
+                if type(isfolder) ~= "function" or type(listfiles) ~= "function" then
+                    return {}
+                end
+                local folder = self.Folder .. "/settings"
+                if not isfolder(folder) then
+                    return {}
+                end
+                local list = listfiles(folder)
+                if type(list) ~= "table" then
+                    return {}
+                end
+                local out = {}
+                for i = 1, #list do
+                    local file = list[i]
+                    if type(file) == "string" and file:sub(-5) == ".json" then
+                        local name = file:match("([^/\\]+)%.json$")
+                        if name and name ~= "options" then
+                            table.insert(out, name)
+                        end
+                    end
+                end
+                return out
+            end)
+            return (ok and type(res) == "table") and res or {}
         end
     end
 

@@ -49,10 +49,12 @@ local EXPERIENCE_NAME = getExperienceName()
 -- preventing accidental path traversal or invalid config folders.
 local function sanitizeConfigSegment(value, fallback)
     local segment = tostring(value or fallback or "")
-    segment = segment:gsub("[%c]", "_")
-    segment = segment:gsub("[<>:\"/|?*]", "_")
-    segment = segment:gsub("\\", "_")
-    segment = segment:gsub("%s+$", "")
+    -- Strip non-ASCII characters (like emojis and unicode symbols)
+    segment = segment:gsub("[^\x20-\x7E]", "")
+    -- Replace reserved filesystem characters and brackets with underscores
+    segment = segment:gsub("[<>:\"/\\|?*%[%]%(%)]", "_")
+    segment = segment:gsub("%s+", " ")
+    segment = segment:gsub("^%s+", ""):gsub("%s+$", "")
     segment = segment:gsub("%.+$", "")
     if segment == "" or segment == "." or segment == ".." then
         segment = tostring(fallback or "Roblox Experience")
@@ -139,7 +141,7 @@ local HubUI
 do
     local ok, result = pcall(function()
         local source = game:HttpGet(
-            "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/maclib_adapter.lua?v=maclib-adapter-1.1.3"
+            "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/maclib_adapter.lua?v=maclib-adapter-1.1.4"
         )
         assert(type(source) == "string" and #source > 1000, "MacLib adapter download was empty")
         local chunk, compileError = loadstring(source)
