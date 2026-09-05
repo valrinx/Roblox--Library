@@ -1,7 +1,7 @@
 --[[
     RAVEN HUB | Iron Soul: Dungeon
     Lobby PlaceId: 117533937949084 | Starless Forest: 116456628154258
-    GameId: 9910245722 | Version: v1.6.1
+    GameId: 9910245722 | Version: v1.6.2
 ]]
 return function(Window, runtimeInfo)
     local Players = game:GetService("Players")
@@ -366,33 +366,105 @@ return function(Window, runtimeInfo)
         return true
     end
     local function getRarityTiers()
-        if not RarityTiers then return {} end
-        local t = {}
-        for _, v in pairs(RarityTiers.Tiers) do table.insert(t, v.Name) end
-        return t
+        loadFramework()
+        if RarityTiers and RarityTiers.Tiers then
+            local t = {}
+            for _, v in ipairs(RarityTiers.Tiers) do table.insert(t, v.Name) end
+            if #t > 0 then return t end
+        end
+        return {"Common","Uncommon","Rare","Epic","Legendary","Mythic","Secret","Heavenly","Pinnacle"}
     end
     local function getRarityName(rarity)
-        if not RarityTiers then return "Unknown" end
+        if not RarityTiers then loadFramework() end
+        if not RarityTiers or not RarityTiers.Tiers then return "Unknown" end
         return RarityTiers.Tiers[rarity] and RarityTiers.Tiers[rarity].Name or "Unknown"
     end
     local function getEquipment()
+        loadFramework()
         if not DataUtil or not EquipmentUtil then return {} end
         local result = {}
         local ok, playerData = pcall(function() return DataUtil:GetPlayerData(LP) end)
         if not ok or not playerData then return result end
         local owned = playerData.Equipment and playerData.Equipment.Owned
         if not owned then return result end
+        local equipped = (playerData.Equipment and playerData.Equipment.Equipped) or {}
         for uuid, itemData in pairs(owned) do
+            local isEquipped = equipped[uuid] == true
             local def = EquipmentUtil:GetDef(itemData.ID)
             if def then
-                local name = TranslationUtil:TranslateByKey("K_" .. string.upper(def.ID))
+                local name = TranslationUtil and TranslationUtil:TranslateByKey("K_" .. string.upper(def.ID)) or def.ID
                 local rarity = EquipmentUtil:GetOreRarity(itemData.MaxOre)
-                table.insert(result, { UUID = uuid, ID = itemData.ID, Name = name, Rarity = getRarityName(rarity), Type = itemData.Type, Level = EquipmentUtil:GetLvByInfo(itemData, def) })
+                table.insert(result, { UUID = uuid, ID = itemData.ID, Name = name, Rarity = getRarityName(rarity), Type = itemData.Type, Equipped = isEquipped, Level = EquipmentUtil:GetLvByInfo(itemData, def) })
             end
         end
         return result
     end
+    local function getAllOreNames()
+        loadFramework()
+        local names = {}
+        if ForgeUtil and TranslationUtil and type(debug) == "table" and type(debug.getupvalues) == "function" then
+            pcall(function()
+                for _, uv in ipairs(debug.getupvalues(ForgeUtil.GetDef)) do
+                    if type(uv) == "table" and uv.Hexbane then
+                        for _, def in pairs(uv) do
+                            if type(def) == "table" and def.ID then
+                                local name = TranslationUtil:TranslateByKey("K_" .. string.upper(def.ID))
+                                if name and not table.find(names, name) then table.insert(names, name) end
+                            end
+                        end
+                    end
+                end
+            end)
+        end
+        if #names == 0 and DataUtil and ForgeUtil and TranslationUtil then
+            local ok, pData = pcall(function() return DataUtil:GetPlayerData(LP) end)
+            if ok and pData and pData.Ores then
+                for oreId, _ in pairs(pData.Ores) do
+                    local def = ForgeUtil:GetDef(oreId)
+                    if def then
+                        local name = TranslationUtil:TranslateByKey("K_" .. string.upper(def.ID))
+                        if name and not table.find(names, name) then table.insert(names, name) end
+                    end
+                end
+            end
+        end
+        table.sort(names)
+        return names
+    end
+    local function getAllCrystalNames()
+        loadFramework()
+        local names = {}
+        if MaterialUtil and TranslationUtil and type(debug) == "table" and type(debug.getupvalues) == "function" then
+            pcall(function()
+                for _, uv in ipairs(debug.getupvalues(MaterialUtil.GetDef)) do
+                    if type(uv) == "table" and uv.CrystalPrism then
+                        for _, def in pairs(uv) do
+                            if type(def) == "table" and def.ID then
+                                local name = TranslationUtil:TranslateByKey("K_" .. string.upper(def.ID))
+                                if name and not table.find(names, name) then table.insert(names, name) end
+                            end
+                        end
+                    end
+                end
+            end)
+        end
+        if #names == 0 and DataUtil and MaterialUtil and TranslationUtil then
+            local ok, pData = pcall(function() return DataUtil:GetPlayerData(LP) end)
+            if ok and pData and pData.Crystals then
+                for crystalId, _ in pairs(pData.Crystals) do
+                    local def = MaterialUtil:GetDef(crystalId)
+                    if def then
+                        local name = TranslationUtil:TranslateByKey("K_" .. string.upper(def.ID))
+                        if name and not table.find(names, name) then table.insert(names, name) end
+                    end
+                end
+            end
+        end
+        table.sort(names)
+        return names
+    end
     local function getOres()
+        loadFramework()
         if not DataUtil or not ForgeUtil or not TranslationUtil then return {} end
         local result = {}
         local ok, playerData = pcall(function() return DataUtil:GetPlayerData(LP) end)
@@ -408,6 +480,7 @@ return function(Window, runtimeInfo)
         return result
     end
     local function getCrystals()
+        loadFramework()
         if not DataUtil or not MaterialUtil or not TranslationUtil then return {} end
         local result = {}
         local ok, playerData = pcall(function() return DataUtil:GetPlayerData(LP) end)
@@ -423,27 +496,31 @@ return function(Window, runtimeInfo)
         return result
     end
     local function sellEquipmentByRarity(rarities)
+        loadFramework()
         if not EquipmentUtil then return end
         local items = getEquipment()
         for _, item in ipairs(items) do
-            for _, r in ipairs(rarities) do
-                if item.Rarity == r then
-                    pcall(function()
-                        game:GetService("ReplicatedStorage").Framework.Gameplay.EquipmentSystem.EquipmentRE:FireServer("Sell", { item.UUID })
-                    end)
-                    task.wait(0.1)
-                    break
+            if not item.Equipped then
+                for _, r in ipairs(rarities) do
+                    if item.Rarity == r then
+                        pcall(function()
+                            game:GetService("ReplicatedStorage").Framework.Gameplay.EquipmentSystem.EquipmentRE:FireServer("Sell", { item.UUID })
+                        end)
+                        task.wait(0.1)
+                        break
+                    end
                 end
             end
         end
     end
     local function sellOres(oreNames)
+        loadFramework()
         if not ForgeUtil then return end
         local ores = getOres()
         local toSell = {}
         for _, ore in ipairs(ores) do
             for _, name in ipairs(oreNames) do
-                if ore.Name == name then toSell[ore.ID] = 1; break end
+                if ore.Name == name then toSell[ore.ID] = math.max(1, tonumber(ore.Amount) or 1); break end
             end
         end
         if next(toSell) then
@@ -453,12 +530,13 @@ return function(Window, runtimeInfo)
         end
     end
     local function sellCrystals(crystalNames)
+        loadFramework()
         if not MaterialUtil then return end
         local crystals = getCrystals()
         local toSell = {}
         for _, c in ipairs(crystals) do
             for _, name in ipairs(crystalNames) do
-                if c.Name == name then toSell[c.ID] = 1; break end
+                if c.Name == name then toSell[c.ID] = math.max(1, tonumber(c.Amount) or 1); break end
             end
         end
         if next(toSell) then
@@ -719,20 +797,20 @@ return function(Window, runtimeInfo)
     local function touchMatchRoom(room, touch)
         local root=myRoot()
         if not root or not room or not touch or not touch.Parent then return false end
-        local direction=touch.Position-root.Position
-        if direction.Magnitude<0.1 then direction=root.CFrame.LookVector else direction=direction.Unit end
-        if type(firetouchinterest)~="function" then
-            root.CFrame=CFrame.new(touch.Position+Vector3.new(0,1,0))
-            task.wait(.25)
-            return true
+        local targetPos = (room:FindFirstChild("Root") and room.Root.Position + Vector3.new(0, 3, 0)) or (touch.Position + Vector3.new(0, 3, 0))
+        root.CFrame = CFrame.new(targetPos)
+        root.AssemblyLinearVelocity = Vector3.zero
+        if type(firetouchinterest)=="function" then
+            pcall(firetouchinterest, root, touch, 0)
+            local touchFolder = room:FindFirstChild("Touch")
+            if touchFolder and touchFolder:IsA("Folder") or touchFolder:IsA("Model") then
+                for _, part in ipairs(touchFolder:GetDescendants()) do
+                    if part:IsA("BasePart") and part ~= touch then
+                        pcall(firetouchinterest, root, part, 0)
+                    end
+                end
+            end
         end
-        root.CFrame=CFrame.new(touch.Position-(direction*2)+Vector3.new(0,1,0))
-        root.AssemblyLinearVelocity=direction*12
-        task.wait(.05)
-        root.CFrame=CFrame.new(touch.Position+(direction*2)+Vector3.new(0,1,0))
-        pcall(firetouchinterest,root,touch,0)
-        task.wait(.2)
-        pcall(firetouchinterest,root,touch,1)
         return true
     end
     local function guiObjectVisible(object)
@@ -793,11 +871,8 @@ return function(Window, runtimeInfo)
         if not force and not settings.autoEnterDungeon then return false end
         if game.PlaceId~=LOBBY_PLACE_ID then return false end
         local screen=getScreenMatch()
-        if not screen or not guiObjectVisible(screen) then
-            if LP:GetAttribute("EnterRoomId") then
-                setAutoDungeonStatus("Room assigned")
-                return false
-            end
+        local inRoomId = LP:GetAttribute("EnterRoomId")
+        if not inRoomId and (not screen or not guiObjectVisible(screen)) then
             local room,touch=findFreeMatchRoom()
             if not room or not touch then
                 setAutoDungeonStatus("Waiting empty room")
@@ -839,7 +914,6 @@ return function(Window, runtimeInfo)
             end)
         end
         setAutoDungeonStatus(createOk and ("Creating " .. settings.autoDungeonWorld .. " / " .. tostring(settings.autoDungeonDifficulty)) or "Create failed")
-        if createOk then closeDungeonScreen(screen) end
         return createOk
     end
     local function runAutoDungeonWorker()
@@ -1092,7 +1166,7 @@ return function(Window, runtimeInfo)
     end
 
     local Dashboard=createTab("Dungeon", "activity")
-    Dashboard:CreateSection("Iron Soul v1.6.0")
+    Dashboard:CreateSection("Iron Soul v1.6.2")
     local roundLabel=Dashboard:CreateLabel("Round: scanning...")
     local enemyCountLabel=Dashboard:CreateLabel("Enemies: scanning...")
     local targetLabel=Dashboard:CreateLabel("Target: none")
@@ -1159,13 +1233,20 @@ return function(Window, runtimeInfo)
     Sell:CreateSection("Sell by Rarity")
     local rarityOptions = getRarityTiers()
     Sell:CreateDropdown({Name="Equipment Rarity",Options=rarityOptions,CurrentOption={},MultipleOptions=true,Flag="IronSoulSellRarity",Callback=function(v) settings.sellEquipmentRarities=type(v)=="table"and v or{v} end})
-    Sell:CreateDropdown({Name="Ores",Options=(function() local t={} for _,o in ipairs(getOres()) do table.insert(t,o.Name) end return t end)(),CurrentOption={},MultipleOptions=true,Flag="IronSoulSellOres",Callback=function(v) settings.sellOres=type(v)=="table"and v or{v} end})
-    Sell:CreateDropdown({Name="Crystals",Options=(function() local t={} for _,c in ipairs(getCrystals()) do table.insert(t,c.Name) end return t end)(),CurrentOption={},MultipleOptions=true,Flag="IronSoulSellCrystals",Callback=function(v) settings.sellCrystals=type(v)=="table"and v or{v} end})
+    local oreDropdown = Sell:CreateDropdown({Name="Ores",Options=getAllOreNames(),CurrentOption={},MultipleOptions=true,Flag="IronSoulSellOres",Callback=function(v) settings.sellOres=type(v)=="table"and v or{v} end})
+    Sell:CreateButton({Name="Refresh Ores List",Callback=function()
+        if oreDropdown and type(oreDropdown.Refresh)=="function" then
+            oreDropdown:Refresh(getAllOreNames(), true)
+        end
+    end})
+    local crystalDropdown = Sell:CreateDropdown({Name="Crystals",Options=getAllCrystalNames(),CurrentOption={},MultipleOptions=true,Flag="IronSoulSellCrystals",Callback=function(v) settings.sellCrystals=type(v)=="table"and v or{v} end})
+    Sell:CreateButton({Name="Refresh Crystals List",Callback=function()
+        if crystalDropdown and type(crystalDropdown.Refresh)=="function" then
+            crystalDropdown:Refresh(getAllCrystalNames(), true)
+        end
+    end})
     Sell:CreateToggle({Name="Auto Sell",CurrentValue=false,Flag="IronSoulAutoSell",Callback=function(v) settings.autoSell=v end})
 
-    -- Framework is only needed by selling/metadata helpers.  Require it now,
-    -- after the final MacLib tab/control has been created, so a yielding game
-    -- module cannot invalidate the capability used by CreateTab.
     loadFramework()
 
     local lastDodge,scanAt,statusAt=0,0,0
@@ -1359,6 +1440,6 @@ return function(Window, runtimeInfo)
         local camera=workspace.CurrentCamera; if camera and LP.Character then camera.CameraSubject=LP.Character:FindFirstChildOfClass("Humanoid") end
         if getgenv().__RAVEN_IRON_SOUL and getgenv().__RAVEN_IRON_SOUL.Settings==settings then getgenv().__RAVEN_IRON_SOUL=nil end
     end
-    getgenv().__RAVEN_IRON_SOUL={Version="v1.6.1",Settings=settings,Destroy=destroy}
+    getgenv().__RAVEN_IRON_SOUL={Version="v1.6.2",Settings=settings,Destroy=destroy}
     if runtimeInfo and type(runtimeInfo.registerCleanup)=="function" then runtimeInfo.registerCleanup(destroy) end
 end
