@@ -461,10 +461,10 @@ local SCRIPTS = {
     {
         name        = "Dungeon Lootr",
         description = "Auto Queue | Kill Aura | Auto Skills | Farm | Sell | Forge | Webhook",
-        placeIds    = {132285059959516},
-        gameIds     = {9656201728},
-        version     = "v2.0.1",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/dungeon_lootr.lua?v=dungeon-lootr-2.0.1",
+        placeIds    = {132285059959516, 135245842886361},
+        gameIds     = {9656201728, 8410525651},
+        version     = "v2.0.2",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/DungeonLootr.lua?v=dungeon-lootr-2.0.2",
     },
     {
         name        = "Greedy Growers",
@@ -481,6 +481,14 @@ local SCRIPTS = {
         gameIds     = {7000989941},
         version     = "v1.0.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/beeconomy.lua?v=beeconomy-1.0.0",
+    },
+    {
+        name        = "Kronos",
+        description = "Grand Blue | Farm & lifeskills | Automation | ESP | Teleports",
+        placeIds    = {118635363908336},
+        gameIds     = {6215986499},
+        version     = "v1.0.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/grand_blue.lua",
     },
     --[[
     {

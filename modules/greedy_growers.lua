@@ -49,14 +49,14 @@ return function(Window, scriptInfo)
     local settings = {
         -- Auto Farm
         autoFarm = false,
-        shockMode = true,
-        shockSafetyMargin = 0.08, -- Harvest 0.08s before lightning strike
+        harvestMode = "Target Multiplier", -- "Target Multiplier" (safe guaranteed cash out) or "Shock (Pre-Lightning)"
+        targetMultiplier = 2.5,
+        shockSafetyMargin = 0.08,
         selectedSeed = "Pine",
         selectedFertilizer = "Basic",
         autoPlant = false,
         plantDelay = 1.0,
         autoHarvest = false,
-        harvestTargetMult = 2.0,
         autoCollect = true,
         collectInterval = 0.5,
         autoSell = false,
@@ -80,10 +80,50 @@ return function(Window, scriptInfo)
         crashPoint = 5.95,
         estimatedCrashTime = 0,
         seedType = "Pine",
-        harvested = false
+        harvested = false,
+        lastMult = 0,
     }
 
     local connections = {}
+
+    local function getMyPlantModel()
+        local bf = workspace:FindFirstChild("BigField")
+        if not bf then return nil end
+        local prefix = "PlantRound_" .. Player.UserId .. "_"
+        for _, c in ipairs(bf:GetChildren()) do
+            if c.Name:sub(1, #prefix) == prefix then
+                return c
+            end
+        end
+        return nil
+    end
+
+    local function getMyPlantDisplayInfo()
+        local model = getMyPlantModel()
+        if not model then return nil end
+        local md = model:FindFirstChild("MultDisplay")
+        local bg = md and md:FindFirstChild("BillboardGui")
+        local mf = bg and bg:FindFirstChild("MainFrame")
+        if not mf then return nil end
+
+        local multLabel = mf:FindFirstChild("Mult")
+        local warnLabel = mf:FindFirstChild("Warning")
+        local multVal = 0
+        if multLabel and multLabel:IsA("TextLabel") then
+            multVal = tonumber((multLabel.Text:gsub("x", ""):gsub(" ", ""))) or 0
+        end
+
+        local isWarning = false
+        if warnLabel and warnLabel:IsA("TextLabel") and warnLabel.Visible and warnLabel.Text:find("⚠️") then
+            isWarning = true
+        end
+
+        return {
+            model = model,
+            mult = multVal,
+            warning = isWarning
+        }
+    end
 
     local function getPlotCFrame()
         local bf = workspace:FindFirstChild("BigField")
@@ -221,16 +261,8 @@ return function(Window, scriptInfo)
                     currentMyRound.active = true
                     currentMyRound.roundId = roundId
                     currentMyRound.startTime = tonumber(startTime) or workspace:GetServerTimeNow()
-                    currentMyRound.crashPoint = tonumber(crashPoint) or 5.95
                     currentMyRound.seedType = seedType or "Pine"
                     currentMyRound.harvested = false
-                    
-                    -- Exact elapsed seconds until lightning crashes:
-                    -- crashPoint = (exp(0.28 * elapsed) - 1)
-                    -- crashPoint + 1 = exp(0.28 * elapsed)
-                    -- elapsed = math.log(crashPoint + 1) / 0.28
-                    local crashDuration = math.log(currentMyRound.crashPoint + 1) / 0.28
-                    currentMyRound.estimatedCrashTime = currentMyRound.startTime + crashDuration
                 end
             end)
         end
@@ -472,10 +504,25 @@ return function(Window, scriptInfo)
                             task.wait(settings.plantDelay)
                         else
                             -- Step 2: Active round running!
-                            -- If in Shock Mode, wait until split-second before lightning strike!
-                            if settings.shockMode then
-                                local waitStart = os.clock()
-                                while isActive() and (currentMyRound.active or getActiveMyRound()) and not currentMyRound.harvested do
+                            local waitStart = os.clock()
+                            while isActive() and (currentMyRound.active or getActiveMyRound()) and not currentMyRound.harvested do
+                                local displayInfo = getMyPlantDisplayInfo()
+                                local curMult = displayInfo and displayInfo.mult or 0
+
+                                if settings.harvestMode == "Target Multiplier" then
+                                    if curMult >= settings.targetMultiplier then
+                                        doHarvest()
+                                        break
+                                    end
+                                else
+                                    -- Shock (Pre-Lightning) Mode:
+                                    -- 1. Check BillboardGui warning ⚠️
+                                    if displayInfo and displayInfo.warning then
+                                        doHarvest()
+                                        break
+                                    end
+
+                                    -- 2. Server Time countdown check
                                     local now = workspace:GetServerTimeNow()
                                     if currentMyRound.estimatedCrashTime > 0 and currentMyRound.estimatedCrashTime > currentMyRound.startTime then
                                         local timeLeft = currentMyRound.estimatedCrashTime - now
@@ -483,16 +530,24 @@ return function(Window, scriptInfo)
                                             doHarvest()
                                             break
                                         end
-                                    elseif os.clock() - waitStart > 15 then
-                                        -- Fallback timeout only if round ran for 15s without crash info
-                                        doHarvest()
-                                        break
                                     end
-                                    RunService.Heartbeat:Wait()
+
+                                    -- 3. Proximity to crash multiplier
+                                    if currentMyRound.crashPoint > 0 and curMult > 0 then
+                                        if curMult >= (currentMyRound.crashPoint - 0.15) then
+                                            doHarvest()
+                                            break
+                                        end
+                                    end
                                 end
-                            else
-                                task.wait(3.0)
-                                doHarvest()
+
+                                -- Fallback safety timeout (60s max for extreme rounds)
+                                if os.clock() - waitStart > 60 then
+                                    doHarvest()
+                                    break
+                                end
+
+                                RunService.Heartbeat:Wait()
                             end
 
                             task.wait(0.3)
@@ -516,12 +571,26 @@ return function(Window, scriptInfo)
         end,
     })
 
-    FarmTab:CreateToggle({
-        Name = "Shock Status Mode (Harvest Pre-Lightning)",
-        CurrentValue = true,
-        Flag = "GGShockMode",
+    FarmTab:CreateDropdown({
+        Name = "Harvest Mode",
+        Options = {"Target Multiplier", "Shock (Pre-Lightning)"},
+        CurrentOption = {"Target Multiplier"},
+        MultipleOptions = false,
+        Flag = "GGHarvestMode",
+        Callback = function(value)
+            settings.harvestMode = type(value) == "table" and value[1] or value
+        end,
+    })
+
+    FarmTab:CreateSlider({
+        Name = "Target Multiplier",
+        Range = {1.5, 500.0},
+        Increment = 0.5,
+        CurrentValue = 2.5,
+        Suffix = "x",
+        Flag = "GGTargetMultiplier",
         Callback = function(v)
-            settings.shockMode = v
+            settings.targetMultiplier = tonumber(v) or 10.0
         end,
     })
 
@@ -605,7 +674,7 @@ return function(Window, scriptInfo)
     FarmTab:CreateSection("🌾 Harvest (Cash Out)")
 
     FarmTab:CreateToggle({
-        Name = "Auto Harvest (Shock Pre-Lightning)",
+        Name = "Auto Harvest (Smart Cash Out)",
         CurrentValue = false,
         Flag = "GGAutoHarvest",
         Callback = function(v)
@@ -615,17 +684,37 @@ return function(Window, scriptInfo)
                     while isActive() do
                         local active = getActiveMyRound() or currentMyRound.active
                         if active and not currentMyRound.harvested then
-                            if settings.shockMode then
-                                if currentMyRound.estimatedCrashTime > 0 and currentMyRound.estimatedCrashTime > currentMyRound.startTime then
-                                    local now = workspace:GetServerTimeNow()
-                                    local timeLeft = currentMyRound.estimatedCrashTime - now
-                                    if timeLeft <= settings.shockSafetyMargin then
-                                        doHarvest()
-                                    end
+                            local displayInfo = getMyPlantDisplayInfo()
+                            local curMult = displayInfo and displayInfo.mult or 0
+
+                            if settings.harvestMode == "Target Multiplier" then
+                                if curMult >= settings.targetMultiplier then
+                                    doHarvest()
                                 end
                             else
-                                task.wait(3.0)
-                                doHarvest()
+                                -- Shock (Pre-Lightning) Mode
+                                local shouldHarvest = false
+                                if displayInfo and displayInfo.warning then
+                                    shouldHarvest = true
+                                end
+
+                                local now = workspace:GetServerTimeNow()
+                                if currentMyRound.estimatedCrashTime > 0 and currentMyRound.estimatedCrashTime > currentMyRound.startTime then
+                                    local timeLeft = currentMyRound.estimatedCrashTime - now
+                                    if timeLeft <= settings.shockSafetyMargin then
+                                        shouldHarvest = true
+                                    end
+                                end
+
+                                if currentMyRound.crashPoint > 0 and curMult > 0 then
+                                    if curMult >= (currentMyRound.crashPoint - 0.15) then
+                                        shouldHarvest = true
+                                    end
+                                end
+
+                                if shouldHarvest then
+                                    doHarvest()
+                                end
                             end
                         end
                         RunService.Heartbeat:Wait()
