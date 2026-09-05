@@ -10,7 +10,7 @@ return function(MacLib)
     assert(type(MacLib) == "table" and type(MacLib.Window) == "function", "MacLib is unavailable")
 
     local Adapter = {
-        Version = "maclib-adapter-1.1.2",
+        Version = "maclib-adapter-1.1.3",
         Flags = MacLib.Options or {},
         _maclib = MacLib,
         _window = nil,
@@ -135,6 +135,91 @@ return function(MacLib)
 
     local function installExactConfigLoader()
         local HttpService = game:GetService("HttpService")
+
+        function MacLib:SaveConfig(path)
+            if type(writefile) ~= "function" then
+                return false, "Config system unavailable."
+            end
+            if path == nil or tostring(path) == "" then
+                return false, "Please select a config file."
+            end
+
+            ensureFolderTree(self.Folder .. "/settings")
+            local fullPath = self.Folder .. "/settings/" .. tostring(path) .. ".json"
+
+            local data = {
+                objects = {}
+            }
+
+            local function Color3ToHex(color)
+                return string.format("#%02X%02X%02X", math.floor(color.R * 255), math.floor(color.G * 255), math.floor(color.B * 255))
+            end
+
+            for flag, option in next, (self.Options or {}) do
+                if type(option) == "table" and not option.IgnoreConfig then
+                    local class = option.Class
+                    local flagStr = tostring(flag)
+                    local entry = nil
+
+                    if class == "Toggle" then
+                        entry = {
+                            type = "Toggle",
+                            flag = flagStr,
+                            state = (option.GetState and option:GetState()) or option.State or false
+                        }
+                    elseif class == "Slider" then
+                        local val = option.GetValue and option:GetValue() or option.Value or 0
+                        entry = {
+                            type = "Slider",
+                            flag = flagStr,
+                            value = tostring(val)
+                        }
+                    elseif class == "Input" then
+                        entry = {
+                            type = "Input",
+                            flag = flagStr,
+                            text = tostring(option.Text or "")
+                        }
+                    elseif class == "Keybind" then
+                        local bindName = (typeof(option.Bind) == "EnumItem" and option.Bind.Name) or (type(option.Bind) == "string" and option.Bind) or nil
+                        entry = {
+                            type = "Keybind",
+                            flag = flagStr,
+                            bind = bindName
+                        }
+                    elseif class == "Dropdown" then
+                        entry = {
+                            type = "Dropdown",
+                            flag = flagStr,
+                            value = option.Value
+                        }
+                    elseif class == "Colorpicker" then
+                        entry = {
+                            type = "Colorpicker",
+                            flag = flagStr,
+                            color = option.Color and Color3ToHex(option.Color) or nil,
+                            alpha = option.Alpha
+                        }
+                    end
+
+                    if entry then
+                        table.insert(data.objects, entry)
+                    end
+                end
+            end
+
+            local success, encoded = pcall(HttpService.JSONEncode, HttpService, data)
+            if not success then
+                return false, "Unable to encode JSON data: " .. tostring(encoded)
+            end
+
+            local writeOk, writeErr = pcall(writefile, fullPath, encoded)
+            if not writeOk then
+                return false, "Failed to write file: " .. tostring(writeErr)
+            end
+
+            return true
+        end
 
         -- MacLib's bundled loader skips Toggle values when the saved state is
         -- false. Replaying every supported value explicitly also makes loading
