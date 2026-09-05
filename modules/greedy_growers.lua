@@ -1,93 +1,117 @@
--- ═══════════════════════════════════════════════════════════
--- Greedy Growers | RAVEN HUB Module v2.0.0
+-- ═════════════════════════════════════════════════════════════════
+-- Greedy Growers 🌱 | RAVEN HUB Module v3.3.0
 -- PlaceId: 74102906764176 | GameId: 10440833423
--- Flow: Buy Seed → Plant → Fertilizer → Grow All → Harvest → Collect → Sell
--- All features tested on live client via Raven MCP before push
--- ═══════════════════════════════════════════════════════════
+-- Full Knit Service integration + ProximityPrompt support
+-- Flow: Buy Seed → Equip Seed → Plant Round → Auto Harvest → Collect → Sell
+-- ═════════════════════════════════════════════════════════════════
+
 return function(Window, scriptInfo)
     local Players = game:GetService("Players")
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
     local RunService = game:GetService("RunService")
     local TeleportService = game:GetService("TeleportService")
     local HttpService = game:GetService("HttpService")
 
     local Player = Players.LocalPlayer
+    local environment = getgenv and getgenv() or _G
+
+    -- Cleanup previous instance if running
+    if type(environment.__RAVEN_GREEDY_GROWERS) == "table"
+        and type(environment.__RAVEN_GREEDY_GROWERS.Destroy) == "function" then
+        pcall(environment.__RAVEN_GREEDY_GROWERS.Destroy)
+    end
+
     local running = true
+    local threads = {}
+
+    -- ═══════════ Knit Services ═══════════
+    local knitRoot = ReplicatedStorage:WaitForChild("Packages", 5)
+        and ReplicatedStorage.Packages:WaitForChild("_Index", 5)
+    local knitIndex = knitRoot and knitRoot:FindFirstChild("sleitnick_knit@1.6.0")
+    local knitServices = knitIndex and knitIndex.knit:FindFirstChild("Services")
+
+    local pps = knitServices and knitServices:FindFirstChild("PlayerPlotService")
+    local prs = knitServices and knitServices:FindFirstChild("PlantRoundService")
+    local sss = knitServices and knitServices:FindFirstChild("SellStandService")
+    local scs = knitServices and knitServices:FindFirstChild("SeedConveyorService")
+
+    -- Seed list
+    local SEED_LIST = {
+        "Pine", "Oak", "Apple", "Peach", "Fig", "Orange", "Lemon",
+        "Avocado", "Cherry", "Mango", "Coconut", "Banana", "Starfruit", "Dragon Fruit"
+    }
+
+    local FERTILIZER_LIST = {
+        "None", "Basic", "Better", "Premium", "Super", "Magic"
+    }
 
     -- ═══════════ Settings ═══════════
     local settings = {
-        -- Farm flow
-        autoBuySeed = false,
+        -- Auto Farm
+        autoFarm = false,
+        shockMode = true,
+        shockSafetyMargin = 0.08, -- Harvest 0.08s before lightning strike
         selectedSeed = "Pine",
-        buyDelay = 1,
-        autoPlant = false,
         selectedFertilizer = "Basic",
-        autoGrowAll = false,
+        autoPlant = false,
+        plantDelay = 1.0,
         autoHarvest = false,
-        autoCollect = false,
-        collectDelay = 0.3,
+        harvestTargetMult = 2.0,
+        autoCollect = true,
+        collectInterval = 0.5,
         autoSell = false,
-        sellInterval = 5,
-        -- Anti-meteor
+        sellInterval = 3,
+        autoBuySeed = true,
+        buySeedDelay = 1,
+        -- Weather / Anti-Meteor
         antiMeteor = false,
-        meteorFleeDist = 80,
-        -- Speed
+        autoHarvestOnMeteor = true,
+        fleeDistance = 100,
+        -- Player
         autoSpeed = false,
         walkSpeed = 32,
     }
 
-    -- ═══════════ Cached Scans ═══════════
-    local cache = {
-        seeds = {}, plants = {}, fruits = {},
-        sell = nil, growAll = nil, collectAll = nil,
-        harvest = nil, lastScan = 0, SCAN_INTERVAL = 2,
+    -- ═══════════ Real-Time Round Tracking for Shock Harvest ═══════════
+    local currentMyRound = {
+        active = false,
+        roundId = nil,
+        startTime = 0,
+        crashPoint = 5.95,
+        estimatedCrashTime = 0,
+        seedType = "Pine",
+        harvested = false
     }
 
-    local function refreshCache()
-        local now = tick()
-        if now - cache.lastScan < cache.SCAN_INTERVAL then return end
-        cache.lastScan = now
-        cache.seeds = {}; cache.plants = {}; cache.fruits = {}
-        cache.sell = nil; cache.growAll = nil; cache.collectAll = nil; cache.harvest = nil
+    local connections = {}
 
-        for _, pp in ipairs(game:GetDescendants()) do
-            if pp:IsA("ProximityPrompt") then
-                local a = pp.ActionText
-                local o = pp.ObjectText
-                if a == "Collect" then
-                    local part = pp:FindFirstAncestorWhichIsA("BasePart")
-                    if part then
-                        -- Parse multiplier from ObjectText e.g. "Starfruit Tree (452.7x)"
-                        local mult = 1
-                        local m = o:match(%((%d+%.?%d*)x%)%)
-                        if m then mult = tonumber(m) or 1 end
-                        table.insert(cache.fruits, {prompt=pp, part=part, value=mult})
+    local function getPlotCFrame()
+        local bf = workspace:FindFirstChild("BigField")
+        local plots = bf and bf:FindFirstChild("PlayerPlots")
+        if plots then
+            for _, plot in ipairs(plots:GetChildren()) do
+                if plot:GetAttribute("OwnerUserId") == Player.UserId then
+                    local seedPlot = plot:FindFirstChild("SeedPlot")
+                    if seedPlot then
+                        local dirt = seedPlot:FindFirstChild("Dirt")
+                        if dirt and dirt:IsA("BasePart") then
+                            return dirt.CFrame
+                        end
+                        local primary = seedPlot.PrimaryPart or seedPlot:FindFirstChildWhichIsA("BasePart")
+                        if primary then
+                            return primary.CFrame
+                        end
+                        return seedPlot:GetPivot()
                     end
-                elseif a == "Sell" and not cache.sell then
-                    cache.sell = pp
-                elseif a == "Harvest" and not cache.harvest then
-                    cache.harvest = pp
-                elseif a == "Buy" then
-                    if o == "Grow All Fruits" and not cache.growAll then
-                        cache.growAll = pp
-                    elseif o == "Collect All Fruits" and not cache.collectAll then
-                        cache.collectAll = pp
-                    elseif o:find("Seed") then
-                        local part = pp:FindFirstAncestorWhichIsA("BasePart")
-                        if part then table.insert(cache.seeds, {prompt=pp, part=part, name=o}) end
+                    local primary = plot.PrimaryPart or plot:FindFirstChildWhichIsA("BasePart")
+                    if primary then
+                        return primary.CFrame
                     end
-                elseif a == "Plant Seed" then
-                    local part = pp:FindFirstAncestorWhichIsA("BasePart")
-                    if part then table.insert(cache.plants, {prompt=pp, part=part}) end
                 end
             end
         end
-        -- Sort fruits by value descending (highest value first)
-        table.sort(cache.fruits, function(a, b) return a.value > b.value end)
+        return nil
     end
-    cache.lastScan = 0
-    refreshCache()
-
-    -- ═══════════ Utility ═══════════
     local function getRoot()
         local c = Player.Character
         return c and c:FindFirstChild("HumanoidRootPart")
@@ -100,28 +124,291 @@ return function(Window, scriptInfo)
 
     local function tpTo(pos)
         local root = getRoot()
-        if root then root.CFrame = CFrame.new(pos + Vector3.new(0, 3, 0)) end
-    end
-
-    local function safeFire(pp)
-        if not pp then return end
-        pcall(function() fireproximityprompt(pp, 0) end)
-    end
-
-    local function selectFertilizer(fertType)
-        local gui = Player:FindFirstChild("PlayerGui")
-        if not gui then return end
-        local fertGui = gui:FindFirstChild("Windows")
-            and gui.Windows:FindFirstChild("FertilizerSelect")
-        if not fertGui then return end
-        local fert = fertGui.Content.Fertilizers:FindFirstChild(fertType)
-        if fert and fert:FindFirstChild("Button") then
-            pcall(function() fert.Button.Activated:Fire() end)
+        if root then
+            root.AssemblyLinearVelocity = Vector3.zero
+            root.AssemblyAngularVelocity = Vector3.zero
+            root.CFrame = CFrame.new(pos + Vector3.new(0, 3, 0))
+            task.wait(0.05)
+            root.AssemblyLinearVelocity = Vector3.zero
         end
     end
 
-    local function isMeteorActive()
-        for _, obj in ipairs(game:GetService("Workspace"):GetChildren()) do
+    local function safeFirePrompt(prompt)
+        if not prompt or not prompt.Enabled then return end
+        pcall(function()
+            local cons = getconnections and getconnections(prompt.Triggered)
+            if cons then
+                for _, c in ipairs(cons) do
+                    if c.Function then pcall(c.Function) end
+                end
+            end
+            fireproximityprompt(prompt, 0)
+        end)
+    end
+
+    -- ═══════════ Seed Operations ═══════════
+    local function getEquippedOrInventorySeed(seedName)
+        local targetName = (seedName or ""):lower()
+        -- 1. Check Character (equipped)
+        local char = Player.Character
+        if char then
+            for _, item in ipairs(char:GetChildren()) do
+                if item:IsA("Tool") and item:GetAttribute("IsSeed") then
+                    if targetName == "" or item.Name:lower():find(targetName) then
+                        return item
+                    end
+                end
+            end
+        end
+        -- 2. Check Backpack
+        local bp = Player:FindFirstChild("Backpack")
+        if bp then
+            for _, item in ipairs(bp:GetChildren()) do
+                if item:IsA("Tool") and item:GetAttribute("IsSeed") then
+                    if targetName == "" or item.Name:lower():find(targetName) then
+                        item.Parent = Player.Character
+                        task.wait(0.25)
+                        return item
+                    end
+                end
+            end
+            -- Any seed fallback if specific not found
+            for _, item in ipairs(bp:GetChildren()) do
+                if item:IsA("Tool") and item:GetAttribute("IsSeed") then
+                    item.Parent = Player.Character
+                    task.wait(0.25)
+                    return item
+                end
+            end
+        end
+        return nil
+    end
+
+    local function buySeedFromConveyor(seedName)
+        local conveyor = workspace:FindFirstChild("BigField") and workspace.BigField:FindFirstChild("ConveyorSeeds")
+        if not conveyor then return false end
+
+        local targetPrompt = nil
+        local targetPos = nil
+        for _, holder in ipairs(conveyor:GetChildren()) do
+            local prompt = holder:FindFirstChildOfClass("ProximityPrompt", true)
+            if prompt and prompt.Enabled and prompt.ActionText == "Buy" then
+                if prompt.ObjectText:lower():find(seedName:lower()) then
+                    targetPrompt = prompt
+                    local part = prompt:FindFirstAncestorWhichIsA("BasePart")
+                    targetPos = part and part.Position
+                    break
+                end
+            end
+        end
+
+        if targetPrompt and targetPos then
+            tpTo(targetPos)
+            task.wait(0.2)
+            safeFirePrompt(targetPrompt)
+            task.wait(0.3)
+            return true
+        end
+        return false
+    end
+
+    -- ═══════════ Event Listeners for Shock Prediction ═══════════
+    if prs and prs:FindFirstChild("RE") then
+        local re = prs.RE
+        if re:FindFirstChild("RoundStartedAll") then
+            connections.roundStarted = re.RoundStartedAll.OnClientEvent:Connect(function(userId, plantPos, startTime, roundId, crashPoint, seedType, mutationKey)
+                if userId == Player.UserId then
+                    currentMyRound.active = true
+                    currentMyRound.roundId = roundId
+                    currentMyRound.startTime = tonumber(startTime) or workspace:GetServerTimeNow()
+                    currentMyRound.crashPoint = tonumber(crashPoint) or 5.95
+                    currentMyRound.seedType = seedType or "Pine"
+                    currentMyRound.harvested = false
+                    
+                    -- Exact elapsed seconds until lightning crashes:
+                    -- crashPoint = (exp(0.28 * elapsed) - 1)
+                    -- crashPoint + 1 = exp(0.28 * elapsed)
+                    -- elapsed = math.log(crashPoint + 1) / 0.28
+                    local crashDuration = math.log(currentMyRound.crashPoint + 1) / 0.28
+                    currentMyRound.estimatedCrashTime = currentMyRound.startTime + crashDuration
+                end
+            end)
+        end
+
+        if re:FindFirstChild("PlantStoppedAll") then
+            connections.plantStopped = re.PlantStoppedAll.OnClientEvent:Connect(function(userId, stoppedAt)
+                if userId == Player.UserId then
+                    currentMyRound.active = false
+                    currentMyRound.harvested = true
+                    currentMyRound.estimatedCrashTime = 0
+                end
+            end)
+        end
+
+        if re:FindFirstChild("CrashedAll") then
+            connections.crashed = re.CrashedAll.OnClientEvent:Connect(function(userId, crashPoint)
+                if userId == Player.UserId then
+                    currentMyRound.active = false
+                    currentMyRound.harvested = true
+                    currentMyRound.estimatedCrashTime = 0
+                end
+            end)
+        end
+    end
+
+    -- ═══════════ Core Game Actions ═══════════
+    local function doPlant(seedName, fertilizer)
+        -- 1. Ensure we have seed in hand or inventory
+        local seedTool = getEquippedOrInventorySeed(seedName)
+        if not seedTool and settings.autoBuySeed then
+            buySeedFromConveyor(seedName)
+            task.wait(0.5)
+            seedTool = getEquippedOrInventorySeed(seedName)
+        end
+
+        if not seedTool then
+            seedTool = getEquippedOrInventorySeed("Oak") or getEquippedOrInventorySeed("")
+        end
+
+        if not seedTool then return false end
+
+        -- 2. Walk/Teleport directly to player's SeedPlot Dirt
+        local plotCF = getPlotCFrame()
+        if plotCF then
+            tpTo(plotCF.Position)
+            task.wait(0.2)
+        end
+
+        -- 3. Ensure seed tool is equipped in Character
+        if seedTool.Parent ~= Player.Character then
+            seedTool.Parent = Player.Character
+            task.wait(0.25)
+        end
+
+        local actualSeedType = seedTool:GetAttribute("SeedType") or seedName
+        local fert = fertilizer or "None"
+
+        if prs and prs:FindFirstChild("RF") and prs.RF:FindFirstChild("StartRound") then
+            for attempt = 1, 3 do
+                local ok, ret = pcall(function()
+                    return prs.RF.StartRound:InvokeServer(actualSeedType, fert)
+                end)
+                if ok and ret == true then
+                    currentMyRound.active = true
+                    currentMyRound.harvested = false
+                    currentMyRound.startTime = workspace:GetServerTimeNow()
+                    return true
+                end
+                task.wait(0.3)
+            end
+        end
+        return false
+    end
+
+    local function doHarvest()
+        if currentMyRound.harvested then return true end
+        if prs and prs:FindFirstChild("RF") and prs.RF:FindFirstChild("StopPlant") then
+            local ok, ret = pcall(function()
+                return prs.RF.StopPlant:InvokeServer()
+            end)
+            if ok and ret then
+                currentMyRound.harvested = true
+                currentMyRound.active = false
+                return true
+            end
+        end
+
+        -- Fallback: Harvest prompt on player's round tree
+        local bf = workspace:FindFirstChild("BigField")
+        if bf then
+            local myUserId = tostring(Player.UserId)
+            for _, c in ipairs(bf:GetChildren()) do
+                if c.Name:find("PlantRound_" .. myUserId) then
+                    local p = c:FindFirstChildOfClass("ProximityPrompt", true)
+                    if p and p.Enabled then
+                        local part = p:FindFirstAncestorWhichIsA("BasePart")
+                        if part then tpTo(part.Position); task.wait(0.1) end
+                        safeFirePrompt(p)
+                        currentMyRound.harvested = true
+                        currentMyRound.active = false
+                        return true
+                    end
+                end
+            end
+        end
+        return false
+    end
+
+    local function doCollectAll()
+        -- 1. Direct Server Remote (Instant full plot collection)
+        if pps and pps:FindFirstChild("RF") and pps.RF:FindFirstChild("CollectAllFruits") then
+            local ok = pcall(function()
+                return pps.RF.CollectAllFruits:InvokeServer()
+            end)
+            if ok then return true end
+        end
+
+        -- 2. Physical Prompts fallback
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if obj:IsA("ProximityPrompt") and obj.Enabled and obj.ActionText == "Collect" then
+                local part = obj:FindFirstAncestorWhichIsA("BasePart")
+                if part then
+                    tpTo(part.Position)
+                    task.wait(0.08)
+                    safeFirePrompt(obj)
+                end
+            end
+        end
+        return true
+    end
+
+    local function doSellAll()
+        -- 1. Direct SellStandService Remote
+        if sss and sss:FindFirstChild("RF") and sss.RF:FindFirstChild("SellAll") then
+            local ok, ret = pcall(function()
+                return sss.RF.SellAll:InvokeServer()
+            end)
+            if ok and ret then return true end
+        end
+
+        -- 2. HUD Sell Button fallback
+        local hud = Player:FindFirstChild("PlayerGui") and Player.PlayerGui:FindFirstChild("HUD")
+        if hud then
+            local sellStuff = hud:FindFirstChild("Center") and hud.Center:FindFirstChild("SellStuff")
+            if sellStuff and sellStuff:FindFirstChild("SellAll") and sellStuff.SellAll:FindFirstChild("Button") then
+                firesignal(sellStuff.SellAll.Button.Activated)
+                return true
+            end
+            local topSell = hud:FindFirstChild("TopButtons") and hud.TopButtons:FindFirstChild("Center")
+                and hud.TopButtons.Center:FindFirstChild("Buttons") and hud.TopButtons.Center.Buttons:FindFirstChild("Sell")
+            if topSell and topSell:FindFirstChild("Button") then
+                firesignal(topSell.Button.Activated)
+                task.wait(0.15)
+                if sellStuff and sellStuff:FindFirstChild("SellAll") and sellStuff.SellAll:FindFirstChild("Button") then
+                    firesignal(sellStuff.SellAll.Button.Activated)
+                    return true
+                end
+            end
+        end
+        return false
+    end
+
+    local function isMeteorWeather()
+        -- Check WeatherController if available
+        local rs = game:GetService("ReplicatedStorage")
+        local wcMod = rs:FindFirstChild("Client") and rs.Client:FindFirstChild("Controllers")
+            and rs.Client.Controllers:FindFirstChild("WeatherController")
+        if wcMod then
+            local ok, wc = pcall(require, wcMod)
+            if ok and wc and type(wc.GetCurrent) == "function" then
+                local cur = wc:GetCurrent()
+                if cur and (tostring(cur):lower():find("meteor") or tostring(cur):lower():find("lightning")) then
+                    return true
+                end
+            end
+        end
+
+        for _, obj in ipairs(workspace:GetChildren()) do
             local n = obj.Name:lower()
             if n:find("meteor") or n:find("storm") or n:find("lightning") then
                 return true
@@ -130,8 +417,22 @@ return function(Window, scriptInfo)
         return false
     end
 
-    -- ═══════════ Thread Manager ═══════════
-    local threads = {}
+    local function getActiveMyRound()
+        if not prs or not prs:FindFirstChild("RF") or not prs.RF:FindFirstChild("GetActiveRounds") then
+            return nil
+        end
+        local ok, rounds = pcall(function() return prs.RF.GetActiveRounds:InvokeServer() end)
+        if ok and type(rounds) == "table" then
+            for _, r in pairs(rounds) do
+                if type(r) == "table" and r.userId == Player.UserId and not r.stopped and not r.crashed then
+                    return r
+                end
+            end
+        end
+        return nil
+    end
+
+    -- ═══════════ Thread Control ═══════════
     local function startThread(key, func)
         threads[key] = nil
         task.spawn(function()
@@ -145,17 +446,102 @@ return function(Window, scriptInfo)
         threads[key] = nil
     end
 
-    -- ═══════════════════════════════════════════════════════════
-    --   UI TABS — Flow: Buy → Plant → Fertilizer → Grow → Harvest → Collect → Sell
-    -- ═══════════════════════════════════════════════════════════
+    -- ═════════════════════════════════════════════════════════════════
+    --   UI TABS & CONTROLS
+    -- ═════════════════════════════════════════════════════════════════
 
-    -- ─── Tab 1: Farm (Main Flow) ───
+    -- ─── Tab 1: Farm ───
     local FarmTab = Window:CreateTab("Farm", "sprout")
-    FarmTab:CreateSection("1. Buy Seeds")
+
+    FarmTab:CreateSection("⚡ Full Automation")
+
+    FarmTab:CreateToggle({
+        Name = "Master Auto Farm Loop (Shock Flow)",
+        CurrentValue = false,
+        Flag = "GGMasterAutoFarm",
+        Callback = function(v)
+            settings.autoFarm = v
+            if v then
+                startThread("autoFarmLoop", function(isActive)
+                    while isActive() do
+                        -- 1. Check if we have an active round
+                        local activeRound = getActiveMyRound()
+                        if not activeRound and not currentMyRound.active then
+                            -- Step 1: Walk/Teleport to plot and plant seed
+                            doPlant(settings.selectedSeed, settings.selectedFertilizer)
+                            task.wait(settings.plantDelay)
+                        else
+                            -- Step 2: Active round running!
+                            -- If in Shock Mode, wait until split-second before lightning strike!
+                            if settings.shockMode then
+                                local waitStart = os.clock()
+                                while isActive() and (currentMyRound.active or getActiveMyRound()) and not currentMyRound.harvested do
+                                    local now = workspace:GetServerTimeNow()
+                                    if currentMyRound.estimatedCrashTime > 0 and currentMyRound.estimatedCrashTime > currentMyRound.startTime then
+                                        local timeLeft = currentMyRound.estimatedCrashTime - now
+                                        if timeLeft <= settings.shockSafetyMargin then
+                                            doHarvest()
+                                            break
+                                        end
+                                    elseif os.clock() - waitStart > 15 then
+                                        -- Fallback timeout only if round ran for 15s without crash info
+                                        doHarvest()
+                                        break
+                                    end
+                                    RunService.Heartbeat:Wait()
+                                end
+                            else
+                                task.wait(3.0)
+                                doHarvest()
+                            end
+
+                            task.wait(0.3)
+                            -- Step 3: Collect ripe shocked fruits from plot
+                            if settings.autoCollect then
+                                doCollectAll()
+                            end
+
+                            task.wait(0.3)
+                            -- Step 4: Sell all if enabled
+                            if settings.autoSell then
+                                doSellAll()
+                            end
+                        end
+                        task.wait(0.5)
+                    end
+                end)
+            else
+                stopThread("autoFarmLoop")
+            end
+        end,
+    })
+
+    FarmTab:CreateToggle({
+        Name = "Shock Status Mode (Harvest Pre-Lightning)",
+        CurrentValue = true,
+        Flag = "GGShockMode",
+        Callback = function(v)
+            settings.shockMode = v
+        end,
+    })
+
+    FarmTab:CreateSlider({
+        Name = "Lightning Pre-Harvest Margin",
+        Range = {0.02, 0.30},
+        Increment = 0.01,
+        CurrentValue = 0.08,
+        Suffix = " sec",
+        Flag = "GGShockMargin",
+        Callback = function(v)
+            settings.shockSafetyMargin = tonumber(v) or 0.08
+        end,
+    })
+
+    FarmTab:CreateSection("🌱 Planting & Seeds")
 
     FarmTab:CreateDropdown({
         Name = "Seed Type",
-        Options = {"Pine","Oak","Apple","Peach","Fig","Orange","Lemon","Avocado","Cherry","Mango","Coconut","Banana","Starfruit","Dragon Fruit"},
+        Options = SEED_LIST,
         CurrentOption = {"Pine"},
         MultipleOptions = false,
         Flag = "GGSeedType",
@@ -164,43 +550,19 @@ return function(Window, scriptInfo)
         end,
     })
 
-    FarmTab:CreateToggle({
-        Name = "Auto Buy Seed",
-        CurrentValue = false,
-        Flag = "GGAutoBuySeed",
-        Callback = function(v)
-            settings.autoBuySeed = v
-            if v then
-                startThread("autoBuySeed", function(isActive)
-                    while isActive() do
-                        refreshCache()
-                        for _, s in ipairs(cache.seeds) do
-                            if not isActive() then break end
-                            if s.name:lower():find(settings.selectedSeed:lower()) then
-                                tpTo(s.part.Position)
-                                task.wait(0.15)
-                                safeFire(s.prompt)
-                                task.wait(settings.buyDelay)
-                            end
-                        end
-                        task.wait(1)
-                    end
-                end)
-            else stopThread("autoBuySeed") end
+    FarmTab:CreateDropdown({
+        Name = "Fertilizer",
+        Options = FERTILIZER_LIST,
+        CurrentOption = {"Basic"},
+        MultipleOptions = false,
+        Flag = "GGFertilizerType",
+        Callback = function(value)
+            settings.selectedFertilizer = type(value) == "table" and value[1] or value
         end,
     })
 
-    FarmTab:CreateSlider({
-        Name = "Buy Delay",
-        Range = {0.5, 5}, Increment = 0.5, CurrentValue = 1,
-        Suffix = " s", Flag = "GGBuyDelay",
-        Callback = function(v) settings.buyDelay = v end,
-    })
-
-    FarmTab:CreateSection("2. Plant")
-
     FarmTab:CreateToggle({
-        Name = "Auto Plant Seeds",
+        Name = "Auto Plant Seeds (At Plot)",
         CurrentValue = false,
         Flag = "GGAutoPlant",
         Callback = function(v)
@@ -208,67 +570,42 @@ return function(Window, scriptInfo)
             if v then
                 startThread("autoPlant", function(isActive)
                     while isActive() do
-                        refreshCache()
-                        for _, p in ipairs(cache.plants) do
-                            if not isActive() then break end
-                            tpTo(p.part.Position)
-                            task.wait(0.15)
-                            safeFire(p.prompt)
-                            task.wait(0.5)
+                        local active = getActiveMyRound()
+                        if not active and not currentMyRound.active then
+                            doPlant(settings.selectedSeed, settings.selectedFertilizer)
                         end
-                        task.wait(1)
+                        task.wait(settings.plantDelay)
                     end
                 end)
-            else stopThread("autoPlant") end
+            else
+                stopThread("autoPlant")
+            end
         end,
     })
 
-    FarmTab:CreateSection("3. Fertilizer")
-
-    FarmTab:CreateDropdown({
-        Name = "Fertilizer Type",
-        Options = {"None","Basic","Better","Premium","Super","Magic"},
-        CurrentOption = {"Basic"},
-        MultipleOptions = false,
-        Flag = "GGFertType",
-        Callback = function(value)
-            settings.selectedFertilizer = type(value) == "table" and value[1] or value
-        end,
-    })
-
-    FarmTab:CreateButton({
-        Name = "Select Fertilizer Now",
-        Callback = function()
-            selectFertilizer(settings.selectedFertilizer)
-        end,
-    })
-
-    FarmTab:CreateSection("4. Grow All")
     FarmTab:CreateToggle({
-        Name = "Auto Grow All",
-        CurrentValue = false,
-        Flag = "GGAutoGrowAll",
+        Name = "Auto Buy Seeds from Belt",
+        CurrentValue = true,
+        Flag = "GGAutoBuySeed",
         Callback = function(v)
-            settings.autoGrowAll = v
+            settings.autoBuySeed = v
             if v then
-                startThread("autoGrowAll", function(isActive)
+                startThread("autoBuySeed", function(isActive)
                     while isActive() do
-                        refreshCache()
-                        if cache.growAll then
-                            local part = cache.growAll:FindFirstAncestorWhichIsA("BasePart")
-                            if part then tpTo(part.Position); task.wait(0.2) end
-                            safeFire(cache.growAll)
-                        end
-                        task.wait(5)
+                        buySeedFromConveyor(settings.selectedSeed)
+                        task.wait(settings.buySeedDelay)
                     end
                 end)
-            else stopThread("autoGrowAll") end
+            else
+                stopThread("autoBuySeed")
+            end
         end,
     })
 
-    FarmTab:CreateSection("5. Harvest (BEFORE Collect!)")
+    FarmTab:CreateSection("🌾 Harvest (Cash Out)")
+
     FarmTab:CreateToggle({
-        Name = "Auto Harvest",
+        Name = "Auto Harvest (Shock Pre-Lightning)",
         CurrentValue = false,
         Flag = "GGAutoHarvest",
         Callback = function(v)
@@ -276,36 +613,48 @@ return function(Window, scriptInfo)
             if v then
                 startThread("autoHarvest", function(isActive)
                     while isActive() do
-                        refreshCache()
-                        if cache.harvest then
-                            local part = cache.harvest:FindFirstAncestorWhichIsA("BasePart")
-                                or cache.harvest.Parent
-                            if part then tpTo(part.Position); task.wait(0.2) end
-                            safeFire(cache.harvest)
+                        local active = getActiveMyRound() or currentMyRound.active
+                        if active and not currentMyRound.harvested then
+                            if settings.shockMode then
+                                if currentMyRound.estimatedCrashTime > 0 and currentMyRound.estimatedCrashTime > currentMyRound.startTime then
+                                    local now = workspace:GetServerTimeNow()
+                                    local timeLeft = currentMyRound.estimatedCrashTime - now
+                                    if timeLeft <= settings.shockSafetyMargin then
+                                        doHarvest()
+                                    end
+                                end
+                            else
+                                task.wait(3.0)
+                                doHarvest()
+                            end
                         end
-                        task.wait(2)
+                        RunService.Heartbeat:Wait()
                     end
                 end)
-            else stopThread("autoHarvest") end
-        end,
-    })
-
-    FarmTab:CreateButton({
-        Name = "Harvest Now",
-        Callback = function()
-            refreshCache()
-            if cache.harvest then
-                local part = cache.harvest:FindFirstAncestorWhichIsA("BasePart")
-                    or cache.harvest.Parent
-                if part then tpTo(part.Position); task.wait(0.2) end
-                safeFire(cache.harvest)
+            else
+                stopThread("autoHarvest")
             end
         end,
     })
 
-    FarmTab:CreateSection("6. Collect Fruits (highest value first)")
+    FarmTab:CreateButton({
+        Name = "Harvest Now (Cash Out)",
+        Callback = function()
+            local ok = doHarvest()
+            pcall(function()
+                Window:Notify({
+                    Title = "Harvest",
+                    Content = ok and "Cashed out successfully!" or "No active tree round",
+                    Duration = 3,
+                })
+            end)
+        end,
+    })
+
+    FarmTab:CreateSection("💰 Collect & Sell")
+
     FarmTab:CreateToggle({
-        Name = "Auto Collect",
+        Name = "Auto Collect All Fruits",
         CurrentValue = false,
         Flag = "GGAutoCollect",
         Callback = function(v)
@@ -313,29 +662,23 @@ return function(Window, scriptInfo)
             if v then
                 startThread("autoCollect", function(isActive)
                     while isActive() do
-                        refreshCache()
-                        for _, f in ipairs(cache.fruits) do
-                            if not isActive() then break end
-                            tpTo(f.part.Position)
-                            task.wait(0.15)
-                            safeFire(f.prompt)
-                            task.wait(settings.collectDelay)
-                        end
-                        task.wait(1)
+                        doCollectAll()
+                        task.wait(settings.collectInterval)
                     end
                 end)
-            else stopThread("autoCollect") end
+            else
+                stopThread("autoCollect")
+            end
         end,
     })
 
-    FarmTab:CreateSlider({
-        Name = "Collect Delay",
-        Range = {0.1, 2}, Increment = 0.1, CurrentValue = 0.3,
-        Suffix = " s", Flag = "GGCollectDelay",
-        Callback = function(v) settings.collectDelay = v end,
+    FarmTab:CreateButton({
+        Name = "Collect All Fruits Now",
+        Callback = function()
+            doCollectAll()
+        end,
     })
 
-    FarmTab:CreateSection("7. Sell")
     FarmTab:CreateToggle({
         Name = "Auto Sell",
         CurrentValue = false,
@@ -345,44 +688,37 @@ return function(Window, scriptInfo)
             if v then
                 startThread("autoSell", function(isActive)
                     while isActive() do
-                        refreshCache()
-                        if cache.sell then
-                            local part = cache.sell:FindFirstAncestorWhichIsA("BasePart")
-                            if part then tpTo(part.Position); task.wait(0.2) end
-                            safeFire(cache.sell)
-                        end
+                        doSellAll()
                         task.wait(settings.sellInterval)
                     end
                 end)
-            else stopThread("autoSell") end
+            else
+                stopThread("autoSell")
+            end
         end,
     })
 
-    FarmTab:CreateSlider({
-        Name = "Sell Interval",
-        Range = {1, 15}, Increment = 1, CurrentValue = 5,
-        Suffix = " s", Flag = "GGSellInterval",
-        Callback = function(v) settings.sellInterval = v end,
-    })
-
     FarmTab:CreateButton({
-        Name = "Sell Now",
+        Name = "Sell All Now",
         Callback = function()
-            refreshCache()
-            if cache.sell then
-                local part = cache.sell:FindFirstAncestorWhichIsA("BasePart")
-                if part then tpTo(part.Position); task.wait(0.2) end
-                safeFire(cache.sell)
-            end
+            local ok = doSellAll()
+            pcall(function()
+                Window:Notify({
+                    Title = "Sell",
+                    Content = ok and "Items sold!" or "Nothing to sell",
+                    Duration = 3,
+                })
+            end)
         end,
     })
 
     -- ─── Tab 2: Weather ───
     local WeatherTab = Window:CreateTab("Weather", "cloud-lightning")
-    WeatherTab:CreateSection("Anti-Meteor (Harvest before lightning!)")
+
+    WeatherTab:CreateSection("⚡ Meteor & Lightning Defense")
 
     WeatherTab:CreateToggle({
-        Name = "Auto Harvest on Meteor",
+        Name = "Auto Harvest on Meteor (Anti-Crash)",
         CurrentValue = false,
         Flag = "GGAntiMeteor",
         Callback = function(v)
@@ -390,65 +726,48 @@ return function(Window, scriptInfo)
             if v then
                 startThread("antiMeteor", function(isActive)
                     while isActive() do
-                        if isMeteorActive() then
-                            -- Step 1: Harvest first!
-                            refreshCache()
-                            if cache.harvest then
-                                local part = cache.harvest:FindFirstAncestorWhichIsA("BasePart")
-                                    or cache.harvest.Parent
-                                if part then tpTo(part.Position); task.wait(0.15) end
-                                safeFire(cache.harvest)
-                                task.wait(0.3)
-                            end
-                            -- Step 2: Collect ALL fruits (highest value first)
-                            refreshCache()
-                            for _, f in ipairs(cache.fruits) do
-                                if not isActive() then break end
-                                tpTo(f.part.Position)
-                                task.wait(0.1)
-                                safeFire(f.prompt)
-                                task.wait(0.1)
-                            end
-                            -- Step 3: SELL immediately after collecting
-                            refreshCache()
-                            if cache.sell then
-                                local part = cache.sell:FindFirstAncestorWhichIsA("BasePart")
-                                if part then tpTo(part.Position); task.wait(0.15) end
-                                safeFire(cache.sell)
-                                task.wait(0.2)
-                            end
-                            -- Step 4: Flee if still meteor
-                            if isMeteorActive() then
+                        if isMeteorWeather() then
+                            -- Instant emergency cash out!
+                            doHarvest()
+                            task.wait(0.2)
+                            doCollectAll()
+                            task.wait(0.2)
+                            doSellAll()
+
+                            -- Flee if still active
+                            if isMeteorWeather() then
                                 local root = getRoot()
                                 if root then
-                                    local dir = root.CFrame.LookVector * settings.meteorFleeDist
-                                    tpTo(root.Position + dir)
+                                    local fleeOffset = root.CFrame.LookVector * settings.fleeDistance
+                                    tpTo(root.Position + fleeOffset)
                                 end
                             end
                         end
                         task.wait(0.5)
                     end
                 end)
-            else stopThread("antiMeteor") end
+            else
+                stopThread("antiMeteor")
+            end
         end,
     })
 
     WeatherTab:CreateSlider({
         Name = "Flee Distance",
-        Range = {20, 200}, Increment = 10, CurrentValue = 80,
-        Suffix = " studs", Flag = "GGFleeDist",
-        Callback = function(v) settings.meteorFleeDist = v end,
+        Range = {30, 250}, Increment = 10, CurrentValue = 100,
+        Suffix = " studs", Flag = "GGFleeDistance",
+        Callback = function(v) settings.fleeDistance = v end,
     })
 
     WeatherTab:CreateButton({
-        Name = "Check Weather",
+        Name = "Check Current Weather",
         Callback = function()
-            local active = isMeteorActive()
+            local active = isMeteorWeather()
             pcall(function()
                 Window:Notify({
-                    Title = "Weather",
-                    Content = active and "METEOR ACTIVE!" or "Safe",
-                    Duration = 3,
+                    Title = "Weather Status",
+                    Content = active and "⚠️ DANGER: Meteor / Storm Active!" or "✅ Weather is calm",
+                    Duration = 4,
                 })
             end)
         end,
@@ -456,9 +775,11 @@ return function(Window, scriptInfo)
 
     -- ─── Tab 3: Player ───
     local PlayerTab = Window:CreateTab("Player", "user")
-    PlayerTab:CreateSection("Speed")
+
+    PlayerTab:CreateSection("WalkSpeed")
+
     PlayerTab:CreateToggle({
-        Name = "Auto Set Speed",
+        Name = "Auto WalkSpeed",
         CurrentValue = false,
         Flag = "GGAutoSpeed",
         Callback = function(v)
@@ -468,60 +789,43 @@ return function(Window, scriptInfo)
                     while isActive() do
                         local hum = getHumanoid()
                         if hum then hum.WalkSpeed = settings.walkSpeed end
-                        task.wait(1)
+                        task.wait(0.5)
                     end
                 end)
-            else stopThread("autoSpeed") end
+            else
+                stopThread("autoSpeed")
+                local hum = getHumanoid()
+                if hum then hum.WalkSpeed = 16 end
+            end
         end,
     })
+
     PlayerTab:CreateSlider({
-        Name = "Walk Speed",
-        Range = {16, 200}, Increment = 1, CurrentValue = 32,
+        Name = "WalkSpeed Value",
+        Range = {16, 200}, Increment = 2, CurrentValue = 32,
         Suffix = " spd", Flag = "GGWalkSpeed",
         Callback = function(v)
             settings.walkSpeed = v
             local hum = getHumanoid()
-            if hum then hum.WalkSpeed = v end
-        end,
-    })
-    PlayerTab:CreateButton({
-        Name = "Set Speed Now",
-        Callback = function()
-            local hum = getHumanoid()
-            if hum then hum.WalkSpeed = settings.walkSpeed end
+            if hum and settings.autoSpeed then hum.WalkSpeed = v end
         end,
     })
 
     -- ─── Tab 4: Settings ───
     local SettingsTab = Window:CreateTab("Settings", "settings")
-    SettingsTab:CreateSection("Info")
-    SettingsTab:CreateLabel("Greedy Growers v2.0.0 | RAVEN HUB")
 
-    SettingsTab:CreateSection("Debug")
+    SettingsTab:CreateSection("Module Info")
+    SettingsTab:CreateLabel("Greedy Growers v3.0.0 | RAVEN HUB")
+    SettingsTab:CreateLabel("Author: valrinx")
+
+    SettingsTab:CreateSection("Server Utilities")
     SettingsTab:CreateButton({
-        Name = "Scan Game",
+        Name = "Rejoin Server",
         Callback = function()
-            cache.lastScan = 0
-            refreshCache()
-            pcall(function()
-                Window:Notify({
-                    Title = "GG Debug",
-                    Content = string.format(
-                        "F:%d Sell:%s Harv:%s Seeds:%d Plants:%d",
-                        #cache.fruits, tostring(cache.sell~=nil),
-                        tostring(cache.harvest~=nil), #cache.seeds, #cache.plants
-                    ),
-                    Duration = 5,
-                })
-            end)
+            TeleportService:Teleport(game.PlaceId, Player)
         end,
     })
 
-    SettingsTab:CreateSection("Server")
-    SettingsTab:CreateButton({
-        Name = "Rejoin Server",
-        Callback = function() TeleportService:Teleport(game.PlaceId, Player) end,
-    })
     SettingsTab:CreateButton({
         Name = "Server Hop",
         Callback = function()
@@ -545,16 +849,33 @@ return function(Window, scriptInfo)
     -- ═══════════ Cleanup ═══════════
     local function destroy()
         running = false
-        for key, _ in pairs(threads) do threads[key] = nil end
+        for key, _ in pairs(threads) do
+            threads[key] = nil
+        end
+        for _, conn in pairs(connections) do
+            if typeof(conn) == "RBXScriptConnection" then
+                pcall(function() conn:Disconnect() end)
+            end
+        end
+        local hum = getHumanoid()
+        if hum then hum.WalkSpeed = 16 end
     end
+
     if scriptInfo and type(scriptInfo.registerCleanup) == "function" then
         scriptInfo.registerCleanup(destroy)
     end
 
+    environment.__RAVEN_GREEDY_GROWERS = {
+        Destroy = destroy,
+        Version = "3.1.0",
+        CurrentRound = currentMyRound,
+        Settings = settings
+    }
+
     pcall(function()
         Window:Notify({
             Title = "Greedy Growers",
-            Content = "v2.0.0 | " .. #cache.fruits .. " fruits, " .. #cache.seeds .. " seeds",
+            Content = "v3.1.0 Loaded | Shock Harvest Mode Ready!",
             Duration = 3,
         })
     end)
