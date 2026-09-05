@@ -33,7 +33,14 @@ local State = {
     Skill4 = true,
     SkipChest = false,
     AutoPotion = false,
+    PotionHealthPercent = 60,
     AutoRefillPotion = false,
+    KillAura = false,
+    KillAuraRange = 35,
+    FastAttack = false,
+    FastAttackMultiplier = 4,
+    MobMagnet = false,
+    MobMagnetRange = 60,
     AutoReplay = false,
     AutoReturn = false,
     CreateDungeon = "Bandits Den",
@@ -209,8 +216,11 @@ end
 local function fireM1(dir)
     if not AttackRemote then return end
     local d = dir or Vector3.new(0,-1,0)
-    pcall(function() AttackRemote:FireServer(d) end)
-    if d~=Vector3.new(0,0,0) then pcall(function() AttackRemote:FireServer(Vector3.new(0,0,0)) end) end
+    local hits = (State.FastAttack and State.FastAttackMultiplier) or 1
+    for _ = 1, hits do
+        pcall(function() AttackRemote:FireServer(d) end)
+        if d~=Vector3.new(0,0,0) then pcall(function() AttackRemote:FireServer(Vector3.new(0,0,0)) end) end
+    end
 end
 
 local function getPositionForMode(targetHRP, mode, dist)
@@ -650,6 +660,80 @@ local function setSkipChest(enabled)
     end
 end
 
+local killAuraThread = nil
+local function setKillAura(enabled)
+    State.KillAura = enabled
+    if enabled then
+        if killAuraThread then pcall(function() task.cancel(killAuraThread) end) end
+        killAuraThread = task.spawn(function()
+            while State.KillAura and running do
+                local char = LocalPlayer.Character
+                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                local hum = char and char:FindFirstChildOfClass("Humanoid")
+                if hrp and hum and hum.Health > 0 then
+                    local range = State.KillAuraRange or 35
+                    local monsters = getMonsters()
+                    for _, m in ipairs(monsters) do
+                        if not State.KillAura or not running then break end
+                        local mHrp = m:FindFirstChild("HumanoidRootPart") or m:FindFirstChildWhichIsA("BasePart")
+                        local mHum = m:FindFirstChildOfClass("Humanoid")
+                        if mHrp and mHum and mHum.Health > 0 then
+                            local dist = (mHrp.Position - hrp.Position).Magnitude
+                            if dist <= range then
+                                local dir = (mHrp.Position - hrp.Position).Unit
+                                fireM1(dir)
+                                if State.AutoSkill then
+                                    fireSkills(mHrp.Position)
+                                end
+                            end
+                        end
+                    end
+                end
+                task.wait(State.AttackDelay or 0.12)
+            end
+        end)
+    else
+        if killAuraThread then pcall(function() task.cancel(killAuraThread) end) killAuraThread = nil end
+    end
+end
+
+local mobMagnetThread = nil
+local function setMobMagnet(enabled)
+    State.MobMagnet = enabled
+    if enabled then
+        if mobMagnetThread then pcall(function() task.cancel(mobMagnetThread) end) end
+        mobMagnetThread = task.spawn(function()
+            while State.MobMagnet and running do
+                local char = LocalPlayer.Character
+                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                local hum = char and char:FindFirstChildOfClass("Humanoid")
+                if hrp and hum and hum.Health > 0 then
+                    local range = State.MobMagnetRange or 60
+                    local targetPos = hrp.Position + (hrp.CFrame.LookVector * 6)
+                    local monsters = getMonsters()
+                    for _, m in ipairs(monsters) do
+                        local mHrp = m:FindFirstChild("HumanoidRootPart") or m:FindFirstChildWhichIsA("BasePart")
+                        local mHum = m:FindFirstChildOfClass("Humanoid")
+                        if mHrp and mHum and mHum.Health > 0 then
+                            local dist = (mHrp.Position - hrp.Position).Magnitude
+                            if dist <= range and dist > 4 then
+                                pcall(function()
+                                    mHrp.CanCollide = false
+                                    mHrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                                    mHrp.CFrame = CFrame.new(targetPos)
+                                end)
+                            end
+                        end
+                    end
+                end
+                task.wait(0.08)
+            end
+        end)
+    else
+        if mobMagnetThread then pcall(function() task.cancel(mobMagnetThread) end) mobMagnetThread = nil end
+    end
+end
+
 local potionThread=nil
 local lastPotion=0
 local function setAutoPotion(enabled)
@@ -661,7 +745,8 @@ local function setAutoPotion(enabled)
                 if (not running) then break end
                 if tick()-lastPotion >= 3 then
                     local char=LocalPlayer.Character local hum=char and char:FindFirstChildOfClass("Humanoid")
-                    if hum and hum.Health>0 and hum.Health/hum.MaxHealth < 0.6 then
+                    local threshold = (State.PotionHealthPercent or 60) / 100
+                    if hum and hum.Health>0 and (hum.Health/hum.MaxHealth) <= threshold then
                         lastPotion=tick()
                         local used=false
                         pcall(function()
@@ -1234,6 +1319,54 @@ end
     local MainTab = Window:CreateTab("Main", "swords")
     local DungeonTab = Window:CreateTab("Dungeon", "map")
 
+    -- Main Tab: Combat & Aura
+    MainTab:CreateSection("Combat & Aura")
+    MainTab:CreateToggle({
+        Name = "Kill Aura",
+        CurrentValue = State.KillAura,
+        Flag = "DungeonLootrKillAura",
+        Callback = function(v) setKillAura(v) end
+    })
+    MainTab:CreateSlider({
+        Name = "Kill Aura Range",
+        Range = {10, 60},
+        Increment = 5,
+        CurrentValue = State.KillAuraRange,
+        Suffix = " studs",
+        Flag = "DungeonLootrKillAuraRange",
+        Callback = function(v) State.KillAuraRange = tonumber(v) or 35 end
+    })
+    MainTab:CreateToggle({
+        Name = "Fast Attack (Burst Multi-Hit)",
+        CurrentValue = State.FastAttack,
+        Flag = "DungeonLootrFastAttack",
+        Callback = function(v) State.FastAttack = v end
+    })
+    MainTab:CreateSlider({
+        Name = "Fast Attack Multiplier",
+        Range = {2, 10},
+        Increment = 1,
+        CurrentValue = State.FastAttackMultiplier,
+        Suffix = "x Hits",
+        Flag = "DungeonLootrFastAttackMult",
+        Callback = function(v) State.FastAttackMultiplier = tonumber(v) or 4 end
+    })
+    MainTab:CreateToggle({
+        Name = "Bring Mob (Mob Magnet)",
+        CurrentValue = State.MobMagnet,
+        Flag = "DungeonLootrMobMagnet",
+        Callback = function(v) setMobMagnet(v) end
+    })
+    MainTab:CreateSlider({
+        Name = "Bring Mob Range",
+        Range = {20, 100},
+        Increment = 5,
+        CurrentValue = State.MobMagnetRange,
+        Suffix = " studs",
+        Flag = "DungeonLootrMobMagnetRange",
+        Callback = function(v) State.MobMagnetRange = tonumber(v) or 60 end
+    })
+
     -- Main Tab: Auto Farm
     MainTab:CreateSection("Auto Farm")
     MainTab:CreateToggle({
@@ -1328,6 +1461,15 @@ end
         CurrentValue = State.AutoPotion,
         Flag = "DungeonLootrAutoPotion",
         Callback = function(v) setAutoPotion(v) end
+    })
+    MainTab:CreateSlider({
+        Name = "Heal At Health %",
+        Range = {10, 95},
+        Increment = 5,
+        CurrentValue = State.PotionHealthPercent,
+        Suffix = "%",
+        Flag = "DungeonLootrPotionHealthPercent",
+        Callback = function(v) State.PotionHealthPercent = tonumber(v) or 60 end
     })
 
     -- Dungeon Tab: Create Dungeon
@@ -1479,6 +1621,9 @@ end
         State.AutoBestDungeon = false
         State.AutoCreateChallenger = false
         State.AutoCreateBossRush = false
+        setKillAura(false)
+        setMobMagnet(false)
+        State.FastAttack = false
         stopFarm()
         stopSkill()
         setSkipChest(false)
