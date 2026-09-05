@@ -35,6 +35,8 @@ return function(Window, scriptInfo)
         instantCharge = true,
         autoPass = true,
         magneticPass = true,
+        autoDribble = true,
+        dribbleDistance = 18,
         ballEsp = true,
         playerEsp = true,
         playerEspShowDistance = true,
@@ -888,6 +890,166 @@ return function(Window, scriptInfo)
         end
     end
 
+    -- ============================================================
+    --   AUTO DRIBBLE / ANTI-TACKLE ENGINE
+    -- ============================================================
+    local ActionRemoteProtocol = nil
+    local ActionCommands = nil
+    local DodgeModule = nil
+    local ControlsModule = nil
+    pcall(function()
+        ActionRemoteProtocol = require(ReplicatedStorage.Modules.Actions.ActionRemoteProtocol)
+    end)
+    pcall(function()
+        ActionCommands = require(ReplicatedStorage.Modules.Actions.ActionCommands)
+    end)
+    pcall(function()
+        DodgeModule = require(ReplicatedStorage.Modules.Actions.Dodge)
+    end)
+    pcall(function()
+        ControlsModule = require(ReplicatedStorage.Modules.Gameplay.Controls)
+    end)
+
+    local lastDribbleTime = 0
+
+    local function executeDribble(evadeDir)
+        local myChar = localPlayer.Character
+        local myRoot = getRoot(myChar)
+        local now = workspace:GetServerTimeNow()
+        local aimDir = evadeDir or (myRoot and myRoot.CFrame.LookVector) or Vector3.new(0, 0, 1)
+        if aimDir.Magnitude > 0.01 then
+            aimDir = aimDir.Unit
+        end
+
+        -- 1. Send network Dodge action if protocol available
+        if ActionRemoteProtocol and ActionCommands and type(ActionCommands.Dodge) == "function" then
+            pcall(function()
+                local cmd = ActionCommands.Dodge()
+                ActionRemoteProtocol.Send(cmd, {
+                    AimDirection = aimDir,
+                    ShotTime = now
+                })
+            end)
+        end
+
+        -- 2. Trigger native input key (Space) for local animation, audio & speed boost
+        if type(keypress) == "function" then
+            pcall(keypress, 0x20)
+            task.delay(0.05, function() pcall(keyrelease, 0x20) end)
+        elseif type(keyclick) == "function" then
+            pcall(keyclick, Enum.KeyCode.Space.Value)
+        else
+            pcall(function()
+                local vim = game:GetService("VirtualInputManager")
+                vim:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
+                task.delay(0.05, function()
+                    vim:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
+                end)
+            end)
+        end
+    end
+
+    local function updateAutoDribble()
+        if not running or not settings.autoDribble then return end
+        local myChar = localPlayer.Character
+        local myRoot = getRoot(myChar)
+        local myHum = getHumanoid(myChar)
+        if not myRoot or not myHum or myHum.Health <= 0 then return end
+
+        local nowClock = os.clock()
+        if (nowClock - lastDribbleTime) < 1.0 then return end
+
+        -- Check if already dribbling
+        if DodgeModule and type(DodgeModule.IsDribbling) == "function" then
+            local isDribbling = false
+            pcall(function() isDribbling = DodgeModule.IsDribbling(myChar) end)
+            if isDribbling then return end
+        end
+
+        -- Identify team color for enemy differentiation
+        local myJersey = myChar:FindFirstChild("TeamJersey")
+        local myColor = myJersey and myJersey:FindFirstChild("Handle") and myJersey.Handle.Color
+
+        local charFolder = workspace:FindFirstChild("Characters") and workspace.Characters:FindFirstChild("Players")
+        local enemyTackling = false
+        local evadeDir = nil
+
+        local function checkEnemy(char)
+            if not char or char == myChar then return end
+            local enemyRoot = getRoot(char)
+            local enemyHum = getHumanoid(char)
+            if not enemyRoot or not enemyHum or enemyHum.Health <= 0 then return end
+
+            -- Team check: Ignore teammates
+            local enemyJersey = char:FindFirstChild("TeamJersey")
+            local enemyColor = enemyJersey and enemyJersey:FindFirstChild("Handle") and enemyJersey.Handle.Color
+            if myColor and enemyColor then
+                local diff = math.abs(myColor.R - enemyColor.R) + math.abs(myColor.G - enemyColor.G) + math.abs(myColor.B - enemyColor.B)
+                if diff < 0.1 then return end -- Teammate
+            end
+
+            local toMe = myRoot.Position - enemyRoot.Position
+            local dist = toMe.Magnitude
+            if dist > settings.dribbleDistance then return end
+
+            local nowServer = workspace:GetServerTimeNow()
+            local slidingUntil = char:GetAttribute("SlidingUntil")
+            local isSliding = slidingUntil and (tonumber(slidingUntil) > nowServer)
+
+            -- Check if enemy is charging/rushing towards us
+            local enemyVel = enemyRoot.AssemblyLinearVelocity
+            local isRushingAtMe = false
+            if dist <= 14 and enemyVel.Magnitude > 12 then
+                local approachSpeed = enemyVel:Dot(toMe.Unit)
+                if approachSpeed > 10 then
+                    isRushingAtMe = true
+                end
+            end
+
+            if isSliding or isRushingAtMe then
+                enemyTackling = true
+                -- Calculate perpendicular escape vector (left or right relative to enemy attack vector)
+                local flatAttack = Vector3.new(toMe.X, 0, toMe.Z)
+                if flatAttack.Magnitude > 0.01 then
+                    flatAttack = flatAttack.Unit
+                else
+                    flatAttack = Vector3.new(0, 0, 1)
+                end
+                local leftEvade = Vector3.new(-flatAttack.Z, 0, flatAttack.X)
+                local rightEvade = Vector3.new(flatAttack.Z, 0, -flatAttack.X)
+
+                -- Prefer dodge direction aligning with player current movement
+                local moveDir = myHum.MoveDirection
+                if moveDir.Magnitude > 0.1 and moveDir:Dot(leftEvade) > moveDir:Dot(rightEvade) then
+                    evadeDir = leftEvade
+                else
+                    evadeDir = rightEvade
+                end
+            end
+        end
+
+        if charFolder then
+            for _, char in ipairs(charFolder:GetChildren()) do
+                if enemyTackling then break end
+                checkEnemy(char)
+            end
+        end
+
+        if not enemyTackling then
+            for _, p in ipairs(Players:GetPlayers()) do
+                if enemyTackling then break end
+                if p ~= localPlayer and p.Character then
+                    checkEnemy(p.Character)
+                end
+            end
+        end
+
+        if enemyTackling then
+            lastDribbleTime = nowClock
+            executeDribble(evadeDir)
+        end
+    end
+
     -- Update Loops
     connect(RunService.Heartbeat, function()
         if not running then return end
@@ -925,6 +1087,11 @@ return function(Window, scriptInfo)
         -- Auto Goalkeeper update
         if settings.autoGoalkeeper then
             updateAutoGoalkeeper()
+        end
+
+        -- Auto Dribble / Anti-Tackle update
+        if settings.autoDribble then
+            updateAutoDribble()
         end
     end)
 
@@ -1232,6 +1399,35 @@ return function(Window, scriptInfo)
         Name = "Pass to Best Teammate (Key: Z)",
         Callback = function()
             executeAutoPass()
+        end,
+    })
+
+    MainTab:CreateSection("Dribble & Evasion")
+
+    MainTab:CreateToggle({
+        Name = "Auto Dribble / Anti-Tackle",
+        CurrentValue = settings.autoDribble,
+        Flag = "Soccer_AutoDribble",
+        Callback = function(value)
+            settings.autoDribble = value
+        end,
+    })
+
+    MainTab:CreateSlider({
+        Name = "Anti-Tackle Detection Range",
+        Range = {10, 30},
+        Increment = 1,
+        CurrentValue = settings.dribbleDistance,
+        Flag = "Soccer_DribbleDistance",
+        Callback = function(value)
+            settings.dribbleDistance = value
+        end,
+    })
+
+    MainTab:CreateButton({
+        Name = "Manual Dribble / Dodge (Space)",
+        Callback = function()
+            executeDribble()
         end,
     })
 
