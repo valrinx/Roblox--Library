@@ -1908,9 +1908,15 @@ end
         Callback = function(v) setAutoEquipBest(v) end
     })
 
-    if Window and type(Window.SortTabs) == "function" then
-        Window:SortTabs({"Overview", "Main", "Dungeon", "ESP", "Misc", "Settings"})
+    local function applyTabOrder()
+        if Window and type(Window.SortTabs) == "function" then
+            Window:SortTabs({"Overview", "Main", "Dungeon", "ESP", "Misc", "Settings"})
+        end
     end
+    applyTabOrder()
+    task.defer(applyTabOrder)
+    task.delay(0.5, applyTabOrder)
+    task.delay(1.5, applyTabOrder)
 
     -- =================================================================
     --   LIFECYCLE & CLEANUP
