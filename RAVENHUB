@@ -141,7 +141,7 @@ local HubUI
 do
     local ok, result = pcall(function()
         local source = game:HttpGet(
-            "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/maclib_adapter.lua?v=maclib-adapter-1.1.4"
+            "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/maclib_adapter.lua?v=maclib-adapter-1.1.5"
         )
         assert(type(source) == "string" and #source > 1000, "MacLib adapter download was empty")
         local chunk, compileError = loadstring(source)
@@ -465,8 +465,8 @@ local SCRIPTS = {
         description = "Auto Queue | Kill Aura | Auto Skills | Farm | Sell | Forge | Webhook",
         placeIds    = {132285059959516, 135245842886361},
         gameIds     = {9656201728, 8410525651},
-        version     = "v2.0.2",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/DungeonLootr.lua?v=dungeon-lootr-2.0.2",
+        version     = "v2.1.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/DungeonLootr.lua?v=dungeon-lootr-2.1.0",
     },
     {
         name        = "Greedy Growers",
@@ -772,6 +772,12 @@ if not matchedAnyScript then
     Window:CreatePlaceholderTab("Visuals", "eye", unavailableMessage)
     Window:CreatePlaceholderTab("Movement", "walk", unavailableMessage)
 end
+
+pcall(function()
+    if type(Window.SortTabs) == "function" then
+        Window:SortTabs({"Overview", "Main", "Dungeon", "Misc", "Settings"})
+    end
+end)
 
 pcall(function()
     HubUI:LoadAutoLoadConfig()

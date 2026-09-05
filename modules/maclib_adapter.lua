@@ -10,7 +10,7 @@ return function(MacLib)
     assert(type(MacLib) == "table" and type(MacLib.Window) == "function", "MacLib is unavailable")
 
     local Adapter = {
-        Version = "maclib-adapter-1.1.4",
+        Version = "maclib-adapter-1.1.5",
         Flags = MacLib.Options or {},
         _maclib = MacLib,
         _window = nil,
@@ -619,12 +619,49 @@ return function(MacLib)
             _native = native,
             _sectionCount = 0,
             _currentSection = nil,
+            _name = tostring(name or "Tab"),
         }, {__index = TabMethods})
+
+        table.insert(self._tabs, tab)
+
         if not self._selectedFirstTab then
             self._selectedFirstTab = true
             native:Select()
         end
         return tab
+    end
+
+    function WindowMethods:SortTabs(orderedNames)
+        if type(orderedNames) ~= "table" or #orderedNames == 0 then
+            return
+        end
+
+        pcall(function()
+            local root = type(gethui) == "function" and gethui() or game:GetService("CoreGui")
+            local ravenGuis = {}
+            for _, child in ipairs(root:GetChildren()) do
+                if child:IsA("ScreenGui") and (child.Name == "RavenMacLib" or (child:FindFirstChild("Base") and child:FindFirstChild("Notifications"))) then
+                    table.insert(ravenGuis, child)
+                end
+            end
+
+            for _, gui in ipairs(ravenGuis) do
+                for _, desc in ipairs(gui:GetDescendants()) do
+                    if desc:IsA("TextLabel") and desc.Name == "TabSwitcherName" then
+                        local btn = desc.Parent
+                        if btn and (btn:IsA("TextButton") or btn:IsA("ImageButton") or btn:IsA("GuiObject")) then
+                            local tabText = tostring(desc.Text or "")
+                            for orderIdx, targetName in ipairs(orderedNames) do
+                                if tabText == targetName or tabText:lower() == targetName:lower() then
+                                    btn.LayoutOrder = orderIdx
+                                    break
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end)
     end
 
     function WindowMethods:CreatePlaceholderTab(name, icon, message)
@@ -723,6 +760,7 @@ return function(MacLib)
         local window = setmetatable({
             _native = native,
             _tabGroup = native:TabGroup(),
+            _tabs = {},
             _selectedFirstTab = false,
             _unloadCallbacks = {},
             _destroyed = false,
