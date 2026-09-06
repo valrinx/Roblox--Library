@@ -69,6 +69,13 @@ return function(Window, scriptInfo)
         aimbotSmoothness = 0.25,
         aimbotShowFOV = true,
 
+        -- Aim Prediction Settings (Cold War Ballistics Standard)
+        aimPrediction = true,                          -- Predict enemy movement + bullet drop
+        predictBulletSpeed = 1600,                     -- Studs/sec estimated bullet velocity
+        predictGravity = 196.2,                        -- Workspace gravity for drop calculation
+        predictDotSize = 6,                            -- Size of prediction reticle dot
+        predictShowCircle = true,                      -- Outer ring around prediction dot
+
         -- Visuals & Lighting
         fullBright = false,
         noFog = false,
@@ -90,9 +97,13 @@ return function(Window, scriptInfo)
     }
 
     ---------------------------------------------------------------------------
-    -- Drawing FOV Circle
+    -- Drawing FOV Circle & Aim Prediction Dot (Cold War Standard)
     ---------------------------------------------------------------------------
     local fovCircle = nil
+    local predictDot = nil
+    local predictCircle = nil
+    local predictText = nil
+
     if Drawing and type(Drawing.new) == "function" then
         pcall(function()
             fovCircle = Drawing.new("Circle")
@@ -103,6 +114,34 @@ return function(Window, scriptInfo)
             fovCircle.Color = Color3.fromRGB(80, 220, 120)
             fovCircle.Transparency = 0.75
             fovCircle.Visible = false
+
+            -- Prediction Dot (Exact point where bullet will hit with lead + drop)
+            predictDot = Drawing.new("Circle")
+            predictDot.Thickness = 1
+            predictDot.NumSides = 24
+            predictDot.Radius = settings.predictDotSize
+            predictDot.Filled = true
+            predictDot.Color = Color3.fromRGB(0, 255, 120)
+            predictDot.Transparency = 0.9
+            predictDot.Visible = false
+
+            -- Prediction Outer Ring
+            predictCircle = Drawing.new("Circle")
+            predictCircle.Thickness = 1.5
+            predictCircle.NumSides = 24
+            predictCircle.Radius = settings.predictDotSize + 4
+            predictCircle.Filled = false
+            predictCircle.Color = Color3.fromRGB(0, 255, 120)
+            predictCircle.Transparency = 0.8
+            predictCircle.Visible = false
+
+            -- Prediction Distance / Time Label
+            predictText = Drawing.new("Text")
+            predictText.Size = 13
+            predictText.Center = true
+            predictText.Outline = true
+            predictText.Color = Color3.fromRGB(0, 255, 120)
+            predictText.Visible = false
         end)
     end
 
@@ -664,6 +703,7 @@ return function(Window, scriptInfo)
 
         local mousePos = UserInputService:GetMouseLocation()
         local bestTargetPart = nil
+        local bestTargetModel = nil
         local bestDist = settings.aimbotFOV
 
         local candidates = {}
@@ -715,6 +755,7 @@ return function(Window, scriptInfo)
                                 if screenDist < bestDist then
                                     bestDist = screenDist
                                     bestTargetPart = targetPart
+                                    bestTargetModel = model
                                 end
                             end
                         end
@@ -723,7 +764,81 @@ return function(Window, scriptInfo)
             end
         end
 
-        return bestTargetPart
+        return bestTargetPart, bestTargetModel
+    end
+
+    ---------------------------------------------------------------------------
+    -- Aim Prediction Ballistics Engine (Cold War Standard)
+    ---------------------------------------------------------------------------
+    local lastPositions = {}
+    local lastPositionTimes = {}
+    local smoothedVelocities = {}
+
+    local function getTargetVelocity(model, rootPart)
+        if not rootPart or not rootPart:IsA("BasePart") then return Vector3.zero end
+
+        local currentPos = rootPart.Position
+        local currentTime = tick()
+        local lastPos = lastPositions[model]
+        local lastTime = lastPositionTimes[model]
+
+        lastPositions[model] = currentPos
+        lastPositionTimes[model] = currentTime
+
+        if lastPos and lastTime then
+            local dt = currentTime - lastTime
+            if dt > 0 and dt < 1 then
+                local measured = (currentPos - lastPos) / dt
+                local assembly = rootPart.AssemblyLinearVelocity
+                if assembly and assembly.Magnitude < 250 then
+                    measured = measured:Lerp(assembly, 0.45)
+                end
+                local previous = smoothedVelocities[model] or measured
+                local alpha = 1 - math.exp(-dt * 12)
+                local smoothed = previous:Lerp(measured, alpha)
+                smoothedVelocities[model] = smoothed
+                return smoothed
+            end
+        end
+        return rootPart.AssemblyLinearVelocity or Vector3.zero
+    end
+
+    local function getBulletTravelTime(distance, muzzleVelocity)
+        return distance / math.max(muzzleVelocity or settings.predictBulletSpeed, 1)
+    end
+
+    local function getBulletDrop(time)
+        return 0.5 * (settings.predictGravity or 196.2) * time * time
+    end
+
+    -- Iterative convergence calculation (Cold War 3-step convergence)
+    local function getPredictedAimPoint(targetPart, targetModel, shooterPos)
+        if not targetPart or not targetPart:IsA("BasePart") then return nil end
+        local root = getRoot(targetModel) or targetPart
+        local velocity = getTargetVelocity(targetModel, root)
+        local targetPos = targetPart.Position
+        local muzzleVelocity = settings.predictBulletSpeed
+
+        local travelTime = 0
+        local leadOffset = Vector3.zero
+        for _ = 1, 3 do
+            leadOffset = velocity * travelTime
+            local futurePos = targetPos + leadOffset
+            local dist = (futurePos - shooterPos).Magnitude
+            travelTime = getBulletTravelTime(dist, muzzleVelocity)
+        end
+
+        leadOffset = velocity * travelTime
+        local drop = getBulletDrop(travelTime)
+        local predictedPos = targetPos + leadOffset + Vector3.new(0, drop, 0)
+
+        return predictedPos, travelTime, velocity
+    end
+
+    local function hidePredictionDisplay()
+        if predictDot then predictDot.Visible = false end
+        if predictCircle then predictCircle.Visible = false end
+        if predictText then predictText.Visible = false end
     end
 
     ---------------------------------------------------------------------------
@@ -782,13 +897,56 @@ return function(Window, scriptInfo)
             fovCircle.Position = UserInputService:GetMouseLocation()
         end
 
-        -- 2. Smooth Aimbot on Right Click (MouseButton2)
+        -- 2. Aim Prediction & Aimbot Target Resolution (Cold War Standard)
+        local targetPart, targetModel = getClosestAimTarget()
+        local aimTargetPoint = targetPart and targetPart.Position or nil
+
+        if targetPart and targetModel and (settings.aimPrediction or settings.aimbotEnabled) then
+            local predictedPos, travelTime, velocity = getPredictedAimPoint(targetPart, targetModel, Camera.CFrame.Position)
+            if predictedPos then
+                aimTargetPoint = predictedPos
+
+                -- Update Drawing Prediction Dot
+                if settings.aimPrediction and predictDot then
+                    local screenPos, onScreen = Camera:WorldToViewportPoint(predictedPos)
+                    if onScreen then
+                        local pos2D = Vector2.new(screenPos.X, screenPos.Y)
+                        predictDot.Position = pos2D
+                        predictDot.Radius = settings.predictDotSize
+                        predictDot.Visible = true
+
+                        if predictCircle then
+                            predictCircle.Position = pos2D
+                            predictCircle.Radius = settings.predictDotSize + 4
+                            predictCircle.Visible = settings.predictShowCircle
+                        end
+
+                        if predictText then
+                            predictText.Position = pos2D + Vector2.new(0, -(settings.predictDotSize + 18))
+                            local distStuds = (targetPart.Position - Camera.CFrame.Position).Magnitude
+                            local distMeters = math.floor(distStuds / 3.5714)
+                            local ms = math.floor(travelTime * 1000)
+                            predictText.Text = string.format("PREDICT: %dm | %dms", distMeters, ms)
+                            predictText.Visible = true
+                        end
+                    else
+                        hidePredictionDisplay()
+                    end
+                else
+                    hidePredictionDisplay()
+                end
+            else
+                hidePredictionDisplay()
+            end
+        else
+            hidePredictionDisplay()
+        end
+
+        -- 3. Smooth Aimbot on Right Click (MouseButton2)
         if settings.aimbotEnabled and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
-            local targetPart = getClosestAimTarget()
-            if targetPart then
-                local targetPos = targetPart.Position
+            if aimTargetPoint then
                 local camCF = Camera.CFrame
-                local targetCF = CFrame.new(camCF.Position, targetPos)
+                local targetCF = CFrame.new(camCF.Position, aimTargetPoint)
                 Camera.CFrame = camCF:Lerp(targetCF, math.clamp(settings.aimbotSmoothness, 0.05, 1))
             end
         end
@@ -882,6 +1040,52 @@ return function(Window, scriptInfo)
         Flag = "Infected_ShowFOV",
         Callback = function(val)
             settings.aimbotShowFOV = val
+        end
+    })
+
+    -- Section: Ballistics Aim Prediction (Cold War Standard)
+    CombatTab:CreateSection("Ballistics Aim Prediction (Drop + Lead)")
+
+    CombatTab:CreateToggle({
+        Name = "Enable Aim Prediction",
+        CurrentValue = settings.aimPrediction,
+        Flag = "Infected_AimPrediction",
+        Callback = function(val)
+            settings.aimPrediction = val
+            if not val then
+                hidePredictionDisplay()
+            end
+        end
+    })
+
+    CombatTab:CreateToggle({
+        Name = "Show Prediction Ring",
+        CurrentValue = settings.predictShowCircle,
+        Flag = "Infected_PredictCircle",
+        Callback = function(val)
+            settings.predictShowCircle = val
+        end
+    })
+
+    CombatTab:CreateSlider({
+        Name = "Prediction Reticle Size",
+        Range = {3, 14},
+        Increment = 1,
+        CurrentValue = settings.predictDotSize,
+        Flag = "Infected_PredictDotSize",
+        Callback = function(val)
+            settings.predictDotSize = val
+        end
+    })
+
+    CombatTab:CreateSlider({
+        Name = "Estimated Bullet Velocity",
+        Range = {800, 3000},
+        Increment = 100,
+        CurrentValue = settings.predictBulletSpeed,
+        Flag = "Infected_PredictSpeed",
+        Callback = function(val)
+            settings.predictBulletSpeed = val
         end
     })
 
@@ -1127,6 +1331,15 @@ return function(Window, scriptInfo)
         restoreLighting()
         if fovCircle then
             pcall(function() fovCircle:Remove() end)
+        end
+        if predictDot then
+            pcall(function() predictDot:Remove() end)
+        end
+        if predictCircle then
+            pcall(function() predictCircle:Remove() end)
+        end
+        if predictText then
+            pcall(function() predictText:Remove() end)
         end
         if espFolder then
             pcall(function() espFolder:Destroy() end)
