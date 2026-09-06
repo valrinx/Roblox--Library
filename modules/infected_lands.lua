@@ -548,84 +548,67 @@ return function(Window, scriptInfo)
     hookPrompts()
 
     ---------------------------------------------------------------------------
-    -- MacLib UI Construction
+    -- User Interface (MacLib / MacLib Adapter Standard)
     ---------------------------------------------------------------------------
-    local CombatTab = Window:Tab({
-        Name = "Combat",
-        Image = "rbxassetid://10723415903"
-    })
+    local CombatTab = Window:CreateTab("Combat", 4483362458)
+    CombatTab:CreateSection("Aimbot Settings (Smooth Camera)")
 
-    local VisualsTab = Window:Tab({
-        Name = "Visuals (ESP)",
-        Image = "rbxassetid://10723346959"
-    })
-
-    local WorldTab = Window:Tab({
-        Name = "World & QoL",
-        Image = "rbxassetid://10734950309"
-    })
-
-    ---------------------------------------------------------------------------
-    -- Combat Tab Elements
-    ---------------------------------------------------------------------------
-    CombatTab:Section({ Title = "Aimbot Settings (Smooth Camera)" })
-
-    CombatTab:Toggle({
+    CombatTab:CreateToggle({
         Name = "Aimbot Enabled (Hold RMB)",
-        Default = settings.aimbotEnabled,
+        CurrentValue = settings.aimbotEnabled,
+        Flag = "Infected_Aimbot",
         Callback = function(val)
             settings.aimbotEnabled = val
         end
     })
 
-    CombatTab:Dropdown({
+    CombatTab:CreateDropdown({
         Name = "Target Type",
-        Multi = false,
-        Required = true,
         Options = {"Both", "Zombies", "Players"},
-        Default = settings.aimbotTargetType,
+        CurrentOption = settings.aimbotTargetType,
+        Flag = "Infected_TargetType",
         Callback = function(val)
             settings.aimbotTargetType = val
         end
     })
 
-    CombatTab:Dropdown({
+    CombatTab:CreateDropdown({
         Name = "Target Bone",
-        Multi = false,
-        Required = true,
         Options = {"Head", "Torso"},
-        Default = settings.aimbotTarget,
+        CurrentOption = settings.aimbotTarget,
+        Flag = "Infected_TargetBone",
         Callback = function(val)
             settings.aimbotTarget = val
         end
     })
 
-    CombatTab:Slider({
-        Name = "Aimbot FOV",
-        Min = 30,
-        Max = 400,
-        Default = settings.aimbotFOV,
-        Precision = 0,
+    CombatTab:CreateSlider({
+        Name = "Aimbot FOV Radius",
+        Range = {30, 400},
+        Increment = 5,
+        CurrentValue = settings.aimbotFOV,
+        Flag = "Infected_AimFOV",
         Callback = function(val)
             settings.aimbotFOV = val
             if fovCircle then fovCircle.Radius = val end
         end
     })
 
-    CombatTab:Slider({
-        Name = "Smoothness Speed",
-        Min = 0.05,
-        Max = 0.8,
-        Default = settings.aimbotSmoothness,
-        Precision = 2,
+    CombatTab:CreateSlider({
+        Name = "Smoothness Speed (Percent)",
+        Range = {5, 80},
+        Increment = 5,
+        CurrentValue = math.floor(settings.aimbotSmoothness * 100),
+        Flag = "Infected_Smooth",
         Callback = function(val)
-            settings.aimbotSmoothness = val
+            settings.aimbotSmoothness = val / 100
         end
     })
 
-    CombatTab:Toggle({
+    CombatTab:CreateToggle({
         Name = "Show FOV Circle",
-        Default = settings.aimbotShowFOV,
+        CurrentValue = settings.aimbotShowFOV,
+        Flag = "Infected_ShowFOV",
         Callback = function(val)
             settings.aimbotShowFOV = val
         end
@@ -634,77 +617,85 @@ return function(Window, scriptInfo)
     ---------------------------------------------------------------------------
     -- Visuals Tab Elements
     ---------------------------------------------------------------------------
-    VisualsTab:Section({ Title = "Entity ESP" })
+    local VisualsTab = Window:CreateTab("Visuals", 4483362458)
+    VisualsTab:CreateSection("Entity ESP")
 
-    VisualsTab:Toggle({
+    VisualsTab:CreateToggle({
         Name = "Player ESP",
-        Default = settings.espPlayers,
+        CurrentValue = settings.espPlayers,
+        Flag = "Infected_PlayerESP",
         Callback = function(val)
             settings.espPlayers = val
             if not val then clearESPByTag("player") end
         end
     })
 
-    VisualsTab:Toggle({
+    VisualsTab:CreateToggle({
         Name = "Zombie ESP",
-        Default = settings.espZombies,
+        CurrentValue = settings.espZombies,
+        Flag = "Infected_ZombieESP",
         Callback = function(val)
             settings.espZombies = val
             if not val then clearESPByTag("zombie") end
         end
     })
 
-    VisualsTab:Toggle({
+    VisualsTab:CreateToggle({
         Name = "Ground Items / Loot ESP",
-        Default = settings.espGroundItems,
+        CurrentValue = settings.espGroundItems,
+        Flag = "Infected_GroundESP",
         Callback = function(val)
             settings.espGroundItems = val
             if not val then clearESPByTag("item") end
         end
     })
 
-    VisualsTab:Toggle({
+    VisualsTab:CreateToggle({
         Name = "Vehicles ESP",
-        Default = settings.espVehicles,
+        CurrentValue = settings.espVehicles,
+        Flag = "Infected_VehESP",
         Callback = function(val)
             settings.espVehicles = val
             if not val then clearESPByTag("vehicle") end
         end
     })
 
-    VisualsTab:Toggle({
+    VisualsTab:CreateToggle({
         Name = "Player Corpses ESP",
-        Default = settings.espCorpses,
+        CurrentValue = settings.espCorpses,
+        Flag = "Infected_CorpseESP",
         Callback = function(val)
             settings.espCorpses = val
             if not val then clearESPByTag("corpse") end
         end
     })
 
-    VisualsTab:Section({ Title = "Display Details" })
+    VisualsTab:CreateSection("Display Details")
 
-    VisualsTab:Toggle({
+    VisualsTab:CreateToggle({
         Name = "Show Distance",
-        Default = settings.espShowDistance,
+        CurrentValue = settings.espShowDistance,
+        Flag = "Infected_ShowDist",
         Callback = function(val)
             settings.espShowDistance = val
         end
     })
 
-    VisualsTab:Toggle({
+    VisualsTab:CreateToggle({
         Name = "Show Health (HP)",
-        Default = settings.espShowHealth,
+        CurrentValue = settings.espShowHealth,
+        Flag = "Infected_ShowHP",
         Callback = function(val)
             settings.espShowHealth = val
         end
     })
 
-    VisualsTab:Slider({
+    VisualsTab:CreateSlider({
         Name = "Max ESP Distance",
-        Min = 100,
-        Max = 1500,
-        Default = settings.espMaxDistance,
-        Precision = 0,
+        Range = {100, 2500},
+        Increment = 50,
+        CurrentValue = settings.espMaxDistance,
+        Flag = "Infected_MaxDist",
         Callback = function(val)
             settings.espMaxDistance = val
         end
@@ -713,31 +704,35 @@ return function(Window, scriptInfo)
     ---------------------------------------------------------------------------
     -- World Tab Elements
     ---------------------------------------------------------------------------
-    WorldTab:Section({ Title = "Lighting & Atmosphere" })
+    local WorldTab = Window:CreateTab("World", 4483362458)
+    WorldTab:CreateSection("Lighting & Atmosphere")
 
-    WorldTab:Toggle({
+    WorldTab:CreateToggle({
         Name = "FullBright / Night Vision",
-        Default = settings.fullBright,
+        CurrentValue = settings.fullBright,
+        Flag = "Infected_FullBright",
         Callback = function(val)
             settings.fullBright = val
             if not val then restoreLighting() end
         end
     })
 
-    WorldTab:Toggle({
+    WorldTab:CreateToggle({
         Name = "No Fog / Clear Vision",
-        Default = settings.noFog,
+        CurrentValue = settings.noFog,
+        Flag = "Infected_NoFog",
         Callback = function(val)
             settings.noFog = val
             if not val then restoreLighting() end
         end
     })
 
-    WorldTab:Section({ Title = "Quality of Life" })
+    WorldTab:CreateSection("Quality of Life")
 
-    WorldTab:Toggle({
+    WorldTab:CreateToggle({
         Name = "Instant Proximity Prompt (Instant E)",
-        Default = settings.instantPrompt,
+        CurrentValue = settings.instantPrompt,
+        Flag = "Infected_InstantE",
         Callback = function(val)
             settings.instantPrompt = val
             if val then hookPrompts() end
