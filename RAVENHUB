@@ -187,7 +187,7 @@ local SCRIPTS = {
         description = "Infinite Stamina | Instant Max Power | Auto Pass | Auto GK | ESP",
         placeIds    = {126987974021910},
         gameIds     = {10155360168},
-        version     = "v1.2.1",
+        version     = "v1.3.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/illegal_soccer.lua",
     },
     {

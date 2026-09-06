@@ -27,8 +27,9 @@ return function(Window, scriptInfo)
         autoGoalkeeper = false,
         gkAutoPosition = true,
         gkAutoDive = true,
+        gkPredictArc = true,
         gkAutoJump = true,
-        gkAutoPunch = true,
+        gkAutoPunch = false,
         gkDiveReach = 22,
         noBallSlowdown = true,
         fullSpeedCharge = true,
@@ -53,7 +54,7 @@ return function(Window, scriptInfo)
     end
 
     local function getRoot(model)
-        if not model then return nil end
+        if not model or not model:IsA("Model") then return nil end
         return model:FindFirstChild("HumanoidRootPart")
             or model:FindFirstChild("UpperTorso")
             or model.PrimaryPart
@@ -61,7 +62,7 @@ return function(Window, scriptInfo)
     end
 
     local function getHumanoid(model)
-        if not model then return nil end
+        if not model or not model:IsA("Model") then return nil end
         return model:FindFirstChildOfClass("Humanoid")
     end
 
@@ -549,17 +550,52 @@ return function(Window, scriptInfo)
     pcall(function()
         ActionMotion = require(ReplicatedStorage.Modules.Actions.ActionMotion)
     end)
+    local TurnControl = nil
+    pcall(function()
+        TurnControl = require(ReplicatedStorage.Client.Gameplay.Player.TurnControl)
+    end)
+    local GoalkeeperDiveAssist = nil
+    pcall(function()
+        GoalkeeperDiveAssist = require(ReplicatedStorage.Modules.Actions.GoalkeeperDiveAssist)
+    end)
+    local BallPhysics = nil
+    pcall(function()
+        BallPhysics = require(ReplicatedStorage.Modules.Ball.Physics)
+    end)
+    local HitboxSettingsModule = nil
+    pcall(function()
+        HitboxSettingsModule = require(ReplicatedStorage.Modules.Gameplay.HitboxSettings)
+    end)
+
+    -- Modestly expand AirReceive hitbox for Goalkeeper so saves register cleanly upon contact
+    local origAirReceiveSize = nil
+    if HitboxSettingsModule and HitboxSettingsModule.AirReceive then
+        origAirReceiveSize = HitboxSettingsModule.AirReceive.Size
+        HitboxSettingsModule.AirReceive.Size = Vector3.new(8, 10, 8)
+    end
 
     local forcedDiveChoice = nil
+    local forcedDiveUntil = 0
     if GoalkeeperDive and type(GoalkeeperDive.GetDirectionChoice) == "function" then
         local origGetChoice = GoalkeeperDive.GetDirectionChoice
         GoalkeeperDive.GetDirectionChoice = function(moveVec, camCF, lookVec)
-            if forcedDiveChoice then
+            if forcedDiveChoice and os.clock() <= forcedDiveUntil then
                 local choice = forcedDiveChoice
-                forcedDiveChoice = nil
                 return choice
             end
+            forcedDiveChoice = nil
             return origGetChoice(moveVec, camCF, lookVec)
+        end
+    end
+
+    -- Hook TurnControl.HasAutoRotateLock so performDive does not force "F" when diving backwards or laterally
+    if TurnControl and type(TurnControl.HasAutoRotateLock) == "function" then
+        local origHasLock = TurnControl.HasAutoRotateLock
+        TurnControl.HasAutoRotateLock = function(...)
+            if forcedDiveChoice and os.clock() <= forcedDiveUntil then
+                return true
+            end
+            return origHasLock(...)
         end
     end
 
@@ -567,6 +603,7 @@ return function(Window, scriptInfo)
     local lastPunchTime = 0
     local lastBallPos = nil
     local lastBallPosTime = 0
+    local lastBallInstance = nil
     local trackedBallVel = Vector3.zero
 
     local function getActiveBall(rootPos)
@@ -637,6 +674,7 @@ return function(Window, scriptInfo)
             end
 
             local goalPos = defGoal and defGoal.Position or Vector3.new(583.5, 39.2, -0.2)
+            -- goalForward points OUTWARDS from the goal toward the field (away from net)
             local goalForward = Vector3.new(-1, 0, 0)
             local goalRight = Vector3.new(0, 0, 1)
 
@@ -704,7 +742,7 @@ return function(Window, scriptInfo)
             targetDir = flatToTarget.Unit
         end
 
-        -- Project target direction onto camera plane to find relative dive direction (L, R, LF, RF, F, B)
+        -- Project target direction onto camera plane to find relative dive direction (L, R, LF, RF, F, B, LB, RB)
         local forwardDot = targetDir:Dot(camFlatForward)
         local rightDot = targetDir:Dot(camFlatRight)
 
@@ -713,21 +751,29 @@ return function(Window, scriptInfo)
             pcall(function()
                 dirName = ActionMotion.GetDirectionName(forwardDot, rightDot)
             end)
+            if string.find(dirName, "B") then
+                if string.find(dirName, "R") then
+                    dirName = "R"
+                elseif string.find(dirName, "L") then
+                    dirName = "L"
+                else
+                    dirName = "F"
+                end
+            end
         else
             if math.abs(rightDot) > 0.38 then
                 if forwardDot > 0.38 then
                     dirName = (rightDot > 0) and "RF" or "LF"
-                elseif forwardDot < -0.38 then
-                    dirName = (rightDot > 0) and "RB" or "LB"
                 else
                     dirName = (rightDot > 0) and "R" or "L"
                 end
             else
-                dirName = (forwardDot >= 0) and "F" or "B"
+                dirName = "F"
             end
         end
 
         -- Prime the game's dive direction choice
+        forcedDiveUntil = os.clock() + 0.35
         if GoalkeeperDive and type(GoalkeeperDive.GetDirectionChoiceByName) == "function" then
             pcall(function()
                 forcedDiveChoice = GoalkeeperDive.GetDirectionChoiceByName(dirName)
@@ -739,12 +785,11 @@ return function(Window, scriptInfo)
             hum:Move(targetDir, false)
         end)
 
-        -- If ball is elevated, initiate a jump right before dive so character gains vertical lift (+6-8 studs)
+        -- If ball is elevated, trigger jump concurrently with dive so character achieves maximum vertical reach instantly
         if isHighShot and settings.gkAutoJump then
             pcall(function()
                 hum.Jump = true
             end)
-            task.wait(0.11)
         end
 
         -- Execute dive
@@ -775,7 +820,7 @@ return function(Window, scriptInfo)
         end
 
         -- Clean up movement direction after brief impulse
-        task.delay(0.15, function()
+        task.delay(0.18, function()
             pcall(function()
                 hum:Move(Vector3.zero, false)
             end)
@@ -821,48 +866,90 @@ return function(Window, scriptInfo)
         local ballPos = ball.Position
         local now = os.clock()
 
-        -- Measure velocity from delta position (studs/sec)
-        if lastBallPos and lastBallPosTime > 0 then
+        -- Reset delta velocity if ball instance changed
+        if lastBallInstance ~= ball then
+            lastBallInstance = ball
+            lastBallPos = ballPos
+            lastBallPosTime = now
+            trackedBallVel = Vector3.zero
+        elseif lastBallPos and lastBallPosTime > 0 then
             local dt = now - lastBallPosTime
             if dt > 0.005 and dt < 0.25 then
                 local rawVel = (ballPos - lastBallPos) / dt
-                if rawVel.Magnitude > 1.5 then
+                if rawVel.Magnitude > 3.0 then
                     trackedBallVel = rawVel
                 else
-                    trackedBallVel = trackedBallVel * 0.88
+                    trackedBallVel = trackedBallVel * 0.75
                 end
             end
+            lastBallPos = ballPos
+            lastBallPosTime = now
+        else
+            lastBallPos = ballPos
+            lastBallPosTime = now
         end
-        lastBallPos = ballPos
-        lastBallPosTime = now
 
         -- Query authoritative physics velocity if available
         local ballVel = trackedBallVel
         if Renderer and type(Renderer.GetMovementState) == "function" then
             pcall(function()
                 local mv = Renderer.GetMovementState()
-                if mv and mv.Velocity and mv.Velocity.Magnitude > 2 then
-                    ballVel = mv.Velocity
+                if mv and mv.Velocity then
+                    if mv.Velocity.Magnitude > 3.0 then
+                        ballVel = mv.Velocity
+                    else
+                        ballVel = Vector3.zero
+                    end
                 end
             end)
         end
 
         local goalPos, goalForward, goalRight, homePos, isPractice = getDefendedGoalInfo(root.Position)
         local distToBall = (ballPos - root.Position).Magnitude
+        local ballSpeed = ballVel.Magnitude
 
-        -- Shot Prediction Vector Mathematics
-        local forwardSpeed = ballVel:Dot(-goalForward)
-        local distToGoalPlane = (ballPos - goalPos):Dot(goalForward)
-        local timeToGoal = (forwardSpeed > 2.5) and (distToGoalPlane / forwardSpeed) or 999
-        local interceptPos = ballPos + (ballVel * timeToGoal)
+        -- Shot Prediction Vector Mathematics & Parabolic Trajectory
+        -- forwardSpeed is positive when ball is actively flying TOWARDS the defended net
+        -- In Practice: goalPos.X ~ 583.5, keeper ~ 572, field is towards -X (goalForward = (-1, 0, 0)), so towards net is +X (-goalForward)
+        local netForward = -goalForward
+        local forwardSpeed = ballVel:Dot(netForward)
+
+        -- Distance along net axis from ball to goal line (positive when ball is on the field in front of goal)
+        local distInFrontOfGoal = (ballPos - goalPos):Dot(goalForward)
+        local timeToGoal = (forwardSpeed > 5.0 and distInFrontOfGoal > 1.2) and (distInFrontOfGoal / forwardSpeed) or 999
+
+        -- Estimated intercept time strictly based on arrival at defended goal line
+        local estInterceptTime = timeToGoal
+        local interceptPos
+        if settings.gkPredictArc and estInterceptTime > 0 and estInterceptTime < 2.5 then
+            local grav = (BallPhysics and BallPhysics.Gravity) or workspace.Gravity or 65
+            local vertDrop = 0.5 * grav * (estInterceptTime ^ 2)
+            interceptPos = ballPos + (ballVel * estInterceptTime) - Vector3.new(0, vertDrop, 0)
+        else
+            interceptPos = ballPos + (ballVel * (estInterceptTime < 999 and estInterceptTime or 0))
+        end
+
         local lateralOffset = (interceptPos - goalPos):Dot(goalRight)
+        local interceptDist = (interceptPos - root.Position).Magnitude
+        local isHighShot = (interceptPos.Y - root.Position.Y > 2.2) or (ballPos.Y - root.Position.Y > 2.8)
 
-        local isShotIncoming = (forwardSpeed > 2.5) and (distToGoalPlane > 0) and (timeToGoal > 0 and timeToGoal < 1.9) and (math.abs(lateralOffset) <= 24)
-        local isHighShot = (interceptPos.Y - root.Position.Y > 2.8) or (ballPos.Y - root.Position.Y > 3.2)
+        -- SHOT DETECTION:
+        -- 1. Ball moving towards defended net (forwardSpeed > 5 studs/s)
+        -- 2. Ball is still in front of the goal line (distInFrontOfGoal > 1.0)
+        -- 3. Reaction window: ball will arrive within 0.05s - 1.85s
+        -- 4. Intercept point is within net width (+- 24 studs)
+        -- 5. Within dive reach distance
+        local maxTimeToGoal = isHighShot and 1.85 or 1.55
+        local reachAllowance = isHighShot and 7 or 5
+        local isShotIncoming = (forwardSpeed > 5.0)
+            and (distInFrontOfGoal > 1.0)
+            and (timeToGoal > 0.05 and timeToGoal < maxTimeToGoal)
+            and (math.abs(lateralOffset) <= 24)
+            and (interceptDist <= (settings.gkDiveReach + reachAllowance))
 
         -- 1. Auto Dive / Save incoming shot
-        if settings.gkAutoDive and isShotIncoming and distToBall <= settings.gkDiveReach then
-            if (now - lastDiveTime) > 1.2 then
+        if settings.gkAutoDive and isShotIncoming then
+            if (now - lastDiveTime) > 1.05 then
                 lastDiveTime = now
                 triggerDive(interceptPos, isHighShot)
                 return
@@ -1463,6 +1550,15 @@ return function(Window, scriptInfo)
     })
 
     GKTab:CreateToggle({
+        Name = "Predict Ball Arc (Parabolic Gravity)",
+        CurrentValue = settings.gkPredictArc,
+        Flag = "Soccer_GKPredictArc",
+        Callback = function(value)
+            settings.gkPredictArc = value
+        end,
+    })
+
+    GKTab:CreateToggle({
         Name = "Auto Jump on High Balls",
         CurrentValue = settings.gkAutoJump,
         Flag = "Soccer_GKAutoJump",
@@ -1605,6 +1701,9 @@ return function(Window, scriptInfo)
 
         restoreStaminaState()
         restoreMovementEnhancements()
+        if HitboxSettingsModule and HitboxSettingsModule.AirReceive and origAirReceiveSize then
+            HitboxSettingsModule.AirReceive.Size = origAirReceiveSize
+        end
         applyFullbright(false)
         clearAllEsp()
 
