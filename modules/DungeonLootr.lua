@@ -623,6 +623,50 @@ local function processSecretRoom(parentRoomIdx, parentRoomCenter)
 end
 
 -- 1. ฟังก์ชันรับบัฟจากแท่น Altar (Blessing Altar)
+local function selectBlessingCardNow()
+    local ok, boostCtrl = pcall(function() return Knit.GetController("BoostSelectionController") end)
+    if not ok or not boostCtrl then return false end
+    if not boostCtrl._active or not boostCtrl._candidates or #boostCtrl._candidates == 0 then return false end
+
+    local pickIndex = 1
+    local priority = State.BlessingPriority or "Damage (ATK)"
+    for idx, c in ipairs(boostCtrl._candidates) do
+        local t = (c.Title or ""):lower()
+        local d = (c.Description or ""):lower()
+        local id = (c.Id or ""):lower()
+        if priority == "Damage (ATK)" then
+            if t:find("attack") or t:find("damage") or t:find("crit") or t:find("flowstate") or t:find("cooldown") or id:find("cd") or id:find("atk") or id:find("crit") or d:find("damage") or d:find("attack") then
+                pickIndex = idx
+                break
+            end
+        elseif priority == "Defense / Health" then
+            if t:find("health") or t:find("defense") or t:find("armor") or t:find("bloodlust") or id:find("hp") or id:find("def") or d:find("health") or d:find("shield") then
+                pickIndex = idx
+                break
+            end
+        elseif priority == "Speed / Haste" then
+            if t:find("speed") or t:find("haste") or t:find("fleetfoot") or id:find("move") or id:find("speed") or d:find("speed") then
+                pickIndex = idx
+                break
+            end
+        end
+    end
+
+    -- ปรับตัวแปร controller ให้พร้อมคลิกทันที (Bypass UI delay)
+    boostCtrl._ready = true
+    boostCtrl._selecting = false
+    pcall(function() boostCtrl:_OnCardClicked(pickIndex) end)
+
+    -- Fallback: เผื่อ controller ไม่ตอบสนอง เรียกผ่าน Knit Service โดยตรง
+    task.defer(function()
+        task.wait(0.6)
+        if boostCtrl and boostCtrl._active then
+            pcall(function() Knit.GetService("DungeonBuffService"):SelectBuff(pickIndex) end)
+        end
+    end)
+    return true
+end
+
 local function processAltarBlessing(roomIdx, roomCenter)
     if not State.AutoBlessing then return end
     local gen = getGeneratedFolder()
@@ -631,25 +675,38 @@ local function processAltarBlessing(roomIdx, roomCenter)
     local hrp = char and getHRP(char)
     if not hrp then return end
 
+    -- ถ้าหน้าต่างเลือกการ์ดค้างอยู่แล้ว ให้กดเลือกทันที!
+    if selectBlessingCardNow() then
+        task.wait(0.5)
+        return
+    end
+
     -- ค้นหาแท่น Altar ในห้องนี้
     local targetAltarPrompt = nil
     local targetAltarPos = nil
     for _, desc in ipairs(gen:GetDescendants()) do
-        if desc.Name == "Altar" and desc:IsA("Model") then
-            local pos = desc:GetPivot().Position
-            local inThisRoom = false
-            if roomCenter and (pos - roomCenter.cf.Position).Magnitude < 130 then
-                inThisRoom = true
-            elseif not roomCenter then
-                inThisRoom = true
-            end
+        local n = desc.Name:lower()
+        if n:find("altar") or n:find("blessing") then
+            local pos = desc:IsA("Model") and desc:GetPivot().Position or (desc:IsA("BasePart") and desc.Position)
+            if pos then
+                local inThisRoom = false
+                if roomCenter and (pos - roomCenter.cf.Position).Magnitude < 140 then
+                    inThisRoom = true
+                elseif not roomCenter then
+                    inThisRoom = true
+                end
 
-            if inThisRoom then
-                local prompt = desc:FindFirstChildWhichIsA("ProximityPrompt", true)
-                if prompt and prompt.Enabled and prompt.ActionText:find("Blessing") then
-                    targetAltarPrompt = prompt
-                    targetAltarPos = pos
-                    break
+                if inThisRoom then
+                    local prompt = desc:FindFirstChildWhichIsA("ProximityPrompt", true)
+                    if prompt and prompt.Enabled then
+                        local act = (prompt.ActionText or ""):lower()
+                        local obj = (prompt.ObjectText or ""):lower()
+                        if act:find("blessing") or act:find("receive") or obj:find("altar") or obj:find("blessing") then
+                            targetAltarPrompt = prompt
+                            targetAltarPos = pos
+                            break
+                        end
+                    end
                 end
             end
         end
@@ -662,34 +719,49 @@ local function processAltarBlessing(roomIdx, roomCenter)
         safeWarp(CFrame.new(standPos, targetAltarPos))
         task.wait(0.2)
         pcall(function() fireproximityprompt(targetAltarPrompt) end)
-        task.wait(0.4)
 
-        -- เลือกการ์ด Blessing อัตโนมัติ (ผ่าน BoostSelectionController หรือ Remote)
-        pcall(function()
-            local boostCtrl = Knit.GetController("BoostSelectionController")
-            if boostCtrl and boostCtrl._candidates and #boostCtrl._candidates > 0 then
-                local pickIndex = 1
-                local priority = State.BlessingPriority or "Damage (ATK)"
-                for idx, c in ipairs(boostCtrl._candidates) do
-                    local t = (c.Title or ""):lower()
-                    local d = (c.Description or ""):lower()
-                    if priority == "Damage (ATK)" and (t:find("attack") or t:find("damage") or t:find("crit") or d:find("damage") or d:find("attack")) then
-                        pickIndex = idx break
-                    elseif priority == "Defense / Health" and (t:find("health") or t:find("defense") or t:find("armor") or d:find("health") or d:find("shield")) then
-                        pickIndex = idx break
-                    elseif priority == "Speed / Haste" and (t:find("speed") or t:find("haste") or t:find("cooldown") or d:find("speed")) then
-                        pickIndex = idx break
+        -- รอจนกว่าหน้าต่าง Boost Selection จะปรากฏ (รอสูงสุด 2.5 วินาที)
+        local waited = 0
+        local chosen = false
+        while waited < 2.5 and State.AutoBlessing do
+            task.wait(0.25)
+            waited += 0.25
+            if selectBlessingCardNow() then
+                chosen = true
+                break
+            end
+        end
+        task.wait(0.3)
+    end
+end
+
+local blessingConn = nil
+local function setAutoBlessing(enabled)
+    State.AutoBlessing = enabled
+    if enabled then
+        if blessingConn then pcall(function() blessingConn:Disconnect() end) end
+        local ok, dbs = pcall(function() return Knit.GetService("DungeonBuffService") end)
+        if ok and dbs and dbs.BuffSelection then
+            blessingConn = dbs.BuffSelection:Connect(function()
+                if not State.AutoBlessing then return end
+                task.wait(0.4)
+                selectBlessingCardNow()
+            end)
+        end
+        -- Fallback loop: ตรวจสอบหน้าต่าง BoostSelectionController ตลอดเวลา
+        task.spawn(function()
+            while State.AutoBlessing and running do
+                pcall(function()
+                    local boostCtrl = Knit.GetController("BoostSelectionController")
+                    if boostCtrl and boostCtrl._active and boostCtrl._candidates and #boostCtrl._candidates > 0 then
+                        selectBlessingCardNow()
                     end
-                end
-
-                if boostCtrl._OnCardClicked then
-                    boostCtrl:_OnCardClicked(pickIndex)
-                else
-                    Knit.GetService("DungeonBuffService"):SelectBuff(pickIndex)
-                end
+                end)
+                task.wait(0.5)
             end
         end)
-        task.wait(0.3)
+    else
+        if blessingConn then pcall(function() blessingConn:Disconnect() end) blessingConn = nil end
     end
 end
 
@@ -2059,7 +2131,7 @@ end
         Name = "Auto Blessing (รับบัฟแท่น Altar)",
         CurrentValue = State.AutoBlessing,
         Flag = "DungeonLootrAutoBlessing",
-        Callback = function(v) State.AutoBlessing = v end
+        Callback = function(v) setAutoBlessing(v) end
     })
     MainTab:CreateDropdown({
         Name = "Blessing Priority (สายบัฟที่เลือก)",
@@ -2401,6 +2473,7 @@ end
         setAutoBest(false)
         setAutoCreateChallenger(false)
         setAutoCreateBossRush(false)
+        setAutoBlessing(false)
     end
 
     if scriptInfo and type(scriptInfo.registerCleanup) == "function" then
