@@ -117,7 +117,10 @@ return function(Window, scriptInfo)
         if not model or not model:IsA("Model") then return nil end
         return model:FindFirstChild("HumanoidRootPart")
             or model:FindFirstChild("UpperTorso")
+            or model:FindFirstChild("LowerTorso")
+            or model:FindFirstChild("Head")
             or model.PrimaryPart
+            or model:FindFirstChildWhichIsA("BasePart")
     end
 
     local function getHumanoid(model)
@@ -149,7 +152,7 @@ return function(Window, scriptInfo)
 
         local bbPart = inst
         if isModel then
-            bbPart = inst:FindFirstChild("Head") or inst:FindFirstChild("HumanoidRootPart") or inst.PrimaryPart
+            bbPart = inst:FindFirstChild("Head") or inst:FindFirstChild("HumanoidRootPart") or inst:FindFirstChild("UpperTorso") or inst:FindFirstChild("LowerTorso") or inst.PrimaryPart
             if not bbPart then
                 bbPart = inst:FindFirstChildWhichIsA("BasePart")
             end
@@ -249,23 +252,67 @@ return function(Window, scriptInfo)
         return false
     end
 
+    local function getActiveCharacters()
+        local chars = {}
+        local seen = {}
+
+        -- 1. All connected players (regardless of where character is parented)
+        for _, p in ipairs(Players:GetPlayers()) do
+            local c = p.Character
+            if c and c:IsA("Model") and not seen[c] then
+                seen[c] = true
+                table.insert(chars, {model = c, player = p, isPlayer = true})
+            end
+        end
+
+        -- 2. Models directly in workspace (includes player models if not registered to Player.Character)
+        for _, model in ipairs(workspace:GetChildren()) do
+            if model:IsA("Model") and not seen[model] then
+                local hum = model:FindFirstChildOfClass("Humanoid")
+                if hum then
+                    seen[model] = true
+                    local p = Players:GetPlayerFromCharacter(model)
+                    table.insert(chars, {model = model, player = p, isPlayer = (p ~= nil)})
+                end
+            end
+        end
+
+        -- 3. AI Zones in Project Delta (workspace.AiZones)
+        local aiZones = workspace:FindFirstChild("AiZones")
+        if aiZones then
+            for _, desc in ipairs(aiZones:GetDescendants()) do
+                if desc:IsA("Model") and not seen[desc] then
+                    local hum = desc:FindFirstChildOfClass("Humanoid")
+                    if hum then
+                        seen[desc] = true
+                        table.insert(chars, {model = desc, player = nil, isPlayer = false})
+                    end
+                end
+            end
+        end
+
+        return chars
+    end
+
     local function updateESP()
         local myChar = LP.Character
         local myRoot = getRoot(myChar)
         local myPos = myRoot and myRoot.Position or Vector3.zero
 
         -- 1. Character ESP (Players & AI)
-        for _, model in ipairs(workspace:GetChildren()) do
-            if model:IsA("Model") and model ~= myChar then
+        local characters = getActiveCharacters()
+        for _, charInfo in ipairs(characters) do
+            local model = charInfo.model
+            if model ~= myChar then
                 local hum = model:FindFirstChildOfClass("Humanoid")
                 local root = getRoot(model)
 
                 if hum and root and hum.Health > 0 then
-                    local player = Players:GetPlayerFromCharacter(model)
+                    local player = charInfo.player
                     local dist = (root.Position - myPos).Magnitude
 
                     if dist <= settings.espMaxDistance then
-                        local isPlayer = (player ~= nil)
+                        local isPlayer = charInfo.isPlayer
                         local shouldShow = (isPlayer and settings.espPlayers) or (not isPlayer and settings.espAI)
 
                         if shouldShow then
@@ -274,7 +321,7 @@ return function(Window, scriptInfo)
                             local color = isPlayer and Color3.fromRGB(70, 160, 255) or Color3.fromRGB(255, 90, 90)
 
                             if not espObjects[model] then
-                                local nameText = isPlayer and (player.DisplayName .. " (@" .. player.Name .. ")") or model.Name
+                                local nameText = isPlayer and (player and (player.DisplayName .. " (@" .. player.Name .. ")") or model.Name) or model.Name
                                 createESP(model, color, nameText, true, tag)
                             end
 
@@ -383,13 +430,15 @@ return function(Window, scriptInfo)
         local bestTarget = nil
         local bestDist = settings.aimbotFOV
 
-        for _, model in ipairs(workspace:GetChildren()) do
-            if model:IsA("Model") and model ~= myChar then
+        local characters = getActiveCharacters()
+        for _, charInfo in ipairs(characters) do
+            local model = charInfo.model
+            if model ~= myChar then
                 local hum = model:FindFirstChildOfClass("Humanoid")
                 local targetPart = model:FindFirstChild(settings.aimbotTarget) or getRoot(model)
 
                 if hum and hum.Health > 0 and targetPart then
-                    local player = Players:GetPlayerFromCharacter(model)
+                    local player = charInfo.player
                     local isEnemy = true
 
                     if settings.aimbotTeamCheck and player then
