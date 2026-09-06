@@ -706,7 +706,9 @@ local function loadScriptModule(scriptInfo)
     setModuleStatus("Loading " .. scriptInfo.name .. "...")
 
     local ok, result = pcall(function()
-        local raw = game:HttpGet(scriptInfo.moduleUrl)
+        local sep = scriptInfo.moduleUrl:find("%?") and "&" or "?"
+        local fetchUrl = scriptInfo.moduleUrl .. sep .. "_cb=" .. tostring(os.time()) .. "_" .. tostring(math.random(1000, 9999))
+        local raw = game:HttpGet(fetchUrl)
         assert(type(raw) == "string" and #raw > 10,
             "HttpGet empty ?????????? URL: " .. scriptInfo.moduleUrl)
 
