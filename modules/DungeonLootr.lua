@@ -11,12 +11,22 @@ return function(Window, scriptInfo)
 
     local running = true
 
-local AttackRemote = nil
-local SkillRemote = nil
-pcall(function() AttackRemote = ReplicatedStorage:WaitForChild("Player"):WaitForChild("Remotes"):WaitForChild("Inputs"):WaitForChild("Attack") end)
-if not AttackRemote then pcall(function() AttackRemote = ReplicatedStorage.Player.Remotes.Inputs.Attack end) end
-pcall(function() SkillRemote = ReplicatedStorage:WaitForChild("Player"):WaitForChild("Remotes"):WaitForChild("Inputs"):WaitForChild("Skill") end)
-if not SkillRemote then pcall(function() SkillRemote = ReplicatedStorage.Player.Remotes.Inputs.Skill end) end
+    local AttackRemote = nil
+    local SkillRemote = nil
+
+    local function getAttackRemote()
+        if AttackRemote and AttackRemote.Parent then return AttackRemote end
+        pcall(function() AttackRemote = ReplicatedStorage.Player.Remotes.Inputs.Attack end)
+        return AttackRemote
+    end
+
+    local function getSkillRemote()
+        if SkillRemote and SkillRemote.Parent then return SkillRemote end
+        pcall(function() SkillRemote = ReplicatedStorage.Player.Remotes.Inputs.Skill end)
+        return SkillRemote
+    end
+    AttackRemote = getAttackRemote()
+    SkillRemote = getSkillRemote()
 
 local State = {
     AutoFarm = false,
@@ -237,10 +247,11 @@ local function setNoclip(state)
 end
 
 local function fireM1(dir)
-    if not AttackRemote then return end
+    local r = getAttackRemote()
+    if not r then return end
     local d = dir or Vector3.new(0,-1,0)
-    pcall(function() AttackRemote:FireServer(d) end)
-    if d~=Vector3.new(0,0,0) then pcall(function() AttackRemote:FireServer(Vector3.new(0,0,0)) end) end
+    pcall(function() r:FireServer(d) end)
+    if d~=Vector3.new(0,0,0) then pcall(function() r:FireServer(Vector3.new(0,0,0)) end) end
 end
 
 local function getPositionForMode(targetHRP, mode, dist)
@@ -295,16 +306,20 @@ local hoverCF=nil
 local function startHover(cf)
     if hoverConn then pcall(function() hoverConn:Disconnect() end) hoverConn=nil end
     hoverCF=cf
+    if not isValidChar() then return end
     local char=LocalPlayer.Character if not char then return end
     local hrp=char:FindFirstChild("HumanoidRootPart") if not hrp then return end
     hoverConn=RunService.Heartbeat:Connect(function()
         if not State.AutoFarm then return end
         if lockConn then return end -- ถ้าล็อคมอนอยู่ให้ lock คุมแทน
-        if not hrp.Parent then return end
-        hrp.CFrame=hoverCF
-        hrp.AssemblyLinearVelocity=Vector3.new(0,0,0)
-        hrp.AssemblyAngularVelocity=Vector3.new(0,0,0)
-        hrp.Velocity=Vector3.new(0,0,0)
+        if not isValidChar() then stopHover() return end
+        local c=LocalPlayer.Character
+        local h=c and c:FindFirstChild("HumanoidRootPart")
+        if not h then return end
+        h.CFrame=hoverCF
+        h.AssemblyLinearVelocity=Vector3.new(0,0,0)
+        h.AssemblyAngularVelocity=Vector3.new(0,0,0)
+        h.Velocity=Vector3.new(0,0,0)
     end)
 end
 local function stopHover()
@@ -314,6 +329,7 @@ local function startLock(targetHRP)
     curTargetHRP=targetHRP
     stopHover()
     if lockConn then pcall(function() lockConn:Disconnect() end) lockConn=nil end
+    if not isValidChar() then return end
     local char=LocalPlayer.Character if not char then return end
     local hrp=char:FindFirstChild("HumanoidRootPart") local hum=char:FindFirstChildOfClass("Humanoid") if not hrp or not hum then return end
     pcall(function() hrp.Anchored=false hum.PlatformStand=false hum:ChangeState(Enum.HumanoidStateType.Physics) end)
@@ -323,33 +339,43 @@ local function startLock(targetHRP)
     local hb, rs
     hb=RunService.Heartbeat:Connect(function()
         if not State.AutoFarm or not State.CFrameLock then return end
-        if not curTargetHRP or not curTargetHRP.Parent or not hrp.Parent then return end
+        if not isValidChar() then stopLock() return end
+        local c=LocalPlayer.Character
+        local h=c and c:FindFirstChild("HumanoidRootPart")
+        if not curTargetHRP or not curTargetHRP.Parent or not h then return end
         local _, cf = getPositionForMode(curTargetHRP, State.Position, State.Distance)
         hoverCF=cf
-        hrp.CFrame=cf
-        hrp.AssemblyLinearVelocity=Vector3.new(0,0,0)
-        hrp.AssemblyAngularVelocity=Vector3.new(0,0,0)
-        hrp.Velocity=Vector3.new(0,0,0)
+        h.CFrame=cf
+        h.AssemblyLinearVelocity=Vector3.new(0,0,0)
+        h.AssemblyAngularVelocity=Vector3.new(0,0,0)
+        h.Velocity=Vector3.new(0,0,0)
     end)
     rs=RunService.Stepped:Connect(function()
         if not State.AutoFarm or not State.CFrameLock then return end
-        if not curTargetHRP or not curTargetHRP.Parent or not hrp.Parent then return end
-        hrp.AssemblyLinearVelocity=Vector3.new(0,0,0)
-        hrp.Velocity=Vector3.new(0,0,0)
+        if not isValidChar() then stopLock() return end
+        local c=LocalPlayer.Character
+        local h=c and c:FindFirstChild("HumanoidRootPart")
+        if not curTargetHRP or not curTargetHRP.Parent or not h then return end
+        h.AssemblyLinearVelocity=Vector3.new(0,0,0)
+        h.Velocity=Vector3.new(0,0,0)
     end)
     lockConn={Disconnect=function() pcall(function() hb:Disconnect() rs:Disconnect() end) end}
 end
 local function stopLock()
-    local char=LocalPlayer.Character
     local lastCF=nil
-    if char then local hrp=char:FindFirstChild("HumanoidRootPart") if hrp then lastCF=hrp.CFrame end end
+    if isValidChar() then
+        local char=LocalPlayer.Character
+        local hrp=char and char:FindFirstChild("HumanoidRootPart")
+        if hrp then lastCF=hrp.CFrame end
+    end
     curTargetHRP=nil
     if lockConn then pcall(function() lockConn:Disconnect() end) lockConn=nil end
-    if lastCF then startHover(lastCF) end
+    if lastCF and isValidChar() then startHover(lastCF) end
 end
 
 local function safeWarp(cf)
     stopHover()
+    if not isValidChar() then return end
     local char=LocalPlayer.Character if not char then return end
     local hrp=char:FindFirstChild("HumanoidRootPart") if not hrp then return end
     hoverCF=cf
@@ -357,11 +383,16 @@ local function safeWarp(cf)
     -- ลอยนิ่งต่อ 0.6วิ กันร่วงช่วงสลับมอน แล้วค้าง hover ไว้จนกว่าจะ lock มอนตัวถัดไป
     local t0=tick()
     while tick()-t0 < 0.6 do
-        if not State.AutoFarm then break end
-        pcall(function() hrp.CFrame=hoverCF hrp.AssemblyLinearVelocity=Vector3.new(0,0,0) hrp.Velocity=Vector3.new(0,0,0) end)
+        if not State.AutoFarm or not isValidChar() then break end
+        local c=LocalPlayer.Character
+        local h=c and c:FindFirstChild("HumanoidRootPart")
+        if not h then break end
+        pcall(function() h.CFrame=hoverCF h.AssemblyLinearVelocity=Vector3.new(0,0,0) h.Velocity=Vector3.new(0,0,0) end)
         RunService.Heartbeat:Wait()
     end
-    startHover(hoverCF)
+    if isValidChar() then
+        startHover(hoverCF)
+    end
 end
 
 local function isInRoom(m, roomIdx, roomCenter)
@@ -522,6 +553,7 @@ local function startFarm()
                     startLock(targetHRP)
                     local hum = boss:FindFirstChildOfClass("Humanoid")
                     while State.AutoFarm and boss.Parent do
+                        if not isValidChar() then break end
                         local dead = false
                         if hum then dead = hum.Health <= 0
                         else local hp = boss:GetAttribute("HealthOverride") if hp ~= nil then dead = hp <= 0 end end
@@ -530,6 +562,7 @@ local function startFarm()
                         fireM1(dir) task.wait(State.AttackDelay)
                     end
                     stopLock()
+                    if not isValidChar() then task.wait(1) continue end
                     task.wait(0.5)
                     -- บอสตายแล้ว ตรวจสอบว่าไม่มีมอนเหลือแล้ว จึงเก็บกล่องทั้งหมด
                     if #getMonsters() == 0 then
@@ -569,6 +602,7 @@ local function startFarm()
                         startLock(targetHRP)
                         local hum = target:FindFirstChildOfClass("Humanoid")
                         while State.AutoFarm and target.Parent do
+                            if not isValidChar() then break end
                             local dead = false
                             if hum then dead = hum.Health <= 0
                             else local hp = target:GetAttribute("HealthOverride") if hp ~= nil then dead = hp <= 0 end end
@@ -580,9 +614,13 @@ local function startFarm()
                     else
                         local _, cf = getPositionForMode(targetHRP, State.Position, State.Distance)
                         pcall(function() hrp.CFrame = cf end)
-                        for i=1,4 do if not State.AutoFarm then break end fireM1() task.wait(State.AttackDelay) end
+                        for i=1,4 do
+                            if not State.AutoFarm or not isValidChar() then break end
+                            fireM1() task.wait(State.AttackDelay)
+                        end
                     end
                 end
+                if not isValidChar() then task.wait(1) continue end
                 task.wait(0.2)
                 continue -- ตีมอนตัวถัดไปในห้องนี้ทันที ห้ามไปทำอย่างอื่น
             end
@@ -685,22 +723,26 @@ end
 
 local skillThread=nil
 local function startSkill()
-    if skillThread then State.AutoSkill=false task.wait(0.2) end
+    if skillThread then return end
     State.AutoSkill=true
     skillThread=task.spawn(function()
-        while State.AutoSkill do
-            if (not running) then break end
-            if isValidChar() and SkillRemote then
-                if State.Skill1 then pcall(function() SkillRemote:FireServer(1, "tap", Vector3.new(0,0,0)) end) end
-                task.wait(0.15) if not State.AutoSkill then break end
-                if State.Skill2 then pcall(function() SkillRemote:FireServer(2, "tap", Vector3.new(0,0,0)) end) end
-                task.wait(0.15) if not State.AutoSkill then break end
-                if State.Skill3 then pcall(function() SkillRemote:FireServer(3, "tap", Vector3.new(0,0,0)) end) end
-                task.wait(0.15) if not State.AutoSkill then break end
-                if State.Skill4 then pcall(function() SkillRemote:FireServer(4, "tap", Vector3.new(0,0,0)) end) end
-                task.wait(0.15)
+        while State.AutoSkill and running do
+            if not isValidChar() then
+                task.wait(1)
+            else
+                local remote = getSkillRemote()
+                if remote then
+                    if State.Skill1 and isValidChar() then pcall(function() remote:FireServer(1, "tap", Vector3.new(0,0,0)) end) end
+                    task.wait(0.15) if not State.AutoSkill or not isValidChar() then task.wait(0.5) continue end
+                    if State.Skill2 and isValidChar() then pcall(function() remote:FireServer(2, "tap", Vector3.new(0,0,0)) end) end
+                    task.wait(0.15) if not State.AutoSkill or not isValidChar() then task.wait(0.5) continue end
+                    if State.Skill3 and isValidChar() then pcall(function() remote:FireServer(3, "tap", Vector3.new(0,0,0)) end) end
+                    task.wait(0.15) if not State.AutoSkill or not isValidChar() then task.wait(0.5) continue end
+                    if State.Skill4 and isValidChar() then pcall(function() remote:FireServer(4, "tap", Vector3.new(0,0,0)) end) end
+                    task.wait(0.15)
+                end
+                task.wait(0.6)
             end
-            task.wait(0.6)
         end
         skillThread=nil
     end)
@@ -1395,8 +1437,9 @@ end
             local root = (type(gethui) == "function" and gethui()) or CoreGui
             container = root:FindFirstChild("RavenDungeonLootrESP")
             if not container or not container.Parent then
-                container = Instance.new("Folder")
+                container = Instance.new("ScreenGui")
                 container.Name = "RavenDungeonLootrESP"
+                container.ResetOnSpawn = false
                 container.Parent = root
             end
         end)
@@ -1405,8 +1448,9 @@ end
                 local pgui = LocalPlayer:FindFirstChildOfClass("PlayerGui") or CoreGui
                 container = pgui:FindFirstChild("RavenDungeonLootrESP")
                 if not container or not container.Parent then
-                    container = Instance.new("Folder")
+                    container = Instance.new("ScreenGui")
                     container.Name = "RavenDungeonLootrESP"
+                    container.ResetOnSpawn = false
                     container.Parent = pgui
                 end
             end)
@@ -1934,8 +1978,20 @@ end
     -- =================================================================
     --   LIFECYCLE & CLEANUP
     -- =================================================================
+    local charAddedConn = nil
+    charAddedConn = LocalPlayer.CharacterAdded:Connect(function(newChar)
+        if not running then return end
+        stopLock()
+        stopHover()
+        task.defer(function()
+            newChar:WaitForChild("HumanoidRootPart", 5)
+            newChar:WaitForChild("Humanoid", 5)
+        end)
+    end)
+
     local function stopAll()
         running = false
+        if charAddedConn then pcall(function() charAddedConn:Disconnect() end) charAddedConn = nil end
         State.AutoFarm = false
         State.AutoSkill = false
         State.AutoCreateDungeon = false
