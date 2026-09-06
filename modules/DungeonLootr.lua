@@ -43,6 +43,8 @@ local State = {
     Skill4 = true,
     SkipChest = false,
     AutoLootChests = true,
+    AutoUnlockSecretRooms = true,
+    AutoLootSecretChests = true,
     AutoPotion = false,
     PotionHealthPercent = 60,
     AutoRefillPotion = false,
@@ -485,6 +487,136 @@ local function collectRoomChests(roomIdx, roomCenter)
     end
 end
 
+-- ระบบปลดล็อคห้องลับ (Secret / Locked Rooms) และเก็บกล่องลับ
+-- ตรวจสอบเงื่อนไขอย่างเคร่งครัด:
+-- 1. ต้องมีกุญแจสำหรับห้องนั้น (Prompt.Enabled == true) ถ้าไม่มีกุญแจจะข้ามทันทีเพื่อไม่ให้ติดค้าง
+-- 2. เคลียร์มอนสเตอร์/Mimic ที่อยู่ในห้องลับให้หมดก่อน (ถ้ามี)
+-- 3. กล่องต้องปลดล็อคแล้ว (ไม่มี Chest_Lock หรือ Prompt.Enabled == true) จึงจะเก็บ
+local function processSecretRoom(parentRoomIdx, parentRoomCenter)
+    if not State.AutoUnlockSecretRooms and not State.AutoLootSecretChests then return end
+    local gen = getGeneratedFolder()
+    if not gen then return end
+    local char = LocalPlayer.Character
+    local hrp = char and getHRP(char)
+    if not hrp then return end
+
+    -- ค้นหาห้องลับที่เป็นห้องลูกของห้องปัจจุบัน (ParentRoomIndex ตรงกัน หรืออยู่ใกล้ห้องนี้)
+    for _, ch in ipairs(gen:GetChildren()) do
+        if ch.Name:match("^Locked_") then
+            local pIdx = ch:GetAttribute("ParentRoomIndex")
+            local isMatching = false
+            if parentRoomIdx and pIdx == parentRoomIdx then
+                isMatching = true
+            elseif parentRoomCenter then
+                local roomPivot = ch:GetPivot()
+                if (roomPivot.Position - parentRoomCenter.cf.Position).Magnitude < 140 then
+                    isMatching = true
+                end
+            end
+
+            if isMatching then
+                -- 1. ตรวจสอบสวิตช์/แท่นไขกุญแจ (KeyModel)
+                local km = ch:FindFirstChild("KeyModel", true)
+                local keyPrompt = km and km:FindFirstChildOfClass("ProximityPrompt")
+
+                -- ถ้าประตูลับยังไม่เปิด (มี keyPrompt อยู่)
+                if keyPrompt and State.AutoUnlockSecretRooms then
+                    -- เช็คเงื่อนไขสำคัญ: ผู้เล่นต้องมีกุญแจตรงตามที่กำหนด (Prompt.Enabled == true)
+                    -- หากไม่มีกุญแจ (Enabled == false) ให้ข้ามห้องลับนี้ทันที ไม่ติดค้าง!
+                    if keyPrompt.Enabled then
+                        local kmPivot = km:GetPivot()
+                        safeWarp(CFrame.new(kmPivot.Position + Vector3.new(0, 2, 3), kmPivot.Position))
+                        task.wait(0.2)
+                        pcall(function() fireproximityprompt(keyPrompt) end)
+                        task.wait(0.5)
+                        -- รอเปิดประตูสักครู่
+                        local waitOpen = 0
+                        while waitOpen < 2 and keyPrompt.Enabled do
+                            task.wait(0.2) waitOpen += 0.2
+                        end
+                    end
+                end
+
+                -- 2. ตรวจสอบมอนสเตอร์ / Mimic ภายในห้องลับนี้
+                -- หากมีมอนสเตอร์สปอนออกมา ต้องกำจัดให้หมด 100% ก่อนถึงจะเก็บกล่องได้
+                local roomPivot = ch:GetPivot()
+                local secretMobs = {}
+                for _, m in ipairs(getMonsters()) do
+                    local mHrp = getHRP(m)
+                    if mHrp and (mHrp.Position - roomPivot.Position).Magnitude < 70 then
+                        table.insert(secretMobs, m)
+                    end
+                end
+
+                if #secretMobs > 0 and State.AutoFarm then
+                    for _, mob in ipairs(secretMobs) do
+                        if not State.AutoFarm or not isValidChar() then break end
+                        local targetHRP = getHRP(mob)
+                        if targetHRP and mob.Parent then
+                            if State.CFrameLock then
+                                startLock(targetHRP)
+                                local hum = mob:FindFirstChildOfClass("Humanoid")
+                                while State.AutoFarm and mob.Parent do
+                                    if not isValidChar() then break end
+                                    local dead = false
+                                    if hum then dead = hum.Health <= 0
+                                    else local hp = mob:GetAttribute("HealthOverride") if hp ~= nil then dead = hp <= 0 end end
+                                    if dead then break end
+                                    local dir = State.Position=="Above" and Vector3.new(0,-1,0) or State.Position=="Below" and Vector3.new(0,1,0) or Vector3.new(0,0,-1)
+                                    fireM1(dir) task.wait(State.AttackDelay)
+                                end
+                                stopLock()
+                            else
+                                local _, cf = getPositionForMode(targetHRP, State.Position, State.Distance)
+                                pcall(function() hrp.CFrame = cf end)
+                                for i=1,4 do
+                                    if not State.AutoFarm or not isValidChar() then break end
+                                    fireM1() task.wait(State.AttackDelay)
+                                end
+                            end
+                            task.wait(0.2)
+                        end
+                    end
+                end
+
+                -- 3. เก็บกล่องในห้องลับ (ถ้ามอนสเตอร์ในห้องลับตายหมดแล้ว และกล่องปลดล็อคแล้ว)
+                if State.AutoLootSecretChests then
+                    -- เช็คอีกครั้งว่าไม่มีมอนในห้องลับหลงเหลืออยู่
+                    local remainingMobs = 0
+                    for _, m in ipairs(getMonsters()) do
+                        local mHrp = getHRP(m)
+                        if mHrp and (mHrp.Position - roomPivot.Position).Magnitude < 70 then
+                            remainingMobs += 1
+                        end
+                    end
+
+                    if remainingMobs == 0 then
+                        for _, c in ipairs(gen:GetChildren()) do
+                            if c.Name:match("^DungeonChest_") then
+                                local cPos = c:GetPivot().Position
+                                if (cPos - roomPivot.Position).Magnitude < 70 then
+                                    local hasLock = c:FindFirstChild("Chest_Lock") ~= nil
+                                    local prompt = c:FindFirstChildWhichIsA("ProximityPrompt", true)
+                                    -- กล่องต้องปลดล็อคแล้ว (ไม่มี Chest_Lock และ Prompt.Enabled == true)
+                                    if not hasLock and prompt and prompt.Enabled then
+                                        stopLock()
+                                        stopHover()
+                                        local standPos = cPos + Vector3.new(0, 2, 3)
+                                        safeWarp(CFrame.new(standPos, cPos))
+                                        task.wait(0.2)
+                                        pcall(function() fireproximityprompt(prompt) end)
+                                        task.wait(0.35)
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
 local farmThread=nil
 -- ใหม่: เคลียร์ครบทุกห้องสปอนก่อน Boss จะเกิด (ห้ามข้าม / ห้ามรอเวฟมั่ว)
 local farmThread=nil
@@ -657,6 +789,8 @@ local function startFarm()
             -- เคลียร์มอนหมดห้องแน่นอนแล้ว 100% จึงเก็บกล่องของห้องนี้
             if not hasMobsInRoom(curIdx, curCenter) then
                 collectRoomChests(curIdx, curCenter)
+                -- ตรวจสอบและปลดล็อคห้องลับ (ถ้ามีกุญแจ) พร้อมจัดการมอนสเตอร์และเก็บกล่องลับ
+                processSecretRoom(curIdx, curCenter)
             end
             markCleared(curIdx)
 
@@ -1603,7 +1737,9 @@ end
                                 createEsp(obj, "chest", "[CHEST] " .. obj.Name, Color3.fromRGB(255, 215, 0), function(chestModel, dist)
                                     local rIdx = chestModel:GetAttribute("RoomIndex")
                                     local roomStr = rIdx and (" (R" .. tostring(rIdx) .. ")") or ""
-                                    return string.format("[CHEST] %s%s [%dm]", chestModel.Name, roomStr, dist)
+                                    local hasLock = chestModel:FindFirstChild("Chest_Lock") ~= nil
+                                    local statusStr = hasLock and " [🔒LOCKED]" or " [OPEN]"
+                                    return string.format("[CHEST%s] %s%s [%dm]", statusStr, chestModel.Name, roomStr, dist)
                                 end)
                             end
                         end
@@ -1712,6 +1848,18 @@ end
         CurrentValue = State.AutoLootChests,
         Flag = "DungeonLootrAutoLootChests",
         Callback = function(v) State.AutoLootChests = v end
+    })
+    MainTab:CreateToggle({
+        Name = "Auto Unlock Secret Rooms (เปิดห้องลับถ้ามีกุญแจ)",
+        CurrentValue = State.AutoUnlockSecretRooms,
+        Flag = "DungeonLootrAutoUnlockSecretRooms",
+        Callback = function(v) State.AutoUnlockSecretRooms = v end
+    })
+    MainTab:CreateToggle({
+        Name = "Auto Loot Secret Chests (เก็บกล่องห้องลับ)",
+        CurrentValue = State.AutoLootSecretChests,
+        Flag = "DungeonLootrAutoLootSecretChests",
+        Callback = function(v) State.AutoLootSecretChests = v end
     })
     MainTab:CreateToggle({
         Name = "Skip Chest",
