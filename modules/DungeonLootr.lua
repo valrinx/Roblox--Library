@@ -1,4 +1,4 @@
--- VoltScriptZ | Dungeon Lootr | RAVEN HUB Module (v3.1.0)
+-- VoltScriptZ | Dungeon Lootr | RAVEN HUB Module (v3.2.0)
 -- Converted to RAVEN HUB (MacLib Adapter)
 -- PlaceIds: 132285059959516, 135245842886361 | GameIds: 9656201728, 8410525651
 
@@ -68,7 +68,11 @@ local State = {
     BlessingPriority = "Damage (ATK)",
     AutoSummonSpecialBoss = true,
     AutoExtractEndless = false,
-    EndlessExtractDepth = 15
+    EndlessExtractDepth = 15,
+    AutoSellGear = false,
+    SellMaxRarity = "Rare",
+    AutoClaimRewards = false,
+    StreamerMode = false
 }
 
 local function getGeneratedFolder()
@@ -1808,6 +1812,271 @@ end
         end)
         return successCount, count
     end
+
+    -- =================================================================
+    --   AUTO STAT UPGRADES
+    -- =================================================================
+    local STAT_NAME_MAP = {
+        ["Strength (STR)"] = "STR",
+        ["Dexterity (DEX)"] = "DEX",
+        ["Intelligence (INT)"] = "INT",
+        ["Vitality (VIT)"] = "VIT"
+    }
+
+    local function upgradeStatsNow()
+        pcall(function()
+            local statService = Knit.GetService("StatService")
+            if not statService then return end
+
+            local pd = Knit.Registry:Get("PlayerData")
+            local statPoints = pd and pd.Data and (pd.Data.StatPoints or pd.Data.AvailableStatPoints or pd.Data.Points) or 0
+            if statPoints <= 0 then return end
+
+            if State.StatMode == "Game Recommended (Auto)" then
+                if statService.AutoAllocate then
+                    statService:AutoAllocate():await()
+                end
+            else
+                local target = STAT_NAME_MAP[State.StatTarget] or "STR"
+                if statService.AllocatePoints then
+                    statService:AllocatePoints({ [target] = statPoints }):await()
+                elseif statService.AllocatePoint then
+                    for _ = 1, math.min(statPoints, 20) do
+                        statService:AllocatePoint(target):await()
+                        task.wait(0.05)
+                    end
+                end
+            end
+        end)
+    end
+
+    local autoStatsConn = nil
+    local function setAutoStats(enabled)
+        State.AutoStats = enabled
+        if enabled then
+            if autoStatsConn then pcall(function() task.cancel(autoStatsConn) end) end
+            autoStatsConn = task.spawn(function()
+                while State.AutoStats and running do
+                    upgradeStatsNow()
+                    task.wait(5)
+                end
+            end)
+        else
+            if autoStatsConn then pcall(function() task.cancel(autoStatsConn) end) autoStatsConn = nil end
+        end
+    end
+
+    -- =================================================================
+    --   AUTO SELL GEAR & AUTO CLAIM REWARDS & STREAMER MODE
+    -- =================================================================
+    local RARITY_RANK = {
+        ["Common"] = 1,
+        ["Uncommon"] = 2,
+        ["Rare"] = 3,
+        ["Epic"] = 4,
+        ["Legendary"] = 5,
+        ["Mythic"] = 6,
+        ["Celestial"] = 7,
+        ["Exotic"] = 8
+    }
+
+    local function sellGearNow()
+        local maxRank = RARITY_RANK[State.SellMaxRarity] or 3
+        local soldCount = 0
+        pcall(function()
+            local pd = Knit.Registry:Get("PlayerData")
+            local eqInv = pd and pd.Data and pd.Data.EquipmentInventory
+            if not eqInv then return end
+
+            local guidsToSell = {}
+            for _, item in pairs(eqInv) do
+                if type(item) == "table" and item.GUID and not item.Locked and not item.Equipped then
+                    local r = item.Rarity or "Common"
+                    local rank = RARITY_RANK[r] or 1
+                    if rank <= maxRank then
+                        table.insert(guidsToSell, item.GUID)
+                    end
+                end
+            end
+
+            if #guidsToSell > 0 then
+                soldCount = #guidsToSell
+                local shopService = Knit.GetService("ShopService")
+                if shopService and shopService.SellEquipment then
+                    shopService:SellEquipment(guidsToSell):await()
+                end
+            end
+        end)
+        return soldCount
+    end
+
+    local autoSellConn = nil
+    local function setAutoSellGear(enabled)
+        State.AutoSellGear = enabled
+        if enabled then
+            if autoSellConn then pcall(function() task.cancel(autoSellConn) end) end
+            autoSellConn = task.spawn(function()
+                while State.AutoSellGear and running do
+                    sellGearNow()
+                    task.wait(6)
+                end
+            end)
+        else
+            if autoSellConn then pcall(function() task.cancel(autoSellConn) end) autoSellConn = nil end
+        end
+    end
+
+    local function claimAllRewardsNow()
+        local claimedAny = 0
+        -- 1. Achievements ClaimAll
+        pcall(function()
+            local achService = Knit.GetService("AchievementService")
+            if achService and achService.ClaimAll then
+                local ok, res = pcall(function() return achService:ClaimAll():await() end)
+                if ok and res then claimedAny += 1 end
+            end
+        end)
+
+        -- 2. Quests (Daily & Weekly)
+        pcall(function()
+            local questService = Knit.GetService("QuestService")
+            local pd = Knit.Registry:Get("PlayerData")
+            local quests = pd and pd.Data and (pd.Data.Quests or pd.Data.QuestData)
+            if quests and questService and questService.ClaimQuest then
+                for groupName, groupData in pairs(quests) do
+                    local activeList = groupData and groupData.Active
+                    if type(activeList) == "table" then
+                        for idx, q in ipairs(activeList) do
+                            if q and q.Completed and not q.Claimed then
+                                pcall(function()
+                                    questService:ClaimQuest(groupName, idx):await()
+                                    claimedAny += 1
+                                end)
+                                task.wait(0.2)
+                            end
+                        end
+                    end
+                end
+            end
+        end)
+
+        -- 3. Battlepass Quests & Rewards
+        pcall(function()
+            local bpService = Knit.GetService("BattlepassService")
+            local pd = Knit.Registry:Get("PlayerData")
+            local bpData = pd and pd.Data and pd.Data.Battlepass
+            if bpService and bpData then
+                -- Quests
+                if bpData.Quests and bpService.ClaimQuest then
+                    for idx, q in pairs(bpData.Quests) do
+                        if q and q.Completed and not q.Claimed then
+                            pcall(function()
+                                bpService:ClaimQuest(idx):await()
+                                claimedAny += 1
+                            end)
+                            task.wait(0.2)
+                        end
+                    end
+                end
+                -- Tiers Free/Premium
+                local curTier = bpData.Tier or 0
+                local claimedFree = bpData.ClaimedFree or {}
+                if bpService.ClaimReward then
+                    for t = 1, curTier do
+                        if not claimedFree[t] and not claimedFree[tostring(t)] then
+                            pcall(function()
+                                bpService:ClaimReward(t, "Free"):await()
+                                claimedAny += 1
+                            end)
+                            task.wait(0.2)
+                        end
+                    end
+                end
+            end
+        end)
+
+        -- 4. Inventory Index Rewards
+        pcall(function()
+            local invService = Knit.GetService("InventoryService")
+            if invService and invService.ClaimAllIndexRewards then
+                pcall(function() invService:ClaimAllIndexRewards():await() end)
+            end
+        end)
+
+        return claimedAny
+    end
+
+    local autoClaimConn = nil
+    local function setAutoClaimRewards(enabled)
+        State.AutoClaimRewards = enabled
+        if enabled then
+            if autoClaimConn then pcall(function() task.cancel(autoClaimConn) end) end
+            autoClaimConn = task.spawn(function()
+                while State.AutoClaimRewards and running do
+                    claimAllRewardsNow()
+                    task.wait(15)
+                end
+            end)
+        else
+            if autoClaimConn then pcall(function() task.cancel(autoClaimConn) end) autoClaimConn = nil end
+        end
+    end
+
+    local streamerConn = nil
+    local function setStreamerMode(enabled)
+        State.StreamerMode = enabled
+        if enabled then
+            local function hideTags(targetChar)
+                pcall(function()
+                    if not targetChar then return end
+                    for _, d in ipairs(targetChar:GetDescendants()) do
+                        if d:IsA("BillboardGui") then
+                            d.Enabled = false
+                        end
+                    end
+                end)
+            end
+
+            hideTags(LocalPlayer.Character)
+            if streamerConn then pcall(function() streamerConn:Disconnect() end) end
+            streamerConn = RunService.RenderStepped:Connect(function()
+                if not State.StreamerMode then return end
+                pcall(function()
+                    local char = LocalPlayer.Character
+                    if char then
+                        local head = char:FindFirstChild("Head")
+                        if head then
+                            for _, bg in ipairs(head:GetChildren()) do
+                                if bg:IsA("BillboardGui") then bg.Enabled = false end
+                            end
+                        end
+                    end
+                    -- ซ่อนชื่อใน Leaderboard UI หรือ PlayerGui
+                    local pgui = LocalPlayer:FindFirstChild("PlayerGui")
+                    if pgui then
+                        for _, lbl in ipairs(pgui:GetDescendants()) do
+                            if lbl:IsA("TextLabel") and lbl.Visible and lbl.Text:find(LocalPlayer.Name) then
+                                lbl.Text = lbl.Text:gsub(LocalPlayer.Name, "Anonymous")
+                            end
+                            if lbl:IsA("TextLabel") and lbl.Visible and lbl.Text:find(LocalPlayer.DisplayName) then
+                                lbl.Text = lbl.Text:gsub(LocalPlayer.DisplayName, "Anonymous")
+                            end
+                        end
+                    end
+                end)
+            end)
+        else
+            if streamerConn then pcall(function() streamerConn:Disconnect() end) streamerConn = nil end
+            pcall(function()
+                local char = LocalPlayer.Character
+                if char then
+                    for _, d in ipairs(char:GetDescendants()) do
+                        if d:IsA("BillboardGui") then d.Enabled = true end
+                    end
+                end
+            end)
+        end
+    end
     local CoreGui = game:GetService("CoreGui")
     local function getEspContainer()
         local container = nil
@@ -2373,6 +2642,66 @@ end
         Callback = function(v) setAutoEquipBest(v) end
     })
 
+    MiscTab:CreateSection("Auto Sell Gear")
+    MiscTab:CreateToggle({
+        Name = "Auto Sell Gear (ขายอุปกรณ์ขยะ)",
+        CurrentValue = State.AutoSellGear,
+        Flag = "DungeonLootrAutoSellGear",
+        Callback = function(v) setAutoSellGear(v) end
+    })
+    MiscTab:CreateDropdown({
+        Name = "Max Sell Rarity (ขายสูงสุดไม่เกินระดับ)",
+        Options = {"Common", "Uncommon", "Rare", "Epic"},
+        CurrentOption = {State.SellMaxRarity},
+        MultipleOptions = false,
+        Flag = "DungeonLootrSellMaxRarity",
+        Callback = function(v)
+            State.SellMaxRarity = type(v) == "table" and v[1] or v
+        end
+    })
+    MiscTab:CreateButton({
+        Name = "Sell Now (กดขายทันที 1 ครั้ง)",
+        Callback = function()
+            local count = sellGearNow()
+            pcall(function()
+                StarterGui:SetCore("SendNotification", {
+                    Title = "Auto Sell",
+                    Text = string.format("ขายไอเทมสำเร็จ %d ชิ้น!", count),
+                    Duration = 4
+                })
+            end)
+        end
+    })
+
+    MiscTab:CreateSection("Auto Claim Rewards")
+    MiscTab:CreateToggle({
+        Name = "Auto Claim Rewards (รับเควสต์ / ความสำเร็จ)",
+        CurrentValue = State.AutoClaimRewards,
+        Flag = "DungeonLootrAutoClaimRewards",
+        Callback = function(v) setAutoClaimRewards(v) end
+    })
+    MiscTab:CreateButton({
+        Name = "Claim All Now (กดรับรางวัลทั้งหมดทันที)",
+        Callback = function()
+            local count = claimAllRewardsNow()
+            pcall(function()
+                StarterGui:SetCore("SendNotification", {
+                    Title = "Claim Rewards",
+                    Text = string.format("กดรับรางวัลสำเร็จ %d รายการ!", count),
+                    Duration = 4
+                })
+            end)
+        end
+    })
+
+    MiscTab:CreateSection("Streamer Mode")
+    MiscTab:CreateToggle({
+        Name = "Streamer Mode (ซ่อนชื่อ / ป้องกันการแบน)",
+        CurrentValue = State.StreamerMode,
+        Flag = "DungeonLootrStreamerMode",
+        Callback = function(v) setStreamerMode(v) end
+    })
+
     MiscTab:CreateSection("Game Codes")
     MiscTab:CreateButton({
         Name = "Redeem All Active Codes (แลกโค้ดทั้งหมด)",
@@ -2474,6 +2803,9 @@ end
         setAutoCreateChallenger(false)
         setAutoCreateBossRush(false)
         setAutoBlessing(false)
+        setAutoSellGear(false)
+        setAutoClaimRewards(false)
+        setStreamerMode(false)
     end
 
     if scriptInfo and type(scriptInfo.registerCleanup) == "function" then
