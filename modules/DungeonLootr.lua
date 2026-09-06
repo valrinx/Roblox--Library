@@ -1,4 +1,4 @@
--- VoltScriptZ | Dungeon Lootr | RAVEN HUB Module (v3.4.1)
+-- VoltScriptZ | Dungeon Lootr | RAVEN HUB Module (v3.5.0)
 -- Converted to RAVEN HUB (MacLib Adapter)
 -- PlaceIds: 132285059959516, 135245842886361 | GameIds: 9656201728, 8410525651
 
@@ -89,7 +89,11 @@ local State = {
     DodgeMode = "Dash & Evade",
     DodgeRadius = 24,
     DodgeDuration = 1.4,
-    DodgeDistance = 32
+    DodgeDistance = 32,
+    WebhookEnabled = false,
+    WebhookUrl = "",
+    WebhookOnVictory = true,
+    WebhookOnDefeat = true
 }
 
 local function getGeneratedFolder()
@@ -2503,6 +2507,353 @@ end
             end)
         end
     end
+
+    -- =================================================================
+    --   DISCORD WEBHOOK SYSTEM (Post-Dungeon Stats & Loot by Rarity)
+    -- =================================================================
+    local dungeonStartTime = os.time()
+    local dungeonStartLoot = {}
+    local dungeonStartMaterials = {}
+    local lastDungeonReportTick = 0
+
+    local function getHttpRequestFunc()
+        if type(syn) == "table" and type(syn.request) == "function" then
+            return syn.request
+        elseif type(http) == "table" and type(http.request) == "function" then
+            return http.request
+        elseif type(http_request) == "function" then
+            return http_request
+        elseif type(request) == "function" then
+            return request
+        end
+        return nil
+    end
+
+    local function snapshotLootBag()
+        local snapshot = {}
+        pcall(function()
+            local pd = Knit.Registry:Get("PlayerData")
+            local lootBag = pd and pd.Data and pd.Data.LootBag
+            if type(lootBag) == "table" then
+                for k, v in pairs(lootBag) do
+                    if type(v) == "table" and v.GUID then
+                        snapshot[v.GUID] = {
+                            ItemId = v.ItemId or "Unknown",
+                            Rarity = v.Rarity or "Common",
+                            LevelReq = v.LevelReq or 0,
+                            Slot = v.Slot or "Equipment"
+                        }
+                    end
+                end
+            end
+        end)
+        return snapshot
+    end
+
+    dungeonStartLoot = snapshotLootBag()
+
+    local RARITY_EMOJIS = {
+        ["Common"] = "⚪",
+        ["Uncommon"] = "🟢",
+        ["Rare"] = "🔵",
+        ["Epic"] = "🟣",
+        ["Legendary"] = "🟡",
+        ["Mythic"] = "🔴",
+        ["Celestial"] = "🌟",
+        ["Impossible"] = "✨",
+        ["Exotic"] = "🔮",
+        ["Admin"] = "👑",
+        ["Owner"] = "⚡"
+    }
+
+    local RARITY_ORDER = {
+        "Owner", "Admin", "Exotic", "Impossible", "Celestial", "Mythic", "Legendary", "Epic", "Rare", "Uncommon", "Common"
+    }
+
+    local function sendDiscordWebhook(summaryData)
+        local url = tostring(State.WebhookUrl or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        if url == "" or not (url:find("^https://discord%.com/api/webhooks/") or url:find("^https://discordapp%.com/api/webhooks/")) then
+            return false, "Invalid or empty Webhook URL"
+        end
+
+        local req = getHttpRequestFunc()
+        if not req then
+            return false, "Executor does not support HTTP requests"
+        end
+
+        local isVictory = summaryData.isVictory == true
+        local isDefeat = not isVictory
+        if isVictory and not State.WebhookOnVictory then return false, "Victory webhook disabled" end
+        if isDefeat and not State.WebhookOnDefeat then return false, "Defeat webhook disabled" end
+
+        local embedColor = isVictory and 0x2ecc71 or 0xe74c3c
+        local outcomeTitle = isVictory and "🏆 DUNGEON VICTORY (ชนะ)" or "💀 DUNGEON DEFEAT (แพ้)"
+
+        -- Format Loot by Rarity
+        local lootFields = {}
+        local itemsByRarity = {}
+        local totalLootCount = 0
+
+        if type(summaryData.lootItems) == "table" then
+            for _, item in ipairs(summaryData.lootItems) do
+                local r = item.Rarity or "Common"
+                if not itemsByRarity[r] then itemsByRarity[r] = {} end
+                local name = tostring(item.DisplayName or item.ItemId or "Item")
+                itemsByRarity[r][name] = (itemsByRarity[r][name] or 0) + 1
+                totalLootCount += 1
+            end
+        end
+
+        local lootDescriptionParts = {}
+        for _, r in ipairs(RARITY_ORDER) do
+            local items = itemsByRarity[r]
+            if items and next(items) then
+                local emoji = RARITY_EMOJIS[r] or "📦"
+                local itemLines = {}
+                for name, count in pairs(items) do
+                    if count > 1 then
+                        table.insert(itemLines, string.format("• **%s** x%d", name, count))
+                    else
+                        table.insert(itemLines, string.format("• **%s**", name))
+                    end
+                end
+                table.insert(lootDescriptionParts, string.format("%s **%s**:\n%s", emoji, r, table.concat(itemLines, "\n")))
+            end
+        end
+
+        -- Check any rarities not in RARITY_ORDER
+        for r, items in pairs(itemsByRarity) do
+            if not table.find(RARITY_ORDER, r) and items and next(items) then
+                local itemLines = {}
+                for name, count in pairs(items) do
+                    table.insert(itemLines, string.format("• **%s** x%d", name, count))
+                end
+                table.insert(lootDescriptionParts, string.format("📦 **%s**:\n%s", r, table.concat(itemLines, "\n")))
+            end
+        end
+
+        local lootText = (#lootDescriptionParts > 0) and table.concat(lootDescriptionParts, "\n\n") or "ไม่มีไอเทมใหม่ในรอบนี้"
+        if #lootText > 1024 then
+            lootText = lootText:sub(1, 1020) .. "..."
+        end
+
+        local durationStr = string.format("%dm %02ds", math.floor(summaryData.duration / 60), summaryData.duration % 60)
+
+        local fields = {
+            {
+                name = "📊 ผลการลงดัน (Outcome)",
+                value = outcomeTitle,
+                inline = true
+            },
+            {
+                name = "⏱️ ระยะเวลาที่ใช้ (Time Taken)",
+                value = durationStr,
+                inline = true
+            },
+            {
+                name = "🗺️ ดันเจี้ยน (Dungeon)",
+                value = string.format("%s (%s)", tostring(summaryData.dungeonName or "Unknown"), tostring(summaryData.difficulty or "Normal")),
+                inline = true
+            }
+        }
+
+        if summaryData.mobsKilled and summaryData.mobsKilled > 0 then
+            table.insert(fields, {
+                name = "⚔️ กำจัดมอนสเตอร์ (Mobs Killed)",
+                value = tostring(summaryData.mobsKilled),
+                inline = true
+            })
+        end
+
+        if summaryData.starsEarned and summaryData.starsEarned > 0 then
+            table.insert(fields, {
+                name = "⭐ ดาวที่ได้รับ (Stars)",
+                value = tostring(summaryData.starsEarned),
+                inline = true
+            })
+        end
+
+        table.insert(fields, {
+            name = string.format("🎒 ไอเทมที่ได้รับ (%d ชิ้น แยกตามระดับแรร์)", totalLootCount),
+            value = lootText,
+            inline = false
+        })
+
+        local payload = {
+            username = "RAVEN HUB | Dungeon Lootr",
+            avatar_url = "https://i.imgur.com/8QfXk9R.png",
+            embeds = {
+                {
+                    title = string.format("Dungeon Summary - %s", tostring(summaryData.dungeonName or "Dungeon")),
+                    description = string.format("รายงานสรุปผลการลงดันเจี้ยนของ `%s`", LocalPlayer.Name),
+                    color = embedColor,
+                    fields = fields,
+                    footer = {
+                        text = string.format("RAVEN HUB v3.5.0 • %s", os.date("%Y-%m-%d %H:%M:%S"))
+                    }
+                }
+            }
+        }
+
+        local jsonBody = game:GetService("HttpService"):JSONEncode(payload)
+        local success, res = pcall(function()
+            return req({
+                Url = url,
+                Method = "POST",
+                Headers = {
+                    ["Content-Type"] = "application/json"
+                },
+                Body = jsonBody
+            })
+        end)
+
+        return success, res
+    end
+
+    local function triggerPostDungeonWebhook(completionInfo)
+        if not State.WebhookEnabled then return end
+        if tick() - lastDungeonReportTick < 8 then return end
+        lastDungeonReportTick = tick()
+
+        local duration = math.max(1, os.time() - dungeonStartTime)
+        local status = completionInfo and completionInfo.Status or "Completed"
+        local isVictory = status ~= "Failed" and status ~= "Defeat"
+        local dungeonName = completionInfo and completionInfo.DungeonName or "Dungeon"
+        local difficulty = completionInfo and completionInfo.Difficulty or "Normal"
+        local mobsKilled = completionInfo and (completionInfo.MobsKilled or completionInfo.TotalMobsKilled) or 0
+
+        -- Collect newly acquired loot from LootBag
+        local currentLoot = snapshotLootBag()
+        local newItems = {}
+        for guid, item in pairs(currentLoot) do
+            if not dungeonStartLoot[guid] then
+                -- Lookup DisplayName if EquipmentTemplates is available
+                local displayName = item.ItemId
+                pcall(function()
+                    local eqMod = ReplicatedStorage:FindFirstChild("GameInfo") and ReplicatedStorage.GameInfo:FindFirstChild("EquipmentTemplates")
+                    if eqMod then
+                        local eqTemplates = require(eqMod)
+                        if eqTemplates and eqTemplates.GetTemplate then
+                            local t = eqTemplates.GetTemplate(item.ItemId)
+                            if t and t.DisplayName then
+                                displayName = t.DisplayName
+                            end
+                        end
+                    end
+                end)
+                table.insert(newItems, {
+                    ItemId = item.ItemId,
+                    DisplayName = displayName,
+                    Rarity = item.Rarity or "Common",
+                    LevelReq = item.LevelReq or 0
+                })
+            end
+        end
+
+        -- Check Stars Earned from HUD or PlayerData
+        local starsEarned = 0
+        pcall(function()
+            local pgui = LocalPlayer:FindFirstChild("PlayerGui")
+            local comp = pgui and pgui:FindFirstChild("Main", true) and pgui.Main:FindFirstChild("HUD", true) and pgui.Main.HUD:FindFirstChild("Dungeon_Container", true) and pgui.Main.HUD.Dungeon_Container:FindFirstChild("Completion_Info", true)
+            if comp and comp.Visible then
+                local rew = comp:FindFirstChild("Rewards", true) or comp:FindFirstChild("Content", true)
+                if rew then
+                    for _, d in ipairs(rew:GetDescendants()) do
+                        if d:IsA("TextLabel") and d.Name == "Amount" and d.Parent and d.Parent:FindFirstChild("ItemName") and d.Parent.ItemName.Text:find("Star") then
+                            local s = d.Text:match("%d+")
+                            if s then starsEarned = tonumber(s) or 0 end
+                        end
+                    end
+                end
+            end
+        end)
+
+        task.spawn(function()
+            sendDiscordWebhook({
+                isVictory = isVictory,
+                duration = duration,
+                dungeonName = dungeonName,
+                difficulty = difficulty,
+                mobsKilled = mobsKilled,
+                starsEarned = starsEarned,
+                lootItems = newItems
+            })
+        end)
+
+        -- Reset snapshot for subsequent run
+        dungeonStartTime = os.time()
+        dungeonStartLoot = currentLoot
+    end
+
+    -- Hook DungeonRunService & DungeonService completion events
+    task.spawn(function()
+        pcall(function()
+            local drService = Knit.GetService("DungeonRunService")
+            if drService and drService.DungeonComplete then
+                drService.DungeonComplete:Connect(function(data)
+                    triggerPostDungeonWebhook(data)
+                end)
+            end
+        end)
+        pcall(function()
+            local dService = Knit.GetService("DungeonService")
+            if dService and dService.DungeonComplete then
+                dService.DungeonComplete:Connect(function(data)
+                    triggerPostDungeonWebhook(data)
+                end)
+            end
+        end)
+    end)
+
+    -- Fallback HUD completion watcher (in case of Challenge / Raid or missed signals)
+    task.spawn(function()
+        local wasCompVisible = false
+        while running do
+            pcall(function()
+                local pgui = LocalPlayer:FindFirstChild("PlayerGui")
+                local comp = pgui and pgui:FindFirstChild("Main", true) and pgui.Main:FindFirstChild("HUD", true) and pgui.Main.HUD:FindFirstChild("Dungeon_Container", true) and pgui.Main.HUD.Dungeon_Container:FindFirstChild("Completion_Info", true)
+                if comp and comp.Visible and not wasCompVisible then
+                    wasCompVisible = true
+                    -- Extract dungeon info from UI labels
+                    local dName = "Dungeon"
+                    local diff = "Normal"
+                    local mobs = 0
+                    local status = "Completed"
+                    pcall(function()
+                        local title = comp:FindFirstChild("Header", true) and comp.Header:FindFirstChild("Title", true)
+                        if title and title.Text then
+                            if title.Text:upper():find("FAILED") or title.Text:upper():find("DEFEAT") then
+                                status = "Failed"
+                            end
+                        end
+                        local lvl = comp:FindFirstChild("Level", true)
+                        if lvl then
+                            local lt = lvl:FindFirstChild("Title")
+                            if lt and lt.Text then dName = lt.Text end
+                            local ld = lvl:FindFirstChild("Difficulty", true) and lvl.Difficulty:FindFirstChild("Dificulty", true)
+                            if ld and ld.Text then diff = ld.Text end
+                        end
+                        local stats = comp:FindFirstChild("Stats", true)
+                        if stats then
+                            local mk = stats:FindFirstChild("Stat_MobsKilled", true) and stats.Stat_MobsKilled:FindFirstChild("StatValue", true)
+                            if mk and mk.Text then mobs = tonumber(mk.Text) or 0 end
+                        end
+                    end)
+
+                    triggerPostDungeonWebhook({
+                        Status = status,
+                        DungeonName = dName,
+                        Difficulty = diff,
+                        MobsKilled = mobs
+                    })
+                elseif comp and not comp.Visible then
+                    wasCompVisible = false
+                end
+            end)
+            task.wait(1.5)
+        end
+    end)
+
     local CoreGui = game:GetService("CoreGui")
     local function getEspContainer()
         local container = nil
@@ -3288,6 +3639,103 @@ end
             end)
         end
     })
+
+    -- =================================================================
+    --   SETTINGS TAB (Webhook Controls)
+    -- =================================================================
+    local SettingsTab = nil
+    if Window and type(Window.GetTab) == "function" then
+        SettingsTab = Window:GetTab("Settings")
+    end
+    if not SettingsTab and Window and type(Window.CreateTab) == "function" then
+        SettingsTab = Window:CreateTab("Settings", "settings")
+    end
+
+    if SettingsTab then
+        SettingsTab:CreateSection("Discord Webhook (แจ้งเตือนหลังจบดัน)")
+
+        SettingsTab:CreateInput({
+            Name = "Webhook URL",
+            CurrentValue = State.WebhookUrl,
+            PlaceholderText = "https://discord.com/api/webhooks/...",
+            Flag = "DungeonLootrWebhookUrl",
+            Callback = function(v)
+                State.WebhookUrl = tostring(v or "")
+            end
+        })
+
+        SettingsTab:CreateToggle({
+            Name = "Enable Webhook (เปิดแจ้งเตือน Discord)",
+            CurrentValue = State.WebhookEnabled,
+            Flag = "DungeonLootrWebhookEnabled",
+            Callback = function(v)
+                State.WebhookEnabled = v
+            end
+        })
+
+        SettingsTab:CreateToggle({
+            Name = "Send on Victory (ส่งเมื่อชนะ / ชนะบอส)",
+            CurrentValue = State.WebhookOnVictory,
+            Flag = "DungeonLootrWebhookOnVictory",
+            Callback = function(v)
+                State.WebhookOnVictory = v
+            end
+        })
+
+        SettingsTab:CreateToggle({
+            Name = "Send on Defeat (ส่งเมื่อแพ้)",
+            CurrentValue = State.WebhookOnDefeat,
+            Flag = "DungeonLootrWebhookOnDefeat",
+            Callback = function(v)
+                State.WebhookOnDefeat = v
+            end
+        })
+
+        SettingsTab:CreateButton({
+            Name = "Test Webhook (ทดสอบส่งข้อความ)",
+            Callback = function()
+                task.spawn(function()
+                    pcall(function()
+                        StarterGui:SetCore("SendNotification", {
+                            Title = "Discord Webhook",
+                            Text = "กำลังส่งข้อความทดสอบ...",
+                            Duration = 3
+                        })
+                    end)
+
+                    local ok, err = sendDiscordWebhook({
+                        isVictory = true,
+                        duration = 142,
+                        dungeonName = "Bandits Den (Test)",
+                        difficulty = "Easy",
+                        mobsKilled = 48,
+                        starsEarned = 15,
+                        lootItems = {
+                            { ItemId = "RunicPlate", DisplayName = "Runic Plate", Rarity = "Legendary" },
+                            { ItemId = "GlacialPlate", DisplayName = "Glacial Plate", Rarity = "Epic" },
+                            { ItemId = "IronSword", DisplayName = "Iron Sword", Rarity = "Common" }
+                        }
+                    })
+
+                    pcall(function()
+                        if ok then
+                            StarterGui:SetCore("SendNotification", {
+                                Title = "Discord Webhook",
+                                Text = "ส่งข้อความสำเร็จ! ตรวจสอบที่ Discord",
+                                Duration = 5
+                            })
+                        else
+                            StarterGui:SetCore("SendNotification", {
+                                Title = "Discord Webhook Error",
+                                Text = "เกิดข้อผิดพลาด: " .. tostring(err or "Failed"),
+                                Duration = 6
+                            })
+                        end
+                    end)
+                end)
+            end
+        })
+    end
 
     local function applyTabOrder()
         local desired = {"Overview", "Main", "Dungeon", "ESP", "Misc", "Settings"}
