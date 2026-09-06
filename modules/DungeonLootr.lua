@@ -1,4 +1,4 @@
--- VoltScriptZ | Dungeon Lootr | RAVEN HUB Module (v3.2.0)
+-- VoltScriptZ | Dungeon Lootr | RAVEN HUB Module (v3.3.0)
 -- Converted to RAVEN HUB (MacLib Adapter)
 -- PlaceIds: 132285059959516, 135245842886361 | GameIds: 9656201728, 8410525651
 
@@ -72,7 +72,11 @@ local State = {
     AutoSellGear = false,
     SellMaxRarity = "Rare",
     AutoClaimRewards = false,
-    StreamerMode = false
+    StreamerMode = false,
+    AutoReroll = false,
+    RerollSpinType = "Normal",
+    RerollTargetSlot = 1,
+    RerollTargetClasses = {}
 }
 
 local function getGeneratedFolder()
@@ -2009,6 +2013,182 @@ end
         return claimedAny
     end
 
+    -- =================================================================
+    --   AUTO REROLL (Class Reroll / Spins)
+    -- =================================================================
+    local autoRerollThread = nil
+    local spinStatusLabel = nil
+    local slotInfoLabel = nil
+
+    local function getSummoningService()
+        local svc = nil
+        pcall(function() svc = Knit.GetService("SummoningService") end)
+        return svc
+    end
+
+    local function fetchSpinCounts()
+        local normalSpins = 0
+        local luckySpins = 0
+        pcall(function()
+            local svc = getSummoningService()
+            if svc then
+                local res = svc:GetSpinCounts()
+                local data = (typeof(res) == "table" and res.await) and select(2, res:await()) or res
+                if type(data) == "table" then
+                    normalSpins = tonumber(data.Normal) or 0
+                    luckySpins = tonumber(data.Lucky) or 0
+                end
+            end
+        end)
+        return normalSpins, luckySpins
+    end
+
+    local function fetchSlotData()
+        local slots = {}
+        local activeIdx = 1
+        pcall(function()
+            local svc = getSummoningService()
+            if svc then
+                local res = svc:GetSlotData()
+                local data = (typeof(res) == "table" and res.await) and select(2, res:await()) or res
+                if type(data) == "table" then
+                    slots = data.Slots or {}
+                    activeIdx = tonumber(data.ActiveIndex) or 1
+                end
+            end
+        end)
+        return slots, activeIdx
+    end
+
+    local function updateRerollLabels()
+        local nSpins, lSpins = fetchSpinCounts()
+        local slots, activeIdx = fetchSlotData()
+
+        if spinStatusLabel and type(spinStatusLabel.Set) == "function" then
+            pcall(function()
+                spinStatusLabel:Set(string.format("Normal Spins: %d | Lucky Spins: %d", nSpins, lSpins))
+            end)
+        end
+
+        if slotInfoLabel and type(slotInfoLabel.Set) == "function" then
+            pcall(function()
+                local targetSlot = tonumber(State.RerollTargetSlot) or 1
+                local targetClass = slots[targetSlot] or "None"
+                local activeTag = (targetSlot == activeIdx) and " (Active)" or ""
+                slotInfoLabel:Set(string.format("Slot %d: [%s]%s", targetSlot, tostring(targetClass), activeTag))
+            end)
+        end
+    end
+
+    local function setAutoReroll(enabled)
+        State.AutoReroll = enabled
+        if enabled then
+            if autoRerollThread then pcall(function() task.cancel(autoRerollThread) end) end
+            autoRerollThread = task.spawn(function()
+                pcall(function()
+                    StarterGui:SetCore("SendNotification", {
+                        Title = "Auto Reroll",
+                        Text = "เริ่มการ Auto Reroll...",
+                        Duration = 3
+                    })
+                end)
+
+                local svc = getSummoningService()
+                if not svc then
+                    warn("[Dungeon Lootr] SummoningService not found")
+                    State.AutoReroll = false
+                    return
+                end
+
+                -- 1. ตรวจสอบ Slot ก่อนเริ่มสุ่ม ถ้ายังไม่ได้เลือก Slot เป้าหมาย ให้สลับไปที่ Slot นั้นก่อน
+                local targetSlot = tonumber(State.RerollTargetSlot) or 1
+                local slots, activeIdx = fetchSlotData()
+                if activeIdx ~= targetSlot then
+                    pcall(function()
+                        svc:SwitchSlot(targetSlot):await()
+                    end)
+                    task.wait(0.5)
+                end
+
+                updateRerollLabels()
+
+                -- ตรวจสอบคลาสปัจจุบันใน Slot ถ้าตรงกับที่เลือกไว้แล้วให้หยุดทันที
+                local currentClass = slots[targetSlot]
+                local targetClassMap = {}
+                for _, name in ipairs(State.RerollTargetClasses or {}) do
+                    targetClassMap[name] = true
+                end
+
+                if currentClass and targetClassMap[currentClass] then
+                    pcall(function()
+                        StarterGui:SetCore("SendNotification", {
+                            Title = "Auto Reroll",
+                            Text = string.format("Slot %d มีคลาส %s อยู่แล้ว! หยุดทำงาน", targetSlot, currentClass),
+                            Duration = 5
+                        })
+                    end)
+                    State.AutoReroll = false
+                    return
+                end
+
+                while State.AutoReroll and running do
+                    -- ตรวจสอบจำนวนสปินที่เหลือ
+                    local nSpins, lSpins = fetchSpinCounts()
+                    local spinType = State.RerollSpinType or "Normal"
+                    local available = (spinType == "Lucky") and lSpins or nSpins
+
+                    if available <= 0 then
+                        pcall(function()
+                            StarterGui:SetCore("SendNotification", {
+                                Title = "Auto Reroll",
+                                Text = string.format("%s Spin หมดแล้ว! หยุดทำงาน", spinType),
+                                Duration = 5
+                            })
+                        end)
+                        State.AutoReroll = false
+                        break
+                    end
+
+                    -- สุ่ม Spin
+                    local ok, spinRes = pcall(function()
+                        return svc:Spin(spinType, false):await()
+                    end)
+
+                    local newClass = nil
+                    if ok and type(spinRes) == "table" then
+                        newClass = spinRes.ClassName
+                    end
+
+                    -- ดึง Slot Data ล่าสุดเพื่อยืนยันชื่อคลาส
+                    local updatedSlots = fetchSlotData()
+                    local slotClass = updatedSlots[targetSlot] or newClass
+
+                    updateRerollLabels()
+
+                    -- ตรวจสอบเงื่อนไขการหยุด: ได้คลาสใดคลาสหนึ่งใน targetClassMap หรือไม่
+                    if slotClass and targetClassMap[slotClass] then
+                        pcall(function()
+                            StarterGui:SetCore("SendNotification", {
+                                Title = "Auto Reroll Success!",
+                                Text = string.format("🎉 ได้รับ %s ใน Slot %d แล้ว! หยุดการสุ่ม", slotClass, targetSlot),
+                                Duration = 8
+                            })
+                        end)
+                        State.AutoReroll = false
+                        break
+                    end
+
+                    task.wait(0.35)
+                end
+            end)
+        else
+            if autoRerollThread then
+                pcall(function() task.cancel(autoRerollThread) end)
+                autoRerollThread = nil
+            end
+        end
+    end
+
     local autoClaimConn = nil
     local function setAutoClaimRewards(enabled)
         State.AutoClaimRewards = enabled
@@ -2707,6 +2887,91 @@ end
         end
     })
 
+    -- =================================================================
+    --   MISC TAB: AUTO REROLL (CLASS SPINS)
+    -- =================================================================
+    MiscTab:CreateSection("Auto Reroll (Class Spins)")
+
+    spinStatusLabel = MiscTab:CreateLabel("Normal Spins: 0 | Lucky Spins: 0")
+    slotInfoLabel = MiscTab:CreateLabel("Slot 1: [Loading...]")
+
+    MiscTab:CreateToggle({
+        Name = "Auto Reroll (สุ่มคลาสอัตโนมัติ)",
+        CurrentValue = State.AutoReroll,
+        Flag = "DungeonLootrAutoReroll",
+        Callback = function(v) setAutoReroll(v) end
+    })
+
+    MiscTab:CreateDropdown({
+        Name = "Spin Type (ประเภทการสุ่ม)",
+        Options = {"Normal", "Lucky"},
+        CurrentOption = {State.RerollSpinType},
+        MultipleOptions = false,
+        Flag = "DungeonLootrRerollSpinType",
+        Callback = function(v)
+            State.RerollSpinType = type(v) == "table" and v[1] or v
+            updateRerollLabels()
+        end
+    })
+
+    MiscTab:CreateDropdown({
+        Name = "Target Slot (เลือก Slot ที่จะสุ่ม)",
+        Options = {"Slot 1", "Slot 2", "Slot 3", "Slot 4"},
+        CurrentOption = {"Slot " .. tostring(State.RerollTargetSlot)},
+        MultipleOptions = false,
+        Flag = "DungeonLootrRerollTargetSlot",
+        Callback = function(v)
+            local chosen = type(v) == "table" and v[1] or v
+            local slotNum = tonumber(chosen:match("%d+")) or 1
+            State.RerollTargetSlot = slotNum
+            pcall(function()
+                local svc = getSummoningService()
+                if svc then svc:SwitchSlot(slotNum):await() end
+            end)
+            updateRerollLabels()
+        end
+    })
+
+    local rerollClassList = {
+        "Artemis", "Vacio", "Azure Devil", "Forge Archon", "Demonbane", "Streamline", "Unrestricted",
+        "Wanderer", "Divergent", "Cursed Child", "Oathbreaker",
+        "Shinobi", "Witch Gunner", "Archer", "Kage",
+        "Assassin", "Flame Bastion", "Boxer",
+        "Greatsword", "Bowman", "Ronin",
+        "Sinister Trigger", "Dark Professor", "Cryomancer", "Awakened Devil EX", "Founder", "Cursed King", "Anti Magic", "Jetstream", "Shadow Vagrant", "Honored One", "Dreadlord", "Prisma", "Framebreaker", "Coyote", "Spell Breaker", "Mori"
+    }
+
+    MiscTab:CreateDropdown({
+        Name = "Target Classes (เลือกคลาสที่ต้องการ - หยุดเมื่อได้)",
+        Options = rerollClassList,
+        CurrentOption = State.RerollTargetClasses,
+        MultipleOptions = true,
+        Flag = "DungeonLootrRerollTargetClasses",
+        Callback = function(v)
+            State.RerollTargetClasses = type(v) == "table" and v or {v}
+        end
+    })
+
+    MiscTab:CreateButton({
+        Name = "Refresh Spin & Slot Info (รีเฟรชข้อมูลคลาส)",
+        Callback = function()
+            updateRerollLabels()
+            pcall(function()
+                StarterGui:SetCore("SendNotification", {
+                    Title = "Auto Reroll",
+                    Text = "อัปเดตข้อมูล Spin และ Slot สำเร็จ!",
+                    Duration = 3
+                })
+            end)
+        end
+    })
+
+    -- เรียกอัปเดตข้อมูลตั้งต้น
+    task.defer(function()
+        task.wait(1)
+        updateRerollLabels()
+    end)
+
     MiscTab:CreateSection("Streamer Mode")
     MiscTab:CreateToggle({
         Name = "Streamer Mode (ซ่อนชื่อ / ป้องกันการแบน)",
@@ -2818,6 +3083,7 @@ end
         setAutoBlessing(false)
         setAutoSellGear(false)
         setAutoClaimRewards(false)
+        setAutoReroll(false)
         setStreamerMode(false)
     end
 
