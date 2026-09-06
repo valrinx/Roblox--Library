@@ -183,6 +183,14 @@ local HUB_BUILD = "maclib-5"
 
 local SCRIPTS = {
     {
+        name        = "Infected Lands",
+        description = "Aimbot | Player & Zombie ESP | Ground Loot & Vehicle ESP | FullBright | Instant Prompt",
+        placeIds    = {122789100578830},
+        gameIds     = {8468366390},
+        version     = "v0.1.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/infected_lands.lua",
+    },
+    {
         name        = "Project Delta",
         description = "Aimbot | No Recoil/Shake | Player & Loot ESP | Night Vision | Fast Pickup",
         placeIds    = {7336302630, 7353845952},
