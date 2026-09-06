@@ -1,4 +1,4 @@
--- VoltScriptZ | Dungeon Lootr | RAVEN HUB Module (v3.3.0)
+-- VoltScriptZ | Dungeon Lootr | RAVEN HUB Module (v3.4.0)
 -- Converted to RAVEN HUB (MacLib Adapter)
 -- PlaceIds: 132285059959516, 135245842886361 | GameIds: 9656201728, 8410525651
 
@@ -14,6 +14,7 @@ return function(Window, scriptInfo)
 
     local AttackRemote = nil
     local SkillRemote = nil
+    local DashRemote = nil
 
     local function getAttackRemote()
         if AttackRemote and AttackRemote.Parent then return AttackRemote end
@@ -26,8 +27,15 @@ return function(Window, scriptInfo)
         pcall(function() SkillRemote = ReplicatedStorage.Player.Remotes.Inputs.Skill end)
         return SkillRemote
     end
+
+    local function getDashRemote()
+        if DashRemote and DashRemote.Parent then return DashRemote end
+        pcall(function() DashRemote = ReplicatedStorage.Player.Remotes.Inputs.Dash end)
+        return DashRemote
+    end
     AttackRemote = getAttackRemote()
     SkillRemote = getSkillRemote()
+    DashRemote = getDashRemote()
 
 local State = {
     AutoFarm = false,
@@ -76,7 +84,10 @@ local State = {
     AutoReroll = false,
     RerollSpinType = "Normal",
     RerollTargetSlot = 1,
-    RerollTargetClasses = {}
+    RerollTargetClasses = {},
+    AutoDodge = true,
+    DodgeMode = "Dash & Evade",
+    DodgeRadius = 24
 }
 
 local function getGeneratedFolder()
@@ -2189,6 +2200,191 @@ end
         end
     end
 
+    -- =================================================================
+    --   AUTO DODGE (AoE & Boss Telegraphs) (v3.4.0)
+    -- =================================================================
+    local autoDodgeThread = nil
+    local isDodgingNow = false
+    local lastDodgeTick = 0
+    local dodgeReturnCF = nil
+
+    local function getDangerousAoEs()
+        local list = {}
+        local char = LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return list end
+        local myPos = hrp.Position
+
+        -- 1. Scan Workspace.SpellTelegraphs
+        local st = workspace:FindFirstChild("SpellTelegraphs")
+        if st then
+            for _, ch in ipairs(st:GetChildren()) do
+                local pos = nil
+                if ch:IsA("BasePart") then
+                    pos = ch.Position
+                elseif ch:IsA("Model") then
+                    local p = ch.PrimaryPart or ch:FindFirstChildWhichIsA("BasePart", true)
+                    if p then pos = p.Position end
+                end
+                if pos then
+                    local dist = (pos - myPos).Magnitude
+                    if dist <= (State.DodgeRadius or 24) then
+                        table.insert(list, { source = "SpellTelegraph", name = ch.Name, pos = pos, dist = dist })
+                    end
+                end
+            end
+        end
+
+        -- 2. Scan Workspace.Effects for danger instances
+        local eff = workspace:FindFirstChild("Effects")
+        local dangerousNames = {
+            ["Telegraph_Root"] = true, ["AoE_Telegraph"] = true, ["Wide_Length_Telegraph"] = true,
+            ["Light_Explosion"] = true, ["Fire_Pillar"] = true, ["Lightning_Crash"] = true,
+            ["Gravity_Well"] = true, ["Arrow_Rain"] = true, ["Blackhole"] = true,
+            ["GroundEffect"] = true, ["AD_Slash"] = true, ["Chains"] = true
+        }
+        if eff then
+            for _, ch in ipairs(eff:GetChildren()) do
+                if dangerousNames[ch.Name] or ch.Name:find("Telegraph") or ch.Name:find("Explod") then
+                    local pos = nil
+                    if ch:IsA("BasePart") then
+                        pos = ch.Position
+                    elseif ch:IsA("Model") then
+                        local p = ch.PrimaryPart or ch:FindFirstChildWhichIsA("BasePart", true)
+                        if p then pos = p.Position end
+                    end
+                    if pos then
+                        local dist = (pos - myPos).Magnitude
+                        if dist <= (State.DodgeRadius or 24) then
+                            table.insert(list, { source = "Effect", name = ch.Name, pos = pos, dist = dist })
+                        end
+                    end
+                end
+            end
+        end
+
+        -- 3. Scan Workspace directly for spawned Telegraph / Placed effects
+        for _, ch in ipairs(workspace:GetChildren()) do
+            if dangerousNames[ch.Name] or ch.Name:find("Telegraph") then
+                local pos = nil
+                if ch:IsA("BasePart") then
+                    pos = ch.Position
+                elseif ch:IsA("Model") then
+                    local p = ch.PrimaryPart or ch:FindFirstChildWhichIsA("BasePart", true)
+                    if p then pos = p.Position end
+                end
+                if pos then
+                    local dist = (pos - myPos).Magnitude
+                    if dist <= (State.DodgeRadius or 24) then
+                        table.insert(list, { source = "WorkspaceRoot", name = ch.Name, pos = pos, dist = dist })
+                    end
+                end
+            end
+        end
+
+        return list
+    end
+
+    local function performDodge(dangerPos)
+        if isDodgingNow then return end
+        if tick() - lastDodgeTick < 0.65 then return end
+        lastDodgeTick = tick()
+        isDodgingNow = true
+
+        local char = LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not hrp then isDodgingNow = false return end
+
+        dodgeReturnCF = hrp.CFrame
+
+        -- คำนวณทิศทางการหลบหนีออกจากศูนย์กลางอันตราย
+        local myPos = hrp.Position
+        local awayDir = (myPos - dangerPos)
+        awayDir = Vector3.new(awayDir.X, 0, awayDir.Z)
+        if awayDir.Magnitude < 0.5 then
+            awayDir = hrp.CFrame.LookVector * -1
+            awayDir = Vector3.new(awayDir.X, 0, awayDir.Z)
+        end
+        if awayDir.Magnitude > 0 then
+            awayDir = awayDir.Unit
+        else
+            awayDir = Vector3.new(0, 0, 1)
+        end
+
+        local mode = State.DodgeMode or "Dash & Evade"
+
+        -- 1. เรียก Dash Remote ของเกม
+        pcall(function()
+            local dash = getDashRemote()
+            if dash then
+                dash:FireServer(awayDir)
+            end
+        end)
+
+        -- 2. เคลื่อนย้ายตำแหน่งฉุกเฉิน (Evade)
+        if mode == "Blink (Upwards)" then
+            -- หลบขึ้นด้านบนเหนือรัศมีระเบิด (ปลอดภัย 100% จากการระเบิดบนพื้น)
+            local safeY = hrp.CFrame + Vector3.new(0, 28, 0)
+            pcall(function()
+                hrp.CFrame = safeY
+                hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+            end)
+            task.wait(0.7)
+            if isValidChar() and dodgeReturnCF and State.AutoFarm then
+                pcall(function() hrp.CFrame = dodgeReturnCF end)
+            end
+        elseif mode == "Blink (Backwards)" then
+            -- หลบถอยหลังพ้นรัศมีวง 30 studs
+            local safePos = hrp.CFrame + (awayDir * 28)
+            pcall(function()
+                hrp.CFrame = safePos
+                hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+            end)
+            task.wait(0.7)
+            if isValidChar() and dodgeReturnCF and State.AutoFarm then
+                pcall(function() hrp.CFrame = dodgeReturnCF end)
+            end
+        else
+            -- "Dash & Evade": Dash พร้อมขยับตำแหน่งเลี่ยงรัศมีทันที
+            local safePos = hrp.CFrame + (awayDir * 22)
+            pcall(function()
+                hrp.CFrame = safePos
+                hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+            end)
+            task.wait(0.55)
+            if isValidChar() and dodgeReturnCF and State.AutoFarm then
+                pcall(function() hrp.CFrame = dodgeReturnCF end)
+            end
+        end
+
+        isDodgingNow = false
+    end
+
+    local function setAutoDodge(enabled)
+        State.AutoDodge = enabled
+        if enabled then
+            if autoDodgeThread then pcall(function() task.cancel(autoDodgeThread) end) end
+            autoDodgeThread = task.spawn(function()
+                while State.AutoDodge and running do
+                    if isValidChar() and not isDodgingNow then
+                        local dangers = getDangerousAoEs()
+                        if #dangers > 0 then
+                            -- มีอันตรายใกล้ตัว สั่งหลบทันที
+                            performDodge(dangers[1].pos)
+                        end
+                    end
+                    task.wait(0.08)
+                end
+            end)
+        else
+            if autoDodgeThread then
+                pcall(function() task.cancel(autoDodgeThread) end)
+                autoDodgeThread = nil
+            end
+            isDodgingNow = false
+        end
+    end
+
     local autoClaimConn = nil
     local function setAutoClaimRewards(enabled)
         State.AutoClaimRewards = enabled
@@ -2512,6 +2708,36 @@ end
         Flag = "DungeonLootrDistance",
         Callback = function(v)
             State.Distance = tonumber(v) or 15
+        end
+    })
+
+    -- Main Tab: Auto Dodge (v3.4.0)
+    MainTab:CreateSection("Auto Dodge (หลบ AoE บอส)")
+    MainTab:CreateToggle({
+        Name = "Auto Dodge (หลบวงสกิล / การโจมตีอันตราย)",
+        CurrentValue = State.AutoDodge,
+        Flag = "DungeonLootrAutoDodge",
+        Callback = function(v) setAutoDodge(v) end
+    })
+    MainTab:CreateDropdown({
+        Name = "Dodge Mode (รูปแบบการหลบ)",
+        Options = {"Dash & Evade", "Blink (Upwards)", "Blink (Backwards)"},
+        CurrentOption = {State.DodgeMode},
+        MultipleOptions = false,
+        Flag = "DungeonLootrDodgeMode",
+        Callback = function(v)
+            State.DodgeMode = type(v) == "table" and v[1] or v
+        end
+    })
+    MainTab:CreateSlider({
+        Name = "Dodge Radius (ระยะตรวจจับวงอันตราย)",
+        Range = {12, 45},
+        Increment = 1,
+        CurrentValue = State.DodgeRadius,
+        Suffix = " studs",
+        Flag = "DungeonLootrDodgeRadius",
+        Callback = function(v)
+            State.DodgeRadius = tonumber(v) or 24
         end
     })
 
@@ -3084,6 +3310,7 @@ end
         setAutoSellGear(false)
         setAutoClaimRewards(false)
         setAutoReroll(false)
+        setAutoDodge(false)
         setStreamerMode(false)
     end
 
