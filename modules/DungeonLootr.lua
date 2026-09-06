@@ -1,4 +1,4 @@
--- VoltScriptZ | Dungeon Lootr | RAVEN HUB Module
+-- VoltScriptZ | Dungeon Lootr | RAVEN HUB Module (v3.0.0)
 -- Converted to RAVEN HUB (MacLib Adapter)
 -- PlaceIds: 132285059959516, 135245842886361 | GameIds: 9656201728, 8410525651
 
