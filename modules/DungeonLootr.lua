@@ -69,6 +69,20 @@ local function getGeneratedFolder()
     return nil
 end
 
+local function getHRP(model)
+    if not model or not model:IsA("Instance") then return nil end
+    local hrp = model:FindFirstChild("HumanoidRootPart")
+    if hrp and hrp:IsA("BasePart") then return hrp end
+    for _, desc in ipairs(model:GetDescendants()) do
+        if desc:IsA("BasePart") and desc.Name == "HumanoidRootPart" then
+            return desc
+        end
+    end
+    local fallback = (model:IsA("Model") and model.PrimaryPart) or model:FindFirstChild("Torso") or model:FindFirstChild("Head")
+    if fallback and fallback:IsA("BasePart") then return fallback end
+    return model:FindFirstChildWhichIsA("BasePart", true)
+end
+
 local function getMonsters()
     local gen = getGeneratedFolder()
     local list = {}
@@ -79,9 +93,8 @@ local function getMonsters()
         local hasHealth = model:GetAttribute("HealthOverride") ~= nil or model:GetAttribute("IsFodder")==true or model:GetAttribute("IsBoss")==true or model:FindFirstChildOfClass("Humanoid") ~= nil
         if not hasHealth then return false end
         if model.Parent and model.Parent.Name=="PlayerModels" then return false end
-        -- StreamingEnabled Fix: ถ้ามอนอยู่ใน NPCs folder แม้ HRP ยัง stream-in ไม่เสร็จ ไม่ discard ทิ้ง
-        local hrp = model:FindFirstChild("HumanoidRootPart", true)
-        if not hrp then hrp = model:FindFirstChild("HumanoidRootPart") end
+        -- StreamingEnabled Fix: ตรวจสอบ BasePart ด้วย getHRP เพื่อกัน Pose หรือชิ้นส่วนอนิเมชั่น
+        local hrp = getHRP(model)
         if not hrp then
             local isInNpcFolder = model.Parent and model.Parent.Name == "NPCs"
             local anyPart = model:FindFirstChildWhichIsA("BasePart", true)
@@ -215,14 +228,6 @@ local function isZoneClear()
 end
 
 local nextRoomPointer=2
-
-local function getHRP(model)
-    local hrp = model:FindFirstChild("HumanoidRootPart") if hrp then return hrp end
-    hrp = model:FindFirstChild("HumanoidRootPart", true) if hrp then return hrp end
-    local fallback = model.PrimaryPart or model:FindFirstChild("Torso", true) or model:FindFirstChild("Head", true)
-    if fallback then return fallback end
-    return model:FindFirstChildWhichIsA("BasePart", true)
-end
 
 local function getClosest(list, fromPos)
     local best,bestDist=nil,math.huge
@@ -1474,7 +1479,7 @@ end
         if activeEspObjects[object] or not object.Parent then return end
         local adornee = object:IsA("Model") and object or object:FindFirstAncestorOfClass("Model") or object
         local part = object:IsA("BasePart") and object
-            or (object:IsA("Model") and (object.PrimaryPart or object:FindFirstChild("HumanoidRootPart") or object:FindFirstChildWhichIsA("BasePart", true)))
+            or (object:IsA("Model") and (object.PrimaryPart or getHRP(object) or object:FindFirstChildWhichIsA("BasePart", true)))
         if not part and object:IsA("Model") then
             -- Fallback: check attachments if parts are streaming
             local att = object:FindFirstChildWhichIsA("Attachment", true)
