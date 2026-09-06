@@ -631,6 +631,17 @@ return function(MacLib)
         return tab
     end
 
+    function WindowMethods:GetTab(name)
+        if type(self._tabs) ~= "table" then return nil end
+        local target = tostring(name or ""):lower()
+        for _, tab in ipairs(self._tabs) do
+            if tab._name and tab._name:lower() == target then
+                return tab
+            end
+        end
+        return nil
+    end
+
     function WindowMethods:SortTabs(orderedNames)
         if type(orderedNames) ~= "table" or #orderedNames == 0 then
             return
