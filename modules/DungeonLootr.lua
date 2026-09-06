@@ -1,4 +1,4 @@
--- VoltScriptZ | Dungeon Lootr | RAVEN HUB Module (v3.0.0)
+-- VoltScriptZ | Dungeon Lootr | RAVEN HUB Module (v3.1.0)
 -- Converted to RAVEN HUB (MacLib Adapter)
 -- PlaceIds: 132285059959516, 135245842886361 | GameIds: 9656201728, 8410525651
 
@@ -6,6 +6,7 @@ return function(Window, scriptInfo)
     local Players = game:GetService("Players")
     local ReplicatedStorage = game:GetService("ReplicatedStorage")
     local RunService = game:GetService("RunService")
+    local StarterGui = game:GetService("StarterGui")
     local LocalPlayer = Players.LocalPlayer
     local Knit = require(ReplicatedStorage.Packages.Knit)
 
@@ -62,8 +63,12 @@ local State = {
     AutoBestDungeon = false,
     AutoCreateChallenger = false,
     ChallengerBoss = "Scarlet Knight",
-    BossRushBoss = "Cursed King",
-    AutoCreateBossRush = false
+    AutoCreateBossRush = false,
+    AutoBlessing = true,
+    BlessingPriority = "Damage (ATK)",
+    AutoSummonSpecialBoss = true,
+    AutoExtractEndless = false,
+    EndlessExtractDepth = 15
 }
 
 local function getGeneratedFolder()
@@ -617,6 +622,123 @@ local function processSecretRoom(parentRoomIdx, parentRoomCenter)
     end
 end
 
+-- 1. ฟังก์ชันรับบัฟจากแท่น Altar (Blessing Altar)
+local function processAltarBlessing(roomIdx, roomCenter)
+    if not State.AutoBlessing then return end
+    local gen = getGeneratedFolder()
+    if not gen then return end
+    local char = LocalPlayer.Character
+    local hrp = char and getHRP(char)
+    if not hrp then return end
+
+    -- ค้นหาแท่น Altar ในห้องนี้
+    local targetAltarPrompt = nil
+    local targetAltarPos = nil
+    for _, desc in ipairs(gen:GetDescendants()) do
+        if desc.Name == "Altar" and desc:IsA("Model") then
+            local pos = desc:GetPivot().Position
+            local inThisRoom = false
+            if roomCenter and (pos - roomCenter.cf.Position).Magnitude < 130 then
+                inThisRoom = true
+            elseif not roomCenter then
+                inThisRoom = true
+            end
+
+            if inThisRoom then
+                local prompt = desc:FindFirstChildWhichIsA("ProximityPrompt", true)
+                if prompt and prompt.Enabled and prompt.ActionText:find("Blessing") then
+                    targetAltarPrompt = prompt
+                    targetAltarPos = pos
+                    break
+                end
+            end
+        end
+    end
+
+    if targetAltarPrompt and targetAltarPos then
+        stopLock()
+        stopHover()
+        local standPos = targetAltarPos + Vector3.new(0, 2, 3)
+        safeWarp(CFrame.new(standPos, targetAltarPos))
+        task.wait(0.2)
+        pcall(function() fireproximityprompt(targetAltarPrompt) end)
+        task.wait(0.4)
+
+        -- เลือกการ์ด Blessing อัตโนมัติ (ผ่าน BoostSelectionController หรือ Remote)
+        pcall(function()
+            local boostCtrl = Knit.GetController("BoostSelectionController")
+            if boostCtrl and boostCtrl._candidates and #boostCtrl._candidates > 0 then
+                local pickIndex = 1
+                local priority = State.BlessingPriority or "Damage (ATK)"
+                for idx, c in ipairs(boostCtrl._candidates) do
+                    local t = (c.Title or ""):lower()
+                    local d = (c.Description or ""):lower()
+                    if priority == "Damage (ATK)" and (t:find("attack") or t:find("damage") or t:find("crit") or d:find("damage") or d:find("attack")) then
+                        pickIndex = idx break
+                    elseif priority == "Defense / Health" and (t:find("health") or t:find("defense") or t:find("armor") or d:find("health") or d:find("shield")) then
+                        pickIndex = idx break
+                    elseif priority == "Speed / Haste" and (t:find("speed") or t:find("haste") or t:find("cooldown") or d:find("speed")) then
+                        pickIndex = idx break
+                    end
+                end
+
+                if boostCtrl._OnCardClicked then
+                    boostCtrl:_OnCardClicked(pickIndex)
+                else
+                    Knit.GetService("DungeonBuffService"):SelectBuff(pickIndex)
+                end
+            end
+        end)
+        task.wait(0.3)
+    end
+end
+
+-- 2. ฟังก์ชันอัญเชิญ Special Boss จากแท่น Skull_Totem (ใช้ 7x Platinum Key)
+local function processSpecialBossSummon()
+    if not State.AutoSummonSpecialBoss then return end
+    local gen = getGeneratedFolder()
+    if not gen then return end
+    local char = LocalPlayer.Character
+    local hrp = char and getHRP(char)
+    if not hrp then return end
+
+    -- ตรวจสอบว่ามีแท่น Skull_Totem ในดันเจี้ยนหรือไม่
+    local totem = nil
+    for _, desc in ipairs(gen:GetDescendants()) do
+        if desc.Name == "Skull_Totem" and desc:IsA("Model") then
+            local p = desc:FindFirstChildWhichIsA("ProximityPrompt", true)
+            if p and p.Enabled then
+                totem = { model = desc, prompt = p, pos = desc:GetPivot().Position }
+                break
+            end
+        end
+    end
+
+    if not totem then return end
+
+    -- ตรวจสอบว่าผู้เล่นมีกุญแจ Platinum Key >= 7 หรือไม่
+    local canSummon = false
+    pcall(function()
+        local ks = Knit.GetService("KeyService")
+        if ks and ks.GetAllKeys then
+            local keys = ks:GetAllKeys():await()
+            if keys and (keys.T4 and keys.T4 >= 7 or keys.Platinum and keys.Platinum >= 7 or keys.Master and keys.Master >= 1) then
+                canSummon = true
+            end
+        end
+    end)
+
+    if canSummon and totem.prompt.Enabled then
+        stopLock()
+        stopHover()
+        local standPos = totem.pos + Vector3.new(0, 2, 3)
+        safeWarp(CFrame.new(standPos, totem.pos))
+        task.wait(0.2)
+        pcall(function() fireproximityprompt(totem.prompt) end)
+        task.wait(1)
+    end
+end
+
 local farmThread=nil
 -- ใหม่: เคลียร์ครบทุกห้องสปอนก่อน Boss จะเกิด (ห้ามข้าม / ห้ามรอเวฟมั่ว)
 local farmThread=nil
@@ -791,6 +913,10 @@ local function startFarm()
                 collectRoomChests(curIdx, curCenter)
                 -- ตรวจสอบและปลดล็อคห้องลับ (ถ้ามีกุญแจ) พร้อมจัดการมอนสเตอร์และเก็บกล่องลับ
                 processSecretRoom(curIdx, curCenter)
+                -- ตรวจสอบและรับบัฟจากแท่น Altar (ถ้ามีในห้องนี้)
+                processAltarBlessing(curIdx, curCenter)
+                -- ตรวจสอบและเสกบอสพิเศษจากแท่น Skull_Totem (ถ้ามีกุญแจ 7x Platinum Key)
+                processSpecialBossSummon()
             end
             markCleared(curIdx)
 
@@ -1043,23 +1169,29 @@ local function setAutoContinue(enabled)
         local ok, svc = pcall(function() return Knit.GetService("DungeonRunService") end)
         if ok and svc and svc.EndlessDecision then
             continueConn=svc.EndlessDecision:Connect(function(data)
-                if not State.AutoContinue then return end
+                if not State.AutoContinue and not State.AutoExtractEndless then return end
                 task.wait(0.8)
-                -- อัตโนมัติกด Continue ในโหมด Endless
-                pcall(function() svc:SubmitEndlessChoice(true) end)
+                local curDepth = data and (data.ExtensionIndex or 0) + 1 or 1
+                local shouldExtract = State.AutoExtractEndless and (curDepth >= (State.EndlessExtractDepth or 15))
+                -- ถ้าเปิด AutoExtractEndless และถึงระดับ Depth ที่กำหนด ให้กด Extract (false)
+                -- ถ้าไม่ใช่ ให้กด Continue (true)
+                pcall(function() svc:SubmitEndlessChoice(not shouldExtract) end)
             end)
         end
         -- fallback ดัก Warning prompt ถ้า event ไม่มา
         if not continueConn then
             continueConn=task.spawn(function()
-                while State.AutoContinue do
+                while State.AutoContinue or State.AutoExtractEndless do
                     if (not running) then break end
                     local done=false
                     pcall(function()
                         for _,gui in ipairs(LocalPlayer.PlayerGui:GetDescendants()) do
                             if gui:IsA("TextLabel") and gui.Visible and gui.Text:find("Checkpoint %d+ cleared!") then
+                                local num = tonumber(gui.Text:match("Checkpoint (%d+) cleared!")) or 1
+                                local shouldExtract = State.AutoExtractEndless and (num >= (State.EndlessExtractDepth or 15))
                                 local svc2=Knit.GetService("DungeonRunService")
-                                svc2:SubmitEndlessChoice(true) done=true
+                                svc2:SubmitEndlessChoice(not shouldExtract)
+                                done=true
                             end
                         end
                     end)
@@ -1566,9 +1698,44 @@ local function setAutoBest(enabled)
     end
 end
 
-    -- =================================================================
-    --   ESP SYSTEM (Mob ESP & Chest ESP)
-    -- =================================================================
+    local ACTIVE_CODES = {
+        "UPDATE1",
+        "WEEKENDBUFFS",
+        "15KCCU",
+        "COURAGE",
+        "LOVETHISGAME",
+        "RAIDTIME",
+        "FORGESKIP",
+        "10KFAV",
+        "8KLIKE",
+        "FULLRELEASE",
+        "LOOTRISBACK",
+        "JACKPOT",
+        "20KPLAYERS",
+        "GIVEMEGEMSPLEASE",
+        "LOOTR"
+    }
+
+    local function redeemAllCodes()
+        local count = 0
+        local successCount = 0
+        pcall(function()
+            local ks = Knit.GetService("CodesService")
+            local remote = ks and ks.RF and ks.RF:FindFirstChild("RedeemCode")
+            if not remote then
+                remote = game:GetService("ReplicatedStorage").Packages._Index["sleitnick_knit@1.7.0"].knit.Services.CodesService.RF.RedeemCode
+            end
+            if remote then
+                for _, code in ipairs(ACTIVE_CODES) do
+                    local ok, res = pcall(function() return remote:InvokeServer(code) end)
+                    count += 1
+                    if ok and res == true then successCount += 1 end
+                    task.wait(0.25)
+                end
+            end
+        end)
+        return successCount, count
+    end
     local CoreGui = game:GetService("CoreGui")
     local function getEspContainer()
         local container = nil
@@ -1886,6 +2053,46 @@ end
         Callback = function(v) setAutoReturn(v) end
     })
 
+    -- Main Tab: Blessing & Special Boss (v3.1.0)
+    MainTab:CreateSection("Blessing & Special")
+    MainTab:CreateToggle({
+        Name = "Auto Blessing (รับบัฟแท่น Altar)",
+        CurrentValue = State.AutoBlessing,
+        Flag = "DungeonLootrAutoBlessing",
+        Callback = function(v) State.AutoBlessing = v end
+    })
+    MainTab:CreateDropdown({
+        Name = "Blessing Priority (สายบัฟที่เลือก)",
+        Options = {"Damage (ATK)", "Defense / Health", "Speed / Haste"},
+        CurrentOption = {State.BlessingPriority},
+        MultipleOptions = false,
+        Flag = "DungeonLootrBlessingPriority",
+        Callback = function(v)
+            State.BlessingPriority = type(v) == "table" and v[1] or v
+        end
+    })
+    MainTab:CreateToggle({
+        Name = "Auto Summon Special Boss (เสกบอสลับ 7x Platinum Key)",
+        CurrentValue = State.AutoSummonSpecialBoss,
+        Flag = "DungeonLootrAutoSummonSpecialBoss",
+        Callback = function(v) State.AutoSummonSpecialBoss = v end
+    })
+    MainTab:CreateToggle({
+        Name = "Auto Extract Endless (ถอนตัว Endless ปลอดภัย)",
+        CurrentValue = State.AutoExtractEndless,
+        Flag = "DungeonLootrAutoExtractEndless",
+        Callback = function(v) State.AutoExtractEndless = v end
+    })
+    MainTab:CreateSlider({
+        Name = "Endless Extract Depth (ถอนตัวที่ชั้น)",
+        Range = {5, 50},
+        Increment = 1,
+        CurrentValue = State.EndlessExtractDepth,
+        Suffix = " waves",
+        Flag = "DungeonLootrEndlessExtractDepth",
+        Callback = function(v) State.EndlessExtractDepth = tonumber(v) or 15 end
+    })
+
     -- Main Tab: Potion
     MainTab:CreateSection("Potion")
     MainTab:CreateToggle({
@@ -2092,6 +2299,30 @@ end
         CurrentValue = State.AutoEquipBest,
         Flag = "DungeonLootrAutoEquipBest",
         Callback = function(v) setAutoEquipBest(v) end
+    })
+
+    MiscTab:CreateSection("Game Codes")
+    MiscTab:CreateButton({
+        Name = "Redeem All Active Codes (แลกโค้ดทั้งหมด)",
+        Callback = function()
+            task.spawn(function()
+                pcall(function()
+                    StarterGui:SetCore("SendNotification", {
+                        Title = "Dungeon Lootr Codes",
+                        Text = "กำลังแลกโค้ดทั้งหมด...",
+                        Duration = 3
+                    })
+                end)
+                local successCount, total = redeemAllCodes()
+                pcall(function()
+                    StarterGui:SetCore("SendNotification", {
+                        Title = "Dungeon Lootr Codes",
+                        Text = string.format("แลกสำเร็จ %d / %d โค้ด!", successCount, total),
+                        Duration = 5
+                    })
+                end)
+            end)
+        end
     })
 
     local function applyTabOrder()
