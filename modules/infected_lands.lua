@@ -33,7 +33,7 @@ return function(Window, scriptInfo)
         espGroundItems = true,
         espVehicles = true,
         espCorpses = true,
-        espMaxDistance = 600,
+        espMaxDistance = 1200,
         espShowDistance = true,
         espShowHealth = true,
 
@@ -231,10 +231,20 @@ return function(Window, scriptInfo)
         if zFolder then
             for _, ch in ipairs(zFolder:GetChildren()) do
                 if ch:IsA("Model") then
-                    local hum = getHumanoid(ch)
                     local root = getRoot(ch)
-                    if hum and root and hum.Health > 0 then
-                        table.insert(list, {model = ch, humanoid = hum, root = root})
+                    local hum = getHumanoid(ch)
+                    local isDead = ch:GetAttribute("Dead") == true
+                    local health = ch:GetAttribute("Health") or (hum and hum.Health) or 100
+                    local maxHealth = ch:GetAttribute("MaxHealth") or (hum and hum.MaxHealth) or 100
+
+                    if root and not isDead and health > 0 then
+                        table.insert(list, {
+                            model = ch,
+                            humanoid = hum,
+                            root = root,
+                            health = health,
+                            maxHealth = maxHealth
+                        })
                     end
                 end
             end
@@ -288,8 +298,14 @@ return function(Window, scriptInfo)
                             zName = "Firefighter Zombie"
                         elseif zName:find("Casual") or zName:find("Farmer") then
                             zName = "Farmer Zombie"
+                        elseif zName:find("EMS") then
+                            zName = "EMS Zombie"
+                        elseif zName:find("Construction") then
+                            zName = "Construction Zombie"
+                        elseif zName:find("Hazmat") then
+                            zName = "Hazmat Zombie"
                         else
-                            zName = "Infected Zombie"
+                            zName = "Zombie"
                         end
                         createESP(info.model, Color3.fromRGB(255, 80, 80), "🧟 " .. zName, true, "zombie")
                     end
@@ -297,7 +313,7 @@ return function(Window, scriptInfo)
                     if data and data.subLabel then
                         local parts = {}
                         if settings.espShowDistance then table.insert(parts, math.floor(dist) .. "m") end
-                        if settings.espShowHealth then table.insert(parts, "HP: " .. math.floor(info.humanoid.Health)) end
+                        if settings.espShowHealth then table.insert(parts, "HP: " .. math.floor(info.health)) end
                         data.subLabel.Text = table.concat(parts, " | ")
                     end
                 else
@@ -388,9 +404,15 @@ return function(Window, scriptInfo)
         for inst, data in pairs(espObjects) do
             if not inst.Parent then
                 removeESP(inst)
-            elseif data.tag == "player" or data.tag == "zombie" then
+            elseif data.tag == "player" then
                 local hum = getHumanoid(inst)
                 if not hum or hum.Health <= 0 then
+                    removeESP(inst)
+                end
+            elseif data.tag == "zombie" then
+                local isDead = inst:GetAttribute("Dead") == true
+                local health = inst:GetAttribute("Health")
+                if isDead or (health and health <= 0) then
                     removeESP(inst)
                 end
             end
@@ -423,8 +445,11 @@ return function(Window, scriptInfo)
 
         for _, model in ipairs(candidates) do
             local hum = getHumanoid(model)
+            local isDead = model:GetAttribute("Dead") == true
+            local health = model:GetAttribute("Health") or (hum and hum.Health) or 100
             local targetPart = model:FindFirstChild(settings.aimbotTarget) or getRoot(model)
-            if hum and hum.Health > 0 and targetPart then
+
+            if not isDead and health > 0 and targetPart then
                 local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
                 if onScreen then
                     local screenDist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
