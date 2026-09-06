@@ -56,6 +56,7 @@ return function(Window, scriptInfo)
 
         -- Wall Check (Visibility Check)
         wallCheck = true,
+        showPartBoxes = true,                          -- Show exact shootable body part boxes (Cold War style)
         colorVisible = Color3.fromRGB(255, 45, 45),   -- Red when shootable (Direct Line of Sight)
         colorBehindWall = Color3.fromRGB(45, 235, 85), -- Green when behind wall
 
@@ -128,41 +129,160 @@ return function(Window, scriptInfo)
     end
 
     ---------------------------------------------------------------------------
-    -- Wall Check (Raycast Line of Sight)
+    -- Wall Check (Line of Sight & Multi-pass Raycast - Cold War standard)
     ---------------------------------------------------------------------------
+    local MAX_VISION_PASSTHROUGHS = 4
+    local espFolder = Instance.new("Folder")
+    espFolder.Name = "RAVEN_PartBoxes"
+    pcall(function() espFolder.Parent = Workspace end)
+
+    local function isVisionTransparent(instance)
+        if not instance or not instance:IsA("BasePart") then return false end
+        -- Pass-through glass, windows, thin fences, or transparent decorative props
+        return instance.Transparency >= 0.25 or instance.CanCollide == false
+    end
+
+    local function rayReachesTarget(fromPos, toPos, targetCharacter, targetPart)
+        local direction = toPos - fromPos
+        local rayParams = RaycastParams.new()
+        rayParams.FilterType = Enum.RaycastFilterType.Exclude
+        rayParams.IgnoreWater = true
+
+        local baseIgnore = {}
+        if LP.Character then
+            table.insert(baseIgnore, LP.Character)
+        end
+        local wsScope = Workspace:FindFirstChild("WeaponSystem_Workspace")
+        if wsScope then table.insert(baseIgnore, wsScope) end
+        for _, name in ipairs({"Ignore", "Effects", "Debris", "RAVEN_PartBoxes"}) do
+            local folder = Workspace:FindFirstChild(name)
+            if folder then table.insert(baseIgnore, folder) end
+        end
+
+        local currentIgnore = table.clone(baseIgnore)
+        local reachesTarget = false
+
+        for _ = 1, MAX_VISION_PASSTHROUGHS do
+            rayParams.FilterDescendantsInstances = currentIgnore
+            local result = Workspace:Raycast(fromPos, direction, rayParams)
+            if not result then
+                reachesTarget = true
+                break
+            end
+
+            if result.Instance == targetPart
+                or (targetCharacter ~= nil and result.Instance:IsDescendantOf(targetCharacter)) then
+                reachesTarget = true
+                break
+            end
+
+            -- If hit opaque solid structure, ray is blocked
+            if not isVisionTransparent(result.Instance) then
+                break
+            end
+
+            -- Pass through transparent / non-collidable part and continue ray
+            table.insert(currentIgnore, result.Instance)
+        end
+
+        return reachesTarget
+    end
+
     local function isPartVisible(targetPart, targetModel)
         if not targetPart or not targetPart:IsA("BasePart") then return false end
         local camPos = Camera.CFrame.Position
         local targetPos = targetPart.Position
         local dir = targetPos - camPos
-        local dist = dir.Magnitude
-        if dist < 0.5 then return true end
+        if dir.Magnitude < 0.5 then return true end
 
-        local rayParams = RaycastParams.new()
-        rayParams.FilterType = Enum.RaycastFilterType.Exclude
-
-        local ignoreList = {}
-        if LP.Character then
-            table.insert(ignoreList, LP.Character)
-        end
-        -- Ignore transparent effects, camera instances, and vehicles if sitting
-        local wsScope = Workspace:FindFirstChild("WeaponSystem_Workspace")
-        if wsScope then table.insert(ignoreList, wsScope) end
-
-        rayParams.FilterDescendantsInstances = ignoreList
-        rayParams.IgnoreWater = true
-
-        local result = Workspace:Raycast(camPos, dir, rayParams)
-        if not result then
-            return true -- Nothing hit between camera and target
+        -- 1. Check center
+        if rayReachesTarget(camPos, targetPos, targetModel, targetPart) then
+            return true
         end
 
-        -- Check if hit instance belongs to the target model
-        if result.Instance and (result.Instance:IsDescendantOf(targetModel) or result.Instance == targetPart) then
+        -- 2. Fallback edge sample (0.42 offset like Cold War for peeking targets)
+        local halfSize = targetPart.Size * 0.42
+        local edgePos = targetPart.CFrame:PointToWorldSpace(Vector3.new(0, halfSize.Y, 0))
+        if rayReachesTarget(camPos, edgePos, targetModel, targetPart) then
             return true
         end
 
         return false
+    end
+
+    -- Check multiple body parts for full visibility scan
+    local BODY_PARTS_CHECK = {"Head", "Torso", "UpperTorso", "Right Arm", "RightUpperArm", "Left Arm", "LeftUpperArm"}
+
+    local function scanCharacterPartStates(character)
+        local states = {}
+        local anyVisible = false
+        local camPos = Camera.CFrame.Position
+
+        for _, name in ipairs(BODY_PARTS_CHECK) do
+            local part = character:FindFirstChild(name)
+            if part and part:IsA("BasePart") then
+                local vis = isPartVisible(part, character)
+                states[part] = vis
+                if vis then anyVisible = true end
+            end
+        end
+
+        return anyVisible, states
+    end
+
+    ---------------------------------------------------------------------------
+    -- Part Boxes (Detailed Shootable Body Point Indicators)
+    ---------------------------------------------------------------------------
+    local function updatePartBoxes(espData, character, partStates)
+        if not espData.partBoxes then
+            espData.partBoxes = {}
+        end
+
+        if not settings.showPartBoxes or not settings.wallCheck then
+            for _, box in pairs(espData.partBoxes) do
+                box.Visible = false
+            end
+            return
+        end
+
+        local active = {}
+        for part, isVis in pairs(partStates or {}) do
+            if part.Parent and part:IsDescendantOf(character) then
+                local box = espData.partBoxes[part]
+                if not box then
+                    box = Instance.new("BoxHandleAdornment")
+                    box.Name = "ShootablePartBox"
+                    box.AlwaysOnTop = true
+                    box.ZIndex = 5
+                    box.Transparency = 0.65
+                    box.Adornee = part
+                    pcall(function() box.Parent = espFolder end)
+                    espData.partBoxes[part] = box
+                end
+                box.Size = part.Size + Vector3.new(0.06, 0.06, 0.06)
+                box.Color3 = isVis and settings.colorVisible or settings.colorBehindWall
+                box.Visible = true
+                active[part] = true
+            end
+        end
+
+        for part, box in pairs(espData.partBoxes) do
+            if not active[part] then
+                box.Visible = false
+                if not part.Parent then
+                    pcall(function() box:Destroy() end)
+                    espData.partBoxes[part] = nil
+                end
+            end
+        end
+    end
+
+    local function hidePartBoxes(espData)
+        if espData and espData.partBoxes then
+            for _, box in pairs(espData.partBoxes) do
+                box.Visible = false
+            end
+        end
     end
 
     ---------------------------------------------------------------------------
@@ -236,7 +356,8 @@ return function(Window, scriptInfo)
             subLabel = subLabel,
             tag = tag,
             color = color,
-            inst = inst
+            inst = inst,
+            partBoxes = {}
         }
     end
 
@@ -245,6 +366,11 @@ return function(Window, scriptInfo)
         if not data then return end
         if data.highlight then pcall(function() data.highlight:Destroy() end) end
         if data.billboard then pcall(function() data.billboard:Destroy() end) end
+        if data.partBoxes then
+            for _, box in pairs(data.partBoxes) do
+                pcall(function() box:Destroy() end)
+            end
+        end
         espObjects[inst] = nil
     end
 
@@ -327,9 +453,11 @@ return function(Window, scriptInfo)
             for _, info in ipairs(players) do
                 local dist = (info.root.Position - myPos).Magnitude
                 if dist <= settings.playerMaxDist then
-                    -- Visibility Wall Check
-                    local headPart = info.model:FindFirstChild("Head") or info.root
-                    local isVisible = settings.wallCheck and isPartVisible(headPart, info.model)
+                    -- Visibility Wall Check & Part Scan (Cold War style)
+                    local isVisible, partStates = false, {}
+                    if settings.wallCheck then
+                        isVisible, partStates = scanCharacterPartStates(info.model)
+                    end
                     local targetColor = isVisible and settings.colorVisible or settings.colorBehindWall
                     if not settings.wallCheck then
                         targetColor = Color3.fromRGB(60, 160, 255)
@@ -352,9 +480,12 @@ return function(Window, scriptInfo)
                             local parts = {}
                             if settings.playerShowDist then table.insert(parts, math.floor(dist) .. "m") end
                             if settings.playerShowHealth then table.insert(parts, "HP: " .. math.floor(info.humanoid.Health)) end
-                            if isVisible then table.insert(parts, "[VISIBLE]") end
+                            if isVisible then table.insert(parts, "[SHOOTABLE]") end
                             data.subLabel.Text = table.concat(parts, " | ")
                         end
+
+                        -- Update detailed shootable body part boxes
+                        updatePartBoxes(data, info.model, partStates)
                     end
                 else
                     if espObjects[info.model] then removeESP(info.model) end
@@ -370,9 +501,11 @@ return function(Window, scriptInfo)
             for _, info in ipairs(zombies) do
                 local dist = (info.root.Position - myPos).Magnitude
                 if dist <= settings.zombieMaxDist then
-                    -- Visibility Wall Check
-                    local headPart = info.model:FindFirstChild("Head") or info.root
-                    local isVisible = settings.wallCheck and isPartVisible(headPart, info.model)
+                    -- Visibility Wall Check & Part Scan (Cold War style)
+                    local isVisible, partStates = false, {}
+                    if settings.wallCheck then
+                        isVisible, partStates = scanCharacterPartStates(info.model)
+                    end
                     local targetColor = isVisible and settings.colorVisible or settings.colorBehindWall
                     if not settings.wallCheck then
                         targetColor = Color3.fromRGB(255, 80, 80)
@@ -411,9 +544,12 @@ return function(Window, scriptInfo)
                             local parts = {}
                             if settings.zombieShowDist then table.insert(parts, math.floor(dist) .. "m") end
                             if settings.zombieShowHealth then table.insert(parts, "HP: " .. math.floor(info.health)) end
-                            if isVisible then table.insert(parts, "[VISIBLE]") end
+                            if isVisible then table.insert(parts, "[SHOOTABLE]") end
                             data.subLabel.Text = table.concat(parts, " | ")
                         end
+
+                        -- Update detailed shootable body part boxes
+                        updatePartBoxes(data, info.model, partStates)
                     end
                 else
                     if espObjects[info.model] then removeESP(info.model) end
@@ -548,11 +684,17 @@ return function(Window, scriptInfo)
             local health = model:GetAttribute("Health") or (hum and hum.Health) or 100
 
             if not isDead and health > 0 then
-                -- Determine bone candidates
+                -- Determine bone candidates with prioritized ranking (Cold War style)
                 local boneCandidates = {}
                 if settings.aimbotTarget == "Auto (Shootable Bone)" then
+                    -- Priority 1: Head
                     table.insert(boneCandidates, model:FindFirstChild("Head"))
+                    -- Priority 2: Torso
                     table.insert(boneCandidates, model:FindFirstChild("Torso") or model:FindFirstChild("UpperTorso"))
+                    -- Priority 3: Arms (if peeking around corner)
+                    table.insert(boneCandidates, model:FindFirstChild("Right Arm") or model:FindFirstChild("RightUpperArm"))
+                    table.insert(boneCandidates, model:FindFirstChild("Left Arm") or model:FindFirstChild("LeftUpperArm"))
+                    -- Priority 4: Root
                     table.insert(boneCandidates, getRoot(model))
                 else
                     table.insert(boneCandidates, model:FindFirstChild(settings.aimbotTarget) or getRoot(model))
@@ -757,6 +899,20 @@ return function(Window, scriptInfo)
         Flag = "Infected_WallCheck",
         Callback = function(val)
             settings.wallCheck = val
+        end
+    })
+
+    VisualsTab:CreateToggle({
+        Name = "Show Shootable Body Part Boxes",
+        CurrentValue = settings.showPartBoxes,
+        Flag = "Infected_PartBoxes",
+        Callback = function(val)
+            settings.showPartBoxes = val
+            if not val then
+                for _, data in pairs(espObjects) do
+                    hidePartBoxes(data)
+                end
+            end
         end
     })
 
@@ -971,6 +1127,9 @@ return function(Window, scriptInfo)
         restoreLighting()
         if fovCircle then
             pcall(function() fovCircle:Remove() end)
+        end
+        if espFolder then
+            pcall(function() espFolder:Destroy() end)
         end
     end
 
