@@ -723,6 +723,7 @@ local function loadScriptModule(scriptInfo)
         runtimeInfo.hubRayfield = HubUI -- compatibility field for existing game modules
         runtimeInfo.hubUI = HubUI
         runtimeInfo.hubWindow = Window
+        runtimeInfo.hubSettingsTab = HubSettingsTab
         runtimeInfo.registerCleanup = function(cleanupFn)
             if type(cleanupFn) == "function" then
                 scriptCleanupHandlers[scriptInfo.name] = cleanupFn

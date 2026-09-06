@@ -3643,8 +3643,8 @@ end
     -- =================================================================
     --   SETTINGS TAB (Webhook Controls)
     -- =================================================================
-    local SettingsTab = nil
-    if Window and type(Window.GetTab) == "function" then
+    local SettingsTab = (scriptInfo and scriptInfo.hubSettingsTab)
+    if not SettingsTab and Window and type(Window.GetTab) == "function" then
         SettingsTab = Window:GetTab("Settings")
     end
     if not SettingsTab and Window and type(Window.CreateTab) == "function" then
