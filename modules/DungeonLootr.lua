@@ -133,11 +133,17 @@ local function getCombatRoomCenters()
             local rName = "Room_" .. tostring(z.Index)
             local room = gen:FindFirstChild(rName)
             if room then
-                local cf = nil pcall(function() cf = room:GetBoundingBox() end)
+                local cf, sz = nil, nil
+                pcall(function() cf, sz = room:GetBoundingBox() end)
                 if cf then
+                    local floorY = cf.Position.Y
+                    if sz and sz.Y > 10 then
+                        floorY = cf.Position.Y - (sz.Y / 2) + 6
+                    end
+                    local roomCF = CFrame.new(Vector3.new(cf.Position.X, floorY, cf.Position.Z))
                     table.insert(out, {
                         idx = z.Index,
-                        cf = cf,
+                        cf = roomCF,
                         name = rName,
                         isBoss = z.IsBoss == true,
                         done = z.Done == true
@@ -161,9 +167,15 @@ local function getCombatRoomCenters()
             end
             local idx = room:GetAttribute("RoomIndex") or tonumber(room.Name:match("%d+")) or 999
             if hasSpawn or idx == 22 then
-                local cf = nil pcall(function() cf = room:GetBoundingBox() end)
+                local cf, sz = nil, nil
+                pcall(function() cf, sz = room:GetBoundingBox() end)
                 if cf then
-                    table.insert(out, {idx = idx, cf = cf, name = room.Name, isBoss = (idx == 22)})
+                    local floorY = cf.Position.Y
+                    if sz and sz.Y > 10 then
+                        floorY = cf.Position.Y - (sz.Y / 2) + 6
+                    end
+                    local roomCF = CFrame.new(Vector3.new(cf.Position.X, floorY, cf.Position.Z))
+                    table.insert(out, {idx = idx, cf = roomCF, name = room.Name, isBoss = (idx == 22)})
                 end
             end
         end
@@ -463,7 +475,8 @@ local function startFarm()
             local activeRoomIdx, curZonePos, zones = getActiveDungeonZone()
             local curCenter = nil
 
-            if activeRoomIdx then
+            -- ถ้า activeRoomIdx ยังไม่ถูกเคลียร์ ให้เล็ง activeRoomIdx ก่อน
+            if activeRoomIdx and not isCleared(activeRoomIdx) then
                 for _, c in ipairs(combatCenters) do
                     if c.idx == activeRoomIdx then
                         curCenter = c
@@ -472,10 +485,10 @@ local function startFarm()
                 end
             end
 
-            -- Fallback ถ้าหา activeRoomIdx ไม่เจอ ให้หาตามลำดับ combatCenters ที่ยังไม่เคลียร์
+            -- ถ้า activeRoomIdx ถูกเคลียร์ไปแล้ว หรือหาไม่เจอ ให้เดินหน้าไปยังห้องถัดไปในลำดับที่ยังไม่เคลียร์
             if not curCenter then
                 for _, c in ipairs(combatCenters) do
-                    if not c.done and not isCleared(c.idx) then
+                    if not isCleared(c.idx) and not c.done then
                         curCenter = c
                         break
                     end
@@ -604,8 +617,9 @@ local function startFarm()
             end
             markCleared(curIdx)
 
-            -- ตรวจสอบการจบดันเจี้ยนเมื่อถึงห้องบอส
-            if curCenter.isBoss or curIdx == 22 then
+            -- ตรวจสอบการจบดันเจี้ยนเมื่อถึงห้องบอส (ห้องสุดท้ายของดันเจี้ยน)
+            local isLastRoom = (curCenter == combatCenters[#combatCenters]) or (curIdx == 22)
+            if isLastRoom and (curCenter.isBoss or curIdx == 22 or #combatCenters == 1) then
                 local waitedBoss = 0
                 while waitedBoss < 8 and State.AutoFarm do
                     task.wait(0.5) waitedBoss += 0.5
@@ -626,6 +640,20 @@ local function startFarm()
                         end)
                         break
                     end
+                end
+            else
+                -- หากไม่ใช่ห้องบอส ให้พาตัวละครวาร์ปมุ่งหน้าไปยังห้องถัดไปทันที
+                local nextTarget = nil
+                for _, c in ipairs(combatCenters) do
+                    if not isCleared(c.idx) and not c.done then
+                        nextTarget = c
+                        break
+                    end
+                end
+                if nextTarget and nextTarget.cf then
+                    stopLock()
+                    safeWarp(nextTarget.cf + Vector3.new(0, 3, 0))
+                    task.wait(0.3)
                 end
             end
 
@@ -1361,12 +1389,30 @@ end
     --   ESP SYSTEM (Mob ESP & Chest ESP)
     -- =================================================================
     local CoreGui = game:GetService("CoreGui")
-    local espFolder = Instance.new("Folder")
-    espFolder.Name = "RavenDungeonLootrESP"
-    pcall(function()
-        espFolder.Parent = (type(gethui) == "function" and gethui()) or CoreGui
-    end)
-    if not espFolder.Parent then espFolder.Parent = LocalPlayer:FindFirstChildOfClass("PlayerGui") or CoreGui end
+    local function getEspContainer()
+        local container = nil
+        pcall(function()
+            local root = (type(gethui) == "function" and gethui()) or CoreGui
+            container = root:FindFirstChild("RavenDungeonLootrESP")
+            if not container or not container.Parent then
+                container = Instance.new("Folder")
+                container.Name = "RavenDungeonLootrESP"
+                container.Parent = root
+            end
+        end)
+        if not container or not container.Parent then
+            pcall(function()
+                local pgui = LocalPlayer:FindFirstChildOfClass("PlayerGui") or CoreGui
+                container = pgui:FindFirstChild("RavenDungeonLootrESP")
+                if not container or not container.Parent then
+                    container = Instance.new("Folder")
+                    container.Name = "RavenDungeonLootrESP"
+                    container.Parent = pgui
+                end
+            end)
+        end
+        return container
+    end
 
     local activeEspObjects = {}
 
@@ -1394,6 +1440,9 @@ end
         end
         if not part then return end
 
+        local container = getEspContainer()
+        if not container then return end
+
         local highlight = Instance.new("Highlight")
         highlight.Adornee = adornee
         highlight.FillColor = color
@@ -1401,15 +1450,16 @@ end
         highlight.OutlineColor = color
         highlight.OutlineTransparency = 0.2
         highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-        pcall(function() highlight.Parent = espFolder end)
+        pcall(function() highlight.Parent = container end)
 
         local billboard = Instance.new("BillboardGui")
         billboard.Adornee = part
         billboard.Size = UDim2.fromOffset(200, 36)
         billboard.StudsOffset = Vector3.new(0, 3.5, 0)
         billboard.AlwaysOnTop = true
-        billboard.MaxDistance = 1000
-        pcall(function() billboard.Parent = espFolder end)
+        billboard.MaxDistance = 1500
+        billboard.LightInfluence = 0
+        pcall(function() billboard.Parent = container end)
 
         local label = Instance.new("TextLabel")
         label.Size = UDim2.fromScale(1, 1)
