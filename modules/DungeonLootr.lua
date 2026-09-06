@@ -1877,7 +1877,10 @@ end
         ["Legendary"] = 5,
         ["Mythic"] = 6,
         ["Celestial"] = 7,
-        ["Exotic"] = 8
+        ["Impossible"] = 8,
+        ["Exotic"] = 9,
+        ["Admin"] = 10,
+        ["Owner"] = 11
     }
 
     local function sellGearNow()
@@ -2022,51 +2025,61 @@ end
         end
     end
 
-    local streamerConn = nil
+    local streamerTask = nil
+    local streamerDescConn = nil
     local function setStreamerMode(enabled)
         State.StreamerMode = enabled
         if enabled then
-            local function hideTags(targetChar)
-                pcall(function()
-                    if not targetChar then return end
-                    for _, d in ipairs(targetChar:GetDescendants()) do
-                        if d:IsA("BillboardGui") then
-                            d.Enabled = false
-                        end
+            local function anonymizeLabel(lbl)
+                if not lbl:IsA("TextLabel") then return end
+                local t = lbl.Text
+                if t and (t:find(LocalPlayer.Name) or t:find(LocalPlayer.DisplayName)) then
+                    lbl.Text = t:gsub(LocalPlayer.Name, "Anonymous"):gsub(LocalPlayer.DisplayName, "Anonymous")
+                end
+            end
+
+            local function hideCharTags(char)
+                if not char then return end
+                for _, d in ipairs(char:GetDescendants()) do
+                    if d:IsA("BillboardGui") then
+                        d.Enabled = false
+                    end
+                end
+            end
+
+            hideCharTags(LocalPlayer.Character)
+
+            -- ดักจับเฉพาะ Label ใหม่ที่ถูกเพิ่มเข้ามา แทนการสแกนทุกเฟรม
+            local pgui = LocalPlayer:FindFirstChild("PlayerGui")
+            if pgui and not streamerDescConn then
+                streamerDescConn = pgui.DescendantAdded:Connect(function(d)
+                    if State.StreamerMode and d:IsA("TextLabel") then
+                        task.defer(function() anonymizeLabel(d) end)
                     end
                 end)
             end
 
-            hideTags(LocalPlayer.Character)
-            if streamerConn then pcall(function() streamerConn:Disconnect() end) end
-            streamerConn = RunService.RenderStepped:Connect(function()
-                if not State.StreamerMode then return end
-                pcall(function()
-                    local char = LocalPlayer.Character
-                    if char then
-                        local head = char:FindFirstChild("Head")
-                        if head then
-                            for _, bg in ipairs(head:GetChildren()) do
-                                if bg:IsA("BillboardGui") then bg.Enabled = false end
+            -- รันตรวจสอบแค่ทุกๆ 1.5 วินาที เพื่อกิน CPU 0% ไม่กระตุกแน่นอน
+            if streamerTask then pcall(function() task.cancel(streamerTask) end) end
+            streamerTask = task.spawn(function()
+                while State.StreamerMode and running do
+                    pcall(function()
+                        hideCharTags(LocalPlayer.Character)
+                        local curPgui = LocalPlayer:FindFirstChild("PlayerGui")
+                        if curPgui then
+                            for _, lbl in ipairs(curPgui:GetDescendants()) do
+                                if lbl:IsA("TextLabel") and lbl.Visible then
+                                    anonymizeLabel(lbl)
+                                end
                             end
                         end
-                    end
-                    -- ซ่อนชื่อใน Leaderboard UI หรือ PlayerGui
-                    local pgui = LocalPlayer:FindFirstChild("PlayerGui")
-                    if pgui then
-                        for _, lbl in ipairs(pgui:GetDescendants()) do
-                            if lbl:IsA("TextLabel") and lbl.Visible and lbl.Text:find(LocalPlayer.Name) then
-                                lbl.Text = lbl.Text:gsub(LocalPlayer.Name, "Anonymous")
-                            end
-                            if lbl:IsA("TextLabel") and lbl.Visible and lbl.Text:find(LocalPlayer.DisplayName) then
-                                lbl.Text = lbl.Text:gsub(LocalPlayer.DisplayName, "Anonymous")
-                            end
-                        end
-                    end
-                end)
+                    end)
+                    task.wait(1.5)
+                end
             end)
         else
-            if streamerConn then pcall(function() streamerConn:Disconnect() end) streamerConn = nil end
+            if streamerTask then pcall(function() task.cancel(streamerTask) end) streamerTask = nil end
+            if streamerDescConn then pcall(function() streamerDescConn:Disconnect() end) streamerDescConn = nil end
             pcall(function()
                 local char = LocalPlayer.Character
                 if char then
@@ -2651,7 +2664,7 @@ end
     })
     MiscTab:CreateDropdown({
         Name = "Max Sell Rarity (ขายสูงสุดไม่เกินระดับ)",
-        Options = {"Common", "Uncommon", "Rare", "Epic"},
+        Options = {"Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Celestial"},
         CurrentOption = {State.SellMaxRarity},
         MultipleOptions = false,
         Flag = "DungeonLootrSellMaxRarity",
