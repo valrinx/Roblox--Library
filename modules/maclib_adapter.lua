@@ -611,6 +611,11 @@ return function(MacLib)
     end
 
     function WindowMethods:CreateTab(name, icon)
+        local existing = self:GetTab(name)
+        if existing then
+            return existing
+        end
+
         local native = self._tabGroup:Tab({
             Name = tostring(name or "Tab"),
             Image = resolveTabIcon(name, icon),

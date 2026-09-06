@@ -141,7 +141,7 @@ local HubUI
 do
     local ok, result = pcall(function()
         local source = game:HttpGet(
-            "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/maclib_adapter.lua?v=maclib-adapter-1.1.6"
+            "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/maclib_adapter.lua?v=maclib-adapter-1.1.7"
         )
         assert(type(source) == "string" and #source > 1000, "MacLib adapter download was empty")
         local chunk, compileError = loadstring(source)
