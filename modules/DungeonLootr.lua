@@ -1,4 +1,4 @@
--- VoltScriptZ | Dungeon Lootr | RAVEN HUB Module (v3.4.0)
+-- VoltScriptZ | Dungeon Lootr | RAVEN HUB Module (v3.4.1)
 -- Converted to RAVEN HUB (MacLib Adapter)
 -- PlaceIds: 132285059959516, 135245842886361 | GameIds: 9656201728, 8410525651
 
@@ -87,7 +87,9 @@ local State = {
     RerollTargetClasses = {},
     AutoDodge = true,
     DodgeMode = "Dash & Evade",
-    DodgeRadius = 24
+    DodgeRadius = 24,
+    DodgeDuration = 1.4,
+    DodgeDistance = 32
 }
 
 local function getGeneratedFolder()
@@ -343,6 +345,7 @@ local function startHover(cf)
     hoverConn=RunService.Heartbeat:Connect(function()
         if not State.AutoFarm then return end
         if lockConn then return end -- ถ้าล็อคมอนอยู่ให้ lock คุมแทน
+        if isDodgingNow then return end -- กำลังหลบ AoE อยู่ ให้ระงับการ hover ชั่วคราว
         if not isValidChar() then stopHover() return end
         local c=LocalPlayer.Character
         local h=c and c:FindFirstChild("HumanoidRootPart")
@@ -370,6 +373,7 @@ local function startLock(targetHRP)
     local hb, rs
     hb=RunService.Heartbeat:Connect(function()
         if not State.AutoFarm or not State.CFrameLock then return end
+        if isDodgingNow then return end -- กำลังหลบ AoE อยู่ ให้ระงับการล็อกตำแหน่งชั่วคราว
         if not isValidChar() then stopLock() return end
         local c=LocalPlayer.Character
         local h=c and c:FindFirstChild("HumanoidRootPart")
@@ -383,6 +387,7 @@ local function startLock(targetHRP)
     end)
     rs=RunService.Stepped:Connect(function()
         if not State.AutoFarm or not State.CFrameLock then return end
+        if isDodgingNow then return end -- กำลังหลบ AoE อยู่ ให้ระงับการล็อกตำแหน่งชั่วคราว
         if not isValidChar() then stopLock() return end
         local c=LocalPlayer.Character
         local h=c and c:FindFirstChild("HumanoidRootPart")
@@ -2312,8 +2317,10 @@ end
         end
 
         local mode = State.DodgeMode or "Dash & Evade"
+        local duration = tonumber(State.DodgeDuration) or 1.4
+        local dodgeDist = tonumber(State.DodgeDistance) or 32
 
-        -- 1. เรียก Dash Remote ของเกม
+        -- 1. เรียก Dash Remote ของเกมตามทิศทางหลบ
         pcall(function()
             local dash = getDashRemote()
             if dash then
@@ -2321,39 +2328,69 @@ end
             end
         end)
 
-        -- 2. เคลื่อนย้ายตำแหน่งฉุกเฉิน (Evade)
+        -- 2. เคลื่อนย้ายตำแหน่งฉุกเฉินและค้างไว้ในจุดปลอดภัย
+        local safeCF = nil
         if mode == "Blink (Upwards)" then
-            -- หลบขึ้นด้านบนเหนือรัศมีระเบิด (ปลอดภัย 100% จากการระเบิดบนพื้น)
-            local safeY = hrp.CFrame + Vector3.new(0, 28, 0)
-            pcall(function()
-                hrp.CFrame = safeY
-                hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-            end)
-            task.wait(0.7)
-            if isValidChar() and dodgeReturnCF and State.AutoFarm then
-                pcall(function() hrp.CFrame = dodgeReturnCF end)
-            end
+            -- ยกตัวลอยขึ้นฟ้าเหนือวงอันตราย 32 studs (พ้นการระเบิดบนพื้น 100%)
+            safeCF = hrp.CFrame + Vector3.new(0, dodgeDist, 0)
         elseif mode == "Blink (Backwards)" then
-            -- หลบถอยหลังพ้นรัศมีวง 30 studs
-            local safePos = hrp.CFrame + (awayDir * 28)
-            pcall(function()
-                hrp.CFrame = safePos
-                hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-            end)
-            task.wait(0.7)
-            if isValidChar() and dodgeReturnCF and State.AutoFarm then
-                pcall(function() hrp.CFrame = dodgeReturnCF end)
-            end
+            -- ถอยหลังพ้นรัศมีวง 32 studs
+            safeCF = hrp.CFrame + (awayDir * dodgeDist)
         else
-            -- "Dash & Evade": Dash พร้อมขยับตำแหน่งเลี่ยงรัศมีทันที
-            local safePos = hrp.CFrame + (awayDir * 22)
+            -- "Dash & Evade": ผสมผสาน Dash + วาร์ปพ้นรัศมีวง 32 studs พร้อมยกสูงขึ้น 6 studs
+            safeCF = hrp.CFrame + (awayDir * dodgeDist) + Vector3.new(0, 6, 0)
+        end
+
+        if safeCF then
             pcall(function()
-                hrp.CFrame = safePos
+                hrp.CFrame = safeCF
                 hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                hrp.Velocity = Vector3.new(0, 0, 0)
             end)
-            task.wait(0.55)
-            if isValidChar() and dodgeReturnCF and State.AutoFarm then
-                pcall(function() hrp.CFrame = dodgeReturnCF end)
+        end
+
+        -- 3. ค้างตัวในตำแหน่งปลอดภัยตลอดช่วงสกิลระเบิด (Dodge Duration)
+        local elapsed = 0
+        while elapsed < duration and running do
+            task.wait(0.1)
+            elapsed += 0.1
+            -- ค้างตำแหน่งให้มั่นคง ไม่ร่วงหรือโดนดูด
+            if isValidChar() and safeCF then
+                local h = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if h then
+                    pcall(function()
+                        h.CFrame = safeCF
+                        h.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                        h.Velocity = Vector3.new(0, 0, 0)
+                    end)
+                end
+            end
+        end
+
+        -- 4. ตรวจสอบว่ายังมี AoE ตกค้างอยู่ไหม ถ้ายังมีอยู่ให้รอต่ออีกจนกว่าจะหมดไป (สูงสุดอีก 1.5 วินาที)
+        local extraWait = 0
+        while extraWait < 1.5 and running do
+            local remainingDangers = getDangerousAoEs()
+            if #remainingDangers == 0 then
+                break
+            end
+            task.wait(0.2)
+            extraWait += 0.2
+            if isValidChar() and safeCF then
+                local h = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if h then pcall(function() h.CFrame = safeCF end) end
+            end
+        end
+
+        -- 5. เมื่อปลอดภัยสมบูรณ์แล้ว ให้คืนตำแหน่งกลับไปตีมอนสเตอร์ต่ออย่างราบรื่น
+        if isValidChar() and dodgeReturnCF and State.AutoFarm then
+            local h = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if h then
+                pcall(function()
+                    h.CFrame = dodgeReturnCF
+                    h.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                    h.Velocity = Vector3.new(0, 0, 0)
+                end)
             end
         end
 
@@ -2738,6 +2775,28 @@ end
         Flag = "DungeonLootrDodgeRadius",
         Callback = function(v)
             State.DodgeRadius = tonumber(v) or 24
+        end
+    })
+    MainTab:CreateSlider({
+        Name = "Dodge Duration (เวลารอให้สกิลจบ)",
+        Range = {0.8, 3.5},
+        Increment = 0.1,
+        CurrentValue = State.DodgeDuration,
+        Suffix = " s",
+        Flag = "DungeonLootrDodgeDuration",
+        Callback = function(v)
+            State.DodgeDuration = tonumber(v) or 1.4
+        end
+    })
+    MainTab:CreateSlider({
+        Name = "Dodge Distance (ระยะกระโดดหลบ)",
+        Range = {20, 60},
+        Increment = 2,
+        CurrentValue = State.DodgeDistance,
+        Suffix = " studs",
+        Flag = "DungeonLootrDodgeDistance",
+        Callback = function(v)
+            State.DodgeDistance = tonumber(v) or 32
         end
     })
 
