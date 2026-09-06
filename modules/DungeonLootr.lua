@@ -100,90 +100,93 @@ local function getMonsters()
     return list
 end
 
-local function getOrderedZones()
-    local ok, ctrl = pcall(function() return Knit.GetController("DungeonHUDController") end)
-    if ok and ctrl then
-        local zones=nil
-        pcall(function() zones = ctrl.Zones or ctrl._Zones end)
-        if zones and #zones>0 then
-            local out={}
-            for _,z in ipairs(zones) do if z.IsBoss~=true and z.HasTreasure~=true then table.insert(out, z.Index) end end
-            table.sort(out)
-            return out
-        end
-    end
-    return nil
-end
-
-local function getCurrentOrderedPointer(ordered)
-    -- ดาวเขียวในรูปคือห้องแรกที่ spawn เข้าดันมา → ต้อง Next Room ไปห้องถัดไป
-    local ok, ctrl = pcall(function() return Knit.GetController("DungeonHUDController") end)
-    if ok and ctrl and ordered then
-        local curPos, zones = nil, nil
-        pcall(function()
-            curPos = ctrl.CurrentPos or ctrl._CurrentPos
-            zones = ctrl.Zones or ctrl._Zones
-        end)
-        if curPos and zones and zones[curPos] then
-            local curIdx = zones[curPos].Index
-            for i, idx in ipairs(ordered) do if idx==curIdx then return (i % #ordered)+1 end end -- Next Room
-        end
-        if curPos and ordered then for i, idx in ipairs(ordered) do if idx==curPos then return (i % #ordered)+1 end end end
-    end
-    return 1
-end
-
-local function getRoomCenters()
-    -- เดินทุก Room: คืนทุก Room_* เรียงตาม idx
-    local gen=getGeneratedFolder() if not gen then return {} end
-    local out={}
-    for _,room in ipairs(gen:GetChildren()) do
-        if room:IsA("Model") or room:IsA("Folder") then
-            if not room.Name:match("^Room_%d+$") then continue end
-            local cf=nil pcall(function() cf=room:GetBoundingBox() end)
-            if cf then
-                local idx = room:GetAttribute("RoomIndex") or tonumber(room.Name:match("%d+")) or 999
-                table.insert(out,{idx=idx, cf=cf, name=room.Name})
+local function getActiveDungeonZone()
+    -- ดึงลำดับ Zone ตรงจาก Completion_Progress Data ของ DungeonHUDController (ตรงตามรูปดาว HUD 100%)
+    if getgc and debug and debug.getupvalues then
+        for _, v in ipairs(getgc()) do
+            if type(v) == "function" and islclosure(v) then
+                local info = debug.getinfo(v)
+                if info.name == "CPBuild" or info.name == "CPMoveCurrentToPos" then
+                    for _, u in ipairs(debug.getupvalues(v)) do
+                        if type(u) == "table" and rawget(u, "Zones") and rawget(u, "ByIndex") then
+                            local curZone = u.Zones[u.CurrentPos]
+                            if curZone then
+                                return curZone.Index, u.CurrentPos, u.Zones
+                            end
+                        end
+                    end
+                end
             end
         end
     end
-    table.sort(out,function(a,b) return (a.idx or 999)<(b.idx or 999) end)
-    local seen={} local filtered={}
-    for _,v in ipairs(out) do if not seen[v.name] then seen[v.name]=true table.insert(filtered,v) end end
-    return filtered
+    return nil, nil, nil
 end
 
-local function getSpawnCenters()
-    -- ห้องสปอนมอนจริง (มี Enemy_Spawn) ไว้เช็คว่าห้องไหนต้องเคลียร์
-    local gen=getGeneratedFolder() if not gen then return {} end
-    local out={}
-    for _,room in ipairs(gen:GetChildren()) do
+local function getCombatRoomCenters()
+    local gen = getGeneratedFolder() if not gen then return {} end
+    local activeIdx, curPos, zones = getActiveDungeonZone()
+    local out = {}
+
+    -- 1. ถ้าดึงจาก Completion_Progress Data ได้ ใช้ลำดับ Zone ตามเกม 100% (Room_2 -> 6 -> 8 -> 10 -> 14 -> 16 -> 20 -> 22)
+    if zones and #zones > 0 then
+        for _, z in ipairs(zones) do
+            local rName = "Room_" .. tostring(z.Index)
+            local room = gen:FindFirstChild(rName)
+            if room then
+                local cf = nil pcall(function() cf = room:GetBoundingBox() end)
+                if cf then
+                    table.insert(out, {
+                        idx = z.Index,
+                        cf = cf,
+                        name = rName,
+                        isBoss = z.IsBoss == true,
+                        done = z.Done == true
+                    })
+                end
+            end
+        end
+        if #out > 0 then return out end
+    end
+
+    -- 2. Fallback: หาเฉพาะห้องที่มี Enemy_Spawn หรือเป็นห้อง Boss (ไม่เอาทางเดินว่างเปล่า)
+    for _, room in ipairs(gen:GetChildren()) do
         if room:IsA("Model") or room:IsA("Folder") then
             if not room.Name:match("^Room_%d+$") then continue end
-            local spawns=room:FindFirstChild("Spawns")
-            local has=false if spawns then for _,s in ipairs(spawns:GetChildren()) do if s.Name=="Enemy_Spawn" then has=true break end end end
-            if not has then continue end
-            local cf=nil pcall(function() cf=room:GetBoundingBox() end)
-            if cf then local idx=room:GetAttribute("RoomIndex") or tonumber(room.Name:match("%d+")) or 999 table.insert(out,{idx=idx, cf=cf, name=room.Name}) end
+            local spawns = room:FindFirstChild("Spawns")
+            local hasSpawn = false
+            if spawns then
+                for _, s in ipairs(spawns:GetChildren()) do
+                    if s.Name == "Enemy_Spawn" or s.Name:find("Boss") then hasSpawn = true break end
+                end
+            end
+            local idx = room:GetAttribute("RoomIndex") or tonumber(room.Name:match("%d+")) or 999
+            if hasSpawn or idx == 22 then
+                local cf = nil pcall(function() cf = room:GetBoundingBox() end)
+                if cf then
+                    table.insert(out, {idx = idx, cf = cf, name = room.Name, isBoss = (idx == 22)})
+                end
+            end
         end
     end
-    table.sort(out,function(a,b) return (a.idx or 999)<(b.idx or 999) end)
+    table.sort(out, function(a, b) return (a.idx or 999) < (b.idx or 999) end)
     return out
 end
 
-local function getSpawnRoomIndices()
-    -- คืน set ของ idx ที่เป็น spawn room เพื่อกรอง byRoom
-    local centers=getRoomCenters()
-    local set={}
-    for _,c in ipairs(centers) do set[c.idx]=true end
-    return set
+local function getRoomCenters()
+    return getCombatRoomCenters()
 end
 
 local function isZoneClear()
-    local ok=false
+    local ok = false
     pcall(function()
-        for _,gui in ipairs(LocalPlayer.PlayerGui:GetDescendants()) do
-            if gui:IsA("TextLabel") and gui.Visible and gui.Text:find("Zone Clear") then ok=true break end
+        local pgui = LocalPlayer:FindFirstChild("PlayerGui")
+        local dc = pgui and pgui:FindFirstChild("Main", true) and pgui.Main:FindFirstChild("HUD", true) and pgui.Main.HUD:FindFirstChild("Dungeon_Container", true)
+        if dc then
+            local notif = dc:FindFirstChild("Notification_Canvas", true)
+            local zc = notif and notif:FindFirstChild("Zone_Cleared")
+            if zc and zc.Visible then
+                ok = true
+            end
         end
     end)
     return ok
@@ -349,8 +352,27 @@ local function safeWarp(cf)
     startHover(hoverCF)
 end
 
+local function isInRoom(m, roomIdx, roomCenter)
+    if m:GetAttribute("RoomIndex") == roomIdx then return true end
+    local hrpM = getHRP(m)
+    if hrpM and roomCenter and (hrpM.Position - roomCenter.cf.Position).Magnitude < 130 then return true end
+    return false
+end
+
+local function hasMobsInRoom(roomIdx, roomCenter)
+    local mons = getMonsters()
+    for _, m in ipairs(mons) do
+        if isInRoom(m, roomIdx, roomCenter) then return true end
+    end
+    return false
+end
+
 local function collectRoomChests(roomIdx, roomCenter)
     if not State.AutoLootChests then return end
+    -- กฎสำคัญ: ต้องเคลียร์มอนสเตอร์ในห้องให้หมด 100% ก่อน ห้ามวาร์ปไปหากล่องถ้ายังมีมอนสเตอร์อยู่
+    if roomIdx and roomCenter and hasMobsInRoom(roomIdx, roomCenter) then return end
+    if not roomIdx and #getMonsters() > 0 then return end
+
     local gen = getGeneratedFolder()
     if not gen then return end
     local char = LocalPlayer.Character
@@ -364,16 +386,19 @@ local function collectRoomChests(roomIdx, roomCenter)
             local cf = nil
             pcall(function() cf = obj:GetBoundingBox() end)
             local inRoom = false
-            if chestRoomIdx and roomIdx and chestRoomIdx == roomIdx then
-                inRoom = true
-            elseif roomCenter and cf and (cf.Position - roomCenter.cf.Position).Magnitude < 100 then
-                inRoom = true
-            elseif not roomIdx and not roomCenter then
+            if roomIdx then
+                if chestRoomIdx == roomIdx or chestRoomIdx == (1000 + roomIdx) then
+                    inRoom = true
+                elseif roomCenter and cf and (cf.Position - roomCenter.cf.Position).Magnitude < 70 then
+                    inRoom = true
+                end
+            else
                 inRoom = true
             end
 
             if inRoom then
                 local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
+                -- กล่องต้องปลดล็อคแล้ว (Enabled = true) เท่านั้น
                 if prompt and prompt.Enabled then
                     table.insert(chestsToLoot, {model = obj, cf = cf, prompt = prompt})
                 end
@@ -414,292 +439,197 @@ end
 
 local farmThread=nil
 -- ใหม่: เคลียร์ครบทุกห้องสปอนก่อน Boss จะเกิด (ห้ามข้าม / ห้ามรอเวฟมั่ว)
+local farmThread=nil
 local function startFarm()
     if farmThread then return end
     farmThread=task.spawn(function()
         setNoclip(true)
         _G.__farmStarted=nil
-        nextRoomPointer=2 -- เริ่มห้องหน้าจุดเกิด (Room_2) ไม่ข้าม
         local lastRoomIndex=nil
         local clearedRooms={}
         local function markCleared(idx) clearedRooms[idx]=true end
         local function isCleared(idx) return clearedRooms[idx]==true end
-        local function allSpawnCleared()
-            local centers=getRoomCenters()
-            for _,c in ipairs(centers) do if not isCleared(c.idx) then return false end end
-            return #centers>0
-        end
+
         while State.AutoFarm do
             if (not running) then break end
             if not isValidChar() then stopLock() task.wait(1) continue end
             local char=LocalPlayer.Character local hrp=char:FindFirstChild("HumanoidRootPart")
             if not hrp then task.wait(0.5) continue end
-            local centers=getRoomCenters()
-            if #centers==0 then task.wait(1) continue end
-            if nextRoomPointer>#centers then
-                clearedRooms={}
-                nextRoomPointer=1
-            end
-            if not _G.__farmStarted then
-                _G.__farmStarted=true
-                local bestDist=math.huge local bestIdx=nextRoomPointer
-                for i, c in ipairs(centers) do
-                    local d=(c.cf.Position - hrp.Position).Magnitude
-                    if d < bestDist then bestDist=d bestIdx=i end
+
+            local combatCenters = getCombatRoomCenters()
+            if #combatCenters == 0 then task.wait(1) continue end
+
+            -- ค้นหาห้องเป้าหมายตามลำดับดาว HUD ของเกมโดยตรง (ห้ามข้ามห้อง)
+            local activeRoomIdx, curZonePos, zones = getActiveDungeonZone()
+            local curCenter = nil
+
+            if activeRoomIdx then
+                for _, c in ipairs(combatCenters) do
+                    if c.idx == activeRoomIdx then
+                        curCenter = c
+                        break
+                    end
                 end
-                nextRoomPointer=bestIdx
             end
-            local allMons=getMonsters()
-            -- Smart Target: ถ้ามีมอนสเตอร์ที่ยังมีชีวิตอยู่ใน NPCs แต่ห้องปัจจุบันไม่มีมอน ให้วาร์ปไปหาห้องที่มีมอนก่อน
-            local targetMobRoom = nil
+
+            -- Fallback ถ้าหา activeRoomIdx ไม่เจอ ให้หาตามลำดับ combatCenters ที่ยังไม่เคลียร์
+            if not curCenter then
+                for _, c in ipairs(combatCenters) do
+                    if not c.done and not isCleared(c.idx) then
+                        curCenter = c
+                        break
+                    end
+                end
+            end
+
+            if not curCenter then
+                curCenter = combatCenters[#combatCenters] -- ห้องสุดท้าย (Boss)
+            end
+
+            local curIdx = curCenter.idx
+
+            -- Boss handling: ถ้าห้องนี้เป็น Boss หรือมีบอสเกิด
+            local allMons = getMonsters()
+            local boss = nil
             for _, m in ipairs(allMons) do
-                local rIdx = m:GetAttribute("RoomIndex")
-                if rIdx and not isCleared(rIdx) then
-                    for i, c in ipairs(centers) do
-                        if c.idx == rIdx then
-                            targetMobRoom = i
-                            break
-                        end
-                    end
-                end
-                if targetMobRoom then break end
-            end
-            if targetMobRoom and targetMobRoom ~= nextRoomPointer then
-                local curHasMob = false
-                local curC = centers[nextRoomPointer]
-                if curC then
-                    for _, m in ipairs(allMons) do
-                        if m:GetAttribute("RoomIndex") == curC.idx then curHasMob = true break end
-                    end
-                end
-                if not curHasMob then
-                    nextRoomPointer = targetMobRoom
+                if m:GetAttribute("IsBoss") == true or m:GetAttribute("IsMapBoss") == true or m:GetAttribute("BossType") ~= nil then
+                    boss = m
+                    break
                 end
             end
-            -- Boss ธรรมดาถือเป็นมอนแต่ต้องวาร์ปหาได้แม้อยู่คนละ RoomIndex (Boss arena ไม่ใช่ Room_*) เลย priority ทั้ง IsBoss/IsMapBoss
-            local boss=nil for _,m in ipairs(allMons) do if m:GetAttribute("IsBoss")==true or m:GetAttribute("IsMapBoss")==true or m:GetAttribute("BossType")~=nil then boss=m break end end
-            if boss then
-                local targetHRP=getHRP(boss)
+
+            if boss and (curCenter.isBoss or (curIdx == 22)) then
+                local targetHRP = getHRP(boss)
                 if not targetHRP then
-                    -- Streaming fallback: ถ้า Boss อยู่ไกลเกินจน HRP unstream ให้วาร์ปไปตำแหน่ง BoundingBox หรือ Center ก่อน
-                    local bRoomIdx = boss:GetAttribute("RoomIndex")
-                    local bDest = nil
-                    if bRoomIdx then
-                        for _, c in ipairs(centers) do
-                            if c.idx == bRoomIdx then bDest = c.cf break end
-                        end
-                    end
-                    if not bDest then
-                        local ok, cf = pcall(function() return boss:GetBoundingBox() end)
-                        if ok and cf then bDest = cf end
-                    end
-                    if bDest then
-                        safeWarp(bDest + Vector3.new(0, 10, 0))
-                        task.wait(0.3)
-                        targetHRP = getHRP(boss)
-                    end
+                    safeWarp(curCenter.cf + Vector3.new(0, 10, 0))
+                    task.wait(0.4)
+                    targetHRP = getHRP(boss)
                 end
                 if targetHRP then
-                    lastRoomIndex=nil
                     startLock(targetHRP)
-                    local hum=boss:FindFirstChildOfClass("Humanoid")
+                    local hum = boss:FindFirstChildOfClass("Humanoid")
                     while State.AutoFarm and boss.Parent do
-                        local dead=false if hum then dead=hum.Health<=0 else local hp=boss:GetAttribute("HealthOverride") if hp~=nil then dead=hp<=0 end end
+                        local dead = false
+                        if hum then dead = hum.Health <= 0
+                        else local hp = boss:GetAttribute("HealthOverride") if hp ~= nil then dead = hp <= 0 end end
                         if dead then break end
                         local dir = State.Position=="Above" and Vector3.new(0,-1,0) or State.Position=="Below" and Vector3.new(0,1,0) or Vector3.new(0,0,-1)
                         fireM1(dir) task.wait(State.AttackDelay)
                     end
                     stopLock()
                     task.wait(0.5)
-                    collectRoomChests(nil, nil)
-                    -- บอสตายรีเซ็ตให้เริ่มเวฟใหม่
-                    nextRoomPointer=1 clearedRooms={} lastRoomIndex=nil
+                    -- บอสตายแล้ว ตรวจสอบว่าไม่มีมอนเหลือแล้ว จึงเก็บกล่องทั้งหมด
+                    if #getMonsters() == 0 then
+                        collectRoomChests(nil, nil)
+                    end
+                    task.wait(1)
                     continue
                 end
             end
-            -- ห้องปัจจุบันที่ต้องเคลียร์ตามลำดับ Room_2→6→10→14→18
-            local curCenter=centers[nextRoomPointer]
-            local curIdx=curCenter.idx
-            -- หามอนในห้องนี้โดยตรง
-            local monsInRoom={}
-            local function isInRoom(m, roomIdx, roomCenter)
-                if m:GetAttribute("RoomIndex")==roomIdx then return true end
-                -- fallback: มอนไม่มี RoomIndex หรือ 999 แต่อยู่ใกล้กลางห้อง <80 studs นับด้วย กันย้ายห้องก่อนมอนตายหมด
-                local hrpM=getHRP(m)
-                if hrpM and roomCenter and (hrpM.Position - roomCenter.cf.Position).Magnitude < 80 then return true end
-                return false
-            end
-            for _,m in ipairs(allMons) do if isInRoom(m, curIdx, curCenter) then table.insert(monsInRoom, m) end end
-            if #monsInRoom==0 then
-                local isSpawn=false
-                do local gen=getGeneratedFolder() local room=gen and gen:FindFirstChild(curCenter.name) local sp=room and room:FindFirstChild("Spawns") if sp then for _,s in ipairs(sp:GetChildren()) do if s.Name=="Enemy_Spawn" then isSpawn=true break end end end end
-                local groundCF=nil
-                do
-                    local roomForGround=getGeneratedFolder() and getGeneratedFolder():FindFirstChild(curCenter.name)
-                    if roomForGround then
-                        local ok, cf2, sz2 = pcall(function() return roomForGround:GetBoundingBox() end)
-                        if ok and cf2 and sz2 then
-                            groundCF = CFrame.new(Vector3.new(curCenter.cf.Position.X, cf2.Position.Y - sz2.Y/2 + 8, curCenter.cf.Position.Z))
-                        end
-                    end
-                    if not groundCF then
-                        local params=RaycastParams.new() params.FilterDescendantsInstances={LocalPlayer.Character} params.FilterType=Enum.RaycastFilterType.Exclude
-                        local res=workspace:Raycast(curCenter.cf.Position+Vector3.new(0,50,0), Vector3.new(0,-200,0), params)
-                        if res then groundCF=CFrame.new(res.Position+Vector3.new(0,0.5,0)) else groundCF=curCenter.cf+Vector3.new(0,0.5,0) end
-                    end
-                end
-                if isSpawn then
-                    if (hrp.Position - groundCF.Position).Magnitude > 8 then
-                        safeWarp(groundCF)
-                    end
-                    if #monsInRoom==0 then
-                        local waited=0
-                        while waited < 3 do
-                            task.wait(0.5) waited+=0.5
-                            local chk=getMonsters()
-                            local has=false for _,m in ipairs(chk) do if isInRoom(m, curIdx, curCenter) then has=true break end end
-                            if has then break end
-                            safeWarp(groundCF)
-                        end
-                        local chk2=getMonsters() local stillEmpty=true for _,m in ipairs(chk2) do if isInRoom(m, curIdx, curCenter) then stillEmpty=false break end end
-                        if stillEmpty then
-                            markCleared(curIdx)
-                            nextRoomPointer+=1
-                            if nextRoomPointer>#centers then
-                                clearedRooms={}
-                                nextRoomPointer=1
-                            end
-                            continue
-                        end
-                        -- มีมอนเกิดแล้วให้ไปตีต่อ ไม่ข้าม
-                        monsInRoom={}
-                        for _,m in ipairs(chk2) do if isInRoom(m, curIdx, curCenter) then table.insert(monsInRoom, m) end end
-                        if #monsInRoom==0 then
-                            markCleared(curIdx)
-                            nextRoomPointer+=1
-                            if nextRoomPointer>#centers then
-                                clearedRooms={}
-                                nextRoomPointer=1
-                            end
-                            continue
-                        end
-                    end
-                else
-                    markCleared(curIdx)
-                    if (hrp.Position - groundCF.Position).Magnitude > 8 then
-                        safeWarp(groundCF) task.wait(0.3)
-                    end
-                    nextRoomPointer+=1
-                    if nextRoomPointer>#centers then
-                        clearedRooms={}
-                        nextRoomPointer=1
-                    end
-                    continue
+
+            -- หามอนในห้องปัจจุบัน
+            local monsInRoom = {}
+            for _, m in ipairs(allMons) do
+                if isInRoom(m, curIdx, curCenter) then
+                    table.insert(monsInRoom, m)
                 end
             end
-            -- มีมอนในห้องนี้ → ตีทีละตัวจนหมดห้อง
-            local target=getClosest(monsInRoom, hrp.Position)
-            if not target then task.wait(0.2) continue end
-            lastRoomIndex=curIdx
-            local targetHRP=getHRP(target) if not targetHRP then task.wait(0.2) continue end
-            if State.CFrameLock then
-                startLock(targetHRP)
-                local hum=target:FindFirstChildOfClass("Humanoid")
-                while State.AutoFarm and target.Parent do
-                    local dead=false if hum then dead=hum.Health<=0 else local hp=target:GetAttribute("HealthOverride") if hp~=nil then dead=hp<=0 end end
-                    if dead then break end
-                    local dir = State.Position=="Above" and Vector3.new(0,-1,0) or State.Position=="Below" and Vector3.new(0,1,0) or Vector3.new(0,0,-1)
-                    fireM1(dir) task.wait(State.AttackDelay)
-                end
-                stopLock()
-            else
-                local _, cf = getPositionForMode(targetHRP, State.Position, State.Distance)
-                pcall(function() hrp.CFrame=cf end)
-                for i=1,4 do if not State.AutoFarm then break end fireM1() task.wait(State.AttackDelay) end
+
+            -- ถ้าตัวละครอยู่ห่างจากห้องเป้าหมาย (>40 studs) ให้วาร์ปเข้าห้องก่อนเพื่อให้ Roblox stream in
+            if (hrp.Position - curCenter.cf.Position).Magnitude > 40 then
+                safeWarp(curCenter.cf + Vector3.new(0, 3, 0))
+                task.wait(0.3)
+                hrp = getHRP(LocalPlayer.Character) or hrp
             end
-            task.wait(0.4)
-            local chkAfter=getMonsters()
-            local remain=0 for _,m in ipairs(chkAfter) do if isInRoom(m, curIdx, curCenter) then remain+=1 end end
-            if remain==0 then
-                -- ถ้าเป็น Rush/Survive/Might ต้องรอเงื่อนไขสำเร็จ (Zone Clear) ก่อนย้าย
-                local waited=0
-                while State.AutoFarm and waited < 12 do
-                    if isZoneClear() then break end
-                    -- ห้องปกติ Zone Clear จะมาทันทีหลังมอนหมด 0.5-1วิ, Rush/Survive รอนานกว่า
-                    -- ถ้าไม่มี Zone Clear แต่ห้องนี้ไม่มีมอนเกิน 3วิก็ถือว่าเคลียร์สำหรับห้องปกติ
-                    if waited>3 then
-                        local c2=getMonsters() local r2=0 for _,m in ipairs(c2) do if isInRoom(m, curIdx, curCenter) then r2+=1 end end
-                        if r2==0 and not (curCenter.name:find("Room")) then break end
-                        -- ถ้าเป็นห้องธรรมดา (ไม่ใช่ Rush/Survive) ให้ไปต่อได้หลัง 3วิ
-                        -- เช็คแบบง่าย: ถ้าไม่มีมอน 3วิและยังไม่ Zone Clear ให้รอดูอีกนิดสำหรับ Rush/Survive
-                        if r2==0 then
-                            -- ดูว่ามี GUI Rush/Survive ค้างไหม ถ้าไม่มีก็ไปต่อ
-                            local hasSpecial=false
-                            pcall(function()
-                                for _,gui in ipairs(LocalPlayer.PlayerGui:GetDescendants()) do
-                                    if gui:IsA("TextLabel") and gui.Visible and (gui.Text:find("Rush") or gui.Text:find("Survive") or gui.Text:find("Survivor") or gui.Text:find("Might")) then hasSpecial=true end
-                                end
-                            end)
-                            if not hasSpecial and waited>3 then break end
-                        end
-                    end
-                    task.wait(0.5) waited+=0.5
+
+            -- 1. ถ้ายังมีมอนในห้องนี้ → ตีทีละตัวจนหมดห้อง (ห้ามข้ามห้องและห้ามไปหากล่อง)
+            if #monsInRoom > 0 then
+                local target = getClosest(monsInRoom, hrp.Position) or monsInRoom[1]
+                local targetHRP = getHRP(target)
+                if not targetHRP then
+                    safeWarp(curCenter.cf + Vector3.new(0, 3, 0))
+                    task.wait(0.3)
+                    targetHRP = getHRP(target)
                 end
+                if targetHRP then
+                    if State.CFrameLock then
+                        startLock(targetHRP)
+                        local hum = target:FindFirstChildOfClass("Humanoid")
+                        while State.AutoFarm and target.Parent do
+                            local dead = false
+                            if hum then dead = hum.Health <= 0
+                            else local hp = target:GetAttribute("HealthOverride") if hp ~= nil then dead = hp <= 0 end end
+                            if dead then break end
+                            local dir = State.Position=="Above" and Vector3.new(0,-1,0) or State.Position=="Below" and Vector3.new(0,1,0) or Vector3.new(0,0,-1)
+                            fireM1(dir) task.wait(State.AttackDelay)
+                        end
+                        stopLock()
+                    else
+                        local _, cf = getPositionForMode(targetHRP, State.Position, State.Distance)
+                        pcall(function() hrp.CFrame = cf end)
+                        for i=1,4 do if not State.AutoFarm then break end fireM1() task.wait(State.AttackDelay) end
+                    end
+                end
+                task.wait(0.2)
+                continue -- ตีมอนตัวถัดไปในห้องนี้ทันที ห้ามไปทำอย่างอื่น
+            end
+
+            -- 2. ถ้า #monsInRoom == 0 (มอนปัจจุบันหมดแล้ว)
+            -- รอเช็ค Wave สปอนถัดไป (2.5 วิ) กันกรณีมอนเวฟ 2 กำลังจะเกิด ไม่รีบไปหากล่อง
+            local moreWave = false
+            local waitTime = 0
+            while State.AutoFarm and waitTime < 2.5 do
+                task.wait(0.5)
+                waitTime += 0.5
+                if hasMobsInRoom(curIdx, curCenter) then
+                    moreWave = true
+                    break
+                end
+            end
+            if moreWave then
+                continue -- มีเวฟใหม่เกิดมา ลุยตีต่อ ไม่ไปหากล่อง
+            end
+
+            -- ถ้าเป็น Rush/Survive/Might หรือห้องพิเศษ
+            local waited = 0
+            while State.AutoFarm and waited < 8 do
+                if isZoneClear() then break end
+                if not hasMobsInRoom(curIdx, curCenter) and waited >= 2 then break end
+                task.wait(0.5) waited += 0.5
+            end
+
+            -- เคลียร์มอนหมดห้องแน่นอนแล้ว 100% จึงเก็บกล่องของห้องนี้
+            if not hasMobsInRoom(curIdx, curCenter) then
                 collectRoomChests(curIdx, curCenter)
-                markCleared(curIdx)
-                if allSpawnCleared() then
-                    local waitedBoss=0
-                    while waitedBoss < 8 and State.AutoFarm do
-                        task.wait(0.5) waitedBoss+=0.5
-                        if isZoneClear() then
-                            local chk=getMonsters()
-                            local hasBoss=false
-                            for _,m in ipairs(chk) do if m:GetAttribute("IsBoss")==true or m:GetAttribute("IsMapBoss")==true or m:GetAttribute("BossType")~=nil then hasBoss=true break end end
-                            if hasBoss then break end
-                            if #chk==0 and waitedBoss >= 8 then
-                                pcall(function()
-                                    local svc=Knit.GetService("DungeonRunService")
-                                    if svc then
-                                        if svc.RequestReturn then pcall(function() svc:RequestReturn():await() end) end
-                                        if svc.RequestLeave then pcall(function() svc:RequestLeave():await() end) end
-                                    end
-                                    -- fallback กดปุ่ม Return
-                                    for _,gui in ipairs(LocalPlayer.PlayerGui:GetDescendants()) do
-                                        if gui:IsA("TextLabel") and gui.Visible and (gui.Text=="Return" or gui.Text=="Leave") then
-                                            local btn=gui.Parent
-                                            while btn and not (btn:IsA("TextButton") or btn:IsA("ImageButton")) do btn=btn.Parent end
-                                            if btn and btn.Visible and btn.Active then pcall(function() btn:Activate() end) break end
-                                        end
-                                    end
-                                end)
-                                break
-                            end
-                        end
-                    end
-                end
-                nextRoomPointer+=1
-                if nextRoomPointer>#centers then
-                    task.wait(0.1)
-                    clearedRooms={}
-                    nextRoomPointer=1
-                else
-                    local nxt=centers[nextRoomPointer]
-                    -- หาพื้นจริงจาก BoundingBox กันโดนหลังคา (Raycast โดนเพดานก่อน)
-                    local dest=nil
-                    local gen2=getGeneratedFolder()
-                    local room2=gen2 and gen2:FindFirstChild(nxt.name)
-                    if room2 then
-                        local ok, cf2, sz2 = pcall(function() return room2:GetBoundingBox() end)
-                        if ok and cf2 and sz2 then
-                            dest = CFrame.new(Vector3.new(nxt.cf.Position.X, cf2.Position.Y - sz2.Y/2 + 8, nxt.cf.Position.Z))
-                        end
-                    end
-                    dest = dest or nxt.cf+Vector3.new(0,1,0)
-                    safeWarp(dest) task.wait(0.1)
-                end
-            else
-                task.wait(State.TeleportDelay)
             end
+            markCleared(curIdx)
+
+            -- ตรวจสอบการจบดันเจี้ยนเมื่อถึงห้องบอส
+            if curCenter.isBoss or curIdx == 22 then
+                local waitedBoss = 0
+                while waitedBoss < 8 and State.AutoFarm do
+                    task.wait(0.5) waitedBoss += 0.5
+                    if #getMonsters() == 0 and waitedBoss >= 6 then
+                        pcall(function()
+                            local svc = Knit.GetService("DungeonRunService")
+                            if svc then
+                                if svc.RequestReturn then pcall(function() svc:RequestReturn():await() end) end
+                                if svc.RequestLeave then pcall(function() svc:RequestLeave():await() end) end
+                            end
+                            for _, gui in ipairs(LocalPlayer.PlayerGui:GetDescendants()) do
+                                if gui:IsA("TextLabel") and gui.Visible and (gui.Text=="Return" or gui.Text=="Leave") then
+                                    local btn = gui.Parent
+                                    while btn and not (btn:IsA("TextButton") or btn:IsA("ImageButton")) do btn = btn.Parent end
+                                    if btn and btn.Visible and btn.Active then pcall(function() btn:Activate() end) break end
+                                end
+                            end
+                        end)
+                        break
+                    end
+                end
+            end
+
+            task.wait(0.3)
         end
         stopLock() stopHover() setNoclip(false) farmThread=nil
     end)
