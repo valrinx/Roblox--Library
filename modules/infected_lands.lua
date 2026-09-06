@@ -27,20 +27,43 @@ return function(Window, scriptInfo)
     -- Settings State
     ---------------------------------------------------------------------------
     local settings = {
-        -- ESP Settings
+        -- Player ESP
         espPlayers = true,
+        playerMaxDist = 1200,
+        playerShowDist = true,
+        playerShowHealth = true,
+
+        -- Zombie ESP
         espZombies = true,
+        zombieMaxDist = 1200,
+        zombieShowDist = true,
+        zombieShowHealth = true,
+
+        -- Ground Items ESP
         espGroundItems = true,
+        itemMaxDist = 300,
+        itemShowDist = true,
+
+        -- Vehicles ESP
         espVehicles = true,
+        vehMaxDist = 1500,
+        vehShowDist = true,
+
+        -- Player Corpses ESP
         espCorpses = true,
-        espMaxDistance = 1200,
-        espShowDistance = true,
-        espShowHealth = true,
+        corpseMaxDist = 800,
+        corpseShowDist = true,
+
+        -- Wall Check (Visibility Check)
+        wallCheck = true,
+        colorVisible = Color3.fromRGB(255, 45, 45),   -- Red when shootable (Direct Line of Sight)
+        colorBehindWall = Color3.fromRGB(45, 235, 85), -- Green when behind wall
 
         -- Aimbot Settings
         aimbotEnabled = true,
-        aimbotTarget = "Head", -- "Head" or "Torso"
+        aimbotTarget = "Head", -- "Head", "Torso", or "Auto (Shootable Bone)"
         aimbotTargetType = "Both", -- "Zombies", "Players", "Both"
+        aimbotVisibleOnly = true, -- Only target shootable entities
         aimbotFOV = 150,
         aimbotSmoothness = 0.25,
         aimbotShowFOV = true,
@@ -105,6 +128,44 @@ return function(Window, scriptInfo)
     end
 
     ---------------------------------------------------------------------------
+    -- Wall Check (Raycast Line of Sight)
+    ---------------------------------------------------------------------------
+    local function isPartVisible(targetPart, targetModel)
+        if not targetPart or not targetPart:IsA("BasePart") then return false end
+        local camPos = Camera.CFrame.Position
+        local targetPos = targetPart.Position
+        local dir = targetPos - camPos
+        local dist = dir.Magnitude
+        if dist < 0.5 then return true end
+
+        local rayParams = RaycastParams.new()
+        rayParams.FilterType = Enum.RaycastFilterType.Exclude
+
+        local ignoreList = {}
+        if LP.Character then
+            table.insert(ignoreList, LP.Character)
+        end
+        -- Ignore transparent effects, camera instances, and vehicles if sitting
+        local wsScope = Workspace:FindFirstChild("WeaponSystem_Workspace")
+        if wsScope then table.insert(ignoreList, wsScope) end
+
+        rayParams.FilterDescendantsInstances = ignoreList
+        rayParams.IgnoreWater = true
+
+        local result = Workspace:Raycast(camPos, dir, rayParams)
+        if not result then
+            return true -- Nothing hit between camera and target
+        end
+
+        -- Check if hit instance belongs to the target model
+        if result.Instance and (result.Instance:IsDescendantOf(targetModel) or result.Instance == targetPart) then
+            return true
+        end
+
+        return false
+    end
+
+    ---------------------------------------------------------------------------
     -- ESP Rendering Functions
     ---------------------------------------------------------------------------
     local function createESP(inst, color, title, isModel, tag)
@@ -134,10 +195,10 @@ return function(Window, scriptInfo)
         if bbPart then
             billboard = Instance.new("BillboardGui")
             billboard.Name = "RAVEN_ESP"
-            billboard.Size = UDim2.new(0, 150, 0, 34)
+            billboard.Size = UDim2.new(0, 160, 0, 36)
             billboard.StudsOffset = Vector3.new(0, 2.5, 0)
             billboard.AlwaysOnTop = true
-            billboard.MaxDistance = 1500
+            billboard.MaxDistance = 2500
             billboard.Adornee = bbPart
             pcall(function() billboard.Parent = bbPart end)
 
@@ -164,7 +225,7 @@ return function(Window, scriptInfo)
             subLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
             subLabel.BackgroundTransparency = 1
             subLabel.Size = UDim2.new(1, 0, 0.5, 0)
-            subLabel.Position = UDim2.new(0, 0, 0.5, 0)
+            subLabel.Position = UDim2.new(0, 0, 0, 0.5)
             subLabel.Parent = billboard
         end
 
@@ -265,16 +326,35 @@ return function(Window, scriptInfo)
             local players = getActivePlayers()
             for _, info in ipairs(players) do
                 local dist = (info.root.Position - myPos).Magnitude
-                if dist <= settings.espMaxDistance then
+                if dist <= settings.playerMaxDist then
+                    -- Visibility Wall Check
+                    local headPart = info.model:FindFirstChild("Head") or info.root
+                    local isVisible = settings.wallCheck and isPartVisible(headPart, info.model)
+                    local targetColor = isVisible and settings.colorVisible or settings.colorBehindWall
+                    if not settings.wallCheck then
+                        targetColor = Color3.fromRGB(60, 160, 255)
+                    end
+
                     if not espObjects[info.model] then
-                        createESP(info.model, Color3.fromRGB(60, 160, 255), "👤 " .. info.model.Name, true, "player")
+                        createESP(info.model, targetColor, "👤 " .. info.model.Name, true, "player")
                     end
                     local data = espObjects[info.model]
-                    if data and data.subLabel then
-                        local parts = {}
-                        if settings.espShowDistance then table.insert(parts, math.floor(dist) .. "m") end
-                        if settings.espShowHealth then table.insert(parts, "HP: " .. math.floor(info.humanoid.Health)) end
-                        data.subLabel.Text = table.concat(parts, " | ")
+                    if data then
+                        -- Update color dynamically on wall check
+                        if data.highlight and data.highlight.FillColor ~= targetColor then
+                            data.highlight.FillColor = targetColor
+                        end
+                        if data.titleLabel and data.titleLabel.TextColor3 ~= targetColor then
+                            data.titleLabel.TextColor3 = targetColor
+                        end
+
+                        if data.subLabel then
+                            local parts = {}
+                            if settings.playerShowDist then table.insert(parts, math.floor(dist) .. "m") end
+                            if settings.playerShowHealth then table.insert(parts, "HP: " .. math.floor(info.humanoid.Health)) end
+                            if isVisible then table.insert(parts, "[VISIBLE]") end
+                            data.subLabel.Text = table.concat(parts, " | ")
+                        end
                     end
                 else
                     if espObjects[info.model] then removeESP(info.model) end
@@ -289,7 +369,15 @@ return function(Window, scriptInfo)
             local zombies = getActiveZombies()
             for _, info in ipairs(zombies) do
                 local dist = (info.root.Position - myPos).Magnitude
-                if dist <= settings.espMaxDistance then
+                if dist <= settings.zombieMaxDist then
+                    -- Visibility Wall Check
+                    local headPart = info.model:FindFirstChild("Head") or info.root
+                    local isVisible = settings.wallCheck and isPartVisible(headPart, info.model)
+                    local targetColor = isVisible and settings.colorVisible or settings.colorBehindWall
+                    if not settings.wallCheck then
+                        targetColor = Color3.fromRGB(255, 80, 80)
+                    end
+
                     if not espObjects[info.model] then
                         local zName = info.model.Name
                         if zName:find("Police") then
@@ -307,14 +395,25 @@ return function(Window, scriptInfo)
                         else
                             zName = "Zombie"
                         end
-                        createESP(info.model, Color3.fromRGB(255, 80, 80), "🧟 " .. zName, true, "zombie")
+                        createESP(info.model, targetColor, "🧟 " .. zName, true, "zombie")
                     end
                     local data = espObjects[info.model]
-                    if data and data.subLabel then
-                        local parts = {}
-                        if settings.espShowDistance then table.insert(parts, math.floor(dist) .. "m") end
-                        if settings.espShowHealth then table.insert(parts, "HP: " .. math.floor(info.health)) end
-                        data.subLabel.Text = table.concat(parts, " | ")
+                    if data then
+                        -- Update color dynamically on wall check
+                        if data.highlight and data.highlight.FillColor ~= targetColor then
+                            data.highlight.FillColor = targetColor
+                        end
+                        if data.titleLabel and data.titleLabel.TextColor3 ~= targetColor then
+                            data.titleLabel.TextColor3 = targetColor
+                        end
+
+                        if data.subLabel then
+                            local parts = {}
+                            if settings.zombieShowDist then table.insert(parts, math.floor(dist) .. "m") end
+                            if settings.zombieShowHealth then table.insert(parts, "HP: " .. math.floor(info.health)) end
+                            if isVisible then table.insert(parts, "[VISIBLE]") end
+                            data.subLabel.Text = table.concat(parts, " | ")
+                        end
                     end
                 else
                     if espObjects[info.model] then removeESP(info.model) end
@@ -331,7 +430,7 @@ return function(Window, scriptInfo)
                 local root = getRoot(item)
                 if root then
                     local dist = (root.Position - myPos).Magnitude
-                    if dist <= settings.espMaxDistance then
+                    if dist <= settings.itemMaxDist then
                         if not espObjects[item] then
                             local prompt = item:FindFirstChildWhichIsA("ProximityPrompt", true)
                             local itemName = (prompt and prompt.ObjectText ~= "" and prompt.ObjectText) or item.Name:gsub("^%w+%-?%w*%-?%w*%-?%w*%-?%w*", "")
@@ -340,8 +439,8 @@ return function(Window, scriptInfo)
                             createESP(item, Color3.fromRGB(255, 215, 0), "📦 " .. itemName, item:IsA("Model"), "item")
                         end
                         local data = espObjects[item]
-                        if data and data.subLabel and settings.espShowDistance then
-                            data.subLabel.Text = math.floor(dist) .. "m"
+                        if data and data.subLabel then
+                            data.subLabel.Text = settings.itemShowDist and (math.floor(dist) .. "m") or ""
                         end
                     else
                         if espObjects[item] then removeESP(item) end
@@ -359,13 +458,13 @@ return function(Window, scriptInfo)
                 local root = getRoot(veh)
                 if root then
                     local dist = (root.Position - myPos).Magnitude
-                    if dist <= settings.espMaxDistance * 1.5 then
+                    if dist <= settings.vehMaxDist then
                         if not espObjects[veh] then
                             createESP(veh, Color3.fromRGB(130, 220, 255), "🚗 " .. veh.Name, true, "vehicle")
                         end
                         local data = espObjects[veh]
-                        if data and data.subLabel and settings.espShowDistance then
-                            data.subLabel.Text = math.floor(dist) .. "m"
+                        if data and data.subLabel then
+                            data.subLabel.Text = settings.vehShowDist and (math.floor(dist) .. "m") or ""
                         end
                     else
                         if espObjects[veh] then removeESP(veh) end
@@ -383,13 +482,13 @@ return function(Window, scriptInfo)
                 local root = getRoot(corpse)
                 if root then
                     local dist = (root.Position - myPos).Magnitude
-                    if dist <= settings.espMaxDistance then
+                    if dist <= settings.corpseMaxDist then
                         if not espObjects[corpse] then
                             createESP(corpse, Color3.fromRGB(200, 130, 255), "💀 " .. corpse.Name, true, "corpse")
                         end
                         local data = espObjects[corpse]
-                        if data and data.subLabel and settings.espShowDistance then
-                            data.subLabel.Text = math.floor(dist) .. "m"
+                        if data and data.subLabel then
+                            data.subLabel.Text = settings.corpseShowDist and (math.floor(dist) .. "m") or ""
                         end
                     else
                         if espObjects[corpse] then removeESP(corpse) end
@@ -420,7 +519,7 @@ return function(Window, scriptInfo)
     end
 
     ---------------------------------------------------------------------------
-    -- Safe Mouse / Camera Aimbot
+    -- Safe Mouse / Camera Aimbot with Wall Check Integration
     ---------------------------------------------------------------------------
     local function getClosestAimTarget()
         local myChar = LP.Character
@@ -447,15 +546,36 @@ return function(Window, scriptInfo)
             local hum = getHumanoid(model)
             local isDead = model:GetAttribute("Dead") == true
             local health = model:GetAttribute("Health") or (hum and hum.Health) or 100
-            local targetPart = model:FindFirstChild(settings.aimbotTarget) or getRoot(model)
 
-            if not isDead and health > 0 and targetPart then
-                local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
-                if onScreen then
-                    local screenDist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
-                    if screenDist < bestDist then
-                        bestDist = screenDist
-                        bestTargetPart = targetPart
+            if not isDead and health > 0 then
+                -- Determine bone candidates
+                local boneCandidates = {}
+                if settings.aimbotTarget == "Auto (Shootable Bone)" then
+                    table.insert(boneCandidates, model:FindFirstChild("Head"))
+                    table.insert(boneCandidates, model:FindFirstChild("Torso") or model:FindFirstChild("UpperTorso"))
+                    table.insert(boneCandidates, getRoot(model))
+                else
+                    table.insert(boneCandidates, model:FindFirstChild(settings.aimbotTarget) or getRoot(model))
+                end
+
+                for _, targetPart in ipairs(boneCandidates) do
+                    if targetPart and targetPart:IsA("BasePart") then
+                        -- Check wall check if required
+                        local canShoot = true
+                        if settings.aimbotVisibleOnly then
+                            canShoot = isPartVisible(targetPart, model)
+                        end
+
+                        if canShoot then
+                            local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+                            if onScreen then
+                                local screenDist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+                                if screenDist < bestDist then
+                                    bestDist = screenDist
+                                    bestTargetPart = targetPart
+                                end
+                            end
+                        end
                     end
                 end
             end
@@ -562,6 +682,15 @@ return function(Window, scriptInfo)
         end
     })
 
+    CombatTab:CreateToggle({
+        Name = "Visible Only (Wall Check Target)",
+        CurrentValue = settings.aimbotVisibleOnly,
+        Flag = "Infected_AimVisibleOnly",
+        Callback = function(val)
+            settings.aimbotVisibleOnly = val
+        end
+    })
+
     CombatTab:CreateDropdown({
         Name = "Target Type",
         Options = {"Both", "Zombies", "Players"},
@@ -574,7 +703,7 @@ return function(Window, scriptInfo)
 
     CombatTab:CreateDropdown({
         Name = "Target Bone",
-        Options = {"Head", "Torso"},
+        Options = {"Head", "Torso", "Auto (Shootable Bone)"},
         CurrentOption = settings.aimbotTarget,
         Flag = "Infected_TargetBone",
         Callback = function(val)
@@ -618,10 +747,24 @@ return function(Window, scriptInfo)
     -- Visuals Tab Elements
     ---------------------------------------------------------------------------
     local VisualsTab = Window:CreateTab("Visuals", 4483362458)
-    VisualsTab:CreateSection("Entity ESP")
+
+    -- Section: Wall Check / Line of Sight
+    VisualsTab:CreateSection("Wall Check & Visibility (Red = Shootable / Green = Behind Wall)")
 
     VisualsTab:CreateToggle({
-        Name = "Player ESP",
+        Name = "Enable Wall Check Colors",
+        CurrentValue = settings.wallCheck,
+        Flag = "Infected_WallCheck",
+        Callback = function(val)
+            settings.wallCheck = val
+        end
+    })
+
+    -- Section: Player ESP
+    VisualsTab:CreateSection("Player ESP Settings")
+
+    VisualsTab:CreateToggle({
+        Name = "Enable Player ESP",
         CurrentValue = settings.espPlayers,
         Flag = "Infected_PlayerESP",
         Callback = function(val)
@@ -631,7 +774,39 @@ return function(Window, scriptInfo)
     })
 
     VisualsTab:CreateToggle({
-        Name = "Zombie ESP",
+        Name = "Player Show Distance",
+        CurrentValue = settings.playerShowDist,
+        Flag = "Infected_PlayerDist",
+        Callback = function(val)
+            settings.playerShowDist = val
+        end
+    })
+
+    VisualsTab:CreateToggle({
+        Name = "Player Show Health (HP)",
+        CurrentValue = settings.playerShowHealth,
+        Flag = "Infected_PlayerHP",
+        Callback = function(val)
+            settings.playerShowHealth = val
+        end
+    })
+
+    VisualsTab:CreateSlider({
+        Name = "Player Max Distance",
+        Range = {100, 2500},
+        Increment = 50,
+        CurrentValue = settings.playerMaxDist,
+        Flag = "Infected_PlayerMaxDist",
+        Callback = function(val)
+            settings.playerMaxDist = val
+        end
+    })
+
+    -- Section: Zombie ESP
+    VisualsTab:CreateSection("Zombie ESP Settings")
+
+    VisualsTab:CreateToggle({
+        Name = "Enable Zombie ESP",
         CurrentValue = settings.espZombies,
         Flag = "Infected_ZombieESP",
         Callback = function(val)
@@ -641,7 +816,39 @@ return function(Window, scriptInfo)
     })
 
     VisualsTab:CreateToggle({
-        Name = "Ground Items / Loot ESP",
+        Name = "Zombie Show Distance",
+        CurrentValue = settings.zombieShowDist,
+        Flag = "Infected_ZombieDist",
+        Callback = function(val)
+            settings.zombieShowDist = val
+        end
+    })
+
+    VisualsTab:CreateToggle({
+        Name = "Zombie Show Health (HP)",
+        CurrentValue = settings.zombieShowHealth,
+        Flag = "Infected_ZombieHP",
+        Callback = function(val)
+            settings.zombieShowHealth = val
+        end
+    })
+
+    VisualsTab:CreateSlider({
+        Name = "Zombie Max Distance",
+        Range = {100, 2500},
+        Increment = 50,
+        CurrentValue = settings.zombieMaxDist,
+        Flag = "Infected_ZombieMaxDist",
+        Callback = function(val)
+            settings.zombieMaxDist = val
+        end
+    })
+
+    -- Section: Ground Items ESP
+    VisualsTab:CreateSection("Ground Items / Loot ESP")
+
+    VisualsTab:CreateToggle({
+        Name = "Enable Ground Items ESP",
         CurrentValue = settings.espGroundItems,
         Flag = "Infected_GroundESP",
         Callback = function(val)
@@ -651,12 +858,46 @@ return function(Window, scriptInfo)
     })
 
     VisualsTab:CreateToggle({
+        Name = "Item Show Distance",
+        CurrentValue = settings.itemShowDist,
+        Flag = "Infected_ItemDist",
+        Callback = function(val)
+            settings.itemShowDist = val
+        end
+    })
+
+    VisualsTab:CreateSlider({
+        Name = "Item Max Distance",
+        Range = {50, 1000},
+        Increment = 25,
+        CurrentValue = settings.itemMaxDist,
+        Flag = "Infected_ItemMaxDist",
+        Callback = function(val)
+            settings.itemMaxDist = val
+        end
+    })
+
+    -- Section: Vehicles & Corpses ESP
+    VisualsTab:CreateSection("Vehicles & Corpses ESP")
+
+    VisualsTab:CreateToggle({
         Name = "Vehicles ESP",
         CurrentValue = settings.espVehicles,
         Flag = "Infected_VehESP",
         Callback = function(val)
             settings.espVehicles = val
             if not val then clearESPByTag("vehicle") end
+        end
+    })
+
+    VisualsTab:CreateSlider({
+        Name = "Vehicle Max Distance",
+        Range = {100, 3000},
+        Increment = 100,
+        CurrentValue = settings.vehMaxDist,
+        Flag = "Infected_VehMaxDist",
+        Callback = function(val)
+            settings.vehMaxDist = val
         end
     })
 
@@ -670,34 +911,14 @@ return function(Window, scriptInfo)
         end
     })
 
-    VisualsTab:CreateSection("Display Details")
-
-    VisualsTab:CreateToggle({
-        Name = "Show Distance",
-        CurrentValue = settings.espShowDistance,
-        Flag = "Infected_ShowDist",
-        Callback = function(val)
-            settings.espShowDistance = val
-        end
-    })
-
-    VisualsTab:CreateToggle({
-        Name = "Show Health (HP)",
-        CurrentValue = settings.espShowHealth,
-        Flag = "Infected_ShowHP",
-        Callback = function(val)
-            settings.espShowHealth = val
-        end
-    })
-
     VisualsTab:CreateSlider({
-        Name = "Max ESP Distance",
-        Range = {100, 2500},
+        Name = "Corpse Max Distance",
+        Range = {100, 2000},
         Increment = 50,
-        CurrentValue = settings.espMaxDistance,
-        Flag = "Infected_MaxDist",
+        CurrentValue = settings.corpseMaxDist,
+        Flag = "Infected_CorpseMaxDist",
         Callback = function(val)
-            settings.espMaxDistance = val
+            settings.corpseMaxDist = val
         end
     })
 
