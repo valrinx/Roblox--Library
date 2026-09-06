@@ -17,11 +17,26 @@ return function(Window, scriptInfo)
     -- Connection & instance cleaner
     local connections = {}
     local espObjects = {}
+    local rightMouseDown = false
 
     local function trackConnection(connection)
         table.insert(connections, connection)
         return connection
     end
+
+    -- Track RMB input reliably (Cold War Standard)
+    trackConnection(UserInputService.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton2
+            and UserInputService:GetFocusedTextBox() == nil then
+            rightMouseDown = true
+        end
+    end))
+
+    trackConnection(UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton2 then
+            rightMouseDown = false
+        end
+    end))
 
     ---------------------------------------------------------------------------
     -- Settings State
@@ -62,10 +77,11 @@ return function(Window, scriptInfo)
 
         -- Aimbot Settings
         aimbotEnabled = true,
-        aimbotTarget = "Head", -- "Head", "Torso", or "Auto (Shootable Bone)"
+        aimbotActivation = "Right Mouse", -- "Right Mouse" or "Always"
+        aimbotTarget = "Auto (Shootable Bone)", -- "Head", "Torso", or "Auto (Shootable Bone)"
         aimbotTargetType = "Both", -- "Zombies", "Players", "Both"
-        aimbotVisibleOnly = true, -- Only target shootable entities
-        aimbotFOV = 150,
+        aimbotVisibleOnly = false, -- Default false so targets can be locked easily or if true use wall check
+        aimbotFOV = 250,
         aimbotSmoothness = 0.25,
         aimbotShowFOV = true,
 
@@ -750,8 +766,13 @@ return function(Window, scriptInfo)
 
                         if canShoot then
                             local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
-                            if onScreen then
-                                local screenDist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+                            if onScreen and screenPos.Z > 0 then
+                                local target2D = Vector2.new(screenPos.X, screenPos.Y)
+                                local screenCenter = Camera.ViewportSize * 0.5
+                                local distToMouse = (target2D - mousePos).Magnitude
+                                local distToCenter = (target2D - screenCenter).Magnitude
+                                local screenDist = math.min(distToMouse, distToCenter)
+
                                 if screenDist < bestDist then
                                     bestDist = screenDist
                                     bestTargetPart = targetPart
@@ -942,13 +963,23 @@ return function(Window, scriptInfo)
             hidePredictionDisplay()
         end
 
-        -- 3. Smooth Aimbot on Right Click (MouseButton2)
-        if settings.aimbotEnabled and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
-            if aimTargetPoint then
-                local camCF = Camera.CFrame
-                local targetCF = CFrame.new(camCF.Position, aimTargetPoint)
-                Camera.CFrame = camCF:Lerp(targetCF, math.clamp(settings.aimbotSmoothness, 0.05, 1))
+        -- 3. Smooth Aimbot Activation (Cold War Standard)
+        local isAimActive = false
+        if settings.aimbotEnabled then
+            if settings.aimbotActivation == "Always" then
+                isAimActive = true
+            else
+                local ok, pressed = pcall(function()
+                    return UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
+                end)
+                isAimActive = (ok and pressed == true) or rightMouseDown
             end
+        end
+
+        if isAimActive and aimTargetPoint then
+            local camCF = Camera.CFrame
+            local targetCF = CFrame.lookAt(camCF.Position, aimTargetPoint)
+            Camera.CFrame = camCF:Lerp(targetCF, math.clamp(settings.aimbotSmoothness, 0.05, 1))
         end
 
         -- 3. Lighting check
@@ -979,6 +1010,16 @@ return function(Window, scriptInfo)
         Flag = "Infected_Aimbot",
         Callback = function(val)
             settings.aimbotEnabled = val
+        end
+    })
+
+    CombatTab:CreateDropdown({
+        Name = "Activation Mode",
+        Options = {"Right Mouse", "Always"},
+        CurrentOption = settings.aimbotActivation,
+        Flag = "Infected_AimActivation",
+        Callback = function(val)
+            settings.aimbotActivation = val
         end
     })
 
