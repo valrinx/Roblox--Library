@@ -87,7 +87,8 @@ return function(Window, scriptInfo)
 
         -- Aim Prediction Settings (Cold War Ballistics Standard)
         aimPrediction = true,                          -- Predict enemy movement + bullet drop
-        predictBulletSpeed = 1600,                     -- Studs/sec estimated bullet velocity
+        predictAutoWeapon = true,                      -- Auto-detect equipped weapon & read exact muzzle velocity
+        predictBulletSpeed = 1600,                     -- Fallback bullet velocity (studs/s) if no gun held
         predictGravity = 196.2,                        -- Workspace gravity for drop calculation
         predictDotSize = 6,                            -- Size of prediction reticle dot
         predictShowCircle = true,                      -- Outer ring around prediction dot
@@ -370,37 +371,44 @@ return function(Window, scriptInfo)
         if bbPart then
             billboard = Instance.new("BillboardGui")
             billboard.Name = "RAVEN_ESP"
-            billboard.Size = UDim2.new(0, 160, 0, 36)
-            billboard.StudsOffset = Vector3.new(0, 2.5, 0)
+            billboard.Size = UDim2.new(0, 220, 0, 50)
+            billboard.StudsOffset = Vector3.new(0, 3.5, 0)
             billboard.AlwaysOnTop = true
             billboard.MaxDistance = 2500
             billboard.Adornee = bbPart
             pcall(function() billboard.Parent = bbPart end)
 
+            local layout = Instance.new("UIListLayout")
+            layout.SortOrder = Enum.SortOrder.LayoutOrder
+            layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+            layout.VerticalAlignment = Enum.VerticalAlignment.Center
+            layout.Padding = UDim.new(0, 2)
+            layout.Parent = billboard
+
             titleLabel = Instance.new("TextLabel")
             titleLabel.Name = "Title"
             titleLabel.Text = title
             titleLabel.Font = Enum.Font.GothamBold
-            titleLabel.TextSize = 12
+            titleLabel.TextSize = 13
             titleLabel.TextColor3 = color
-            titleLabel.TextStrokeTransparency = 0.2
+            titleLabel.TextStrokeTransparency = 0.15
             titleLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
             titleLabel.BackgroundTransparency = 1
-            titleLabel.Size = UDim2.new(1, 0, 0.5, 0)
-            titleLabel.Position = UDim2.new(0, 0, 0, 0)
+            titleLabel.Size = UDim2.new(1, 0, 0, 18)
+            titleLabel.LayoutOrder = 1
             titleLabel.Parent = billboard
 
             subLabel = Instance.new("TextLabel")
             subLabel.Name = "Sub"
             subLabel.Text = ""
-            subLabel.Font = Enum.Font.Gotham
-            subLabel.TextSize = 10
-            subLabel.TextColor3 = Color3.fromRGB(225, 225, 225)
-            subLabel.TextStrokeTransparency = 0.3
+            subLabel.Font = Enum.Font.GothamMedium
+            subLabel.TextSize = 11
+            subLabel.TextColor3 = Color3.fromRGB(240, 240, 240)
+            subLabel.TextStrokeTransparency = 0.2
             subLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
             subLabel.BackgroundTransparency = 1
-            subLabel.Size = UDim2.new(1, 0, 0.5, 0)
-            subLabel.Position = UDim2.new(0, 0, 0, 0.5)
+            subLabel.Size = UDim2.new(1, 0, 0, 16)
+            subLabel.LayoutOrder = 2
             subLabel.Parent = billboard
         end
 
@@ -824,6 +832,65 @@ return function(Window, scriptInfo)
         return rootPart.AssemblyLinearVelocity or Vector3.zero
     end
 
+    -- Cache weapon configs & ballistics (Cold War Architecture)
+    local weaponConfigCache = {}
+    local function getWeaponConfig(tool)
+        if not tool or not tool:IsA("Tool") then return nil end
+        local toolName = tool.Name
+        if weaponConfigCache[toolName] then return weaponConfigCache[toolName] end
+
+        local cfg = tool:FindFirstChild("WeaponConfig")
+        local ws = cfg and cfg:FindFirstChild("WeaponStats")
+        if ws and ws:IsA("ModuleScript") then
+            local ok, data = pcall(require, ws)
+            if ok and type(data) == "table" then
+                local info = {
+                    name = toolName,
+                    muzzleVelocity = tonumber(data.muzzleVelocity) or settings.predictBulletSpeed,
+                    bulletDrop = data.bulletDrop ~= false,
+                    spread = tonumber(data.spread) or 0,
+                    damage = data.damage or {},
+                }
+                weaponConfigCache[toolName] = info
+                return info
+            end
+        end
+
+        -- Fallback: check ReplicatedStorage WeaponBalance if present
+        local rs = game:GetService("ReplicatedStorage")
+        local wsa = rs:FindFirstChild("WeaponSystemAssets")
+        local wb = wsa and wsa:FindFirstChild("WeaponBalance")
+        if wb and wb:IsA("ModuleScript") then
+            local ok, balances = pcall(require, wb)
+            if ok and type(balances) == "table" and balances[toolName] then
+                local b = balances[toolName]
+                local info = {
+                    name = toolName,
+                    muzzleVelocity = 1200, -- safe fallback estimate for balanced weapon
+                    bulletDrop = true,
+                    spread = tonumber(b.spread) or 0,
+                    damage = b.damage or {},
+                }
+                weaponConfigCache[toolName] = info
+                return info
+            end
+        end
+
+        return nil
+    end
+
+    local function getCurrentWeaponConfig()
+        local char = LP.Character
+        if not char then return nil end
+        for _, child in ipairs(char:GetChildren()) do
+            if child:IsA("Tool") then
+                local cfg = getWeaponConfig(child)
+                if cfg then return cfg end
+            end
+        end
+        return nil
+    end
+
     local function getBulletTravelTime(distance, muzzleVelocity)
         return distance / math.max(muzzleVelocity or settings.predictBulletSpeed, 1)
     end
@@ -833,12 +900,12 @@ return function(Window, scriptInfo)
     end
 
     -- Iterative convergence calculation (Cold War 3-step convergence)
-    local function getPredictedAimPoint(targetPart, targetModel, shooterPos)
+    local function getPredictedAimPoint(targetPart, targetModel, shooterPos, customVelocity)
         if not targetPart or not targetPart:IsA("BasePart") then return nil end
         local root = getRoot(targetModel) or targetPart
         local velocity = getTargetVelocity(targetModel, root)
         local targetPos = targetPart.Position
-        local muzzleVelocity = settings.predictBulletSpeed
+        local muzzleVelocity = customVelocity or settings.predictBulletSpeed
 
         local travelTime = 0
         local leadOffset = Vector3.zero
@@ -923,7 +990,10 @@ return function(Window, scriptInfo)
         local aimTargetPoint = targetPart and targetPart.Position or nil
 
         if targetPart and targetModel and (settings.aimPrediction or settings.aimbotEnabled) then
-            local predictedPos, travelTime, velocity = getPredictedAimPoint(targetPart, targetModel, Camera.CFrame.Position)
+            local activeWeapon = settings.predictAutoWeapon and getCurrentWeaponConfig() or nil
+            local activeVelocity = activeWeapon and activeWeapon.muzzleVelocity or settings.predictBulletSpeed
+
+            local predictedPos, travelTime, velocity = getPredictedAimPoint(targetPart, targetModel, Camera.CFrame.Position, activeVelocity)
             if predictedPos then
                 aimTargetPoint = predictedPos
 
@@ -947,7 +1017,8 @@ return function(Window, scriptInfo)
                             local distStuds = (targetPart.Position - Camera.CFrame.Position).Magnitude
                             local distMeters = math.floor(distStuds / 3.5714)
                             local ms = math.floor(travelTime * 1000)
-                            predictText.Text = string.format("PREDICT: %dm | %dms", distMeters, ms)
+                            local gunTag = activeWeapon and activeWeapon.name or (math.floor(activeVelocity) .. " s/s")
+                            predictText.Text = string.format("[%s] %dm | %dms", gunTag, distMeters, ms)
                             predictText.Visible = true
                         end
                     else
@@ -1119,10 +1190,19 @@ return function(Window, scriptInfo)
         end
     })
 
+    CombatTab:CreateToggle({
+        Name = "Auto-Detect Equipped Weapon",
+        CurrentValue = settings.predictAutoWeapon,
+        Flag = "Infected_PredictAutoWeapon",
+        Callback = function(val)
+            settings.predictAutoWeapon = val
+        end
+    })
+
     CombatTab:CreateSlider({
-        Name = "Estimated Bullet Velocity",
-        Range = {800, 3000},
-        Increment = 100,
+        Name = "Fallback Bullet Velocity",
+        Range = {500, 3000},
+        Increment = 50,
         CurrentValue = settings.predictBulletSpeed,
         Flag = "Infected_PredictSpeed",
         Callback = function(val)
