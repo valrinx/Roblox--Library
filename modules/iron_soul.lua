@@ -49,7 +49,7 @@ return function(Window, runtimeInfo)
         enemyEsp = true, maxDistance = 1500, showHp = true,
         targetMode = "Nearest", stickyTarget = true,
         autoFarm = false, autoUseSkill = false,
-        distanceX = 0, distanceY = 0, distanceZ = 10, pitch = 45,
+        distanceX = 0, distanceY = 4, distanceZ = 8, pitch = 30,
         autoDodge = false, dodgeMode = "Air", dodgeMargin = 3, dodgeDistance = 16, dodgeVertical = 50, dodgeCooldown = 0.55, dodgeHold = 1.4,
         autoPlayAgain = false, autoSwitchWeapon = false,
         autoEnterDungeon = false, autoDungeonWorld = "World1", autoDungeonDifficulty = 1,
@@ -103,6 +103,28 @@ return function(Window, runtimeInfo)
         local cfg=game:GetService("ReplicatedStorage"):FindFirstChild("GameRoundCfg")
         local round=cfg and tonumber(cfg:GetAttribute("GameRound")); local complete=cfg and tonumber(cfg:GetAttribute("GameRoundComplete"))
         return round,complete
+    end
+    local function collectEnemies()
+        local out={}; local ef=workspace:FindFirstChild("EnemyNpc")
+        if not ef then return out end
+        for _,m in ipairs(ef:GetChildren()) do
+            local p,h=getPart(m),getHumanoid(m)
+            if p and h and h.Health>0 then table.insert(out,{model=m,part=p,humanoid=h,distance=distance(p)}) end
+        end
+        return out
+    end
+    local function chooseTarget(enemies)
+        if settings.stickyTarget and selectedTarget and selectedTarget.Parent then
+            local h=getHumanoid(selectedTarget); if h and h.Health>0 then return selectedTarget end
+        end
+        table.sort(enemies,function(a,b)
+            if settings.targetMode=="Lowest HP" then
+                if a.humanoid.Health==b.humanoid.Health then return a.distance<b.distance end
+                return a.humanoid.Health<b.humanoid.Health
+            end
+            return a.distance<b.distance
+        end)
+        return enemies[1] and enemies[1].model or nil
     end
     local function tapKey(keyCode)
         VirtualInputManager:SendKeyEvent(true,keyCode,false,game)
@@ -936,59 +958,75 @@ return function(Window, runtimeInfo)
         farmWorkerToken=farmWorkerToken+1
         local token=farmWorkerToken
         task.spawn(function()
+            local floorRayParams=RaycastParams.new()
+            floorRayParams.FilterType=Enum.RaycastFilterType.Exclude
+
             while running and token==farmWorkerToken do
                 if game.PlaceId==117533937949084 then
                     SetCurrentEnemy(nil)
                 elseif settings.autoFarm then
                     local ok,err=pcall(function()
                         clearWhiteEffect()
-                        if CollectingChests then return end
-                        if CollectingEggs then return end
-                        if not workspace.EnemyNpc:FindFirstChildOfClass("Model") then
-                            local root=myRoot()
-                            if workspace:GetAttribute("GameMode")=="" then
-                                if root then
-                                    root.CFrame=CFrame.new(8561.28906,273.670654,-3727.4563,0.589069664,-2.59408957e-08,0.808082283,-6.4901144e-08,1,7.9412942e-08,-0.808082283,-9.92252183e-08,0.589069664)
-                                end
-                                return
-                            end
-                            local oldCFrame=root and root.CFrame
-                            local respawns=workspace:FindFirstChild("PlayerRespawn")
-                            if root and respawns then
-                                for _,v in ipairs(respawns:GetChildren()) do
-                                    if v:IsA("Part") then
-                                        root.CFrame=v.CFrame
-                                        task.wait(1)
+                        if CollectingChests or CollectingEggs then return end
+
+                        local root=myRoot()
+                        if not root then return end
+
+                        local enemies=collectEnemies()
+                        if #enemies==0 then
+                            SetCurrentEnemy(nil)
+                            local curRound=roundState() or 1
+                            local doors=workspace:FindFirstChild("RoundDoor")
+                            if doors then
+                                for _,obj in ipairs(doors:GetChildren()) do
+                                    local rootPart=obj:FindFirstChild("Root")
+                                    local rNum=(rootPart and rootPart:GetAttribute("RoundNum")) or obj:GetAttribute("RoundNum")
+                                    if (rNum==curRound or obj.Name:find("Portal"..tostring(curRound)) or obj.Name:find("Door"..tostring(curRound))) and rootPart then
+                                        root.CFrame=rootPart.CFrame+Vector3.new(0,3,0)
+                                        root.AssemblyLinearVelocity=Vector3.zero
+                                        root.AssemblyAngularVelocity=Vector3.zero
+                                        if type(firetouchinterest)=="function" then
+                                            pcall(firetouchinterest,root,rootPart,0)
+                                            pcall(firetouchinterest,root,rootPart,1)
+                                        end
+                                        break
                                     end
                                 end
-                                if root.Parent and oldCFrame then root.CFrame=oldCFrame end
+                            end
+                            return
+                        end
+
+                        local target=chooseTarget(enemies)
+                        if not target and #enemies>0 then
+                            target=enemies[1].model
+                        end
+
+                        if not target or not target.Parent then return end
+                        local enemyRoot=target:FindFirstChild("HumanoidRootPart")
+                        local enemyHum=target:FindFirstChildOfClass("Humanoid")
+                        if not enemyRoot or not enemyHum or enemyHum.Health<=0 then return end
+
+                        currentEnemy=enemyRoot
+                        SetCurrentEnemy(target)
+
+                        local isBoss=target:GetAttribute("LevelType")=="Boss"
+                        local multiplier=isBoss and 1.5 or 1.0
+                        local finalDistance=CFrame.new(settings.distanceX*multiplier,settings.distanceY*multiplier,settings.distanceZ*multiplier)
+                            * CFrame.Angles(math.rad(-settings.pitch),0,0)
+
+                        local targetCF=enemyRoot.CFrame*finalDistance
+
+                        if LP.Character then
+                            floorRayParams.FilterDescendantsInstances={LP.Character,target}
+                            local floorRay=workspace:Raycast(targetCF.Position+Vector3.new(0,6,0),Vector3.new(0,-30,0),floorRayParams)
+                            if floorRay and targetCF.Position.Y<floorRay.Position.Y+3.5 then
+                                targetCF=CFrame.new(targetCF.Position.X,floorRay.Position.Y+3.5,targetCF.Position.Z)*CFrame.Angles(math.rad(-settings.pitch),0,0)
                             end
                         end
-                        for _,v in ipairs(workspace.EnemyNpc:GetChildren()) do
-                            if v:IsA("Model") and v:FindFirstChild("Humanoid") and v.Humanoid.Health>0 and v:FindFirstChild("HumanoidRootPart") then
-                                local MaxNum,MaxNum2=1000,100
-                                local Counting,Counting2=0,0
-                                repeat task.wait()
-                                    local FinalDistance=CFrame.new(settings.distanceX,settings.distanceY,settings.distanceZ)*CFrame.Angles(math.rad(0),math.rad(0),math.rad(settings.pitch))
-                                    if v:GetAttribute("LevelType")=="Boss" then
-                                        FinalDistance=CFrame.new(settings.distanceX*1.5,settings.distanceY*1.5,settings.distanceZ*1.5)*CFrame.Angles(math.rad(0),math.rad(0),math.rad(settings.pitch))
-                                    end
-                                    local root=myRoot(); local enemyRoot=v:FindFirstChild("HumanoidRootPart")
-                                    if root and enemyRoot and (root.Position-enemyRoot.Position).Magnitude<=math.huge then currentEnemy=enemyRoot end
-                                    if currentEnemy then SetCurrentEnemy(currentEnemy.Parent) end
-                                    Counting=Counting+1
-                                    if Counting>MaxNum then
-                                        if root and currentEnemy then root.CFrame=currentEnemy.CFrame end
-                                        task.wait(.1)
-                                        Counting=0
-                                        return
-                                    end
-                                    if root and currentEnemy then root.CFrame=currentEnemy.CFrame*FinalDistance end
-                                until not settings.autoFarm or v.Humanoid.Health<=0 or not v:FindFirstChild("HumanoidRootPart")
-                            elseif v and v:IsA("Model") and not v:FindFirstChild("HumanoidRootPart") then
-                                local root=myRoot(); if root then root.CFrame=v:GetPivot() end
-                            end
-                        end
+
+                        root.CFrame=targetCF
+                        root.AssemblyLinearVelocity=Vector3.zero
+                        root.AssemblyAngularVelocity=Vector3.zero
                     end)
                     if not ok then warn(err) end
                 else
@@ -1007,33 +1045,18 @@ return function(Window, runtimeInfo)
             while running and token==combatWorkerToken do
                 if game.PlaceId~=117533937949084 and settings.autoFarm then
                     local ok,err=pcall(function()
-                        task.spawn(function()
-                            for _,v in ipairs(workspace.EnemyNpc:GetChildren()) do
-                                local enemyRoot=v:IsA("Model") and v:FindFirstChild("HumanoidRootPart")
-                                local humanoid=v:IsA("Model") and v:FindFirstChild("Humanoid")
-                                if currentEnemy and enemyRoot and humanoid and humanoid.Health>0 and (currentEnemy.Position-enemyRoot.Position).Magnitude<=100 and settings.bringMobs then
-                                    task.wait()
-                                    enemyRoot.CFrame=currentEnemy.CFrame
+                        if settings.bringMobs and currentEnemy then
+                            task.spawn(function()
+                                for _,v in ipairs(workspace.EnemyNpc:GetChildren()) do
+                                    local enemyRoot=v:IsA("Model") and v:FindFirstChild("HumanoidRootPart")
+                                    local humanoid=v:IsA("Model") and v:FindFirstChild("Humanoid")
+                                    if currentEnemy and enemyRoot and humanoid and humanoid.Health>0 and (currentEnemy.Position-enemyRoot.Position).Magnitude<=100 then
+                                        task.wait()
+                                        enemyRoot.CFrame=currentEnemy.CFrame
+                                    end
                                 end
-                            end
-                        end)
-                        task.spawn(function()
-                            for _,v in ipairs(workspace:GetChildren()) do
-                                local dragonEgg=v:FindFirstChild("DragonEgg")
-                                local eggModel=dragonEgg and dragonEgg:FindFirstChild("EggModel")
-                                local eggRoot=eggModel and eggModel:FindFirstChild("Root")
-                                local interactRoot=v:FindFirstChild("Root")
-                                if dragonEgg and eggRoot and interactRoot and not v:GetAttribute("Active") then
-                                    CollectingEggs=true
-                                    local root=myRoot()
-                                    if root then root.CFrame=eggRoot.CFrame end
-                                    task.wait(0.1)
-                                    local prompt=interactRoot:FindFirstChild("Interact_ProximityPrompt") or interactionPrompt(v,interactRoot)
-                                    if prompt and type(fireproximityprompt)=="function" then pcall(fireproximityprompt,prompt) end
-                                    CollectingEggs=false
-                                end
-                            end
-                        end)
+                            end)
+                        end
                         task.spawn(function()
                             local success2,err2=pcall(function()
                                 if not (settings.allowCameraChange or settings.cameraChange) then return end
@@ -1135,29 +1158,6 @@ return function(Window, runtimeInfo)
         visuals[key]=result; return result
     end
 
-    local function collectEnemies()
-        local out={}; local ef=workspace:FindFirstChild("EnemyNpc")
-        if not ef then return out end
-        for _,m in ipairs(ef:GetChildren()) do
-            local p,h=getPart(m),getHumanoid(m)
-            if p and h and h.Health>0 then table.insert(out,{model=m,part=p,humanoid=h,distance=distance(p)}) end
-        end
-        return out
-    end
-    local function chooseTarget(enemies)
-        if settings.stickyTarget and selectedTarget and selectedTarget.Parent then
-            local h=getHumanoid(selectedTarget); if h and h.Health>0 then return selectedTarget end
-        end
-        table.sort(enemies,function(a,b)
-            if settings.targetMode=="Lowest HP" then
-                if a.humanoid.Health==b.humanoid.Health then return a.distance<b.distance end
-                return a.humanoid.Health<b.humanoid.Health
-            end
-            return a.distance<b.distance
-        end)
-        return enemies[1] and enemies[1].model or nil
-    end
-
     -- Keep tab creation on the loader's original call stack.  Yielding here
     -- can drop the executor's Plugin capability before RAVENHUB creates its
     -- own Settings tab.
@@ -1166,7 +1166,7 @@ return function(Window, runtimeInfo)
     end
 
     local Dashboard=createTab("Dungeon", "activity")
-    Dashboard:CreateSection("Iron Soul v1.6.2")
+    Dashboard:CreateSection("Iron Soul v1.6.3")
     local roundLabel=Dashboard:CreateLabel("Round: scanning...")
     local enemyCountLabel=Dashboard:CreateLabel("Enemies: scanning...")
     local targetLabel=Dashboard:CreateLabel("Target: none")
@@ -1204,9 +1204,9 @@ return function(Window, runtimeInfo)
     Farm:CreateToggle({Name="Auto Use Skill",CurrentValue=false,Flag="IronSoulAutoUseSkill",Callback=function(v) settings.autoUseSkill=v end})
     Farm:CreateToggle({Name="Auto Switch Weapon",CurrentValue=false,Flag="IronSoulAutoSwitchWeapon",Callback=function(v) settings.autoSwitchWeapon=v end})
     Farm:CreateSlider({Name="Distance X",Range={-20,20},Increment=1,CurrentValue=0,Suffix=" studs",Flag="IronSoulDistanceX",Callback=function(v) settings.distanceX=v end})
-    Farm:CreateSlider({Name="Distance Y",Range={-20,20},Increment=1,CurrentValue=0,Suffix=" studs",Flag="IronSoulDistanceY",Callback=function(v) settings.distanceY=v end})
-    Farm:CreateSlider({Name="Distance Z",Range={-20,30},Increment=1,CurrentValue=10,Suffix=" studs",Flag="IronSoulDistanceZ",Callback=function(v) settings.distanceZ=v end})
-    Farm:CreateSlider({Name="Pitch",Range={-180,180},Increment=1,CurrentValue=45,Suffix=" deg",Flag="IronSoulPitch",Callback=function(v) settings.pitch=v end})
+    Farm:CreateSlider({Name="Distance Y",Range={-20,20},Increment=1,CurrentValue=4,Suffix=" studs",Flag="IronSoulDistanceY",Callback=function(v) settings.distanceY=v end})
+    Farm:CreateSlider({Name="Distance Z",Range={-20,30},Increment=1,CurrentValue=8,Suffix=" studs",Flag="IronSoulDistanceZ",Callback=function(v) settings.distanceZ=v end})
+    Farm:CreateSlider({Name="Pitch",Range={-180,180},Increment=1,CurrentValue=30,Suffix=" deg",Flag="IronSoulPitch",Callback=function(v) settings.pitch=v end})
     Farm:CreateSection("Mob Management")
     Farm:CreateToggle({Name="BringMobs",CurrentValue=false,Flag="IronSoulBringMobs",Callback=function(v) settings.bringMobs=v end})
     Farm:CreateSection("Reference Controls")
@@ -1286,6 +1286,16 @@ return function(Window, runtimeInfo)
             end)
         end)
     end
+    connect(RunService.Stepped,function()
+        if not running then return end
+        if settings.autoFarm and LP.Character then
+            for _,part in ipairs(LP.Character:GetDescendants()) do
+                if part:IsA("BasePart") and part.CanCollide then
+                    part.CanCollide=false
+                end
+            end
+        end
+    end)
     connect(RunService.Heartbeat,function()
         if not running then return end
         local now=os.clock()
@@ -1440,6 +1450,6 @@ return function(Window, runtimeInfo)
         local camera=workspace.CurrentCamera; if camera and LP.Character then camera.CameraSubject=LP.Character:FindFirstChildOfClass("Humanoid") end
         if getgenv().__RAVEN_IRON_SOUL and getgenv().__RAVEN_IRON_SOUL.Settings==settings then getgenv().__RAVEN_IRON_SOUL=nil end
     end
-    getgenv().__RAVEN_IRON_SOUL={Version="v1.6.2",Settings=settings,Destroy=destroy}
+    getgenv().__RAVEN_IRON_SOUL={Version="v1.6.3",Settings=settings,Destroy=destroy}
     if runtimeInfo and type(runtimeInfo.registerCleanup)=="function" then runtimeInfo.registerCleanup(destroy) end
 end
