@@ -1186,39 +1186,30 @@ return function(Window, runtimeInfo)
                                 enemiesZeroSince=now
                             end
 
-                            -- When enemies hit 0, wait 5 seconds at the room center first so the next wave can spawn
-                            if (now - enemiesZeroSince) < 5.0 then
-                                if lastRoomCenter then
-                                    root.CFrame=CFrame.new(lastRoomCenter)
-                                    root.AssemblyLinearVelocity=Vector3.zero
-                                    root.AssemblyAngularVelocity=Vector3.zero
-                                end
-                                return
-                            end
-
-                            -- Only proceed to next room door/portal if autoOpenDoor is enabled and 5s grace period has elapsed
-                            if settings.autoOpenDoor then
-                                local doors=workspace:FindFirstChild("RoundDoor")
-                                if doors then
-                                    for _,obj in ipairs(doors:GetChildren()) do
-                                        local rootPart=obj:FindFirstChild("Root")
-                                        local rNum=(rootPart and rootPart:GetAttribute("RoundNum")) or obj:GetAttribute("RoundNum")
-                                        if (rNum==curRound or obj.Name:find("Portal"..tostring(curRound)) or obj.Name:find("Door"..tostring(curRound))) and rootPart then
-                                            root.CFrame=rootPart.CFrame+Vector3.new(0,3,0)
-                                            root.AssemblyLinearVelocity=Vector3.zero
-                                            root.AssemblyAngularVelocity=Vector3.zero
-                                            if type(firetouchinterest)=="function" then
-                                                pcall(firetouchinterest,root,rootPart,0)
-                                                pcall(firetouchinterest,root,rootPart,1)
-                                            end
-                                            break
-                                        end
+                            -- Resolve center of current room/round from spawn points or last seen enemy
+                            local roomCenter = lastRoomCenter
+                            if not roomCenter then
+                                local group = workspace:FindFirstChild("WorldEnemys") and workspace.WorldEnemys:FindFirstChild("RoundSpawnGroup")
+                                local roundFolder = group and group:FindFirstChild("Round" .. tostring(curRound))
+                                if roundFolder then
+                                    local spList = {}
+                                    for _, p in ipairs(roundFolder:GetChildren()) do
+                                        if p:IsA("BasePart") then table.insert(spList, p.Position) end
+                                    end
+                                    if #spList > 0 then
+                                        local sum = Vector3.zero
+                                        for _, pos in ipairs(spList) do sum = sum + pos end
+                                        roomCenter = (sum / #spList) + Vector3.new(0, 4, 0)
+                                        lastRoomCenter = roomCenter
                                     end
                                 end
-                            elseif lastRoomCenter then
-                                root.CFrame=CFrame.new(lastRoomCenter)
-                                root.AssemblyLinearVelocity=Vector3.zero
-                                root.AssemblyAngularVelocity=Vector3.zero
+                            end
+
+                            -- Force player to stand exactly at room center for at least 5 seconds
+                            if roomCenter then
+                                root.CFrame = CFrame.new(roomCenter)
+                                root.AssemblyLinearVelocity = Vector3.zero
+                                root.AssemblyAngularVelocity = Vector3.zero
                             end
                             return
                         end
@@ -1423,7 +1414,7 @@ return function(Window, runtimeInfo)
     end
 
     local Dashboard=createTab("Dungeon", "activity")
-    Dashboard:CreateSection("Iron Soul v1.7.0")
+    Dashboard:CreateSection("Iron Soul v1.7.1")
     local roundLabel=Dashboard:CreateLabel("Round: scanning...")
     local enemyCountLabel=Dashboard:CreateLabel("Enemies: scanning...")
     local targetLabel=Dashboard:CreateLabel("Target: none")
@@ -1706,6 +1697,6 @@ return function(Window, runtimeInfo)
         local camera=workspace.CurrentCamera; if camera and LP.Character then camera.CameraSubject=LP.Character:FindFirstChildOfClass("Humanoid") end
         if getgenv().__RAVEN_IRON_SOUL and getgenv().__RAVEN_IRON_SOUL.Settings==settings then getgenv().__RAVEN_IRON_SOUL=nil end
     end
-    getgenv().__RAVEN_IRON_SOUL={Version="v1.7.0",Settings=settings,Destroy=destroy}
+    getgenv().__RAVEN_IRON_SOUL={Version="v1.7.1",Settings=settings,Destroy=destroy}
     if runtimeInfo and type(runtimeInfo.registerCleanup)=="function" then runtimeInfo.registerCleanup(destroy) end
 end
