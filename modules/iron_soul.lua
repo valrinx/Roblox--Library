@@ -1,7 +1,7 @@
 --[[
     RAVEN HUB | Iron Soul: Dungeon
     Lobby PlaceId: 117533937949084 | Starless Forest: 116456628154258
-    GameId: 9910245722 | Version: v1.6.2
+    GameId: 9910245722 | Version: v1.6.8
 ]]
 return function(Window, runtimeInfo)
     local Players = game:GetService("Players")
@@ -21,6 +21,7 @@ return function(Window, runtimeInfo)
     local currentEnemy = nil
     local attackBusy = false
     local skillActionBusy = false
+    local weaponSwitchBusy = false
     local farmWorkerToken = 0
     local combatWorkerToken = 0
     local collectionWorkerToken = 0
@@ -31,7 +32,7 @@ return function(Window, runtimeInfo)
     local autoDungeonLastAttempt = 0
     local autoDungeonStatus = "Disabled"
     local autoDungeonStatusLabel = nil
-    local Framework, DataUtil, EquipmentUtil, ForgeUtil, RarityTiers, TranslationUtil, MaterialUtil
+    local Framework, DataUtil, EquipmentUtil, EquipmentSlots, ForgeUtil, RarityTiers, TranslationUtil, MaterialUtil
     local originalSetWalkSpeed = nil
     local dodgeLockUntil, dodgeSafePosition = 0, nil
     local redzoneDanger = false
@@ -49,6 +50,7 @@ return function(Window, runtimeInfo)
         enemyEsp = true, maxDistance = 1500, showHp = true,
         targetMode = "Nearest", stickyTarget = true,
         autoFarm = false, autoUseSkill = false,
+        farmPosition = "Above", farmDistance = 8,
         distanceX = 0, distanceY = 4, distanceZ = 8, pitch = 30,
         autoDodge = false, dodgeMode = "Air", dodgeMargin = 3, dodgeDistance = 16, dodgeVertical = 50, dodgeCooldown = 0.55, dodgeHold = 1.4,
         autoPlayAgain = false, autoSwitchWeapon = false,
@@ -213,22 +215,22 @@ return function(Window, runtimeInfo)
     local useReadySkills
     local function Attack(bool)
         bool=bool or false
-        if attackBusy then return false end
+        if weaponSwitchBusy or attackBusy then return false end
         attackBusy=true
         local controller=getController()
         local ok=false
-        if controller then ok=pcall(function() controller:PerformAction("BaseAttack") end) end
+        if controller and not weaponSwitchBusy then ok=pcall(function() controller:PerformAction("BaseAttack") end) end
         if ok then
             task.wait()
             if running then pcall(function() controller:StopAction("BaseAttack") end) end
-        else
+        elseif not weaponSwitchBusy then
             local camera=workspace.CurrentCamera; local size=camera and camera.ViewportSize or Vector2.new(960,540)
             pcall(function() VirtualInputManager:SendMouseButtonEvent(size.X/2,size.Y/2,0,true,game,0) end)
             task.wait(.03)
             pcall(function() VirtualInputManager:SendMouseButtonEvent(size.X/2,size.Y/2,0,false,game,0) end)
             ok=true
         end
-        if bool and running then task.spawn(useReadySkills) end
+        if bool and running and not weaponSwitchBusy then task.spawn(useReadySkills) end
         attackBusy=false
         return ok
     end
@@ -264,12 +266,13 @@ return function(Window, runtimeInfo)
         return activateGuiButton(button)
     end
     local function useAllReadySkills()
-        if skillActionBusy then return false end
+        if weaponSwitchBusy or skillActionBusy then return false end
         skillActionBusy=true
         local buttons=getSkillButtons()
         if not buttons then skillActionBusy=false; return false end
         local used=false
         for _,name in ipairs(skillOrder) do
+            if weaponSwitchBusy then break end
             local button=buttons[name]
             if skillIsReady(button,name) and performSkill(button,name) then
                 used=true
@@ -283,85 +286,224 @@ return function(Window, runtimeInfo)
         useAllReadySkills()
     end
     local function getCurrentWeaponSlot(buttons)
-        local switch=buttons and buttons.SwitchWpn
-        local weapon2=switch and switch:FindFirstChild("Weapon2")
-        if weapon2 then return guiObjectVisible(weapon2) and 2 or 1 end
-        if DataUtil then
-            local ok,data=pcall(function() return DataUtil:GetPlayerData(LP) end)
-            local slot=ok and data and data.Equipment and data.Equipment.CurWeaponSlot
-            if slot=="Weapon2" or slot=="ExtraWeapon" then return 2 end
+        local switch = buttons and buttons.SwitchWpn
+        if switch then
+            local weapon2 = switch:FindFirstChild("Weapon2")
+            if weapon2 and guiObjectVisible(weapon2) then return 2 end
+            local weapon1 = switch:FindFirstChild("Weapon")
+            if weapon1 and guiObjectVisible(weapon1) then return 1 end
+        end
+        local char = LP.Character
+        local tool = char and char:FindFirstChildWhichIsA("Tool")
+        local uuid = tool and tool:GetAttribute("UUID")
+        if uuid and DataUtil then
+            local ok, data = pcall(function() return DataUtil:GetPlayerData(LP) end)
+            local slots = ok and data and data.Equipment and data.Equipment.EquipSlots
+            if slots then
+                if slots.Weapon2 == uuid then return 2 end
+                if slots.Weapon == uuid then return 1 end
+            end
         end
         return 1
     end
     local function hasSecondWeapon(buttons)
         if DataUtil then
-            local ok,data=pcall(function() return DataUtil:GetPlayerData(LP) end)
-            local slots=ok and data and data.Equipment and data.Equipment.EquipSlots
-            if slots then return slots.Weapon2~=nil end
+            local ok, data = pcall(function() return DataUtil:GetPlayerData(LP) end)
+            local slots = ok and data and data.Equipment and data.Equipment.EquipSlots
+            if slots then return slots.Weapon2 ~= nil end
         end
-        local switch=buttons and buttons.SwitchWpn
-        local weapon2=switch and switch:FindFirstChild("Weapon2")
-        local image=weapon2 and weapon2:FindFirstChildWhichIsA("ImageLabel",true)
-        return image and image.Image~=""
+        local switch = buttons and buttons.SwitchWpn
+        local weapon2 = switch and switch:FindFirstChild("Weapon2")
+        local image = weapon2 and weapon2:FindFirstChildWhichIsA("ImageLabel", true)
+        return image and image.Image ~= ""
     end
-    local function switchWeapon(buttons,expectedSlot)
-        local switch=buttons and buttons.SwitchWpn
-        if not switch or not guiObjectVisible(switch) or getCurrentWeaponSlot(buttons)~=expectedSlot then return false end
-        local keyCode=buttonKeyCode(switch)
-        if keyCode then
-            tapKey(keyCode)
-            local deadline=os.clock()+1.2
-            repeat task.wait(0.05) until not running or getCurrentWeaponSlot(buttons)~=expectedSlot or os.clock()>=deadline
-            if getCurrentWeaponSlot(buttons)~=expectedSlot then return true end
-        end
-        local candidates={switch,switch:FindFirstChild("Switch")}
-        for _,button in ipairs(candidates) do
-            if activateGuiButton(button) then
-                local deadline=os.clock()+1.2
-                repeat
-                    task.wait(0.05)
-                until not running or getCurrentWeaponSlot(buttons)~=expectedSlot or os.clock()>=deadline
-                if getCurrentWeaponSlot(buttons)~=expectedSlot then return true end
+    local function hasAnyReadySkill(buttons)
+        if not buttons then return false end
+        for _, name in ipairs(skillOrder) do
+            local button = buttons[name]
+            if skillIsReady(button, name) then
+                return true
             end
         end
-        if keyCode then
-            tapKey(keyCode)
-            local deadline=os.clock()+1.2
-            repeat task.wait(0.05) until not running or getCurrentWeaponSlot(buttons)~=expectedSlot or os.clock()>=deadline
-        end
-        return getCurrentWeaponSlot(buttons)~=expectedSlot
+        return false
+    end
+    local lastWeaponSwitchAt = 0
+    local function isSwitchOnCooldown(buttons)
+        local switch = buttons and buttons.SwitchWpn
+        if not switch then return true end
+        local cool = switch:FindFirstChild("Cool")
+        if cool and cool:IsA("GuiObject") and cool.Visible then return true end
+        local lastTs = tonumber(LP:GetAttribute("SwitchWpnLastTs")) or 0
+        if (workspace:GetServerTimeNow() - lastTs) < 2.5 then return true end
+        if (os.clock() - lastWeaponSwitchAt) < 2.5 then return true end
+        return false
+    end
+    local function switchWeapon(buttons, expectedSlot)
+        local switch = buttons and buttons.SwitchWpn
+        if not switch or not guiObjectVisible(switch) then return false end
+        if getCurrentWeaponSlot(buttons) ~= expectedSlot then return true end
+        if isSwitchOnCooldown(buttons) then return false end
+
+        -- Acquire exclusive switch lock to pause combat attacks & skill triggers
+        weaponSwitchBusy = true
+
+        local success = false
+        pcall(function()
+            local controller = getController()
+            local char = LP.Character
+
+            -- 1. Completely abort and terminate BaseAttack so server sees NotInSkill == true
+            if controller then
+                pcall(function()
+                    controller:StopAction("BaseAttack")
+                    controller.HoldingBaseAttack = false
+                    local bAtk = controller.WeaponDef and controller.WeaponDef.BaseAttack
+                    if bAtk then
+                        bAtk.Aborted = true
+                        bAtk.StageContinue = false
+                        bAtk.InStage = nil
+                        bAtk.AcceptInput = nil
+                    end
+                    controller:RemoveAction("BaseAttack")
+                    controller:SetSkillStage("BaseAttack", nil)
+                end)
+            end
+
+            -- 2. If any skill action is active, wait up to 0.8s for its animation to finish or abort it
+            local deadlineWaitSkill = os.clock() + 0.8
+            while os.clock() < deadlineWaitSkill do
+                local inSkill = false
+                if controller and controller:HasSkillAction() then
+                    inSkill = true
+                elseif char then
+                    for _, v in ipairs({"Skill1", "Skill2", "SkillU", "SkillAW"}) do
+                        if char:GetAttribute("ReplicateAction_" .. v) or char:GetAttribute("Action_" .. v) then
+                            inSkill = true
+                            break
+                        end
+                    end
+                end
+                if not inSkill then break end
+                task.wait(0.04)
+            end
+
+            -- 3. Abort all lingering actions and stop any playing attack/skill animations
+            if controller then
+                pcall(function()
+                    controller:StopAction("BaseAttack")
+                    controller.HoldingBaseAttack = false
+                    local bAtk = controller.WeaponDef and controller.WeaponDef.BaseAttack
+                    if bAtk then
+                        bAtk.Aborted = true
+                        bAtk.StageContinue = false
+                        bAtk.InStage = nil
+                        bAtk.AcceptInput = nil
+                    end
+                    controller:RemoveAction("BaseAttack")
+                    controller:SetSkillStage("BaseAttack", nil)
+
+                    for _, sk in ipairs({"Skill1", "Skill2", "SkillU", "SkillAW"}) do
+                        if controller:HasAction(sk) then
+                            controller:StopAction(sk)
+                            local skDef = controller.WeaponDef and controller.WeaponDef[sk]
+                            if skDef then
+                                skDef.Aborted = true
+                                skDef.StageContinue = false
+                                skDef.InStage = nil
+                            end
+                            controller:RemoveAction(sk)
+                            controller:SetSkillStage(sk, nil)
+                        end
+                    end
+                end)
+            end
+
+            if char then
+                local hum = char:FindFirstChildOfClass("Humanoid")
+                local animator = hum and hum:FindFirstChildOfClass("Animator")
+                if animator then
+                    for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+                        if track.Name:find("Atk") or track.Name:find("Attack") or track.Name:find("Heavy") or track.Name:find("Skill") then
+                            pcall(function() track:Stop(0) end)
+                        end
+                    end
+                end
+            end
+
+            task.wait(0.06)
+
+            -- 4. Execute Weapon Switch via EquipmentSlots
+            lastWeaponSwitchAt = os.clock()
+            loadFramework()
+            local switchedRemotely = false
+            if Framework and Framework.Modules and Framework.Modules.EquipmentSlots then
+                local eqMod = Framework.Modules.EquipmentSlots
+                local okCall, callRes = pcall(function() return eqMod:ChangeWeaponSlot(LP) end)
+                if okCall and callRes then
+                    switchedRemotely = true
+                end
+            end
+
+            if not switchedRemotely then
+                local eqRE = game:GetService("ReplicatedStorage"):FindFirstChild("Framework")
+                    and game:GetService("ReplicatedStorage").Framework:FindFirstChild("Gameplay")
+                    and game:GetService("ReplicatedStorage").Framework.Gameplay:FindFirstChild("EquipmentSystem")
+                    and game:GetService("ReplicatedStorage").Framework.Gameplay.EquipmentSystem:FindFirstChild("EquipmentRE")
+                if eqRE then
+                    pcall(function() eqRE:FireServer("ChangeWeaponSlot") end)
+                    switchedRemotely = true
+                end
+            end
+
+            if not switchedRemotely then
+                local keyCode = buttonKeyCode(switch) or Enum.KeyCode.C
+                tapKey(keyCode)
+            end
+
+            -- 5. Wait for weapon slot UI / attributes to flip
+            local deadlineWait = os.clock() + 1.2
+            repeat
+                task.wait(0.04)
+            until not running or getCurrentWeaponSlot(buttons) ~= expectedSlot or os.clock() >= deadlineWait
+
+            success = (getCurrentWeaponSlot(buttons) ~= expectedSlot)
+        end)
+
+        weaponSwitchBusy = false
+        return success
     end
     local function runAutoWeaponWorker()
-        autoWeaponWorkerToken=autoWeaponWorkerToken+1
-        local token=autoWeaponWorkerToken
+        autoWeaponWorkerToken = autoWeaponWorkerToken + 1
+        local token = autoWeaponWorkerToken
         task.spawn(function()
-            local hasSecond=false
-            local nextWeaponDataAt=0
-            while running and token==autoWeaponWorkerToken do
+            local hasSecond = false
+            local nextWeaponDataAt = 0
+            while running and token == autoWeaponWorkerToken do
                 if settings.autoSwitchWeapon then
-                    local buttons=getSkillButtons()
-                    if buttons and os.clock()>=nextWeaponDataAt then
-                        hasSecond=hasSecondWeapon(buttons)
-                        nextWeaponDataAt=os.clock()+0.75
+                    local buttons = getSkillButtons()
+                    if buttons and os.clock() >= nextWeaponDataAt then
+                        hasSecond = hasSecondWeapon(buttons)
+                        nextWeaponDataAt = os.clock() + 1.0
                     end
                     if buttons and hasSecond then
-                        local currentSlot=getCurrentWeaponSlot(buttons)
-                        if useAllReadySkills() then
-                            task.wait(0.1)
-                            if currentSlot == 1 then
-                                if switchWeapon(buttons,1) then currentSlot = 2 end
-                            elseif currentSlot == 2 then
-                                if switchWeapon(buttons,2) then currentSlot = 1 end
-                            end
-                            task.wait(0.15)
+                        if settings.autoUseSkill and hasAnyReadySkill(buttons) then
+                            useAllReadySkills()
+                            task.wait(0.2)
+                        end
+
+                        local buttonsNow = getSkillButtons()
+                        if buttonsNow and not hasAnyReadySkill(buttonsNow) and not isSwitchOnCooldown(buttonsNow) and not weaponSwitchBusy then
+                            local currentSlot = getCurrentWeaponSlot(buttonsNow)
+                            switchWeapon(buttonsNow, currentSlot)
+                            task.wait(0.3)
                         else
-                            task.wait(0.1)
+                            task.wait(0.15)
                         end
                     else
                         task.wait(0.5)
                     end
                 else
-                    task.wait(0.25)
+                    task.wait(0.3)
                 end
             end
         end)
@@ -381,10 +523,21 @@ return function(Window, runtimeInfo)
         local modules=Framework.Modules or {}
         DataUtil=modules.DataUtil
         EquipmentUtil=modules.EquipmentUtil
+        EquipmentSlots=modules.EquipmentSlots
         ForgeUtil=modules.ForgeUtil
         RarityTiers=modules.RarityTiers
         TranslationUtil=modules.TranslationUtil
         MaterialUtil=modules.MaterialUtil
+        local audioPlayer=modules.AudioPlayer
+        if audioPlayer and type(audioPlayer.PlayAudio3D)=="function" and not rawget(audioPlayer,"_ravenProtected") then
+            local orig=audioPlayer.PlayAudio3D
+            audioPlayer._ravenProtected=true
+            audioPlayer.PlayAudio3D=function(self,...)
+                local ok,res=pcall(orig,self,...)
+                if ok then return res end
+                return nil
+            end
+        end
         return true
     end
     local function getRarityTiers()
@@ -665,7 +818,7 @@ return function(Window, runtimeInfo)
     end
     local function collectChests()
         local root=myRoot(); if not root then return end
-        local finalDistance=CFrame.new(settings.distanceX,settings.distanceY,settings.distanceZ)*CFrame.Angles(math.rad(settings.pitch),math.rad(180),0)
+        local finalDistance=CFrame.new(0, 3, 5)
         -- Potassium's chest contract scans the live workspace models and keeps
         -- the player on a chest until its HitCount reaches zero.
         for _,v in ipairs(workspace:GetChildren()) do
@@ -954,6 +1107,44 @@ return function(Window, runtimeInfo)
             end
         end)
     end
+    local function calculateTargetCFrame(targetRoot, isBoss)
+        if not targetRoot then return nil end
+        local dist = tonumber(settings.farmDistance) or 8
+        if isBoss then dist = dist * 1.3 end
+        local mode = tostring(settings.farmPosition or "Above")
+
+        local targetPos = targetRoot.Position
+        local targetLook = targetRoot.CFrame.LookVector
+        local targetUp = targetRoot.CFrame.UpVector
+
+        local desiredPos
+        local lookAtTarget = true
+
+        if mode == "Above" then
+            desiredPos = targetPos + Vector3.new(0, dist, 0)
+        elseif mode == "Below" then
+            desiredPos = targetPos - Vector3.new(0, dist, 0)
+        elseif mode == "Behind" then
+            desiredPos = targetPos - (targetLook * dist) + Vector3.new(0, 1.5, 0)
+        elseif mode == "Front" then
+            desiredPos = targetPos + (targetLook * dist) + Vector3.new(0, 1.5, 0)
+        else
+            desiredPos = targetPos + Vector3.new(0, dist, 0)
+        end
+
+        local cf
+        local dir = targetPos - desiredPos
+        if dir.Magnitude > 0.001 then
+            local upVector = Vector3.new(0, 1, 0)
+            if math.abs(dir.Unit:Dot(upVector)) > 0.99 then
+                upVector = targetLook
+            end
+            cf = CFrame.lookAt(desiredPos, targetPos, upVector)
+        else
+            cf = targetRoot.CFrame * CFrame.Angles(0, math.pi, 0)
+        end
+        return cf
+    end
     local function runPotassiumAutofarm()
         farmWorkerToken=farmWorkerToken+1
         local token=farmWorkerToken
@@ -961,21 +1152,50 @@ return function(Window, runtimeInfo)
             local floorRayParams=RaycastParams.new()
             floorRayParams.FilterType=Enum.RaycastFilterType.Exclude
 
+            local enemiesZeroSince=0
+            local lastRoomCenter=nil
+            local lastSeenRound=nil
+
             while running and token==farmWorkerToken do
                 if game.PlaceId==117533937949084 then
                     SetCurrentEnemy(nil)
+                    enemiesZeroSince=0
+                    lastRoomCenter=nil
                 elseif settings.autoFarm then
                     local ok,err=pcall(function()
                         clearWhiteEffect()
                         if CollectingChests or CollectingEggs then return end
+                        if settings.autoDodge and dodgeSafePosition~=nil and os.clock()<dodgeLockUntil then return end
 
                         local root=myRoot()
                         if not root then return end
 
+                        local curRound=roundState() or 1
+                        if lastSeenRound~=curRound then
+                            lastSeenRound=curRound
+                            enemiesZeroSince=0
+                            lastRoomCenter=nil
+                        end
+
                         local enemies=collectEnemies()
                         if #enemies==0 then
                             SetCurrentEnemy(nil)
-                            local curRound=roundState() or 1
+                            local now=os.clock()
+                            if enemiesZeroSince==0 then
+                                enemiesZeroSince=now
+                            end
+
+                            -- When enemies hit 0, wait 5 seconds at the room center first so the next wave can spawn
+                            if (now - enemiesZeroSince) < 5.0 then
+                                if lastRoomCenter then
+                                    root.CFrame=CFrame.new(lastRoomCenter)
+                                    root.AssemblyLinearVelocity=Vector3.zero
+                                    root.AssemblyAngularVelocity=Vector3.zero
+                                end
+                                return
+                            end
+
+                            -- After 5 seconds grace period with 0 enemies, proceed to next room door/portal
                             local doors=workspace:FindFirstChild("RoundDoor")
                             if doors then
                                 for _,obj in ipairs(doors:GetChildren()) do
@@ -996,6 +1216,9 @@ return function(Window, runtimeInfo)
                             return
                         end
 
+                        -- Reset zero counter when enemies are alive and track room center position
+                        enemiesZeroSince=0
+
                         local target=chooseTarget(enemies)
                         if not target and #enemies>0 then
                             target=enemies[1].model
@@ -1006,25 +1229,33 @@ return function(Window, runtimeInfo)
                         local enemyHum=target:FindFirstChildOfClass("Humanoid")
                         if not enemyRoot or not enemyHum or enemyHum.Health<=0 then return end
 
+                        lastRoomCenter=enemyRoot.Position + Vector3.new(0, 3, 0)
+
                         currentEnemy=enemyRoot
                         SetCurrentEnemy(target)
 
                         local isBoss=target:GetAttribute("LevelType")=="Boss"
-                        local multiplier=isBoss and 1.5 or 1.0
-                        local finalDistance=CFrame.new(settings.distanceX*multiplier,settings.distanceY*multiplier,settings.distanceZ*multiplier)
-                            * CFrame.Angles(math.rad(-settings.pitch),0,0)
+                        local targetCF=calculateTargetCFrame(enemyRoot, isBoss)
 
-                        local targetCF=enemyRoot.CFrame*finalDistance
-
-                        if LP.Character then
+                        if targetCF and LP.Character then
                             floorRayParams.FilterDescendantsInstances={LP.Character,target}
                             local floorRay=workspace:Raycast(targetCF.Position+Vector3.new(0,6,0),Vector3.new(0,-30,0),floorRayParams)
                             if floorRay and targetCF.Position.Y<floorRay.Position.Y+3.5 then
-                                targetCF=CFrame.new(targetCF.Position.X,floorRay.Position.Y+3.5,targetCF.Position.Z)*CFrame.Angles(math.rad(-settings.pitch),0,0)
+                                local safePos=Vector3.new(targetCF.Position.X,floorRay.Position.Y+3.5,targetCF.Position.Z)
+                                local dir=enemyRoot.Position-safePos
+                                if dir.Magnitude>0.001 then
+                                    local upVec=Vector3.new(0,1,0)
+                                    if math.abs(dir.Unit:Dot(upVec))>0.99 then upVec=enemyRoot.CFrame.LookVector end
+                                    targetCF=CFrame.lookAt(safePos,enemyRoot.Position,upVec)
+                                else
+                                    targetCF=CFrame.new(safePos)*enemyRoot.CFrame.Rotation
+                                end
                             end
                         end
 
-                        root.CFrame=targetCF
+                        if targetCF then
+                            root.CFrame=targetCF
+                        end
                         root.AssemblyLinearVelocity=Vector3.zero
                         root.AssemblyAngularVelocity=Vector3.zero
                     end)
@@ -1044,6 +1275,10 @@ return function(Window, runtimeInfo)
         task.spawn(function()
             while running and token==combatWorkerToken do
                 if game.PlaceId~=117533937949084 and settings.autoFarm then
+                    if settings.autoDodge and dodgeSafePosition~=nil and os.clock()<dodgeLockUntil then
+                        task.wait(0.05)
+                        continue
+                    end
                     local ok,err=pcall(function()
                         if settings.bringMobs and currentEnemy then
                             task.spawn(function()
@@ -1072,11 +1307,19 @@ return function(Window, runtimeInfo)
                             end)
                             if not success2 then warn("Camera: ",err2) end
                         end)
-                        task.spawn(function() Attack(settings.autoUseSkill) end)
+                        task.spawn(function()
+                            if not weaponSwitchBusy then
+                                Attack(settings.autoUseSkill)
+                            end
+                        end)
                     end)
                     if not ok then warn(err) end
                 end
-                task.wait()
+                if weaponSwitchBusy then
+                    task.wait(0.08)
+                else
+                    task.wait()
+                end
             end
         end)
     end
@@ -1166,7 +1409,7 @@ return function(Window, runtimeInfo)
     end
 
     local Dashboard=createTab("Dungeon", "activity")
-    Dashboard:CreateSection("Iron Soul v1.6.3")
+    Dashboard:CreateSection("Iron Soul v1.6.9")
     local roundLabel=Dashboard:CreateLabel("Round: scanning...")
     local enemyCountLabel=Dashboard:CreateLabel("Enemies: scanning...")
     local targetLabel=Dashboard:CreateLabel("Target: none")
@@ -1203,10 +1446,8 @@ return function(Window, runtimeInfo)
     Farm:CreateToggle({Name="Autofarm",CurrentValue=false,Flag="IronSoulAutoFarm",Callback=function(v) settings.autoFarm=v end})
     Farm:CreateToggle({Name="Auto Use Skill",CurrentValue=false,Flag="IronSoulAutoUseSkill",Callback=function(v) settings.autoUseSkill=v end})
     Farm:CreateToggle({Name="Auto Switch Weapon",CurrentValue=false,Flag="IronSoulAutoSwitchWeapon",Callback=function(v) settings.autoSwitchWeapon=v end})
-    Farm:CreateSlider({Name="Distance X",Range={-20,20},Increment=1,CurrentValue=0,Suffix=" studs",Flag="IronSoulDistanceX",Callback=function(v) settings.distanceX=v end})
-    Farm:CreateSlider({Name="Distance Y",Range={-20,20},Increment=1,CurrentValue=4,Suffix=" studs",Flag="IronSoulDistanceY",Callback=function(v) settings.distanceY=v end})
-    Farm:CreateSlider({Name="Distance Z",Range={-20,30},Increment=1,CurrentValue=8,Suffix=" studs",Flag="IronSoulDistanceZ",Callback=function(v) settings.distanceZ=v end})
-    Farm:CreateSlider({Name="Pitch",Range={-180,180},Increment=1,CurrentValue=30,Suffix=" deg",Flag="IronSoulPitch",Callback=function(v) settings.pitch=v end})
+    Farm:CreateDropdown({Name="Farm Position",Options={"Above","Front","Behind","Below"},CurrentOption={"Above"},MultipleOptions=false,Flag="IronSoulFarmPosition",Callback=function(v) settings.farmPosition=type(v)=="table"and v[1]or v end})
+    Farm:CreateSlider({Name="Distance",Range={1,30},Increment=1,CurrentValue=8,Suffix=" studs",Flag="IronSoulFarmDistance",Callback=function(v) settings.farmDistance=v end})
     Farm:CreateSection("Mob Management")
     Farm:CreateToggle({Name="BringMobs",CurrentValue=false,Flag="IronSoulBringMobs",Callback=function(v) settings.bringMobs=v end})
     Farm:CreateSection("Reference Controls")
@@ -1450,6 +1691,6 @@ return function(Window, runtimeInfo)
         local camera=workspace.CurrentCamera; if camera and LP.Character then camera.CameraSubject=LP.Character:FindFirstChildOfClass("Humanoid") end
         if getgenv().__RAVEN_IRON_SOUL and getgenv().__RAVEN_IRON_SOUL.Settings==settings then getgenv().__RAVEN_IRON_SOUL=nil end
     end
-    getgenv().__RAVEN_IRON_SOUL={Version="v1.6.3",Settings=settings,Destroy=destroy}
+    getgenv().__RAVEN_IRON_SOUL={Version="v1.6.9",Settings=settings,Destroy=destroy}
     if runtimeInfo and type(runtimeInfo.registerCleanup)=="function" then runtimeInfo.registerCleanup(destroy) end
 end
