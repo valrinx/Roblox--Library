@@ -55,6 +55,7 @@ return function(Window, runtimeInfo)
         autoDodge = false, dodgeMode = "Air", dodgeMargin = 3, dodgeDistance = 16, dodgeVertical = 50, dodgeCooldown = 0.55, dodgeHold = 1.4,
         autoPlayAgain = false, autoSwitchWeapon = false,
         autoEnterDungeon = false, autoDungeonWorld = "World1", autoDungeonDifficulty = 1,
+        autoOpenDoor = false,
         bringMobs = false,
         autoCollectChests = false, autoCollectEggs = false,
         changeWalkSpeed = false, walkSpeed = false, walkSpeedValue = 16,
@@ -1195,23 +1196,29 @@ return function(Window, runtimeInfo)
                                 return
                             end
 
-                            -- After 5 seconds grace period with 0 enemies, proceed to next room door/portal
-                            local doors=workspace:FindFirstChild("RoundDoor")
-                            if doors then
-                                for _,obj in ipairs(doors:GetChildren()) do
-                                    local rootPart=obj:FindFirstChild("Root")
-                                    local rNum=(rootPart and rootPart:GetAttribute("RoundNum")) or obj:GetAttribute("RoundNum")
-                                    if (rNum==curRound or obj.Name:find("Portal"..tostring(curRound)) or obj.Name:find("Door"..tostring(curRound))) and rootPart then
-                                        root.CFrame=rootPart.CFrame+Vector3.new(0,3,0)
-                                        root.AssemblyLinearVelocity=Vector3.zero
-                                        root.AssemblyAngularVelocity=Vector3.zero
-                                        if type(firetouchinterest)=="function" then
-                                            pcall(firetouchinterest,root,rootPart,0)
-                                            pcall(firetouchinterest,root,rootPart,1)
+                            -- Only proceed to next room door/portal if autoOpenDoor is enabled and 5s grace period has elapsed
+                            if settings.autoOpenDoor then
+                                local doors=workspace:FindFirstChild("RoundDoor")
+                                if doors then
+                                    for _,obj in ipairs(doors:GetChildren()) do
+                                        local rootPart=obj:FindFirstChild("Root")
+                                        local rNum=(rootPart and rootPart:GetAttribute("RoundNum")) or obj:GetAttribute("RoundNum")
+                                        if (rNum==curRound or obj.Name:find("Portal"..tostring(curRound)) or obj.Name:find("Door"..tostring(curRound))) and rootPart then
+                                            root.CFrame=rootPart.CFrame+Vector3.new(0,3,0)
+                                            root.AssemblyLinearVelocity=Vector3.zero
+                                            root.AssemblyAngularVelocity=Vector3.zero
+                                            if type(firetouchinterest)=="function" then
+                                                pcall(firetouchinterest,root,rootPart,0)
+                                                pcall(firetouchinterest,root,rootPart,1)
+                                            end
+                                            break
                                         end
-                                        break
                                     end
                                 end
+                            elseif lastRoomCenter then
+                                root.CFrame=CFrame.new(lastRoomCenter)
+                                root.AssemblyLinearVelocity=Vector3.zero
+                                root.AssemblyAngularVelocity=Vector3.zero
                             end
                             return
                         end
@@ -1281,13 +1288,20 @@ return function(Window, runtimeInfo)
                     end
                     local ok,err=pcall(function()
                         if settings.bringMobs and currentEnemy then
+                            local snapEnemy = currentEnemy
                             task.spawn(function()
-                                for _,v in ipairs(workspace.EnemyNpc:GetChildren()) do
+                                local ef = workspace:FindFirstChild("EnemyNpc")
+                                if not ef or not snapEnemy or not snapEnemy.Parent then return end
+                                for _,v in ipairs(ef:GetChildren()) do
+                                    if not snapEnemy or not snapEnemy.Parent then break end
                                     local enemyRoot=v:IsA("Model") and v:FindFirstChild("HumanoidRootPart")
                                     local humanoid=v:IsA("Model") and v:FindFirstChild("Humanoid")
-                                    if currentEnemy and enemyRoot and humanoid and humanoid.Health>0 and (currentEnemy.Position-enemyRoot.Position).Magnitude<=100 then
-                                        task.wait()
-                                        enemyRoot.CFrame=currentEnemy.CFrame
+                                    if snapEnemy and enemyRoot and humanoid and humanoid.Health>0 then
+                                        pcall(function()
+                                            if (snapEnemy.Position-enemyRoot.Position).Magnitude<=100 then
+                                                enemyRoot.CFrame=snapEnemy.CFrame
+                                            end
+                                        end)
                                     end
                                 end
                             end)
@@ -1409,7 +1423,7 @@ return function(Window, runtimeInfo)
     end
 
     local Dashboard=createTab("Dungeon", "activity")
-    Dashboard:CreateSection("Iron Soul v1.6.9")
+    Dashboard:CreateSection("Iron Soul v1.7.0")
     local roundLabel=Dashboard:CreateLabel("Round: scanning...")
     local enemyCountLabel=Dashboard:CreateLabel("Enemies: scanning...")
     local targetLabel=Dashboard:CreateLabel("Target: none")
@@ -1449,6 +1463,7 @@ return function(Window, runtimeInfo)
     Farm:CreateDropdown({Name="Farm Position",Options={"Above","Front","Behind","Below"},CurrentOption={"Above"},MultipleOptions=false,Flag="IronSoulFarmPosition",Callback=function(v) settings.farmPosition=type(v)=="table"and v[1]or v end})
     Farm:CreateSlider({Name="Distance",Range={1,30},Increment=1,CurrentValue=8,Suffix=" studs",Flag="IronSoulFarmDistance",Callback=function(v) settings.farmDistance=v end})
     Farm:CreateSection("Mob Management")
+    Farm:CreateToggle({Name="Auto Open Round Door",CurrentValue=false,Flag="IronSoulAutoOpenDoor",Callback=function(v) settings.autoOpenDoor=v end})
     Farm:CreateToggle({Name="BringMobs",CurrentValue=false,Flag="IronSoulBringMobs",Callback=function(v) settings.bringMobs=v end})
     Farm:CreateSection("Reference Controls")
     Farm:CreateToggle({Name="Allow Camera Change",CurrentValue=false,Flag="IronSoulAllowCameraChange",Callback=function(v) settings.allowCameraChange=v settings.cameraChange=v if not v then workspace.CurrentCamera.CameraType=Enum.CameraType.Custom workspace.CurrentCamera.CameraSubject=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid") end end})
@@ -1691,6 +1706,6 @@ return function(Window, runtimeInfo)
         local camera=workspace.CurrentCamera; if camera and LP.Character then camera.CameraSubject=LP.Character:FindFirstChildOfClass("Humanoid") end
         if getgenv().__RAVEN_IRON_SOUL and getgenv().__RAVEN_IRON_SOUL.Settings==settings then getgenv().__RAVEN_IRON_SOUL=nil end
     end
-    getgenv().__RAVEN_IRON_SOUL={Version="v1.6.9",Settings=settings,Destroy=destroy}
+    getgenv().__RAVEN_IRON_SOUL={Version="v1.7.0",Settings=settings,Destroy=destroy}
     if runtimeInfo and type(runtimeInfo.registerCleanup)=="function" then runtimeInfo.registerCleanup(destroy) end
 end
