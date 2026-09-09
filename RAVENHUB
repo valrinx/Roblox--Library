@@ -342,6 +342,14 @@ local SCRIPTS = {
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/ground_war.lua",
     },
     {
+        name        = "Wood Carving Tycoon",
+        description = "Instant 100% Accuracy Auto Carve | Auto Next | Lathe Automation | Auto Deposit",
+        placeIds    = {82712304391069, 122971261313361},
+        gameIds     = {10404519332, 7129528628},
+        version     = "v1.0.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/wood_carving_tycoon.lua?v=wct-1.0.0",
+    },
+    {
         name        = "Iron Soul: Dungeon",
         description = "Enemy ESP | Reference Autofarm | Auto Dodge | Auto Weapon Cycle | Replay/Lobby",
         placeIds    = {117533937949084, 116456628154258, 112316840155266},
@@ -725,7 +733,12 @@ for _, scriptInfo in ipairs(SCRIPTS) do
             return workspace:FindFirstChild("PlacedOre") ~= nil
                 and workspace:FindFirstChild("SpawnedBlocks") ~= nil
         end
-        break
+    elseif scriptInfo.name == "Wood Carving Tycoon" then
+        scriptInfo.detector = function()
+            local rs = game:GetService("ReplicatedStorage")
+            return rs:FindFirstChild("Shared") ~= nil
+                and rs.Shared:FindFirstChild("WoodCarving") ~= nil
+        end
     end
 end
 
