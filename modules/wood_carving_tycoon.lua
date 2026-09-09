@@ -5,6 +5,8 @@
 
 return function(Window, runtimeInfo)
     local Players = game:GetService("Players")
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+    local ReplicatedFirst = game:GetService("ReplicatedFirst")
     local localPlayer = Players.LocalPlayer
 
     local environment = getgenv()
@@ -32,6 +34,62 @@ return function(Window, runtimeInfo)
     local lastNextClick = 0
     local lastEnterPrompt = 0
     local lastDepositPrompt = 0
+    local isSaving = false
+
+    -- Safe patch for Client.AskServer and Client.TellServer
+    -- Disables honeypot / getfenv().writefile checks that crash executor calls with attempt to index nil with 'FireServer'
+    pcall(function()
+        local Client = require(ReplicatedFirst.Client)
+        local REM = ReplicatedStorage:WaitForChild("REM", 5)
+        if not Client or not REM then return end
+
+        if not Client.__RavenPatched then
+            Client.AskServer = function(self, remoteName, payload, callback)
+                local hash = self:CreateKeyHash(remoteName)
+                local remoteId = self.CachedRemotes[hash]
+                if not remoteId then
+                    local start = os.clock()
+                    while not self.CachedRemotes[hash] and os.clock() - start < 2 do
+                        task.wait()
+                    end
+                    remoteId = self.CachedRemotes[hash]
+                end
+                local remote = remoteId and REM:FindFirstChild(remoteId)
+                if remote then
+                    task.spawn(function()
+                        local ok, ret = pcall(function()
+                            return remote:InvokeServer(payload)
+                        end)
+                        if ok and callback then
+                            pcall(callback, ret)
+                        end
+                    end)
+                end
+            end
+
+            Client.TellServer = function(self, remoteName, payload)
+                local hash = self:CreateKeyHash(remoteName)
+                local remoteId = self.CachedRemotes[hash]
+                if not remoteId then
+                    local start = os.clock()
+                    while not self.CachedRemotes[hash] and os.clock() - start < 2 do
+                        task.wait()
+                    end
+                    remoteId = self.CachedRemotes[hash]
+                end
+                local remote = remoteId and REM:FindFirstChild(remoteId)
+                if remote then
+                    task.spawn(function()
+                        pcall(function()
+                            remote:FireServer(payload)
+                        end)
+                    end)
+                end
+            end
+
+            Client.__RavenPatched = true
+        end
+    end)
 
     -- Helper: get Tycoon folder for current player
     local function getMyTycoon()
@@ -47,6 +105,75 @@ return function(Window, runtimeInfo)
             return tycoons["Tycoon" .. tostring(tycoonId)]
         end
         return nil
+    end
+
+    -- Helper: get world position of any ProximityPrompt
+    local function getPromptPosition(prompt)
+        if not prompt or not prompt.Parent then return nil end
+        local parent = prompt.Parent
+        if parent:IsA("BasePart") then
+            return parent.Position
+        elseif parent:IsA("Attachment") then
+            return parent.WorldPosition
+        elseif parent.Parent and parent.Parent:IsA("BasePart") then
+            return parent.Parent.Position
+        end
+        return nil
+    end
+
+    -- Helper: reliably trigger ProximityPrompt
+    local function triggerPrompt(prompt, forceNearby)
+        if not prompt or not fireproximityprompt then return false end
+
+        local char = localPlayer.Character
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        local promptPos = getPromptPosition(prompt)
+
+        local savedCF = nil
+        if forceNearby and root and promptPos then
+            local dist = (root.Position - promptPos).Magnitude
+            if dist > (prompt.MaxActivationDistance or 12) then
+                savedCF = root.CFrame
+                root.CFrame = CFrame.new(promptPos + Vector3.new(0, 2, 0))
+                task.wait(0.1)
+            end
+        end
+
+        local oldHold = prompt.HoldDuration
+        pcall(function() prompt.HoldDuration = 0 end)
+        pcall(function() fireproximityprompt(prompt, 0) end)
+        pcall(function() fireproximityprompt(prompt, 1) end)
+        pcall(function() fireproximityprompt(prompt) end)
+
+        task.delay(0.15, function()
+            pcall(function() prompt.HoldDuration = oldHold end)
+            if savedCF and root then
+                pcall(function() root.CFrame = savedCF end)
+            end
+        end)
+
+        return true
+    end
+
+    -- Helper: check if player is holding or carrying carved wood
+    local function hasCarvedWoodInInventory()
+        local bp = localPlayer:FindFirstChild("Backpack")
+        if bp then
+            for _, item in ipairs(bp:GetChildren()) do
+                if item:IsA("Tool") and item.Name ~= "Bronze Axe" and not item.Name:lower():find("axe") then
+                    return true
+                end
+            end
+        end
+        local char = localPlayer.Character
+        if char then
+            for _, item in ipairs(char:GetChildren()) do
+                if item:IsA("Tool") and item.Name ~= "Bronze Axe" and not item.Name:lower():find("axe") then
+                    return true
+                end
+            end
+        end
+        return false
     end
 
     -- Helper: get active Lathe context from WoodCarvingMain UI
@@ -122,7 +249,6 @@ return function(Window, runtimeInfo)
         pcall(function()
             ctx.accuracyUI:SetConfirmEnabled(true)
             ctx.accuracyUI:Update(
-                0,
                 calcResult,
                 lathe:GetActiveWoodId(),
                 lathe:GetActiveMutation(),
@@ -141,18 +267,106 @@ return function(Window, runtimeInfo)
         return true, calcResult.Accuracy
     end
 
-    -- Trigger Carve Next button click safely
-    local function clickCarveNext()
-        local ctx = getLatheContext()
-        if not ctx or not ctx.confirmButton then return false end
+    -- Direct, safe save and carve next handler
+    -- Prevents saving hangs and advances to the next workpiece smoothly
+    local function saveAndCarveNext()
+        if isSaving then return false end
 
-        for _, conn in ipairs(getconnections(ctx.confirmButton.MouseButton1Click)) do
-            conn:Fire()
-        end
-        for _, conn in ipairs(getconnections(ctx.confirmButton.Activated)) do
-            conn:Fire()
-        end
-        stats.CarvedCount = stats.CarvedCount + 1
+        local ctx = getLatheContext()
+        if not ctx then return false end
+
+        local wcController = ctx.wcController
+        local lathe = ctx.lathe
+
+        -- Clear stuck SavePending if needed
+        wcController.SavePending = false
+        isSaving = true
+        stats.Status = "Saving Carved Log..."
+
+        task.spawn(function()
+            -- 1. Ensure 100% accuracy carve applied
+            performInstant100Carve()
+
+            -- 2. Build complete serialized payload
+            local woodId = lathe:GetActiveWoodId()
+            local variantId = lathe:GetActiveVariantId()
+            local Ser = require(ReplicatedStorage.Shared.WoodCarving.Serializer)
+            local cylSer = Ser.SerializeCarvedLog(lathe)
+            local targetSer = Ser.SerializeCarvedLog(lathe:GetTargetProfile(), woodId)
+
+            local payload = {
+                SessionId = wcController.LatheSessionId,
+                WorkpieceId = wcController.LatheWorkpieceId,
+                WoodId = woodId,
+                VariantId = variantId,
+                Mutation = lathe:GetActiveMutation() or "None",
+                Serialized = cylSer,
+                TargetSerialized = targetSer
+            }
+
+            -- 3. Invoke SaveCarvedWood RemoteFunction
+            local client = wcController.Client or require(ReplicatedFirst.Client)
+            local hash = client:CreateKeyHash("SaveCarvedWood")
+            local remId = client.CachedRemotes and client.CachedRemotes[hash]
+            local rem = remId and ReplicatedStorage.REM:FindFirstChild(remId)
+
+            local ok, serverResp = pcall(function()
+                if rem then
+                    return rem:InvokeServer(payload)
+                else
+                    return ReplicatedStorage.REM["3adbf815-b8cf-4125-86df-7c71dc04a533"]:InvokeServer(payload)
+                end
+            end)
+
+            wcController.SavePending = false
+
+            if ok and type(serverResp) == "table" then
+                if serverResp.RawWoodVariants then
+                    pcall(function() wcController:ApplyServerRawWoodVariants(serverResp.RawWoodVariants) end)
+                end
+                pcall(function() wcController:OptimisticallyConsumeRawWood(payload.WoodId, payload.VariantId) end)
+
+                if serverResp.Success then
+                    stats.CarvedCount = stats.CarvedCount + 1
+                    stats.Status = "Carved Successfully!"
+
+                    -- Mount next uncut log
+                    local nextWood = wcController:GetFirstAvailableRawWoodVariantId()
+                    if nextWood then
+                        pcall(function() wcController:BeginLocalCarvingWorkpiece(nextWood) end)
+                    else
+                        -- No logs left in inventory, exit lathe gracefully
+                        stats.Status = "No Uncut Logs Left"
+                        pcall(function() wcController:ResetLathe() end)
+                        pcall(function() wcController:ExitLathe() end)
+                    end
+                else
+                    -- Handle server error (e.g., already saved or out of sync)
+                    local nextWood = wcController:GetFirstAvailableRawWoodVariantId()
+                    if nextWood then
+                        pcall(function() wcController:BeginLocalCarvingWorkpiece(nextWood) end)
+                    else
+                        stats.Status = "Lathe Finished"
+                        pcall(function() wcController:ResetLathe() end)
+                        pcall(function() wcController:ExitLathe() end)
+                    end
+                end
+            else
+                -- Fallback via button connections if remote invocation fails
+                pcall(function()
+                    for _, conn in ipairs(getconnections(ctx.confirmButton.MouseButton1Click)) do
+                        conn:Fire()
+                    end
+                    for _, conn in ipairs(getconnections(ctx.confirmButton.Activated)) do
+                        conn:Fire()
+                    end
+                end)
+            end
+
+            task.wait(settings.NextDelay)
+            isSaving = false
+        end)
+
         return true
     end
 
@@ -216,7 +430,14 @@ return function(Window, runtimeInfo)
         end,
     })
 
-    tab:CreateSection("Tycoon Lathe Automation")
+    tab:CreateButton({
+        Name = "Save & Carve Next Now (Manual Trigger)",
+        Callback = function()
+            saveAndCarveNext()
+        end,
+    })
+
+    tab:CreateSection("Tycoon Lathe & Wood Automation")
 
     tab:CreateToggle({
         Name = "Auto Re-enter Lathe (Proximity)",
@@ -241,12 +462,20 @@ return function(Window, runtimeInfo)
         Callback = function()
             local tycoon = getMyTycoon()
             local prompt = tycoon and tycoon:FindFirstChild("DepositAllCarvedWoodPrompt", true)
-            if prompt and fireproximityprompt then
-                fireproximityprompt(prompt)
+            if prompt then
+                local success = triggerPrompt(prompt, true)
                 pcall(function()
                     Window:Notify({
                         Title = "Wood Stack",
-                        Content = "Triggered Deposit All Carved Wood!",
+                        Content = success and "Triggered Deposit All Carved Wood!" or "Failed to trigger prompt.",
+                        Duration = 2.5,
+                    })
+                end)
+            else
+                pcall(function()
+                    Window:Notify({
+                        Title = "Wood Stack",
+                        Content = "DepositAllCarvedWoodPrompt not found in Tycoon.",
                         Duration = 2.5,
                     })
                 end)
@@ -261,27 +490,34 @@ return function(Window, runtimeInfo)
             local now = os.clock()
 
             if isCarving then
-                stats.Status = "Carving on Lathe"
                 local ctx = getLatheContext()
                 if ctx and ctx.lathe and ctx.lathe.TargetProfile then
                     local currentAcc = ctx.lathe.AccuracyResult and ctx.lathe.AccuracyResult.Accuracy or 0
                     stats.CurrentAccuracy = currentAcc
                     stats.CurrentWood = tostring(ctx.lathe:GetActiveWoodId() or "Unknown")
 
-                    if settings.AutoCarve and currentAcc < 100 then
-                        performInstant100Carve()
-                        currentAcc = 100
-                    end
+                    if not isSaving then
+                        stats.Status = "Carving on Lathe"
 
-                    if settings.AutoCarveNext and currentAcc >= 100 then
-                        if now - lastNextClick >= settings.NextDelay then
-                            lastNextClick = now
-                            clickCarveNext()
+                        -- 1. Auto Carve to 100%
+                        if settings.AutoCarve and currentAcc < 100 then
+                            performInstant100Carve()
+                            currentAcc = 100
+                        end
+
+                        -- 2. Auto Save & Carve Next
+                        if settings.AutoCarveNext and currentAcc >= 100 then
+                            if now - lastNextClick >= settings.NextDelay then
+                                lastNextClick = now
+                                saveAndCarveNext()
+                            end
                         end
                     end
                 end
             else
-                stats.Status = "Walking / Idle"
+                if not isSaving then
+                    stats.Status = "Idle / Roaming"
+                end
                 stats.CurrentAccuracy = 0
 
                 -- Auto enter lathe if enabled and prompt is near
@@ -289,32 +525,32 @@ return function(Window, runtimeInfo)
                     lastEnterPrompt = now
                     local tycoon = getMyTycoon()
                     local lathePrompt = tycoon and tycoon:FindFirstChild("WoodLathePrompt", true)
-                    if lathePrompt and lathePrompt.Enabled and fireproximityprompt then
+                    if lathePrompt and lathePrompt.Enabled then
                         local char = localPlayer.Character
                         local root = char and char:FindFirstChild("HumanoidRootPart")
-                        local part = lathePrompt.Parent
-                        if root and part and part:IsA("BasePart") then
-                            local dist = (root.Position - part.Position).Magnitude
-                            if dist <= (lathePrompt.MaxActivationDistance or 15) + 2 then
-                                fireproximityprompt(lathePrompt)
+                        local pos = getPromptPosition(lathePrompt)
+                        if root and pos then
+                            local dist = (root.Position - pos).Magnitude
+                            if dist <= (lathePrompt.MaxActivationDistance or 10) + 3 then
+                                triggerPrompt(lathePrompt, false)
                             end
                         end
                     end
                 end
 
-                -- Auto deposit carved wood if enabled
-                if settings.AutoDepositCarved and now - lastDepositPrompt >= 3.0 then
+                -- Auto deposit carved wood if enabled and player holds/has carved wood
+                if settings.AutoDepositCarved and now - lastDepositPrompt >= 2.0 then
                     lastDepositPrompt = now
                     local tycoon = getMyTycoon()
                     local depPrompt = tycoon and tycoon:FindFirstChild("DepositAllCarvedWoodPrompt", true)
-                    if depPrompt and depPrompt.Enabled and fireproximityprompt then
+                    if depPrompt and (depPrompt.Enabled or hasCarvedWoodInInventory()) then
                         local char = localPlayer.Character
                         local root = char and char:FindFirstChild("HumanoidRootPart")
-                        local part = depPrompt.Parent
-                        if root and part and part:IsA("BasePart") then
-                            local dist = (root.Position - part.Position).Magnitude
-                            if dist <= (depPrompt.MaxActivationDistance or 15) + 2 then
-                                fireproximityprompt(depPrompt)
+                        local pos = getPromptPosition(depPrompt)
+                        if root and pos then
+                            local dist = (root.Position - pos).Magnitude
+                            if dist <= (depPrompt.MaxActivationDistance or 12) + 4 then
+                                triggerPrompt(depPrompt, false)
                             end
                         end
                     end
@@ -347,11 +583,12 @@ return function(Window, runtimeInfo)
     end
 
     environment.__RAVEN_WOOD_CARVING = {
-        Version = "v1.0.0",
+        Version = "v1.1.0",
         Settings = settings,
         Stats = stats,
         PerformInstant100Carve = performInstant100Carve,
-        ClickCarveNext = clickCarveNext,
+        SaveAndCarveNext = saveAndCarveNext,
+        TriggerPrompt = triggerPrompt,
         GetLatheContext = getLatheContext,
         Destroy = destroy,
     }
