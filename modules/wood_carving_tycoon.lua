@@ -21,6 +21,12 @@ return function(Window, runtimeInfo)
         NextDelay = 0.35,
         AutoEnterLathe = false,
         AutoDepositCarved = false,
+        AutoRerollSeeds = false,
+        RerollDelay = 2.0,
+        AutoCollectSeeds = false,
+        MinCollectRarity = "All",
+        AutoWoodChipper = false,
+        MaxChipRarity = "Common",
     }
 
     local stats = {
@@ -28,6 +34,7 @@ return function(Window, runtimeInfo)
         CurrentAccuracy = 0,
         CurrentWood = "None",
         Status = "Idle",
+        PedestalSeedsText = "None",
     }
 
     local running = true
@@ -121,7 +128,7 @@ return function(Window, runtimeInfo)
         return nil
     end
 
-    -- Helper: reliably trigger ProximityPrompt
+    -- Helper: reliably trigger ProximityPrompt without visible teleporting (Micro-spoof)
     local function triggerPrompt(prompt, forceNearby)
         if not prompt or not fireproximityprompt then return false end
 
@@ -134,23 +141,22 @@ return function(Window, runtimeInfo)
             local dist = (root.Position - promptPos).Magnitude
             if dist > (prompt.MaxActivationDistance or 12) then
                 savedCF = root.CFrame
+                -- Micro-spoof: shift CFrame directly adjacent for only milliseconds
                 root.CFrame = CFrame.new(promptPos + Vector3.new(0, 2, 0))
-                task.wait(0.1)
+                task.wait(0.04)
             end
         end
 
         local oldHold = prompt.HoldDuration
         pcall(function() prompt.HoldDuration = 0 end)
         pcall(function() fireproximityprompt(prompt, 0) end)
-        pcall(function() fireproximityprompt(prompt, 1) end)
+        task.wait(0.04)
         pcall(function() fireproximityprompt(prompt) end)
+        pcall(function() prompt.HoldDuration = oldHold end)
 
-        task.delay(0.15, function()
-            pcall(function() prompt.HoldDuration = oldHold end)
-            if savedCF and root then
-                pcall(function() root.CFrame = savedCF end)
-            end
-        end)
+        if savedCF and root then
+            root.CFrame = savedCF
+        end
 
         return true
     end
@@ -174,6 +180,245 @@ return function(Window, runtimeInfo)
             end
         end
         return false
+    end
+
+    -- ============================================================
+    --   Seed Economy & Pedestal Reroll Helpers
+    -- ============================================================
+    local RARITY_RANK = {
+        ["Common"] = 1,
+        ["Uncommon"] = 2,
+        ["Rare"] = 3,
+        ["Epic"] = 4,
+        ["Legendary"] = 5,
+        ["Mythical"] = 6,
+        ["Sacred"] = 7,
+        ["Ethereal"] = 8,
+        ["Celestial"] = 9,
+        ["Secret"] = 10,
+        ["Cosmic"] = 11,
+        ["Transcendent"] = 12,
+        ["Super Secret"] = 13,
+    }
+
+    local RARITY_PRICES = {
+        ["Common"] = 100,
+        ["Uncommon"] = 200,
+        ["Rare"] = 400,
+        ["Epic"] = 800,
+        ["Legendary"] = 1600,
+        ["Mythical"] = 2500,
+        ["Sacred"] = 4500,
+        ["Ethereal"] = 6667,
+        ["Celestial"] = 40000,
+        ["Secret"] = 140000,
+        ["Cosmic"] = 200000,
+        ["Transcendent"] = 800000,
+        ["Super Secret"] = 4000000,
+    }
+
+    local function formatPrice(val)
+        if not val or val <= 0 then return "$0" end
+        if val >= 1000000 then
+            return string.format("$%.1fM", val / 1000000):gsub("%.0M", "M")
+        elseif val >= 1000 then
+            return string.format("$%.1fK", val / 1000):gsub("%.0K", "K")
+        end
+        return "$" .. tostring(val)
+    end
+
+    local function getPedestalSeeds()
+        local tycoon = getMyTycoon()
+        if not tycoon then return {} end
+        local genSeedsFolder = tycoon:FindFirstChild("GeneratedSeeds")
+        if not genSeedsFolder then return {} end
+
+        local WoodEconomy
+        pcall(function()
+            WoodEconomy = require(ReplicatedStorage.Shared.WoodEconomy)
+        end)
+
+        local seeds = {}
+        for _, s in ipairs(genSeedsFolder:GetChildren()) do
+            local prompt = s:FindFirstChild("GrabSeedPrompt", true)
+            if prompt then
+                local treeType = s:GetAttribute("GeneratedTreeType") or s.Name
+                local rarity = "Common"
+                if WoodEconomy and WoodEconomy.NormalizeWoodId and WoodEconomy.GetWoodRarity then
+                    local norm = WoodEconomy.NormalizeWoodId(treeType)
+                    rarity = WoodEconomy.GetWoodRarity(norm) or "Common"
+                end
+                local rank = RARITY_RANK[rarity] or 1
+                local price = RARITY_PRICES[rarity] or 100
+
+                table.insert(seeds, {
+                    Model = s,
+                    Prompt = prompt,
+                    Name = s.Name,
+                    TreeType = treeType,
+                    Rarity = rarity,
+                    Rank = rank,
+                    Price = price,
+                    FormattedPrice = formatPrice(price)
+                })
+            end
+        end
+
+        table.sort(seeds, function(a, b)
+            return a.Name < b.Name
+        end)
+
+        return seeds
+    end
+
+    local function collectSeed(seedInfo)
+        if not seedInfo or not seedInfo.Prompt then return false end
+        return triggerPrompt(seedInfo.Prompt, true)
+    end
+
+    local function confirmRerollProtectedModal()
+        pcall(function()
+            local SeedReroll = require(ReplicatedFirst.Client.SeedReroll)
+            if SeedReroll and type(SeedReroll.ConfirmProtectedReroll) == "function" then
+                SeedReroll:ConfirmProtectedReroll()
+            end
+        end)
+    end
+
+    local function pullRerollLever()
+        local tycoon = getMyTycoon()
+        if not tycoon then return false end
+        local rerollFolder = tycoon:FindFirstChild("TycoonRoot") and tycoon.TycoonRoot:FindFirstChild("Reroll")
+        local leverPrompt = rerollFolder and rerollFolder:FindFirstChild("ProximityPrompt", true)
+        if not leverPrompt then return false end
+
+        local success = triggerPrompt(leverPrompt, true)
+        task.delay(0.3, confirmRerollProtectedModal)
+        return success
+    end
+
+    -- ============================================================
+    --   Wood Chipper (Seed Destroyer) Helpers
+    -- ============================================================
+    local function getBackpackSeedsForChipper(maxRarityName)
+        local maxRank = maxRarityName == "All" and 999 or (RARITY_RANK[maxRarityName] or 1)
+        local bp = localPlayer:FindFirstChild("Backpack")
+        local char = localPlayer.Character
+        local matches = {}
+
+        local function checkItem(tool)
+            if not tool:IsA("Tool") then return end
+            local isSeed = tool:GetAttribute("TreeSeed") == true or tool.Name:find("Seed") ~= nil
+            if not isSeed then return end
+
+            local rarity = tool:GetAttribute("SeedRarity")
+            if not rarity then
+                local treeType = tool:GetAttribute("TreeType")
+                if treeType then
+                    local WoodEconomy = require(ReplicatedStorage.Shared.WoodEconomy)
+                    rarity = WoodEconomy.GetWoodRarity(WoodEconomy.NormalizeWoodId(treeType))
+                end
+            end
+            rarity = rarity or "Common"
+            local rank = RARITY_RANK[rarity] or 1
+
+            if rank <= maxRank then
+                table.insert(matches, {
+                    Tool = tool,
+                    Name = tool.Name,
+                    Rarity = rarity,
+                    Rank = rank
+                })
+            end
+        end
+
+        if bp then
+            for _, t in ipairs(bp:GetChildren()) do checkItem(t) end
+        end
+        if char then
+            for _, t in ipairs(char:GetChildren()) do checkItem(t) end
+        end
+
+        return matches
+    end
+
+    local function chipSeedTool(seedTool)
+        local tycoon = getMyTycoon()
+        if not tycoon then return false end
+        local chipper = tycoon:FindFirstChild("WoodChipper", true)
+        local prompt = chipper and chipper:FindFirstChild("WoodChipperPrompt", true)
+        if not prompt or not prompt.Enabled then return false end
+
+        local char = localPlayer.Character
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if not root or not hum then return false end
+
+        -- 1. Equip seed
+        if seedTool.Parent == localPlayer:FindFirstChild("Backpack") then
+            hum:EquipTool(seedTool)
+            task.wait(0.2)
+        end
+
+        -- 2. Micro-spoof to chipper to trigger prompt
+        local chipperPos = getPromptPosition(prompt)
+        local savedCF = root.CFrame
+        if chipperPos and (root.Position - chipperPos).Magnitude > 10 then
+            root.CFrame = CFrame.new(chipperPos + Vector3.new(0, 2, 2))
+            task.wait(0.04)
+        end
+
+        -- 3. Fire prompt
+        local oldHold = prompt.HoldDuration
+        pcall(function() prompt.HoldDuration = 0 end)
+        pcall(function() fireproximityprompt(prompt, 0) end)
+        task.wait(0.04)
+        pcall(function() fireproximityprompt(prompt) end)
+        pcall(function() prompt.HoldDuration = oldHold end)
+
+        -- Instantly restore original player position so player never visually walks/stays at chipper
+        if savedCF and root then
+            root.CFrame = savedCF
+        end
+
+        -- 4. Auto-confirm via WoodChipperBulk GUI (GUI is local and remains open)
+        local pg = localPlayer:FindFirstChild("PlayerGui")
+        local confirmed = false
+        local startTime = os.clock()
+
+        while os.clock() - startTime < 1.8 do
+            local bulkGui = pg and pg:FindFirstChild("WoodChipperBulk")
+            if bulkGui and bulkGui.Enabled then
+                local allBtn, chipBtn
+                for _, d in ipairs(bulkGui:GetDescendants()) do
+                    if d:IsA("TextButton") then
+                        local lbl = d:FindFirstChildOfClass("TextLabel") or d.Parent:FindFirstChildOfClass("TextLabel")
+                        local t = lbl and lbl.Text or d.Text
+                        if t == "All" then
+                            allBtn = d
+                        elseif t:find("Chip") then
+                            chipBtn = d
+                        end
+                    end
+                end
+
+                if allBtn then
+                    for _, c in ipairs(getconnections(allBtn.MouseButton1Click)) do c:Fire() end
+                    for _, c in ipairs(getconnections(allBtn.Activated)) do c:Fire() end
+                    task.wait(0.1)
+                end
+
+                if chipBtn then
+                    for _, c in ipairs(getconnections(chipBtn.MouseButton1Click)) do c:Fire() end
+                    for _, c in ipairs(getconnections(chipBtn.Activated)) do c:Fire() end
+                    confirmed = true
+                    break
+                end
+            end
+            task.wait(0.05)
+        end
+
+        return confirmed
     end
 
     -- Helper: get active Lathe context from WoodCarvingMain UI
@@ -483,7 +728,202 @@ return function(Window, runtimeInfo)
         end,
     })
 
+    -- ============================================================
+    --   Seed Farm & Reroll Section
+    -- ============================================================
+    tab:CreateSection("Seed Farm & Reroll")
+
+    local seedStatusLabel = tab:CreateLabel("Seeds: Inspecting pedestals...")
+
+    tab:CreateToggle({
+        Name = "Auto Collect Seeds",
+        CurrentValue = settings.AutoCollectSeeds,
+        Flag = "WCT_AutoCollectSeeds",
+        Callback = function(value)
+            settings.AutoCollectSeeds = (value == true)
+        end,
+    })
+
+    tab:CreateDropdown({
+        Name = "Min Rarity to Collect",
+        Options = {
+            "All",
+            "Common",
+            "Uncommon",
+            "Rare",
+            "Epic",
+            "Legendary",
+            "Mythical",
+            "Sacred",
+            "Ethereal",
+            "Celestial",
+            "Secret",
+            "Cosmic",
+            "Transcendent",
+        },
+        CurrentValue = settings.MinCollectRarity,
+        Flag = "WCT_MinCollectRarity",
+        Callback = function(value)
+            settings.MinCollectRarity = value
+        end,
+    })
+
+    tab:CreateToggle({
+        Name = "Auto Reroll Seeds",
+        CurrentValue = settings.AutoRerollSeeds,
+        Flag = "WCT_AutoRerollSeeds",
+        Callback = function(value)
+            settings.AutoRerollSeeds = (value == true)
+        end,
+    })
+
+    tab:CreateSlider({
+        Name = "Reroll Delay",
+        Range = {1.5, 5.0},
+        Increment = 0.1,
+        CurrentValue = settings.RerollDelay,
+        Suffix = " s",
+        Flag = "WCT_RerollDelay",
+        Callback = function(value)
+            settings.RerollDelay = value
+        end,
+    })
+
+    tab:CreateButton({
+        Name = "Collect Matching Seeds Now",
+        Callback = function()
+            local seeds = getPedestalSeeds()
+            local targetRank = settings.MinCollectRarity == "All" and 0 or (RARITY_RANK[settings.MinCollectRarity] or 0)
+            local collected = 0
+            for _, s in ipairs(seeds) do
+                if s.Rank >= targetRank then
+                    if collectSeed(s) then
+                        collected = collected + 1
+                        task.wait(0.1)
+                    end
+                end
+            end
+            pcall(function()
+                Window:Notify({
+                    Title = "Seed Collector",
+                    Content = string.format("Collected %d seeds matching >= %s", collected, settings.MinCollectRarity),
+                    Duration = 2.5,
+                })
+            end)
+        end,
+    })
+
+    tab:CreateButton({
+        Name = "Collect All Seeds Now",
+        Callback = function()
+            local seeds = getPedestalSeeds()
+            local collected = 0
+            for _, s in ipairs(seeds) do
+                if collectSeed(s) then
+                    collected = collected + 1
+                    task.wait(0.1)
+                end
+            end
+            pcall(function()
+                Window:Notify({
+                    Title = "Seed Collector",
+                    Content = string.format("Collected all %d seeds!", collected),
+                    Duration = 2.5,
+                })
+            end)
+        end,
+    })
+
+    tab:CreateButton({
+        Name = "Reroll Seeds Now (Pull Lever)",
+        Callback = function()
+            local ok = pullRerollLever()
+            pcall(function()
+                Window:Notify({
+                    Title = "Seed Reroll",
+                    Content = ok and "Reroll lever pulled!" or "Could not pull reroll lever.",
+                    Duration = 2.5,
+                })
+            end)
+        end,
+    })
+
+    -- ============================================================
+    --   Wood Chipper (Seed Destroyer) Section
+    -- ============================================================
+    tab:CreateSection("Wood Chipper (Destroy Seeds)")
+
+    tab:CreateToggle({
+        Name = "Auto Wood Chipper (Destroy Seeds)",
+        CurrentValue = settings.AutoWoodChipper,
+        Flag = "WCT_AutoWoodChipper",
+        Callback = function(value)
+            settings.AutoWoodChipper = (value == true)
+        end,
+    })
+
+    tab:CreateDropdown({
+        Name = "Max Rarity to Destroy (<= Level)",
+        Options = {
+            "Common",
+            "Uncommon",
+            "Rare",
+            "Epic",
+            "Legendary",
+            "Mythical",
+            "Sacred",
+            "Ethereal",
+            "Celestial",
+            "Secret",
+            "Cosmic",
+            "Transcendent",
+            "All",
+        },
+        CurrentValue = settings.MaxChipRarity,
+        Flag = "WCT_MaxChipRarity",
+        Callback = function(value)
+            settings.MaxChipRarity = value
+        end,
+    })
+
+    tab:CreateButton({
+        Name = "Destroy Matching Seeds Now",
+        Callback = function()
+            local matches = getBackpackSeedsForChipper(settings.MaxChipRarity)
+            if #matches == 0 then
+                pcall(function()
+                    Window:Notify({
+                        Title = "Wood Chipper",
+                        Content = "No seeds found matching <= " .. tostring(settings.MaxChipRarity),
+                        Duration = 2.5,
+                    })
+                end)
+                return
+            end
+
+            local chippedCount = 0
+            for _, m in ipairs(matches) do
+                if chipSeedTool(m.Tool) then
+                    chippedCount = chippedCount + 1
+                    task.wait(0.3)
+                end
+            end
+
+            pcall(function()
+                Window:Notify({
+                    Title = "Wood Chipper",
+                    Content = string.format("Chipped %d seed types!", chippedCount),
+                    Duration = 2.5,
+                })
+            end)
+        end,
+    })
+
     -- Main Automation Worker Loop
+    local lastRerollTime = 0
+    local lastSeedScanTime = 0
+    local lastChipTime = 0
+
     task.spawn(function()
         while running do
             local isCarving = localPlayer:GetAttribute("WoodCarvingActive") == true
@@ -555,9 +995,63 @@ return function(Window, runtimeInfo)
                         end
                     end
                 end
+
+                -- ============================================================
+                --   Seed Farming & Reroll Automation
+                -- ============================================================
+                local pedestalSeeds = getPedestalSeeds()
+                local seedDescriptions = {}
+                local targetRank = settings.MinCollectRarity == "All" and 0 or (RARITY_RANK[settings.MinCollectRarity] or 0)
+                local uncollectedMatchingSeeds = {}
+
+                for idx, s in ipairs(pedestalSeeds) do
+                    table.insert(seedDescriptions, string.format("[%s: %s (%s)]", s.TreeType, s.Rarity, s.FormattedPrice))
+                    if s.Rank >= targetRank then
+                        table.insert(uncollectedMatchingSeeds, s)
+                    end
+                end
+
+                if #seedDescriptions > 0 then
+                    stats.PedestalSeedsText = table.concat(seedDescriptions, " ")
+                else
+                    stats.PedestalSeedsText = "None (Rerolling...)"
+                end
+
+                -- Auto collect matching seeds
+                if settings.AutoCollectSeeds and #uncollectedMatchingSeeds > 0 then
+                    for _, s in ipairs(uncollectedMatchingSeeds) do
+                        collectSeed(s)
+                        task.wait(0.12)
+                    end
+                    -- Update pedestal list after collection
+                    pedestalSeeds = getPedestalSeeds()
+                    uncollectedMatchingSeeds = {}
+                    for _, s in ipairs(pedestalSeeds) do
+                        if s.Rank >= targetRank then
+                            table.insert(uncollectedMatchingSeeds, s)
+                        end
+                    end
+                end
+
+                -- Auto reroll seeds (only when all wanted seeds have been collected)
+                if settings.AutoRerollSeeds and #uncollectedMatchingSeeds == 0 then
+                    if now - lastRerollTime >= settings.RerollDelay then
+                        lastRerollTime = now
+                        pullRerollLever()
+                    end
+                end
+
+                -- Auto wood chipper (destroy seeds in backpack matching <= MaxChipRarity)
+                if settings.AutoWoodChipper and now - lastChipTime >= 1.5 then
+                    lastChipTime = now
+                    local chipMatches = getBackpackSeedsForChipper(settings.MaxChipRarity)
+                    if #chipMatches > 0 then
+                        chipSeedTool(chipMatches[1].Tool)
+                    end
+                end
             end
 
-            -- Refresh Status Label
+            -- Refresh Status Labels
             pcall(function()
                 statusLabel:Set(string.format(
                     "Status: %s | Wood: %s | Acc: %d%% | Carved: %d",
@@ -566,6 +1060,10 @@ return function(Window, runtimeInfo)
                     math.floor(stats.CurrentAccuracy),
                     stats.CarvedCount
                 ))
+            end)
+
+            pcall(function()
+                seedStatusLabel:Set("Seeds: " .. tostring(stats.PedestalSeedsText or "None"))
             end)
 
             task.wait(0.2)
@@ -583,13 +1081,15 @@ return function(Window, runtimeInfo)
     end
 
     environment.__RAVEN_WOOD_CARVING = {
-        Version = "v1.1.0",
+        Version = "v1.2.0",
         Settings = settings,
         Stats = stats,
         PerformInstant100Carve = performInstant100Carve,
         SaveAndCarveNext = saveAndCarveNext,
         TriggerPrompt = triggerPrompt,
         GetLatheContext = getLatheContext,
+        GetBackpackSeedsForChipper = getBackpackSeedsForChipper,
+        ChipSeedTool = chipSeedTool,
         Destroy = destroy,
     }
 

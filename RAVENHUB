@@ -343,11 +343,11 @@ local SCRIPTS = {
     },
     {
         name        = "Wood Carving Tycoon",
-        description = "Instant 100% Accuracy Auto Carve | Auto Next | Lathe Automation | Auto Deposit",
+        description = "Instant 100% Carve | Auto Next | Auto Deposit | Auto Seeds | Auto Wood Chipper",
         placeIds    = {82712304391069, 122971261313361},
         gameIds     = {10404519332, 7129528628},
-        version     = "v1.0.0",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/wood_carving_tycoon.lua?v=wct-1.0.0",
+        version     = "v1.2.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/wood_carving_tycoon.lua?v=wct-1.2.0",
     },
     {
         name        = "Iron Soul: Dungeon",
