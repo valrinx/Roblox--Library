@@ -30,7 +30,11 @@ return function(Window, scriptInfo)
         gkPredictArc = true,
         gkAutoJump = true,
         gkAutoPunch = false,
-        gkDiveReach = 22,
+        gkDiveReach = 32,
+        gkOpHitbox = true,
+        gkInstantDive = true,
+        gkAssistMagnet = true,
+        gkFastRecovery = true,
         noBallSlowdown = true,
         fullSpeedCharge = true,
         instantCharge = true,
@@ -567,15 +571,146 @@ return function(Window, scriptInfo)
         HitboxSettingsModule = require(ReplicatedStorage.Modules.Gameplay.HitboxSettings)
     end)
 
-    -- Modestly expand AirReceive hitbox for Goalkeeper so saves register cleanly upon contact
+    -- ============================================================
+    --   OP GOALKEEPER ENHANCEMENT ENGINE (HITBOX, COOLDOWN, ASSIST)
+    -- ============================================================
     local origAirReceiveSize = nil
-    if HitboxSettingsModule and HitboxSettingsModule.AirReceive then
-        origAirReceiveSize = HitboxSettingsModule.AirReceive.Size
-        HitboxSettingsModule.AirReceive.Size = Vector3.new(8, 10, 8)
+    local origAssistedReceiveSize = nil
+    local origReceiveSize = nil
+    local origGkDiveConstants = {}
+    local origGkAssistConstants = {}
+
+    local function applyGoalkeeperEnhancements()
+        if not running then return end
+
+        -- 1. OP Save & Catch Hitboxes
+        if HitboxSettingsModule then
+            if settings.gkOpHitbox then
+                if HitboxSettingsModule.AirReceive then
+                    if not origAirReceiveSize then origAirReceiveSize = HitboxSettingsModule.AirReceive.Size end
+                    HitboxSettingsModule.AirReceive.Size = Vector3.new(22, 26, 22)
+                end
+                if HitboxSettingsModule.AssistedReceive then
+                    if not origAssistedReceiveSize then origAssistedReceiveSize = HitboxSettingsModule.AssistedReceive.Size end
+                    HitboxSettingsModule.AssistedReceive.Size = Vector3.new(24, 26, 24)
+                end
+                if HitboxSettingsModule.Receive then
+                    if not origReceiveSize then origReceiveSize = HitboxSettingsModule.Receive.Size end
+                    HitboxSettingsModule.Receive.Size = Vector3.new(18, 16, 18)
+                end
+            else
+                if origAirReceiveSize and HitboxSettingsModule.AirReceive then
+                    HitboxSettingsModule.AirReceive.Size = origAirReceiveSize
+                end
+                if origAssistedReceiveSize and HitboxSettingsModule.AssistedReceive then
+                    HitboxSettingsModule.AssistedReceive.Size = origAssistedReceiveSize
+                end
+                if origReceiveSize and HitboxSettingsModule.Receive then
+                    HitboxSettingsModule.Receive.Size = origReceiveSize
+                end
+            end
+        end
+
+        -- 2. Dive Physics & Reach Constants
+        if GoalkeeperDive and GoalkeeperDive.Constants then
+            local c = GoalkeeperDive.Constants
+            if not origGkDiveConstants.MaximumSaveHeight then
+                origGkDiveConstants.MaximumSaveHeight = c.MaximumSaveHeight
+                origGkDiveConstants.SaveContactPadding = c.SaveContactPadding
+                origGkDiveConstants.Distance = c.Distance
+                origGkDiveConstants.RepeatDelaySeconds = c.RepeatDelaySeconds
+                origGkDiveConstants.CaughtMovementRestoreStartsAtSeconds = c.CaughtMovementRestoreStartsAtSeconds
+                origGkDiveConstants.MovementRestoreStartsAtSeconds = c.MovementRestoreStartsAtSeconds
+            end
+
+            if settings.gkOpHitbox then
+                c.MaximumSaveHeight = 28
+                c.SaveContactPadding = 6
+                c.Distance = origGkDiveConstants.Distance or 20
+            else
+                c.MaximumSaveHeight = origGkDiveConstants.MaximumSaveHeight
+                c.SaveContactPadding = origGkDiveConstants.SaveContactPadding
+                c.Distance = origGkDiveConstants.Distance
+            end
+
+            if settings.gkInstantDive then
+                c.RepeatDelaySeconds = 0.35
+            else
+                c.RepeatDelaySeconds = origGkDiveConstants.RepeatDelaySeconds
+            end
+
+            if settings.gkFastRecovery then
+                c.CaughtMovementRestoreStartsAtSeconds = 0.12
+                c.MovementRestoreStartsAtSeconds = 0.4
+            else
+                c.CaughtMovementRestoreStartsAtSeconds = origGkDiveConstants.CaughtMovementRestoreStartsAtSeconds
+                c.MovementRestoreStartsAtSeconds = origGkDiveConstants.MovementRestoreStartsAtSeconds
+            end
+        end
+
+        -- 3. Dive Magnet Assist (Auto-curve trajectory directly into ball flight)
+        if GoalkeeperDiveAssist and GoalkeeperDiveAssist.Constants then
+            local ac = GoalkeeperDiveAssist.Constants
+            if not origGkAssistConstants.FullAssistMissStuds then
+                origGkAssistConstants.FullAssistMissStuds = ac.FullAssistMissStuds
+                origGkAssistConstants.ZeroAssistMissStuds = ac.ZeroAssistMissStuds
+                origGkAssistConstants.MaximumAssistDistance = ac.MaximumAssistDistance
+                origGkAssistConstants.MaximumExtraReachStuds = ac.MaximumExtraReachStuds
+                origGkAssistConstants.MaximumTravelScale = ac.MaximumTravelScale
+                origGkAssistConstants.MaximumYawDegrees = ac.MaximumYawDegrees
+            end
+
+            if settings.gkAssistMagnet then
+                ac.FullAssistMissStuds = 15
+                ac.ZeroAssistMissStuds = 35
+                ac.MaximumAssistDistance = 250
+                ac.MaximumExtraReachStuds = 8
+                ac.MaximumTravelScale = 1.35
+                ac.MaximumYawDegrees = 75
+            else
+                ac.FullAssistMissStuds = origGkAssistConstants.FullAssistMissStuds
+                ac.ZeroAssistMissStuds = origGkAssistConstants.ZeroAssistMissStuds
+                ac.MaximumAssistDistance = origGkAssistConstants.MaximumAssistDistance
+                ac.MaximumExtraReachStuds = origGkAssistConstants.MaximumExtraReachStuds
+                ac.MaximumTravelScale = origGkAssistConstants.MaximumTravelScale
+                ac.MaximumYawDegrees = origGkAssistConstants.MaximumYawDegrees
+            end
+        end
     end
 
+    local function restoreGoalkeeperEnhancements()
+        if HitboxSettingsModule then
+            if origAirReceiveSize and HitboxSettingsModule.AirReceive then HitboxSettingsModule.AirReceive.Size = origAirReceiveSize end
+            if origAssistedReceiveSize and HitboxSettingsModule.AssistedReceive then HitboxSettingsModule.AssistedReceive.Size = origAssistedReceiveSize end
+            if origReceiveSize and HitboxSettingsModule.Receive then HitboxSettingsModule.Receive.Size = origReceiveSize end
+        end
+        if GoalkeeperDive and GoalkeeperDive.Constants and origGkDiveConstants.MaximumSaveHeight then
+            local c = GoalkeeperDive.Constants
+            c.MaximumSaveHeight = origGkDiveConstants.MaximumSaveHeight
+            c.SaveContactPadding = origGkDiveConstants.SaveContactPadding
+            c.Distance = origGkDiveConstants.Distance
+            c.RepeatDelaySeconds = origGkDiveConstants.RepeatDelaySeconds
+            c.CaughtMovementRestoreStartsAtSeconds = origGkDiveConstants.CaughtMovementRestoreStartsAtSeconds
+            c.MovementRestoreStartsAtSeconds = origGkDiveConstants.MovementRestoreStartsAtSeconds
+        end
+        if GoalkeeperDiveAssist and GoalkeeperDiveAssist.Constants and origGkAssistConstants.FullAssistMissStuds then
+            local ac = GoalkeeperDiveAssist.Constants
+            ac.FullAssistMissStuds = origGkAssistConstants.FullAssistMissStuds
+            ac.ZeroAssistMissStuds = origGkAssistConstants.ZeroAssistMissStuds
+            ac.MaximumAssistDistance = origGkAssistConstants.MaximumAssistDistance
+            ac.MaximumExtraReachStuds = origGkAssistConstants.MaximumExtraReachStuds
+            ac.MaximumTravelScale = origGkAssistConstants.MaximumTravelScale
+            ac.MaximumYawDegrees = origGkAssistConstants.MaximumYawDegrees
+        end
+    end
+
+    -- Initial application of Goalkeeper constants
+    applyGoalkeeperEnhancements()
+
     local forcedDiveChoice = nil
+    local forcedWorldDirection = nil
     local forcedDiveUntil = 0
+
     if GoalkeeperDive and type(GoalkeeperDive.GetDirectionChoice) == "function" then
         local origGetChoice = GoalkeeperDive.GetDirectionChoice
         GoalkeeperDive.GetDirectionChoice = function(moveVec, camCF, lookVec)
@@ -585,6 +720,16 @@ return function(Window, scriptInfo)
             end
             forcedDiveChoice = nil
             return origGetChoice(moveVec, camCF, lookVec)
+        end
+    end
+
+    if GoalkeeperDive and type(GoalkeeperDive.GetWorldDirection) == "function" then
+        local origGetWorldDir = GoalkeeperDive.GetWorldDirection
+        GoalkeeperDive.GetWorldDirection = function(choice, camCF, fallbackLook)
+            if forcedWorldDirection and os.clock() <= forcedDiveUntil then
+                return forcedWorldDirection
+            end
+            return origGetWorldDir(choice, camCF, fallbackLook)
         end
     end
 
@@ -718,7 +863,7 @@ return function(Window, scriptInfo)
         end
     end
 
-    local function triggerDive(targetLookPos, isHighShot)
+    local function triggerDive(targetLookPos, isHighShot, targetDist)
         local char = localPlayer.Character
         local root = getRoot(char)
         local hum = getHumanoid(char)
@@ -734,51 +879,48 @@ return function(Window, scriptInfo)
         end
         local camFlatRight = Vector3.new(-camFlatForward.Z, 0, camFlatForward.X)
 
-        -- Calculate flat directional vector from keeper to target intercept position
+        -- Calculate exact flat vector from keeper root to target intercept position
         local toTarget = targetLookPos - root.Position
         local flatToTarget = Vector3.new(toTarget.X, 0, toTarget.Z)
-        local targetDir = camFlatForward
-        if flatToTarget.Magnitude > 0.1 then
-            targetDir = flatToTarget.Unit
+        local dist = targetDist or flatToTarget.Magnitude
+        local targetDir = (flatToTarget.Magnitude > 0.05) and flatToTarget.Unit or camFlatForward
+
+        -- Mathematical lock: inject exact direction into GoalkeeperDive hook
+        forcedWorldDirection = targetDir
+        forcedDiveUntil = os.clock() + 0.60
+
+        -- Dynamic dive distance adaptation: match dive range directly to intercept distance
+        if GoalkeeperDive and GoalkeeperDive.Constants then
+            local desiredDist = math.clamp(dist + 3.0, 12, 28)
+            GoalkeeperDive.Constants.Distance = desiredDist
         end
 
-        -- Project target direction onto camera plane to find relative dive direction (L, R, LF, RF, F, B, LB, RB)
+        -- Project target direction onto camera plane to find relative direction (F, L, R, LF, RF)
         local forwardDot = targetDir:Dot(camFlatForward)
         local rightDot = targetDir:Dot(camFlatRight)
 
         local dirName = "F"
-        if ActionMotion and type(ActionMotion.GetDirectionName) == "function" then
-            pcall(function()
-                dirName = ActionMotion.GetDirectionName(forwardDot, rightDot)
-            end)
-            if string.find(dirName, "B") then
-                if string.find(dirName, "R") then
-                    dirName = "R"
-                elseif string.find(dirName, "L") then
-                    dirName = "L"
-                else
-                    dirName = "F"
-                end
+        if math.abs(rightDot) > 0.35 then
+            if forwardDot > 0.35 then
+                dirName = (rightDot > 0) and "RF" or "LF"
+            else
+                dirName = (rightDot > 0) and "R" or "L"
             end
         else
-            if math.abs(rightDot) > 0.38 then
-                if forwardDot > 0.38 then
-                    dirName = (rightDot > 0) and "RF" or "LF"
-                else
-                    dirName = (rightDot > 0) and "R" or "L"
-                end
-            else
-                dirName = "F"
-            end
+            dirName = "F"
         end
 
-        -- Prime the game's dive direction choice
-        forcedDiveUntil = os.clock() + 0.35
+        -- Prime the game's direction choice
         if GoalkeeperDive and type(GoalkeeperDive.GetDirectionChoiceByName) == "function" then
             pcall(function()
                 forcedDiveChoice = GoalkeeperDive.GetDirectionChoiceByName(dirName)
             end)
         end
+
+        -- Physically snap root orientation directly facing intercept vector
+        pcall(function()
+            root.CFrame = CFrame.lookAt(root.Position, root.Position + targetDir)
+        end)
 
         -- Set humanoid movement towards target so native move direction aligns
         pcall(function()
@@ -792,9 +934,12 @@ return function(Window, scriptInfo)
             end)
         end
 
-        -- Execute dive
+        -- Execute dive: prioritize native GoalkeeperRole.Dive(), fallback to inputs
         local triggered = false
-        if type(mouse2click) == "function" then
+        if GoalkeeperRole and type(GoalkeeperRole.Dive) == "function" then
+            pcall(function() triggered = GoalkeeperRole.Dive() end)
+        end
+        if not triggered and type(mouse2click) == "function" then
             local s = pcall(mouse2click)
             if s then triggered = true end
         end
@@ -808,14 +953,12 @@ return function(Window, scriptInfo)
                 triggered = true
             end)
         end
-        if not triggered and GoalkeeperRole and type(GoalkeeperRole.Dive) == "function" then
-            pcall(function() triggered = GoalkeeperRole.Dive() end)
-        end
         if not triggered then
             pcall(function()
                 local vim = game:GetService("VirtualInputManager")
                 vim:SendKeyEvent(true, Enum.KeyCode.E, false, game)
                 task.delay(0.05, function() vim:SendKeyEvent(false, Enum.KeyCode.E, false, game) end)
+                triggered = true
             end)
         end
 
@@ -848,6 +991,7 @@ return function(Window, scriptInfo)
                 local vim = game:GetService("VirtualInputManager")
                 vim:SendMouseButtonEvent(0, 0, 0, true, game, 1)
                 task.delay(0.05, function() vim:SendMouseButtonEvent(0, 0, 0, false, game, 1) end)
+                triggered = true
             end)
         end
         return triggered
@@ -876,7 +1020,7 @@ return function(Window, scriptInfo)
             local dt = now - lastBallPosTime
             if dt > 0.005 and dt < 0.25 then
                 local rawVel = (ballPos - lastBallPos) / dt
-                if rawVel.Magnitude > 3.0 then
+                if rawVel.Magnitude > 1.5 then
                     trackedBallVel = rawVel
                 else
                     trackedBallVel = trackedBallVel * 0.75
@@ -889,89 +1033,168 @@ return function(Window, scriptInfo)
             lastBallPosTime = now
         end
 
-        -- Query authoritative physics velocity if available
+        -- Query authoritative physics velocity & movement state
         local ballVel = trackedBallVel
+        local ballMovementState = nil
         if Renderer and type(Renderer.GetMovementState) == "function" then
             pcall(function()
                 local mv = Renderer.GetMovementState()
-                if mv and mv.Velocity then
-                    if mv.Velocity.Magnitude > 3.0 then
+                if mv then
+                    ballMovementState = mv
+                    if mv.Velocity and mv.Velocity.Magnitude > 1.5 then
                         ballVel = mv.Velocity
-                    else
+                    elseif mv.Velocity then
                         ballVel = Vector3.zero
                     end
                 end
             end)
         end
+        if not ballMovementState and Renderer and type(Renderer.GetAuthoritativeMovementState) == "function" then
+            pcall(function()
+                local mv = Renderer.GetAuthoritativeMovementState()
+                if mv then
+                    ballMovementState = mv
+                    if mv.Velocity and mv.Velocity.Magnitude > 1.5 then
+                        ballVel = mv.Velocity
+                    end
+                end
+            end)
+        end
 
-        local goalPos, goalForward, goalRight, homePos, isPractice = getDefendedGoalInfo(root.Position)
         local distToBall = (ballPos - root.Position).Magnitude
         local ballSpeed = ballVel.Magnitude
 
-        -- Shot Prediction Vector Mathematics & Parabolic Trajectory
-        -- forwardSpeed is positive when ball is actively flying TOWARDS the defended net
-        -- In Practice: goalPos.X ~ 583.5, keeper ~ 572, field is towards -X (goalForward = (-1, 0, 0)), so towards net is +X (-goalForward)
-        local netForward = -goalForward
-        local forwardSpeed = ballVel:Dot(netForward)
-
-        -- Distance along net axis from ball to goal line (positive when ball is on the field in front of goal)
-        local distInFrontOfGoal = (ballPos - goalPos):Dot(goalForward)
-        local timeToGoal = (forwardSpeed > 5.0 and distInFrontOfGoal > 1.2) and (distInFrontOfGoal / forwardSpeed) or 999
-
-        -- Estimated intercept time strictly based on arrival at defended goal line
-        local estInterceptTime = timeToGoal
-        local interceptPos
-        if settings.gkPredictArc and estInterceptTime > 0 and estInterceptTime < 2.5 then
-            local grav = (BallPhysics and BallPhysics.Gravity) or workspace.Gravity or 65
-            local vertDrop = 0.5 * grav * (estInterceptTime ^ 2)
-            interceptPos = ballPos + (ballVel * estInterceptTime) - Vector3.new(0, vertDrop, 0)
-        else
-            interceptPos = ballPos + (ballVel * (estInterceptTime < 999 and estInterceptTime or 0))
+        -- Avoid diving if player is already holding / controlling the ball
+        if distToBall < 3.2 and ballSpeed < 3.0 then
+            return
         end
 
-        local lateralOffset = (interceptPos - goalPos):Dot(goalRight)
-        local interceptDist = (interceptPos - root.Position).Magnitude
-        local isHighShot = (interceptPos.Y - root.Position.Y > 2.2) or (ballPos.Y - root.Position.Y > 2.8)
+        local goalPos, goalForward, goalRight, homePos, isPractice = getDefendedGoalInfo(root.Position)
 
-        -- SHOT DETECTION:
-        -- 1. Ball moving towards defended net (forwardSpeed > 5 studs/s)
-        -- 2. Ball is still in front of the goal line (distInFrontOfGoal > 1.0)
-        -- 3. Reaction window: ball will arrive within 0.05s - 1.85s
-        -- 4. Intercept point is within net width (+- 24 studs)
-        -- 5. Within dive reach distance
-        local maxTimeToGoal = isHighShot and 1.85 or 1.55
-        local reachAllowance = isHighShot and 7 or 5
-        local isShotIncoming = (forwardSpeed > 5.0)
-            and (distInFrontOfGoal > 1.0)
-            and (timeToGoal > 0.05 and timeToGoal < maxTimeToGoal)
-            and (math.abs(lateralOffset) <= 24)
-            and (interceptDist <= (settings.gkDiveReach + reachAllowance))
+        -- 1. Precision Aerodynamic Plane Crossing (Analytical Solver)
+        local netForward = -goalForward
+        local forwardSpeed = ballVel:Dot(netForward)
+        local distInFrontOfGoal = (ballPos - goalPos):Dot(goalForward)
 
-        -- 1. Auto Dive / Save incoming shot
-        if settings.gkAutoDive and isShotIncoming then
-            if (now - lastDiveTime) > 1.05 then
-                lastDiveTime = now
-                triggerDive(interceptPos, isHighShot)
-                return
+        local timeToGoal = nil
+        if GoalkeeperPrediction and type(GoalkeeperPrediction.GetPlaneTime) == "function" and ballMovementState then
+            pcall(function()
+                timeToGoal = GoalkeeperPrediction.GetPlaneTime(ballMovementState, goalPos, goalForward, 1.0)
+            end)
+        end
+        if not timeToGoal or timeToGoal <= 0 then
+            if forwardSpeed > 1.5 and distInFrontOfGoal > 0.3 then
+                timeToGoal = distInFrontOfGoal / forwardSpeed
             end
         end
 
-        -- 2. Auto Punch / Clear loose ball
-        if settings.gkAutoPunch and distToBall <= 9 and (now - lastPunchTime) > 0.6 then
+        -- 2. Exact Goal Crossing Point
+        local goalCrossingPos = nil
+        local isShotOnGoal = false
+        if timeToGoal and timeToGoal > 0 and timeToGoal < 3.5 then
+            if GoalkeeperPrediction and type(GoalkeeperPrediction.GetBallPositionAtTime) == "function" and ballMovementState then
+                pcall(function()
+                    goalCrossingPos = GoalkeeperPrediction.GetBallPositionAtTime(ballMovementState, timeToGoal)
+                end)
+            end
+            if not goalCrossingPos then
+                local grav = (BallPhysics and BallPhysics.Gravity) or workspace.Gravity or 65
+                goalCrossingPos = ballPos + (ballVel * timeToGoal) - Vector3.new(0, 0.5 * grav * (timeToGoal ^ 2), 0)
+            end
+
+            if goalCrossingPos then
+                local latOffset = (goalCrossingPos - goalPos):Dot(goalRight)
+                local vertOffset = goalCrossingPos.Y - goalPos.Y
+                -- Goal bounds: +-23 studs lateral, -1 to 17 studs height
+                if math.abs(latOffset) <= 23.5 and vertOffset >= -1.5 and vertOffset <= 17 then
+                    isShotOnGoal = true
+                end
+            end
+        end
+
+        -- 3. In-Flight Trajectory Sampling (Find earliest reachable 3D point along curve)
+        local chosenInterceptPos = goalCrossingPos
+        local chosenArrivalTime = timeToGoal or 999
+        local canInterceptInFlight = false
+
+        local maxScanTime = timeToGoal and math.min(timeToGoal, 1.6) or 1.3
+        if ballSpeed > 12 and forwardSpeed > 1.0 then
+            local scanSteps = math.clamp(math.floor(maxScanTime / 0.05), 2, 26)
+            for step = 1, scanSteps do
+                local t = step * 0.05
+                local samplePos = nil
+                if GoalkeeperPrediction and type(GoalkeeperPrediction.GetBallPositionAtTime) == "function" and ballMovementState then
+                    pcall(function()
+                        samplePos = GoalkeeperPrediction.GetBallPositionAtTime(ballMovementState, t)
+                    end)
+                end
+                if not samplePos then
+                    local grav = (BallPhysics and BallPhysics.Gravity) or 65
+                    samplePos = ballPos + (ballVel * t) - Vector3.new(0, 0.5 * grav * (t ^ 2), 0)
+                end
+
+                local sampleDist = (samplePos - root.Position).Magnitude
+                local vertDiff = samplePos.Y - root.Position.Y
+                local estTransit = math.clamp(sampleDist / 30, 0.10, 0.65)
+
+                if sampleDist <= (settings.gkDiveReach + 6) and vertDiff >= -2 and vertDiff <= 15 then
+                    if t >= (estTransit - 0.08) then
+                        chosenInterceptPos = samplePos
+                        chosenArrivalTime = t
+                        canInterceptInFlight = true
+                        break
+                    end
+                end
+            end
+        end
+
+        -- 4. Shot Interception Assessment
+        local isShotIncoming = (isShotOnGoal or canInterceptInFlight) and (chosenInterceptPos ~= nil)
+        local targetIntercept = chosenInterceptPos
+
+        -- 5. Auto Dive / Save incoming shot (Synchronized Arrival Execution)
+        if settings.gkAutoDive and isShotIncoming and targetIntercept then
+            local interceptDist = (targetIntercept - root.Position).Magnitude
+            local diveTransitTime = math.clamp(interceptDist / 30, 0.12, 0.62)
+            local arrivalTime = chosenArrivalTime or 0.45
+            local isHighShot = (targetIntercept.Y - root.Position.Y > 2.2) or (ballPos.Y - root.Position.Y > 2.8)
+
+            -- Synchronization: dive ONLY when transit time matches arrival time!
+            -- timeDiff > 0.18 means ball is still too far; do not dive prematurely!
+            local timeDiff = arrivalTime - diveTransitTime
+            local shouldTriggerNow = (timeDiff <= 0.18) or (interceptDist <= 7.0 and arrivalTime <= 0.40)
+
+            if shouldTriggerNow then
+                local diveCooldown = settings.gkInstantDive and 0.35 or 0.95
+                if (now - lastDiveTime) > diveCooldown then
+                    lastDiveTime = now
+                    triggerDive(targetIntercept, isHighShot, interceptDist)
+                    return
+                end
+            else
+                -- Angle Cutting & Staging: Strafe/move on foot toward intercept line while waiting
+                local stagingPos = Vector3.new(targetIntercept.X, root.Position.Y, targetIntercept.Z)
+                if (root.Position - stagingPos).Magnitude > 0.8 then
+                    hum:MoveTo(stagingPos)
+                end
+            end
+        end
+
+        -- 6. Auto Punch / Clear loose ball
+        if settings.gkAutoPunch and distToBall <= 12 and (now - lastPunchTime) > 0.38 then
             lastPunchTime = now
             triggerPunch(ballPos)
             return
         end
 
-        -- 3. Auto Positioning along the net
+        -- 7. Auto Positioning along the net (Magnetic net guarding & angle cutting)
         if settings.gkAutoPosition and not isShotIncoming then
             local ballLateral = (ballPos - homePos):Dot(goalRight)
-            local keeperLateral = math.clamp(ballLateral * 0.7, -18, 18)
-            local ballForwardDist = (ballPos - homePos):Dot(goalForward)
-            local keeperDepth = math.clamp(ballForwardDist * 0.06, -1, 5)
+            local keeperLateral = math.clamp(ballLateral * 0.75, -17, 17)
+            local keeperDepth = math.clamp((45 - distToBall) * 0.12, 0, 5.5)
 
             local targetPos = homePos + (goalRight * keeperLateral) + (goalForward * keeperDepth)
-            if (root.Position - targetPos).Magnitude > 1.5 then
+            if (root.Position - targetPos).Magnitude > 0.9 then
                 hum:MoveTo(targetPos)
             end
         end
@@ -1576,11 +1799,53 @@ return function(Window, scriptInfo)
         end,
     })
 
+    GKTab:CreateSection("OP Enhancements (Unstoppable)")
+
+    GKTab:CreateToggle({
+        Name = "OP Hitbox & Super Reach",
+        CurrentValue = settings.gkOpHitbox,
+        Flag = "Soccer_GKOpHitbox",
+        Callback = function(value)
+            settings.gkOpHitbox = value
+            applyGoalkeeperEnhancements()
+        end,
+    })
+
+    GKTab:CreateToggle({
+        Name = "Instant Dive / Zero Cooldown",
+        CurrentValue = settings.gkInstantDive,
+        Flag = "Soccer_GKInstantDive",
+        Callback = function(value)
+            settings.gkInstantDive = value
+            applyGoalkeeperEnhancements()
+        end,
+    })
+
+    GKTab:CreateToggle({
+        Name = "Dive Magnet Assist (Auto-Curve)",
+        CurrentValue = settings.gkAssistMagnet,
+        Flag = "Soccer_GKAssistMagnet",
+        Callback = function(value)
+            settings.gkAssistMagnet = value
+            applyGoalkeeperEnhancements()
+        end,
+    })
+
+    GKTab:CreateToggle({
+        Name = "Fast Recovery (Instant Getup)",
+        CurrentValue = settings.gkFastRecovery,
+        Flag = "Soccer_GKFastRecovery",
+        Callback = function(value)
+            settings.gkFastRecovery = value
+            applyGoalkeeperEnhancements()
+        end,
+    })
+
     GKTab:CreateSection("Tuning")
 
     GKTab:CreateSlider({
         Name = "Dive Reach Distance",
-        Range = {10, 35},
+        Range = {10, 50},
         Increment = 1,
         CurrentValue = settings.gkDiveReach,
         Flag = "Soccer_GKDiveReach",
@@ -1701,9 +1966,7 @@ return function(Window, scriptInfo)
 
         restoreStaminaState()
         restoreMovementEnhancements()
-        if HitboxSettingsModule and HitboxSettingsModule.AirReceive and origAirReceiveSize then
-            HitboxSettingsModule.AirReceive.Size = origAirReceiveSize
-        end
+        restoreGoalkeeperEnhancements()
         applyFullbright(false)
         clearAllEsp()
 

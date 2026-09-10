@@ -13,6 +13,11 @@ files in subdirectories may add or override rules for their scope.
   latest test result.
 - Prefer read-only Raven MCP operations first. Do not invoke, replay, or mutate a
   RemoteEvent/RemoteFunction until its arguments and expected effect are known.
+- **CRITICAL / MANDATORY: ตรวจสอบ Anti-Cheat (AC) และ Honeypot Remotes ก่อนทุกครั้ง**:
+  - **ห้าม** invoke หรือ fire RemoteEvent / RemoteFunction ใดๆ สุ่มสี่สุ่มห้าเด็ดขาด
+  - ก่อนจะยิง Remote ใดๆ ต้อง decompile หรือ inspect script ฝั่ง Client / ReplicatedFirst / ReplicatedStorage ให้ละเอียดก่อนเสมอ
+  - ตรวจสอบชื่อ Remote ที่ต้องสงสัยว่าเป็น Honeypot / Trap ของผู้พัฒนา (เช่น `ResetCooldowns`, `AdminAction`, `SetCash`, `GrantItem`, `SetLevel` ฯลฯ) ซึ่งมักตั้งไว้ดักแบนหรือเตะผู้เล่น (`player:Kick("Exploiting")`) ทันที
+  - ตรวจสอบระบบตรวจสอบของเกม (Client Anti-Cheat, Memory checks, Remote rate-limits, Server-authoritative checks) ให้ชัดเจนก่อนทำการทดสอบทุกครั้ง
 - If multiple clients are connected, explicitly select or confirm the intended
   active client before executing code.
 - When the user asks to run or test a script, run the modified version locally on
