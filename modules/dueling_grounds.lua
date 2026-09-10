@@ -1,4 +1,4 @@
--- RAVEN HUB | Dueling Grounds combat assist and marker-driven auto parry
+-- RAVEN HUB | Dueling Grounds combat assist, marker-driven auto parry & instant auto counter
 return function(Window, scriptInfo)
     local Players = game:GetService("Players")
     local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -9,22 +9,40 @@ return function(Window, scriptInfo)
     local localPlayer = Players.LocalPlayer
     local running = true
     local connections = {}
+    local hooks = {}
     local currentTarget = nil
+    local lastAttackingOpponent = nil
     local guardHeldByHub = false
     local guardReleaseToken = 0
     local lastParryAt = 0
+    local lastCounterAt = 0
     local lastLookReplication = 0
     local parryCount = 0
+    local counterCount = 0
+    local successfulParryCount = 0
     local scanAccumulator = 0
     local statusAccumulator = 0
 
     local settings = {
+        -- Auto Parry
         autoParry = false,
-        parryRange = 14,
+        parryRange = 15,
         reactionLead = 0.09,
+        guardHold = 0.065,
         pingCompensation = true,
-        guardHold = 0.07,
         requireFacing = true,
+        closeRange360 = true,
+        multiHitParry = true,
+
+        -- Auto Counter
+        autoCounter = true,
+        counterType = "Light Attack (M1)",
+        counterDelay = 0,
+        counterFaceTarget = true,
+        counterRange = 16,
+        followUpCombo = false,
+
+        -- Combat Assist
         combatAssist = false,
         assistRange = 28,
         assistFov = 140,
@@ -33,17 +51,27 @@ return function(Window, scriptInfo)
         showTarget = true,
     }
 
+    -- Remotes
     local remotes = ReplicatedStorage:FindFirstChild("Remotes")
     local playerCharacterRemotes = remotes and remotes:FindFirstChild("PlayerCharacter")
     local requestRemotes = playerCharacterRemotes and playerCharacterRemotes:FindFirstChild("Request")
     local desiredLookRemote = requestRemotes and requestRemotes:FindFirstChild("SetDesiredLookDirection")
 
+    -- Input Actions
     local inputActions = ReplicatedStorage:FindFirstChild("Controllers")
     inputActions = inputActions and inputActions:FindFirstChild("PlayerInputController")
     inputActions = inputActions and inputActions:FindFirstChild("InputActions")
     local characterContext = inputActions and inputActions:FindFirstChild("CharacterGameplayContext")
     local weaponContext = characterContext and characterContext:FindFirstChild("EquippedWeaponContext")
     local guardAction = weaponContext and weaponContext:FindFirstChild("GuardAction")
+    local lightAttackAction = weaponContext and weaponContext:FindFirstChild("LightAttackAction")
+    local heavyAttackAction = weaponContext and weaponContext:FindFirstChild("HeavyAttackAction")
+    local dodgeAction = characterContext and characterContext:FindFirstChild("DodgeAction")
+
+    -- Combat Controller & Impact Resolvers
+    local combatControllerModule = ReplicatedStorage:FindFirstChild("Controllers")
+    combatControllerModule = combatControllerModule and combatControllerModule:FindFirstChild("CombatController")
+    local parryImpactsModule = combatControllerModule and combatControllerModule:FindFirstChild("ParryImpacts")
 
     local function disconnect(connection)
         if connection then
@@ -57,16 +85,23 @@ return function(Window, scriptInfo)
         return tostring(value or ""):match("(%d+)")
     end
 
+    -- Dynamic Attack Catalog
     local attackCatalog = {}
     local catalogModuleCount = 0
 
-    local function addAttackConfig(moduleScript, weaponName)
+    local function addAttackConfig(moduleScript, weaponName, categoryName)
         local ok, config = pcall(require, moduleScript)
         if not ok or type(config) ~= "table" then
             return
         end
+
         local animation = config.animation
         local animationId = animation and normalizeAssetId(animation.AnimationId)
+        if not animationId then
+            local animObj = config.Animation or config.anim
+            animationId = animObj and normalizeAssetId(animObj.AnimationId)
+        end
+
         if not animationId or type(config.impacts) ~= "table" then
             return
         end
@@ -88,9 +123,11 @@ return function(Window, scriptInfo)
         table.sort(markers, function(a, b)
             return a.time < b.time
         end)
+
         attackCatalog[animationId] = {
             name = moduleScript.Name,
             weapon = weaponName,
+            category = categoryName or "BasicAttack",
             markers = markers,
         }
         catalogModuleCount += 1
@@ -103,12 +140,38 @@ return function(Window, scriptInfo)
         if not weaponRoot then
             return
         end
+
         for _, weaponModule in ipairs(weaponRoot:GetChildren()) do
+            -- BasicAttackTypes (Lights 1-4, Heavies 1-3, Dash Light/Heavy, Jump, Ult)
             local basicAttacks = weaponModule:FindFirstChild("BasicAttackTypes")
             if basicAttacks then
                 for _, moduleScript in ipairs(basicAttacks:GetChildren()) do
                     if moduleScript:IsA("ModuleScript") then
-                        addAttackConfig(moduleScript, weaponModule.Name)
+                        addAttackConfig(moduleScript, weaponModule.Name, "BasicAttack")
+                    end
+                end
+            end
+
+            -- CriticalStrikes subfolders
+            local critStrikes = weaponModule:FindFirstChild("CriticalStrikes")
+            if critStrikes then
+                for _, subFolder in ipairs(critStrikes:GetChildren()) do
+                    for _, moduleScript in ipairs(subFolder:GetChildren()) do
+                        if moduleScript:IsA("ModuleScript") then
+                            addAttackConfig(moduleScript, weaponModule.Name, "CriticalStrike")
+                        end
+                    end
+                end
+            end
+
+            -- UltimateAbilities subfolders
+            local ultAbilities = weaponModule:FindFirstChild("UltimateAbilities")
+            if ultAbilities then
+                for _, subFolder in ipairs(ultAbilities:GetChildren()) do
+                    for _, moduleScript in ipairs(subFolder:GetChildren()) do
+                        if moduleScript:IsA("ModuleScript") then
+                            addAttackConfig(moduleScript, weaponModule.Name, "Ultimate")
+                        end
                     end
                 end
             end
@@ -165,7 +228,11 @@ return function(Window, scriptInfo)
             or isFriendly(character, localCharacter) then
             return false
         end
-        return (root.Position - localRoot.Position).Magnitude <= maxRange
+        local delta = root.Position - localRoot.Position
+        if math.abs(delta.Y) > 14 then
+            return false
+        end
+        return delta.Magnitude <= maxRange
     end
 
     local function targetAngle(camera, position)
@@ -194,18 +261,18 @@ return function(Window, scriptInfo)
                     and character:GetAttribute("IsUntargetable") ~= true
                     and character:GetAttribute("InSafeZone") ~= true
                     and not isFriendly(character, localCharacter) then
-                    local distance = (root.Position - localRoot.Position).Magnitude
-                    if distance <= maxRange then
+                    local delta = root.Position - localRoot.Position
+                    if math.abs(delta.Y) <= 14 and delta.Magnitude <= maxRange then
                         local angle = targetAngle(camera, root.Position)
                         if angle <= fov * 0.5 then
-                            local score = settings.targetPriority == "Distance" and distance or angle
+                            local score = settings.targetPriority == "Distance" and delta.Magnitude or angle
                             if score < bestScore then
                                 bestScore = score
                                 bestTarget = {
                                     player = player,
                                     character = character,
                                     root = root,
-                                    distance = distance,
+                                    distance = delta.Magnitude,
                                 }
                             end
                         end
@@ -214,6 +281,39 @@ return function(Window, scriptInfo)
             end
         end
         return bestTarget
+    end
+
+    local function findNearestOpponent(maxRange)
+        local localCharacter = getCharacter(localPlayer)
+        local localRoot = getRoot(localCharacter)
+        if not localRoot then
+            return nil
+        end
+
+        local nearestTarget = nil
+        local nearestDistance = maxRange or settings.counterRange
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= localPlayer then
+                local character = getCharacter(player)
+                local root = getRoot(character)
+                if root and characterAlive(character)
+                    and character:GetAttribute("IsUntargetable") ~= true
+                    and character:GetAttribute("InSafeZone") ~= true
+                    and not isFriendly(character, localCharacter) then
+                    local dist = (root.Position - localRoot.Position).Magnitude
+                    if dist < nearestDistance then
+                        nearestDistance = dist
+                        nearestTarget = {
+                            player = player,
+                            character = character,
+                            root = root,
+                            distance = dist,
+                        }
+                    end
+                end
+            end
+        end
+        return nearestTarget
     end
 
     local targetHighlight = Instance.new("Highlight")
@@ -245,9 +345,10 @@ return function(Window, scriptInfo)
         if not ok then
             return 0
         end
-        return math.clamp((tonumber(value) or 0) / 2000, 0, 0.1)
+        return math.clamp((tonumber(value) or 0) / 2000, 0, 0.12)
     end
 
+    -- Guard Action Execution
     local function fireGuardSignal(signalName)
         if guardAction and type(firesignal) == "function" then
             local signal = guardAction[signalName]
@@ -272,9 +373,11 @@ return function(Window, scriptInfo)
         fireGuardSignal("Released")
     end
 
-    local function tapGuard()
+    local function tapGuard(opponentCharacter)
         local now = os.clock()
-        if now - lastParryAt < 0.12 then
+        -- Allow rapid consecutive parries for multi-hit attacks if multiHitParry is enabled
+        local minInterval = settings.multiHitParry and 0.045 or 0.09
+        if now - lastParryAt < minInterval then
             return false
         end
         lastParryAt = now
@@ -282,10 +385,15 @@ return function(Window, scriptInfo)
         guardReleaseToken += 1
         local token = guardReleaseToken
 
+        if opponentCharacter then
+            lastAttackingOpponent = opponentCharacter
+        end
+
         if not guardHeldByHub then
             guardHeldByHub = true
             fireGuardSignal("Pressed")
         end
+
         task.delay(settings.guardHold, function()
             if running and token == guardReleaseToken then
                 releaseGuard()
@@ -294,65 +402,87 @@ return function(Window, scriptInfo)
         return true
     end
 
-    local seenTrackMarkers = setmetatable({}, {__mode = "k"})
-
-    local function opponentFacingLocal(opponentRoot, localRoot)
-        if not settings.requireFacing then
+    -- Attack Action Execution for Auto Counter
+    local function fireAttackInput(actionType)
+        if actionType == "LightAttackAction" then
+            if lightAttackAction and type(firesignal) == "function" then
+                pcall(firesignal, lightAttackAction.Pressed)
+                task.defer(function()
+                    pcall(firesignal, lightAttackAction.Released)
+                end)
+                return true
+            end
+            pcall(function()
+                VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 0)
+                task.defer(function()
+                    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+                end)
+            end)
+            return true
+        elseif actionType == "HeavyAttackAction" then
+            if heavyAttackAction and type(firesignal) == "function" then
+                pcall(firesignal, heavyAttackAction.Pressed)
+                task.defer(function()
+                    pcall(firesignal, heavyAttackAction.Released)
+                end)
+                return true
+            end
+            pcall(function()
+                VirtualInputManager:SendMouseButtonEvent(0, 0, 1, true, game, 0)
+                task.defer(function()
+                    VirtualInputManager:SendMouseButtonEvent(0, 0, 1, false, game, 0)
+                end)
+            end)
+            return true
+        elseif actionType == "DashAttack" then
+            -- Dodge forward + Light Attack
+            if dodgeAction and type(firesignal) == "function" then
+                pcall(firesignal, dodgeAction.Pressed)
+                task.defer(function()
+                    pcall(firesignal, dodgeAction.Released)
+                end)
+            else
+                pcall(function()
+                    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Q, false, game)
+                    task.defer(function()
+                        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Q, false, game)
+                    end)
+                end)
+            end
+            task.delay(0.06, function()
+                if running then
+                    fireAttackInput("LightAttackAction")
+                end
+            end)
             return true
         end
-        local offset = localRoot.Position - opponentRoot.Position
-        if offset.Magnitude < 0.001 then
-            return true
-        end
-        return opponentRoot.CFrame.LookVector:Dot(offset.Unit) >= 0.05
+        return false
     end
 
-    local function scanOpponentAttacks()
+    -- Face target immediately
+    local function snapFaceTarget(targetCharacter)
         local localCharacter = getCharacter(localPlayer)
         local localRoot = getRoot(localCharacter)
-        if not localRoot or not characterAlive(localCharacter)
-            or localCharacter:GetAttribute("InSafeZone") == true then
+        local targetRoot = getRoot(targetCharacter)
+        if not localRoot or not targetRoot then
             return
         end
+        local flatTarget = Vector3.new(targetRoot.Position.X, localRoot.Position.Y, targetRoot.Position.Z)
+        local direction = flatTarget - localRoot.Position
+        if direction.Magnitude < 0.001 then
+            return
+        end
+        local desiredCFrame = CFrame.lookAt(localRoot.Position, flatTarget)
+        localRoot.CFrame = desiredCFrame
 
-        local realLead = settings.reactionLead + getPingSeconds()
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player ~= localPlayer then
-                local character = getCharacter(player)
-                local root = getRoot(character)
-                if root and targetValid({character = character}, settings.parryRange)
-                    and opponentFacingLocal(root, localRoot) then
-                    local humanoid = character:FindFirstChildOfClass("Humanoid")
-                    local animator = humanoid and humanoid:FindFirstChildOfClass("Animator")
-                    if animator then
-                        for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
-                            local animationId = track.Animation and normalizeAssetId(track.Animation.AnimationId)
-                            local attack = animationId and attackCatalog[animationId]
-                            if attack then
-                                local seen = seenTrackMarkers[track]
-                                if not seen then
-                                    seen = {}
-                                    seenTrackMarkers[track] = seen
-                                end
-                                local speed = math.max(math.abs(track.Speed), 0.01)
-                                local animationLead = realLead * speed
-                                for _, marker in ipairs(attack.markers) do
-                                    local triggerTime = math.max(0, marker.time - animationLead)
-                                    if not seen[marker.index]
-                                        and track.TimePosition >= triggerTime
-                                        and track.TimePosition <= marker.time + 0.035 * speed then
-                                        seen[marker.index] = true
-                                        tapGuard()
-                                    end
-                                end
-                            end
-                        end
-                    end
-                end
-            end
+        if desiredLookRemote then
+            pcall(function()
+                desiredLookRemote:FireServer(direction.Unit)
+            end)
         end
     end
 
+    -- Smooth face target for combat assist
     local function faceTarget(target, deltaTime)
         local localCharacter = getCharacter(localPlayer)
         local localRoot = getRoot(localCharacter)
@@ -378,9 +508,245 @@ return function(Window, scriptInfo)
         end
     end
 
+    -- Auto Counter Execution
+    local function executeAutoCounter(targetChar)
+        local now = os.clock()
+        if now - lastCounterAt < 0.25 then
+            return
+        end
+        lastCounterAt = now
+
+        local target = targetChar
+        if not target or not characterAlive(target) then
+            local nearest = findNearestOpponent(settings.counterRange)
+            target = nearest and nearest.character
+        end
+        if not target or not characterAlive(target) then
+            return
+        end
+
+        local localCharacter = getCharacter(localPlayer)
+        local localRoot = getRoot(localCharacter)
+        local targetRoot = getRoot(target)
+        if not localRoot or not targetRoot then
+            return
+        end
+
+        local distance = (targetRoot.Position - localRoot.Position).Magnitude
+        if distance > settings.counterRange then
+            return
+        end
+
+        -- Release guard first so counter-attack is not blocked by our own block lag
+        guardReleaseToken += 1
+        releaseGuard()
+
+        -- Auto face target if enabled
+        if settings.counterFaceTarget then
+            snapFaceTarget(target)
+        end
+
+        local counterAction = "LightAttackAction"
+        if settings.counterType == "Heavy Attack (M2)" then
+            counterAction = "HeavyAttackAction"
+        elseif settings.counterType == "Dash Light" then
+            counterAction = "DashAttack"
+        elseif settings.counterType == "Auto (Light/Dash)" then
+            if distance > 8.5 then
+                counterAction = "DashAttack"
+            else
+                counterAction = "LightAttackAction"
+            end
+        end
+
+        local function doStrike()
+            if not running or not characterAlive(localCharacter) then
+                return
+            end
+            counterCount += 1
+            fireAttackInput(counterAction)
+
+            if settings.followUpCombo and counterAction == "LightAttackAction" then
+                task.delay(0.24, function()
+                    if running and characterAlive(localCharacter) then
+                        fireAttackInput("LightAttackAction")
+                    end
+                end)
+            end
+        end
+
+        if settings.counterDelay > 0 then
+            task.delay(settings.counterDelay, doStrike)
+        else
+            doStrike()
+        end
+    end
+
+    -- Confirmed Parry Handler (Hook / Signal Callbacks)
+    local function onParryConfirmed(attackerChar)
+        successfulParryCount += 1
+        -- Immediately release guard so we don't remain stuck in block
+        guardReleaseToken += 1
+        releaseGuard()
+
+        if settings.autoCounter then
+            local target = attackerChar or lastAttackingOpponent
+            executeAutoCounter(target)
+        end
+    end
+
+    -- Hook ParryImpacts module for 100% reliable local parry resolution
+    local function hookParryImpacts()
+        if not parryImpactsModule then
+            return
+        end
+        local ok, pi = pcall(require, parryImpactsModule)
+        if not ok or type(pi) ~= "table" then
+            return
+        end
+
+        -- Hook Parry (standard parry clash)
+        if type(pi.Parry) == "function" then
+            local originalParry = pi.Parry
+            hooks["Parry"] = {target = pi, key = "Parry", orig = originalParry}
+            pi.Parry = function(cf, ...)
+                onParryConfirmed(lastAttackingOpponent)
+                return originalParry(cf, ...)
+            end
+        end
+
+        -- Hook LightParry
+        if type(pi.LightParry) == "function" then
+            local originalLightParry = pi.LightParry
+            hooks["LightParry"] = {target = pi, key = "LightParry", orig = originalLightParry}
+            pi.LightParry = function(...)
+                onParryConfirmed(lastAttackingOpponent)
+                return originalLightParry(...)
+            end
+        end
+
+        -- Hook UltimateParry
+        if type(pi.UltimateParry) == "function" then
+            local originalUltParry = pi.UltimateParry
+            hooks["UltimateParry"] = {target = pi, key = "UltimateParry", orig = originalUltParry}
+            pi.UltimateParry = function(...)
+                onParryConfirmed(lastAttackingOpponent)
+                return originalUltParry(...)
+            end
+        end
+    end
+
+    hookParryImpacts()
+
+    -- Connect CombatController.LocalImpactResolved for extra redundancy
+    local function connectCombatController()
+        if not combatControllerModule then
+            return
+        end
+        local ok, cc = pcall(require, combatControllerModule)
+        if not ok or type(cc) ~= "table" then
+            return
+        end
+
+        local signal = cc.LocalImpactResolved
+        if signal and type(signal.Connect) == "function" then
+            local conn = signal:Connect(function(arg1, arg2)
+                local outcome = tostring(arg1 == "Parry" and arg1 or arg2)
+                if outcome == "Parry" then
+                    onParryConfirmed(lastAttackingOpponent)
+                end
+            end)
+            table.insert(connections, conn)
+        end
+    end
+
+    connectCombatController()
+
+    -- Track seen animation markers per cycle to support multi-hits and looping swings
+    local trackMarkerSeen = setmetatable({}, {__mode = "k"})
+
+    local function opponentFacingLocal(opponentRoot, localRoot, distance)
+        -- Close quarters (under 8 studs): allow 360 parry if closeRange360 is on
+        if settings.closeRange360 and distance <= 8.5 then
+            return true
+        end
+        if not settings.requireFacing then
+            return true
+        end
+        local offset = localRoot.Position - opponentRoot.Position
+        if offset.Magnitude < 0.001 then
+            return true
+        end
+        -- Lenient facing threshold for dynamic combat strafing
+        return opponentRoot.CFrame.LookVector:Dot(offset.Unit) >= -0.15
+    end
+
+    -- High-Performance Auto Parry Scanner
+    local function scanOpponentAttacks()
+        local localCharacter = getCharacter(localPlayer)
+        local localRoot = getRoot(localCharacter)
+        if not localRoot or not characterAlive(localCharacter)
+            or localCharacter:GetAttribute("InSafeZone") == true
+            or localCharacter:GetAttribute("IsUntargetable") == true then
+            return
+        end
+
+        local realLead = settings.reactionLead + getPingSeconds()
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= localPlayer then
+                local character = getCharacter(player)
+                local root = getRoot(character)
+                if root and targetValid({character = character}, settings.parryRange) then
+                    local distance = (root.Position - localRoot.Position).Magnitude
+                    if opponentFacingLocal(root, localRoot, distance) then
+                        local humanoid = character:FindFirstChildOfClass("Humanoid")
+                        local animator = humanoid and humanoid:FindFirstChildOfClass("Animator")
+                        if animator then
+                            for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+                                local animationId = track.Animation and normalizeAssetId(track.Animation.AnimationId)
+                                local attack = animationId and attackCatalog[animationId]
+                                if attack then
+                                    local seen = trackMarkerSeen[track]
+                                    if not seen then
+                                        seen = {}
+                                        trackMarkerSeen[track] = seen
+                                    end
+
+                                    local speed = math.max(math.abs(track.Speed), 0.05)
+                                    local trackPos = track.TimePosition
+                                    local animationLead = realLead * speed
+
+                                    for _, marker in ipairs(attack.markers) do
+                                        local triggerTime = math.max(0, marker.time - animationLead)
+                                        local upperWindow = marker.time + 0.045 * speed
+
+                                        -- Cycle reset for looping attacks
+                                        if trackPos < triggerTime - 0.1 then
+                                            seen[marker.index] = nil
+                                        end
+
+                                        if not seen[marker.index]
+                                            and trackPos >= triggerTime
+                                            and trackPos <= upperWindow then
+                                            seen[marker.index] = true
+                                            tapGuard(character)
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- UI Creation via MacLib
     local CombatTab = Window:CreateTab("Combat", "swords")
-    CombatTab:CreateSection("Auto Parry")
-    local statusLabel = CombatTab:CreateLabel("Attack catalog: " .. tostring(catalogModuleCount) .. " animations")
+
+    -- Auto Parry Section
+    CombatTab:CreateSection("Auto Parry (Overhauled)")
+    local statusLabel = CombatTab:CreateLabel("Catalog: " .. tostring(catalogModuleCount) .. " attacks loaded")
 
     CombatTab:CreateToggle({
         Name = "Auto Parry",
@@ -394,17 +760,19 @@ return function(Window, scriptInfo)
             end
         end,
     })
+
     CombatTab:CreateSlider({
         Name = "Parry Range",
-        Range = {5, 30},
+        Range = {6, 30},
         Increment = 1,
         Suffix = " studs",
-        CurrentValue = 14,
+        CurrentValue = 15,
         Flag = "DGParryRange",
         Callback = function(value)
             settings.parryRange = value
         end,
     })
+
     CombatTab:CreateSlider({
         Name = "Reaction Lead",
         Range = {20, 180},
@@ -416,17 +784,19 @@ return function(Window, scriptInfo)
             settings.reactionLead = value / 1000
         end,
     })
+
     CombatTab:CreateSlider({
-        Name = "Guard Hold",
-        Range = {40, 130},
+        Name = "Guard Hold Window",
+        Range = {35, 140},
         Increment = 5,
         Suffix = " ms",
-        CurrentValue = 70,
+        CurrentValue = 65,
         Flag = "DGGuardHold",
         Callback = function(value)
             settings.guardHold = value / 1000
         end,
     })
+
     CombatTab:CreateToggle({
         Name = "Half-Ping Compensation",
         CurrentValue = true,
@@ -435,20 +805,114 @@ return function(Window, scriptInfo)
             settings.pingCompensation = value
         end,
     })
+
     CombatTab:CreateToggle({
-        Name = "Require Enemy Facing You",
+        Name = "Require Enemy Facing",
         CurrentValue = true,
         Flag = "DGRequireFacing",
         Callback = function(value)
             settings.requireFacing = value
         end,
     })
-    CombatTab:CreateButton({
-        Name = "Reload Attack Catalog",
-        Callback = buildAttackCatalog,
+
+    CombatTab:CreateToggle({
+        Name = "Close-Range 360 Parry",
+        CurrentValue = true,
+        Flag = "DGCloseRange360",
+        Callback = function(value)
+            settings.closeRange360 = value
+        end,
     })
 
+    CombatTab:CreateToggle({
+        Name = "Multi-Hit Auto Parry",
+        CurrentValue = true,
+        Flag = "DGMultiHitParry",
+        Callback = function(value)
+            settings.multiHitParry = value
+        end,
+    })
+
+    CombatTab:CreateButton({
+        Name = "Reload Attack Catalog",
+        Callback = function()
+            buildAttackCatalog()
+        end,
+    })
+
+    -- Auto Counter Section
+    CombatTab:CreateSection("Auto Counter (Riposte)")
+
+    CombatTab:CreateToggle({
+        Name = "Auto Counter on Parry",
+        CurrentValue = true,
+        Flag = "DGAutoCounter",
+        Callback = function(value)
+            settings.autoCounter = value
+        end,
+    })
+
+    CombatTab:CreateDropdown({
+        Name = "Counter Attack Type",
+        Options = {
+            "Light Attack (M1)",
+            "Heavy Attack (M2)",
+            "Auto (Light/Dash)",
+            "Dash Light",
+        },
+        CurrentOption = {"Light Attack (M1)"},
+        MultipleOptions = false,
+        Flag = "DGCounterType",
+        Callback = function(value)
+            settings.counterType = type(value) == "table" and value[1] or tostring(value)
+        end,
+    })
+
+    CombatTab:CreateSlider({
+        Name = "Counter Delay",
+        Range = {0, 150},
+        Increment = 5,
+        Suffix = " ms",
+        CurrentValue = 0,
+        Flag = "DGCounterDelay",
+        Callback = function(value)
+            settings.counterDelay = value / 1000
+        end,
+    })
+
+    CombatTab:CreateSlider({
+        Name = "Counter Max Range",
+        Range = {6, 25},
+        Increment = 1,
+        Suffix = " studs",
+        CurrentValue = 16,
+        Flag = "DGCounterRange",
+        Callback = function(value)
+            settings.counterRange = value
+        end,
+    })
+
+    CombatTab:CreateToggle({
+        Name = "Auto Face on Counter",
+        CurrentValue = true,
+        Flag = "DGCounterFaceTarget",
+        Callback = function(value)
+            settings.counterFaceTarget = value
+        end,
+    })
+
+    CombatTab:CreateToggle({
+        Name = "Follow-up Combo (M1 x2)",
+        CurrentValue = false,
+        Flag = "DGFollowUpCombo",
+        Callback = function(value)
+            settings.followUpCombo = value
+        end,
+    })
+
+    -- Combat Assist Section
     CombatTab:CreateSection("Combat Assist")
+
     CombatTab:CreateToggle({
         Name = "Auto Face Target",
         CurrentValue = false,
@@ -461,6 +925,7 @@ return function(Window, scriptInfo)
             end
         end,
     })
+
     CombatTab:CreateDropdown({
         Name = "Target Priority",
         Options = {"Crosshair", "Distance"},
@@ -471,6 +936,7 @@ return function(Window, scriptInfo)
             settings.targetPriority = type(value) == "table" and value[1] or tostring(value)
         end,
     })
+
     CombatTab:CreateSlider({
         Name = "Assist Range",
         Range = {8, 60},
@@ -482,6 +948,7 @@ return function(Window, scriptInfo)
             settings.assistRange = value
         end,
     })
+
     CombatTab:CreateSlider({
         Name = "Assist FOV",
         Range = {30, 360},
@@ -493,6 +960,7 @@ return function(Window, scriptInfo)
             settings.assistFov = value
         end,
     })
+
     CombatTab:CreateSlider({
         Name = "Turn Strength",
         Range = {5, 100},
@@ -504,6 +972,7 @@ return function(Window, scriptInfo)
             settings.assistStrength = value / 100
         end,
     })
+
     CombatTab:CreateToggle({
         Name = "Show Target Highlight",
         CurrentValue = true,
@@ -513,8 +982,10 @@ return function(Window, scriptInfo)
             updateHighlight()
         end,
     })
-    CombatTab:CreateLabel("Auto Parry reads each weapon's real impact marker; no hard-coded animation list is required.")
 
+    CombatTab:CreateLabel("Auto Parry catches all lights, heavies, crits & ults. Auto Counter strikes back instantly on parry.")
+
+    -- Main Render Loop
     table.insert(connections, RunService.RenderStepped:Connect(function(deltaTime)
         if not running then
             return
@@ -522,6 +993,7 @@ return function(Window, scriptInfo)
         scanAccumulator += deltaTime
         statusAccumulator += deltaTime
 
+        -- Combat Assist Aim
         if settings.combatAssist then
             if scanAccumulator >= 0.08 or not targetValid(currentTarget, settings.assistRange) then
                 scanAccumulator = 0
@@ -533,24 +1005,29 @@ return function(Window, scriptInfo)
             end
         end
 
+        -- Auto Parry Scan
         if settings.autoParry then
             scanOpponentAttacks()
         end
 
-        if statusAccumulator >= 0.25 then
+        -- Status HUD Update
+        if statusAccumulator >= 0.3 then
             statusAccumulator = 0
             local targetName = currentTarget and currentTarget.player and currentTarget.player.Name or "none"
             pcall(function()
                 statusLabel:Set(string.format(
-                    "Catalog: %d | Target: %s | Parries: %d",
+                    "Catalog: %d | Target: %s | Parries: %d (%d hit) | Counters: %d",
                     catalogModuleCount,
                     targetName,
-                    parryCount
+                    parryCount,
+                    successfulParryCount,
+                    counterCount
                 ))
             end)
         end
     end))
 
+    -- Cleanup
     local function destroyScript()
         if not running then
             return
@@ -559,6 +1036,18 @@ return function(Window, scriptInfo)
         guardReleaseToken += 1
         releaseGuard()
         currentTarget = nil
+        lastAttackingOpponent = nil
+
+        -- Restore all hooks
+        for _, h in pairs(hooks) do
+            if h.target and h.orig then
+                pcall(function()
+                    h.target[h.key] = h.orig
+                end)
+            end
+        end
+        table.clear(hooks)
+
         for _, connection in ipairs(connections) do
             disconnect(connection)
         end

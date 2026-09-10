@@ -157,17 +157,34 @@ return function(Window, scriptInfo)
     local KickCore = nil
     local ActionCommands = nil
     local ActionRemoteProtocol = nil
+    local ClientShoot = nil
+    local ClientPass = nil
+    local PlayerMovement = nil
+    local PlayerSprint = nil
+    local shootTracker = nil
+    local passTracker = nil
 
     local origGetChargeAlpha = nil
     local origGetMinimumReleaseDelaySeconds = nil
     local origIsFullyCharged = nil
     local origIsFullPower = nil
+    local origShootGetChargeAlpha = nil
+    local origShootIsFullPower = nil
     local origCmdKick = nil
     local origCmdTackleKick = nil
     local origCmdVolley = nil
     local origCmdThrow = nil
     local origCmdAssistedPass = nil
     local origRemoteRelease = nil
+    local origGetChargingWalkSpeed = nil
+    local origGetRecoveredWalkSpeed = nil
+    local origSetMultiplier = nil
+    local origShootGetCS = nil
+    local origPassGetCS = nil
+    local origShootStart = nil
+    local origPassStart = nil
+
+    local getupval = (debug and debug.getupvalues) or getupvalues
 
     pcall(function()
         ActionMovement = require(ReplicatedStorage.Modules.Actions.ActionMovement)
@@ -178,6 +195,150 @@ return function(Window, scriptInfo)
         ActionCommands = require(ReplicatedStorage.Modules.Actions.ActionCommands)
         ActionRemoteProtocol = require(ReplicatedStorage.Modules.Actions.ActionRemoteProtocol)
 
+        pcall(function()
+            ClientShoot = require(ReplicatedStorage.Client.Gameplay.Actions.Shoot)
+            if ClientShoot and getupval then
+                local sInst = getupval(ClientShoot.Update)[1]
+                if sInst and sInst.DelayReleaseUntilMinimum then
+                    shootTracker = getupval(sInst.DelayReleaseUntilMinimum)[3]
+                end
+            end
+        end)
+
+        pcall(function()
+            ClientPass = require(ReplicatedStorage.Client.Gameplay.Actions.Pass)
+            if ClientPass and getupval then
+                local pInst = getupval(ClientPass.Update)[1]
+                if pInst and pInst.DelayReleaseUntilMinimum then
+                    passTracker = getupval(pInst.DelayReleaseUntilMinimum)[3]
+                end
+            end
+        end)
+
+        pcall(function()
+            PlayerMovement = require(ReplicatedStorage.Client.Gameplay.Player.Movement)
+        end)
+        pcall(function()
+            PlayerSprint = require(ReplicatedStorage.Client.Gameplay.Player.Sprint)
+        end)
+
+        -- ActionMovement WalkSpeed hooks (guarantees full sprint speed 25.6 instead of 7.2 when charging)
+        if ActionMovement then
+            origGetChargingWalkSpeed = ActionMovement.GetChargingWalkSpeed
+            origGetRecoveredWalkSpeed = ActionMovement.GetRecoveredWalkSpeed
+
+            ActionMovement.GetChargingWalkSpeed = function(walkSpeed, hasBall)
+                if running and settings.fullSpeedCharge then
+                    return ActionMovement.GetRunWalkSpeed(walkSpeed, false)
+                end
+                if origGetChargingWalkSpeed then
+                    return origGetChargingWalkSpeed(walkSpeed, hasBall)
+                end
+                return ActionMovement.Constants.BaseWalkSpeed
+            end
+
+            ActionMovement.GetRecoveredWalkSpeed = function(chargeSec, walkSpeed, hasBall, ...)
+                if running and settings.fullSpeedCharge then
+                    return ActionMovement.GetRunWalkSpeed(walkSpeed, false)
+                end
+                if origGetRecoveredWalkSpeed then
+                    return origGetRecoveredWalkSpeed(chargeSec, walkSpeed, hasBall, ...)
+                end
+                return ActionMovement.Constants.BaseWalkSpeed
+            end
+        end
+
+        -- PlayerMovement post-kick recovery multiplier bypass (eliminates post-kick freezing/slowdown)
+        if PlayerMovement then
+            origSetMultiplier = PlayerMovement.SetMultiplier
+            PlayerMovement.SetMultiplier = function(source, mult, ...)
+                if running and settings.fullSpeedCharge and (source == "KickRecovery" or source == "ShootRecovery" or source == "PassRecovery" or source == "DefensiveKickRecovery") then
+                    return
+                end
+                if origSetMultiplier then
+                    return origSetMultiplier(source, mult, ...)
+                end
+            end
+        end
+
+        -- Client Shoot & Pass Input Trackers (instant 100% UI and power calculations)
+        if shootTracker then
+            origShootGetCS = shootTracker.GetChargeSeconds
+            shootTracker.GetChargeSeconds = function(...)
+                if running and settings.instantCharge then
+                    return shootTracker.MaximumChargeSeconds or 0.4
+                end
+                if origShootGetCS then
+                    return origShootGetCS(...)
+                end
+                return 0
+            end
+
+            origShootStart = shootTracker.Start
+            shootTracker.Start = function(...)
+                local ret = origShootStart and origShootStart(...)
+                if running and settings.instantCharge and getupval then
+                    local u1 = getupval(shootTracker.Start)[1]
+                    if type(u1) == "table" and u1.StartedAt then
+                        u1.StartedAt = workspace:GetServerTimeNow() - 0.45
+                    end
+                end
+                return ret
+            end
+        end
+
+        if passTracker then
+            origPassGetCS = passTracker.GetChargeSeconds
+            passTracker.GetChargeSeconds = function(...)
+                if running and settings.instantCharge then
+                    return passTracker.MaximumChargeSeconds or 0.3
+                end
+                if origPassGetCS then
+                    return origPassGetCS(...)
+                end
+                return 0
+            end
+
+            origPassStart = passTracker.Start
+            passTracker.Start = function(...)
+                local ret = origPassStart and origPassStart(...)
+                if running and settings.instantCharge and getupval then
+                    local u1 = getupval(passTracker.Start)[1]
+                    if type(u1) == "table" and u1.StartedAt then
+                        u1.StartedAt = workspace:GetServerTimeNow() - 0.35
+                    end
+                end
+                return ret
+            end
+        end
+
+        -- Modules.Actions.Shoot alpha & full power hooks
+        if ShootModule then
+            origShootGetChargeAlpha = ShootModule.GetChargeAlpha
+            origShootIsFullPower = ShootModule.IsFullPower
+
+            ShootModule.GetChargeAlpha = function(chargeSeconds, constants)
+                if running and settings.instantCharge then
+                    return 1
+                end
+                if origShootGetChargeAlpha then
+                    return origShootGetChargeAlpha(chargeSeconds, constants)
+                end
+                return 1
+            end
+
+            ShootModule.IsFullPower = function(chargeSeconds, constants)
+                if running and settings.instantCharge then
+                    return true
+                end
+                if origShootIsFullPower then
+                    return origShootIsFullPower(chargeSeconds, constants)
+                end
+                return true
+            end
+        end
+
+        -- KickCore mathematical power curves
         if KickCore then
             origGetChargeAlpha = KickCore.GetChargeAlpha
             origGetMinimumReleaseDelaySeconds = KickCore.GetMinimumReleaseDelaySeconds
@@ -310,7 +471,7 @@ return function(Window, scriptInfo)
             end
 
             if settings.fullSpeedCharge then
-                ActionMovement.Constants.ChargingWalkSpeedMultiplier = 1.0
+                ActionMovement.Constants.ChargingWalkSpeedMultiplier = ActionMovement.Constants.SprintSpeedMultiplier or 1.6
                 ActionMovement.Constants.ChargingRecoverySeconds = 0
             else
                 ActionMovement.Constants.ChargingWalkSpeedMultiplier = 0.5
@@ -349,11 +510,28 @@ return function(Window, scriptInfo)
             ActionMovement.Constants.BallCarrierRunSpeedMultiplier = 0.8
             ActionMovement.Constants.ChargingWalkSpeedMultiplier = 0.5
             ActionMovement.Constants.ChargingRecoverySeconds = 0.5
+            if origGetChargingWalkSpeed then ActionMovement.GetChargingWalkSpeed = origGetChargingWalkSpeed end
+            if origGetRecoveredWalkSpeed then ActionMovement.GetRecoveredWalkSpeed = origGetRecoveredWalkSpeed end
         end
-        if ShootModule and PassModule then
+        if PlayerMovement then
+            if origSetMultiplier then PlayerMovement.SetMultiplier = origSetMultiplier end
+        end
+        if shootTracker then
+            if origShootGetCS then shootTracker.GetChargeSeconds = origShootGetCS end
+            if origShootStart then shootTracker.Start = origShootStart end
+        end
+        if passTracker then
+            if origPassGetCS then passTracker.GetChargeSeconds = origPassGetCS end
+            if origPassStart then passTracker.Start = origPassStart end
+        end
+        if ShootModule then
             ShootModule.Constants.Kick.MaximumChargeSeconds = 0.4
-            PassModule.Constants.Kick.MaximumChargeSeconds = 0.3
             ShootModule.Constants.Kick.MinimumChargeSeconds = 0.2
+            if origShootGetChargeAlpha then ShootModule.GetChargeAlpha = origShootGetChargeAlpha end
+            if origShootIsFullPower then ShootModule.IsFullPower = origShootIsFullPower end
+        end
+        if PassModule then
+            PassModule.Constants.Kick.MaximumChargeSeconds = 0.3
             PassModule.Constants.Kick.MinimumChargeSeconds = 0.1
         end
         if AssistedPassModule then
