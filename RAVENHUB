@@ -219,7 +219,7 @@ local SCRIPTS = {
         description = "Overhauled Auto Parry | Auto Counter (Riposte) | Combat Assist",
         placeIds    = {94217045453265},
         gameIds     = {9051406594},
-        version     = "v1.0",
+        version     = "v1.0.1",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/dueling_grounds.lua",
     },
     {
