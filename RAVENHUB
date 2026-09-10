@@ -211,7 +211,7 @@ local SCRIPTS = {
         description = "OP Goalkeeper | Infinite Stamina | Instant Max Power | Auto Pass | ESP",
         placeIds    = {126987974021910},
         gameIds     = {10155360168},
-        version     = "v1.4.1",
+        version     = "v1.4.3",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/illegal_soccer.lua",
     },
     {

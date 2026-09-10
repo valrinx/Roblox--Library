@@ -570,11 +570,20 @@ return function(Window, scriptInfo)
     pcall(function()
         HitboxSettingsModule = require(ReplicatedStorage.Modules.Gameplay.HitboxSettings)
     end)
+    local GoalkeeperActions = nil
+    pcall(function()
+        GoalkeeperActions = require(ReplicatedStorage.Modules.Actions.GoalkeeperActions)
+    end)
+    local ActorTargeting = nil
+    pcall(function()
+        ActorTargeting = require(ReplicatedStorage.Modules.Items.ActorTargeting)
+    end)
 
     -- ============================================================
     --   OP GOALKEEPER ENHANCEMENT ENGINE (HITBOX, COOLDOWN, ASSIST)
     -- ============================================================
     local origAirReceiveSize = nil
+    local origAirReceiveOffset = nil
     local origAssistedReceiveSize = nil
     local origReceiveSize = nil
     local origGkDiveConstants = {}
@@ -583,24 +592,27 @@ return function(Window, scriptInfo)
     local function applyGoalkeeperEnhancements()
         if not running then return end
 
-        -- 1. OP Save & Catch Hitboxes
+        -- 1. OP Save & Catch Hitboxes (Legit Athletic Vertical Coverage)
         if HitboxSettingsModule then
             if settings.gkOpHitbox then
                 if HitboxSettingsModule.AirReceive then
                     if not origAirReceiveSize then origAirReceiveSize = HitboxSettingsModule.AirReceive.Size end
-                    HitboxSettingsModule.AirReceive.Size = Vector3.new(22, 26, 22)
+                    if not origAirReceiveOffset then origAirReceiveOffset = HitboxSettingsModule.AirReceive.CFrameOffset end
+                    HitboxSettingsModule.AirReceive.Size = Vector3.new(20, 24, 20)
+                    HitboxSettingsModule.AirReceive.CFrameOffset = CFrame.new(0, 4, 0)
                 end
                 if HitboxSettingsModule.AssistedReceive then
                     if not origAssistedReceiveSize then origAssistedReceiveSize = HitboxSettingsModule.AssistedReceive.Size end
-                    HitboxSettingsModule.AssistedReceive.Size = Vector3.new(24, 26, 24)
+                    HitboxSettingsModule.AssistedReceive.Size = Vector3.new(22, 24, 22)
                 end
                 if HitboxSettingsModule.Receive then
                     if not origReceiveSize then origReceiveSize = HitboxSettingsModule.Receive.Size end
-                    HitboxSettingsModule.Receive.Size = Vector3.new(18, 16, 18)
+                    HitboxSettingsModule.Receive.Size = Vector3.new(18, 18, 18)
                 end
             else
                 if origAirReceiveSize and HitboxSettingsModule.AirReceive then
                     HitboxSettingsModule.AirReceive.Size = origAirReceiveSize
+                    HitboxSettingsModule.AirReceive.CFrameOffset = origAirReceiveOffset or CFrame.new(0, -0.5, 0)
                 end
                 if origAssistedReceiveSize and HitboxSettingsModule.AssistedReceive then
                     HitboxSettingsModule.AssistedReceive.Size = origAssistedReceiveSize
@@ -611,7 +623,7 @@ return function(Window, scriptInfo)
             end
         end
 
-        -- 2. Dive Physics & Reach Constants
+        -- 2. Dive Physics & Reach Constants (Legit Pro Goalkeeper Scale)
         if GoalkeeperDive and GoalkeeperDive.Constants then
             local c = GoalkeeperDive.Constants
             if not origGkDiveConstants.MaximumSaveHeight then
@@ -621,11 +633,13 @@ return function(Window, scriptInfo)
                 origGkDiveConstants.RepeatDelaySeconds = c.RepeatDelaySeconds
                 origGkDiveConstants.CaughtMovementRestoreStartsAtSeconds = c.CaughtMovementRestoreStartsAtSeconds
                 origGkDiveConstants.MovementRestoreStartsAtSeconds = c.MovementRestoreStartsAtSeconds
+                origGkDiveConstants.InitialVerticalVelocity = c.InitialVerticalVelocity
+                origGkDiveConstants.GravityStudsPerSecondSquared = c.GravityStudsPerSecondSquared
             end
 
             if settings.gkOpHitbox then
-                c.MaximumSaveHeight = 28
-                c.SaveContactPadding = 6
+                c.MaximumSaveHeight = 22 -- Covers crossbar + 5 studs headroom without flying into orbit
+                c.SaveContactPadding = 4
                 c.Distance = origGkDiveConstants.Distance or 20
             else
                 c.MaximumSaveHeight = origGkDiveConstants.MaximumSaveHeight
@@ -648,7 +662,7 @@ return function(Window, scriptInfo)
             end
         end
 
-        -- 3. Dive Magnet Assist (Auto-curve trajectory directly into ball flight)
+        -- 3. Dive Magnet Assist (Natural Athletic Guidance)
         if GoalkeeperDiveAssist and GoalkeeperDiveAssist.Constants then
             local ac = GoalkeeperDiveAssist.Constants
             if not origGkAssistConstants.FullAssistMissStuds then
@@ -658,15 +672,21 @@ return function(Window, scriptInfo)
                 origGkAssistConstants.MaximumExtraReachStuds = ac.MaximumExtraReachStuds
                 origGkAssistConstants.MaximumTravelScale = ac.MaximumTravelScale
                 origGkAssistConstants.MaximumYawDegrees = ac.MaximumYawDegrees
+                origGkAssistConstants.MaximumVerticalVelocityChange = ac.MaximumVerticalVelocityChange
+                origGkAssistConstants.HighBallAlignmentDropStuds = ac.HighBallAlignmentDropStuds
+                origGkAssistConstants.LiftGravityPerStud = ac.LiftGravityPerStud
             end
 
             if settings.gkAssistMagnet then
-                ac.FullAssistMissStuds = 15
-                ac.ZeroAssistMissStuds = 35
-                ac.MaximumAssistDistance = 250
-                ac.MaximumExtraReachStuds = 8
-                ac.MaximumTravelScale = 1.35
-                ac.MaximumYawDegrees = 75
+                ac.FullAssistMissStuds = 8
+                ac.ZeroAssistMissStuds = 20
+                ac.MaximumAssistDistance = 150
+                ac.MaximumExtraReachStuds = 4
+                ac.MaximumTravelScale = 1.18
+                ac.MaximumYawDegrees = 32
+                ac.MaximumVerticalVelocityChange = 22
+                ac.HighBallAlignmentDropStuds = 1.0
+                ac.LiftGravityPerStud = 12
             else
                 ac.FullAssistMissStuds = origGkAssistConstants.FullAssistMissStuds
                 ac.ZeroAssistMissStuds = origGkAssistConstants.ZeroAssistMissStuds
@@ -674,13 +694,19 @@ return function(Window, scriptInfo)
                 ac.MaximumExtraReachStuds = origGkAssistConstants.MaximumExtraReachStuds
                 ac.MaximumTravelScale = origGkAssistConstants.MaximumTravelScale
                 ac.MaximumYawDegrees = origGkAssistConstants.MaximumYawDegrees
+                ac.MaximumVerticalVelocityChange = origGkAssistConstants.MaximumVerticalVelocityChange
+                ac.HighBallAlignmentDropStuds = origGkAssistConstants.HighBallAlignmentDropStuds
+                ac.LiftGravityPerStud = origGkAssistConstants.LiftGravityPerStud
             end
         end
     end
 
     local function restoreGoalkeeperEnhancements()
         if HitboxSettingsModule then
-            if origAirReceiveSize and HitboxSettingsModule.AirReceive then HitboxSettingsModule.AirReceive.Size = origAirReceiveSize end
+            if origAirReceiveSize and HitboxSettingsModule.AirReceive then
+                HitboxSettingsModule.AirReceive.Size = origAirReceiveSize
+                HitboxSettingsModule.AirReceive.CFrameOffset = origAirReceiveOffset or CFrame.new(0, -0.5, 0)
+            end
             if origAssistedReceiveSize and HitboxSettingsModule.AssistedReceive then HitboxSettingsModule.AssistedReceive.Size = origAssistedReceiveSize end
             if origReceiveSize and HitboxSettingsModule.Receive then HitboxSettingsModule.Receive.Size = origReceiveSize end
         end
@@ -692,6 +718,8 @@ return function(Window, scriptInfo)
             c.RepeatDelaySeconds = origGkDiveConstants.RepeatDelaySeconds
             c.CaughtMovementRestoreStartsAtSeconds = origGkDiveConstants.CaughtMovementRestoreStartsAtSeconds
             c.MovementRestoreStartsAtSeconds = origGkDiveConstants.MovementRestoreStartsAtSeconds
+            c.InitialVerticalVelocity = origGkDiveConstants.InitialVerticalVelocity
+            c.GravityStudsPerSecondSquared = origGkDiveConstants.GravityStudsPerSecondSquared
         end
         if GoalkeeperDiveAssist and GoalkeeperDiveAssist.Constants and origGkAssistConstants.FullAssistMissStuds then
             local ac = GoalkeeperDiveAssist.Constants
@@ -701,11 +729,43 @@ return function(Window, scriptInfo)
             ac.MaximumExtraReachStuds = origGkAssistConstants.MaximumExtraReachStuds
             ac.MaximumTravelScale = origGkAssistConstants.MaximumTravelScale
             ac.MaximumYawDegrees = origGkAssistConstants.MaximumYawDegrees
+            ac.MaximumVerticalVelocityChange = origGkAssistConstants.MaximumVerticalVelocityChange
+            ac.HighBallAlignmentDropStuds = origGkAssistConstants.HighBallAlignmentDropStuds
+            ac.LiftGravityPerStud = origGkAssistConstants.LiftGravityPerStud
         end
     end
 
     -- Initial application of Goalkeeper constants
     applyGoalkeeperEnhancements()
+
+    -- Hook GoalkeeperActions.FindDiveSaveContact to remove hardcoded 7.75 MaximumSaveHeight clamp on high balls
+    if GoalkeeperActions and type(GoalkeeperActions.FindDiveSaveContact) == "function" then
+        local origFindSave = GoalkeeperActions.FindDiveSaveContact
+        GoalkeeperActions.FindDiveSaveContact = function(actor, p1, p2, options)
+            local root = ActorTargeting and ActorTargeting.GetActorRoot(actor)
+            if not root then return origFindSave(actor, p1, p2, options) end
+            local AirReceive = HitboxSettingsModule and HitboxSettingsModule.AirReceive
+            if not AirReceive then return origFindSave(actor, p1, p2, options) end
+            local pad = (not options or options.ContactPadding == nil) and 3.5 or (options.ContactPadding + 2.0)
+            local hitbox = {
+                CFrameOffset = AirReceive.CFrameOffset,
+                Shape = AirReceive.Shape,
+                Size = AirReceive.Size + Vector3.new(pad, pad, pad)
+            }
+            local rootOffset = options and options.RootOffset or Vector3.new(0, 0, 0)
+            local alpha = HitboxSettingsModule.GetSegmentEnterAlpha(root, hitbox, p1 - rootOffset, p2 - rootOffset)
+            if not alpha then return nil end
+            local contactPos = p1:Lerp(p2, alpha)
+            -- Allow saves up to 24 studs high without 7.75 clamp!
+            if (contactPos.Y - (root.Position.Y + rootOffset.Y)) <= 24 then
+                return {
+                    Alpha = alpha,
+                    Position = contactPos
+                }
+            end
+            return nil
+        end
+    end
 
     local forcedDiveChoice = nil
     local forcedWorldDirection = nil
@@ -889,10 +949,20 @@ return function(Window, scriptInfo)
         forcedWorldDirection = targetDir
         forcedDiveUntil = os.clock() + 0.60
 
-        -- Dynamic dive distance adaptation: match dive range directly to intercept distance
+        -- Dynamic dive distance & legit athletic vertical leap adaptation
+        local diffY = targetLookPos.Y - root.Position.Y
         if GoalkeeperDive and GoalkeeperDive.Constants then
-            local desiredDist = math.clamp(dist + 3.0, 12, 28)
+            local desiredDist = math.clamp(dist + 2.0, 14, 24)
             GoalkeeperDive.Constants.Distance = desiredDist
+            if isHighShot or diffY > 1.2 then
+                -- Ball is elevated: athletic vertical leap matching crossbar apex with natural gravity
+                local athleticVel = math.clamp(math.sqrt(2 * 65 * math.min(diffY, 7.5)) + 4, 18, 30)
+                GoalkeeperDive.Constants.InitialVerticalVelocity = athleticVel
+                GoalkeeperDive.Constants.GravityStudsPerSecondSquared = -65 -- Natural realistic gravity (zero floating)
+            else
+                GoalkeeperDive.Constants.InitialVerticalVelocity = origGkDiveConstants.InitialVerticalVelocity or 15
+                GoalkeeperDive.Constants.GravityStudsPerSecondSquared = origGkDiveConstants.GravityStudsPerSecondSquared or -65
+            end
         end
 
         -- Project target direction onto camera plane to find relative direction (F, L, R, LF, RF)
@@ -962,10 +1032,14 @@ return function(Window, scriptInfo)
             end)
         end
 
-        -- Clean up movement direction after brief impulse
-        task.delay(0.18, function()
+        -- Clean up movement direction and restore dive physics constants after impulse
+        task.delay(0.65, function()
             pcall(function()
                 hum:Move(Vector3.zero, false)
+                if GoalkeeperDive and GoalkeeperDive.Constants and origGkDiveConstants.InitialVerticalVelocity then
+                    GoalkeeperDive.Constants.InitialVerticalVelocity = origGkDiveConstants.InitialVerticalVelocity
+                    GoalkeeperDive.Constants.GravityStudsPerSecondSquared = origGkDiveConstants.GravityStudsPerSecondSquared
+                end
             end)
         end)
 
@@ -1105,8 +1179,8 @@ return function(Window, scriptInfo)
             if goalCrossingPos then
                 local latOffset = (goalCrossingPos - goalPos):Dot(goalRight)
                 local vertOffset = goalCrossingPos.Y - goalPos.Y
-                -- Goal bounds: +-23 studs lateral, -1 to 17 studs height
-                if math.abs(latOffset) <= 23.5 and vertOffset >= -1.5 and vertOffset <= 17 then
+                -- Goal bounds: +-23.5 studs lateral, -1.5 to 19 studs height (covers crossbar and upper 90)
+                if math.abs(latOffset) <= 23.5 and vertOffset >= -1.5 and vertOffset <= 19 then
                     isShotOnGoal = true
                 end
             end
@@ -1137,7 +1211,7 @@ return function(Window, scriptInfo)
                 local vertDiff = samplePos.Y - root.Position.Y
                 local estTransit = math.clamp(sampleDist / 30, 0.10, 0.65)
 
-                if sampleDist <= (settings.gkDiveReach + 6) and vertDiff >= -2 and vertDiff <= 15 then
+                if sampleDist <= (settings.gkDiveReach + 6) and vertDiff >= -2 and vertDiff <= 18 then
                     if t >= (estTransit - 0.08) then
                         chosenInterceptPos = samplePos
                         chosenArrivalTime = t
@@ -1157,7 +1231,7 @@ return function(Window, scriptInfo)
             local interceptDist = (targetIntercept - root.Position).Magnitude
             local diveTransitTime = math.clamp(interceptDist / 30, 0.12, 0.62)
             local arrivalTime = chosenArrivalTime or 0.45
-            local isHighShot = (targetIntercept.Y - root.Position.Y > 2.2) or (ballPos.Y - root.Position.Y > 2.8)
+            local isHighShot = (targetIntercept.Y - root.Position.Y > 1.2) or (ballPos.Y - root.Position.Y > 1.8)
 
             -- Synchronization: dive ONLY when transit time matches arrival time!
             -- timeDiff > 0.18 means ball is still too far; do not dive prematurely!
