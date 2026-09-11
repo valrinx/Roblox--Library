@@ -510,11 +510,11 @@ local SCRIPTS = {
     },
     {
         name        = "Greedy Growers",
-        description = "Shock Harvest | Auto Farm Loop | Auto Plant | Auto Buy | Anti-Meteor | Speed",
+        description = "High-Multiplier Hunter (1.1x–500x) | Peak Tracker | Auto Farm Loop | Ping Comp",
         placeIds    = {74102906764176},
         gameIds     = {10440833423},
-        version     = "v3.3.0",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/greedy_growers.lua?v=greedy-growers-3.3.0",
+        version     = "v4.2.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/greedy_growers.lua?v=greedy-growers-4.2.0",
     },
     {
         name        = "Beeconomy!",
@@ -531,6 +531,22 @@ local SCRIPTS = {
         gameIds     = {6215986499},
         version     = "v1.0.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/grand_blue.lua",
+    },
+    {
+        name        = "Zoo Hatchers!",
+        description = "Auto Steal Best Eggs | Auto Place | Auto Hatch | Auto Squat | Egg ESP",
+        placeIds    = {127715053457585, 126870639873289},
+        gameIds     = {7181313677, 10690360998},
+        version     = "v1.8.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/zoo_hatchers.lua?v=zoo-hatchers-1.8.0",
+    },
+    {
+        name        = "Color My Flag",
+        description = "100% Accuracy Auto Solver | Auto Reveal | Auto Submit | Auto Play AI | Auto Rematch | Auto Sit",
+        placeIds    = {132173349090360},
+        gameIds     = {10630800860},
+        version     = "v1.0.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/color_my_flag.lua?v=color-my-flag-1.0.0",
     },
     --[[
     {

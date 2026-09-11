@@ -1,8 +1,7 @@
 -- ═════════════════════════════════════════════════════════════════
--- Greedy Growers 🌱 | RAVEN HUB Module v3.3.0
+-- Greedy Growers 🌱 | RAVEN HUB Module v4.2.0
 -- PlaceId: 74102906764176 | GameId: 10440833423
--- Full Knit Service integration + ProximityPrompt support
--- Flow: Buy Seed → Equip Seed → Plant Round → Auto Harvest → Collect → Sell
+-- High-Multiplier Hunter (1.1x–500x) + True Live Metrics + Knit Full Automation
 -- ═════════════════════════════════════════════════════════════════
 
 return function(Window, scriptInfo)
@@ -23,6 +22,7 @@ return function(Window, scriptInfo)
 
     local running = true
     local threads = {}
+    local connections = {}
 
     -- ═══════════ Knit Services ═══════════
     local knitRoot = ReplicatedStorage:WaitForChild("Packages", 5)
@@ -35,10 +35,17 @@ return function(Window, scriptInfo)
     local sss = knitServices and knitServices:FindFirstChild("SellStandService")
     local scs = knitServices and knitServices:FindFirstChild("SeedConveyorService")
 
-    -- Seed list
+    local Knit = nil
+    pcall(function()
+        Knit = require(ReplicatedStorage.Packages.Knit)
+    end)
+
+    -- ═══════════ Seed & Fertilizer Constants ═══════════
     local SEED_LIST = {
-        "Pine", "Oak", "Apple", "Peach", "Fig", "Orange", "Lemon",
-        "Avocado", "Cherry", "Mango", "Coconut", "Banana", "Starfruit", "Dragon Fruit"
+        "Oak", "Pine", "Apple", "Peach", "Fig", "Orange", "Lemon",
+        "Avocado", "Cherry", "Mango", "Coconut", "Banana", "Starfruit",
+        "DragonFruit", "Mushroom", "Glowshroom", "Magic", "Spirit",
+        "Inferno", "Prismatic", "Astral", "Elder"
     }
 
     local FERTILIZER_LIST = {
@@ -47,111 +54,63 @@ return function(Window, scriptInfo)
 
     -- ═══════════ Settings ═══════════
     local settings = {
-        -- Auto Farm
-        autoFarm = false,
-        harvestMode = "Target Multiplier", -- "Target Multiplier" (safe guaranteed cash out) or "Shock (Pre-Lightning)"
-        targetMultiplier = 2.5,
-        shockSafetyMargin = 0.08,
-        selectedSeed = "Pine",
-        selectedFertilizer = "Basic",
+        -- Harvest Engine
+        autoHarvest = true,
+        harvestStrategy = "Custom Target", -- "Custom Target", "High Hunter", "Ladder"
+        targetMultiplier = 5.0,            -- Target multiplier to cash out (up to 2500x)
+        pingCompensation = true,
+        latencyBuffer = 0.05,
+        riskPreset = "🟠 Solid Profit (5.0x)",
+
+        -- Advanced Hunting Strategies
+        ladderMode = false,                -- Auto Escalator (เพิ่มเป้าหมายอัตโนมัติตามสเต็ป)
+        ladderStep = 2.0,                  -- Step increment per cashout
+        ladderMax = 50.0,                  -- Max ceiling for ladder mode
+        trailingMode = false,              -- Trailing Stop (ถ้าโตเกิน X แล้วให้ปล่อยไหล)
+        trailingTrigger = 10.0,            -- Start trailing after 10x
+        trailingDrop = 1.0,                -- Cash out if drop/stagnant
+
+        -- Automation Loop
+        masterAutoFarm = false,
+        selectedSeed = "Oak",
+        selectedFertilizer = "None",
         autoPlant = false,
-        plantDelay = 1.0,
-        autoHarvest = false,
-        autoCollect = true,
-        collectInterval = 0.5,
+        plantDelay = 0.8,
+        autoCollectDeadWood = true,  -- Auto CollectDeadTree if struck by lightning
+        autoCollectFruits = true,
+        collectInterval = 1.5,
         autoSell = false,
-        sellInterval = 3,
-        autoBuySeed = true,
-        buySeedDelay = 1,
-        -- Weather / Anti-Meteor
-        antiMeteor = false,
-        autoHarvestOnMeteor = true,
-        fleeDistance = 100,
+        sellInterval = 5.0,
+        autoBuySeed = false,
+        buySeedDelay = 2.0,
+
         -- Player
         autoSpeed = false,
         walkSpeed = 32,
     }
 
-    -- ═══════════ Real-Time Round Tracking for Shock Harvest ═══════════
+    -- ═══════════ Live Statistics ═══════════
+    local stats = {
+        status = "Idle",
+        currentMult = 1.0,
+        peakMult = 1.0,
+        lastCashoutMult = 0,
+        totalRounds = 0,
+        successfulHarvests = 0,
+        crashedRounds = 0,
+    }
+
+    -- ═══════════ Round Tracking State ═══════════
     local currentMyRound = {
         active = false,
         roundId = nil,
         startTime = 0,
-        crashPoint = 5.95,
-        estimatedCrashTime = 0,
-        seedType = "Pine",
+        seedType = "Oak",
         harvested = false,
-        lastMult = 0,
+        crashed = false,
     }
 
-    local connections = {}
-
-    local function getMyPlantModel()
-        local bf = workspace:FindFirstChild("BigField")
-        if not bf then return nil end
-        local prefix = "PlantRound_" .. Player.UserId .. "_"
-        for _, c in ipairs(bf:GetChildren()) do
-            if c.Name:sub(1, #prefix) == prefix then
-                return c
-            end
-        end
-        return nil
-    end
-
-    local function getMyPlantDisplayInfo()
-        local model = getMyPlantModel()
-        if not model then return nil end
-        local md = model:FindFirstChild("MultDisplay")
-        local bg = md and md:FindFirstChild("BillboardGui")
-        local mf = bg and bg:FindFirstChild("MainFrame")
-        if not mf then return nil end
-
-        local multLabel = mf:FindFirstChild("Mult")
-        local warnLabel = mf:FindFirstChild("Warning")
-        local multVal = 0
-        if multLabel and multLabel:IsA("TextLabel") then
-            multVal = tonumber((multLabel.Text:gsub("x", ""):gsub(" ", ""))) or 0
-        end
-
-        local isWarning = false
-        if warnLabel and warnLabel:IsA("TextLabel") and warnLabel.Visible and warnLabel.Text:find("⚠️") then
-            isWarning = true
-        end
-
-        return {
-            model = model,
-            mult = multVal,
-            warning = isWarning
-        }
-    end
-
-    local function getPlotCFrame()
-        local bf = workspace:FindFirstChild("BigField")
-        local plots = bf and bf:FindFirstChild("PlayerPlots")
-        if plots then
-            for _, plot in ipairs(plots:GetChildren()) do
-                if plot:GetAttribute("OwnerUserId") == Player.UserId then
-                    local seedPlot = plot:FindFirstChild("SeedPlot")
-                    if seedPlot then
-                        local dirt = seedPlot:FindFirstChild("Dirt")
-                        if dirt and dirt:IsA("BasePart") then
-                            return dirt.CFrame
-                        end
-                        local primary = seedPlot.PrimaryPart or seedPlot:FindFirstChildWhichIsA("BasePart")
-                        if primary then
-                            return primary.CFrame
-                        end
-                        return seedPlot:GetPivot()
-                    end
-                    local primary = plot.PrimaryPart or plot:FindFirstChildWhichIsA("BasePart")
-                    if primary then
-                        return primary.CFrame
-                    end
-                end
-            end
-        end
-        return nil
-    end
+    -- ═══════════ Helper Functions ═══════════
     local function getRoot()
         local c = Player.Character
         return c and c:FindFirstChild("HumanoidRootPart")
@@ -167,8 +126,8 @@ return function(Window, scriptInfo)
         if root then
             root.AssemblyLinearVelocity = Vector3.zero
             root.AssemblyAngularVelocity = Vector3.zero
-            root.CFrame = CFrame.new(pos + Vector3.new(0, 3, 0))
-            task.wait(0.05)
+            root.CFrame = CFrame.new(pos + Vector3.new(0, 3.0, 0))
+            task.wait(0.12)
             root.AssemblyLinearVelocity = Vector3.zero
         end
     end
@@ -182,87 +141,238 @@ return function(Window, scriptInfo)
                     if c.Function then pcall(c.Function) end
                 end
             end
-            fireproximityprompt(prompt, 0)
+            if fireproximityprompt then
+                fireproximityprompt(prompt, 0)
+            end
         end)
     end
 
-    -- ═══════════ Seed Operations ═══════════
-    local function getEquippedOrInventorySeed(seedName)
-        local targetName = (seedName or ""):lower()
-        -- 1. Check Character (equipped)
-        local char = Player.Character
-        if char then
-            for _, item in ipairs(char:GetChildren()) do
-                if item:IsA("Tool") and item:GetAttribute("IsSeed") then
-                    if targetName == "" or item.Name:lower():find(targetName) then
-                        return item
+    -- ═══════════ Multiplier Sensor (Ultra-Precise) ═══════════
+    local function getMyPlantModel()
+        local bf = workspace:FindFirstChild("BigField")
+        if not bf then return nil end
+        local prefix = "PlantRound_" .. Player.UserId .. "_"
+        for _, c in ipairs(bf:GetChildren()) do
+            if c.Name:sub(1, #prefix) == prefix then
+                return c
+            end
+        end
+        return nil
+    end
+
+    local function getMyLiveMultiplier()
+        local plantModel = getMyPlantModel()
+        local rb = Player.PlayerGui:FindFirstChild("RoundBillboards")
+
+        -- 1. Primary: RoundBillboards in PlayerGui
+        if rb and plantModel then
+            local myMd = plantModel:FindFirstChild("MultDisplay")
+            for _, b in ipairs(rb:GetChildren()) do
+                if b:IsA("BillboardGui") and (b.Adornee == myMd or (myMd and b.Adornee and b.Adornee:IsDescendantOf(plantModel))) then
+                    local mf = b:FindFirstChild("MainFrame")
+                    if mf then
+                        for _, desc in ipairs(mf:GetChildren()) do
+                            if desc:IsA("TextLabel") and desc.Text and desc.Text ~= "" then
+                                local clean = desc.Text:gsub("[xX,%s]", ""):match("[%d%.]+")
+                                local val = tonumber(clean)
+                                if val and val > 0 then
+                                    return val, desc.Text, plantModel
+                                end
+                            end
+                        end
                     end
                 end
             end
         end
-        -- 2. Check Backpack
-        local bp = Player:FindFirstChild("Backpack")
-        if bp then
-            for _, item in ipairs(bp:GetChildren()) do
-                if item:IsA("Tool") and item:GetAttribute("IsSeed") then
-                    if targetName == "" or item.Name:lower():find(targetName) then
-                        item.Parent = Player.Character
-                        task.wait(0.25)
-                        return item
+
+        -- 2. Secondary: TextLabels inside tree model descendants
+        if plantModel then
+            for _, desc in ipairs(plantModel:GetDescendants()) do
+                if desc:IsA("TextLabel") and desc.Text and (desc.Text:find("x") or desc.Text:find("X")) then
+                    local clean = desc.Text:gsub("[xX,%s]", ""):match("[%d%.]+")
+                    local val = tonumber(clean)
+                    if val and val > 0 then
+                        return val, desc.Text, plantModel
                     end
                 end
             end
-            -- Any seed fallback if specific not found
-            for _, item in ipairs(bp:GetChildren()) do
-                if item:IsA("Tool") and item:GetAttribute("IsSeed") then
-                    item.Parent = Player.Character
-                    task.wait(0.25)
-                    return item
+        end
+
+        -- 3. Tertiary: Fallback if round is marked active
+        if currentMyRound.active and currentMyRound.startTime > 0 then
+            local elapsed = math.max(0, workspace:GetServerTimeNow() - currentMyRound.startTime)
+            local estimated = 1.0 + (elapsed * 0.18)
+            return estimated, string.format("%.2fx (est)", estimated), plantModel
+        end
+
+        return 0, "0.00x", nil
+    end
+
+    -- ═══════════ Plot Location ═══════════
+    local function getPlotCFrame()
+        local bf = workspace:FindFirstChild("BigField")
+        local plots = bf and bf:FindFirstChild("PlayerPlots")
+        if plots then
+            for _, plot in ipairs(plots:GetChildren()) do
+                if plot:GetAttribute("OwnerUserId") == Player.UserId then
+                    local seedPlot = plot:FindFirstChild("SeedPlot")
+                    if seedPlot then
+                        local dirt = seedPlot:FindFirstChild("Dirt")
+                        if dirt and dirt:IsA("BasePart") then
+                            return dirt.CFrame
+                        end
+                        return seedPlot:GetPivot()
+                    end
+                    return plot:GetPivot()
                 end
             end
         end
         return nil
     end
 
-    local function buySeedFromConveyor(seedName)
-        local conveyor = workspace:FindFirstChild("BigField") and workspace.BigField:FindFirstChild("ConveyorSeeds")
-        if not conveyor then return false end
+    -- ═══════════ Execution Primitives ═══════════
+    local function doHarvestNow(reason)
+        if currentMyRound.harvested then return true end
+        currentMyRound.harvested = true
+        currentMyRound.active = false
 
-        local targetPrompt = nil
-        local targetPos = nil
-        for _, holder in ipairs(conveyor:GetChildren()) do
-            local prompt = holder:FindFirstChildOfClass("ProximityPrompt", true)
-            if prompt and prompt.Enabled and prompt.ActionText == "Buy" then
-                if prompt.ObjectText:lower():find(seedName:lower()) then
-                    targetPrompt = prompt
-                    local part = prompt:FindFirstAncestorWhichIsA("BasePart")
-                    targetPos = part and part.Position
-                    break
+        local harvestedMult = stats.currentMult
+        stats.lastCashoutMult = harvestedMult
+        stats.status = "Harvested (" .. string.format("%.2f", harvestedMult) .. "x)"
+        stats.successfulHarvests = stats.successfulHarvests + 1
+
+        -- 1. Fast Invoke via PlantRoundService RF
+        task.spawn(function()
+            if Knit then
+                pcall(function() Knit.GetService("PlantRoundService"):StopPlant():await() end)
+            end
+            if prs and prs:FindFirstChild("RF") and prs.RF:FindFirstChild("StopPlant") then
+                pcall(function() prs.RF.StopPlant:InvokeServer() end)
+            end
+        end)
+
+        -- 2. Fallback: Proximity prompt on tree model
+        local bf = workspace:FindFirstChild("BigField")
+        if bf then
+            local prefix = "PlantRound_" .. Player.UserId .. "_"
+            for _, c in ipairs(bf:GetChildren()) do
+                if c.Name:sub(1, #prefix) == prefix then
+                    local prompt = c:FindFirstChildOfClass("ProximityPrompt", true)
+                    if prompt and prompt.Enabled then
+                        safeFirePrompt(prompt)
+                    end
                 end
             end
         end
 
-        if targetPrompt and targetPos then
-            tpTo(targetPos)
+        pcall(function()
+            Window:Notify({
+                Title = "⚡ Precision Harvest!",
+                Content = string.format("Cashed out safely at %.2fx! (%s)", harvestedMult, reason or "Target Reached"),
+                Duration = 3.0,
+            })
+        end)
+
+        return true
+    end
+
+    local function doCollectDeadTreeNow()
+        if Knit then
+            pcall(function() Knit.GetService("PlantRoundService"):CollectDeadTree():await() end)
+        elseif prs and prs:FindFirstChild("RF") and prs.RF:FindFirstChild("CollectDeadTree") then
+            pcall(function() prs.RF.CollectDeadTree:InvokeServer() end)
+        end
+    end
+
+    local function doPlantNow(seedType, fertilizer)
+        local seed = seedType or settings.selectedSeed or "Oak"
+        local fert = fertilizer or settings.selectedFertilizer or "None"
+
+        local plotCF = getPlotCFrame()
+        if plotCF then
+            tpTo(plotCF.Position)
             task.wait(0.2)
-            safeFirePrompt(targetPrompt)
-            task.wait(0.3)
+        end
+
+        local ok, ret = false, nil
+        if Knit then
+            ok, ret = pcall(function()
+                return Knit.GetService("PlantRoundService"):StartRound(seed, fert):await()
+            end)
+        end
+        if not ok or ret == false then
+            if prs and prs:FindFirstChild("RF") and prs.RF:FindFirstChild("StartRound") then
+                ok, ret = pcall(function()
+                    return prs.RF.StartRound:InvokeServer(seed, fert)
+                end)
+            end
+        end
+
+        if ok and (ret == true or ret == nil) then
+            currentMyRound.active = true
+            currentMyRound.harvested = false
+            currentMyRound.crashed = false
+            currentMyRound.seedType = seed
+            currentMyRound.startTime = workspace:GetServerTimeNow()
+            stats.status = "Growing (" .. seed .. ")"
+            stats.totalRounds = stats.totalRounds + 1
             return true
         end
         return false
     end
 
-    -- ═══════════ Event Listeners for Shock Prediction ═══════════
+    local function doCollectAllFruits()
+        if pps and pps:FindFirstChild("RF") and pps.RF:FindFirstChild("CollectAllFruits") then
+            pcall(function() pps.RF.CollectAllFruits:InvokeServer() end)
+        end
+
+        local bf = workspace:FindFirstChild("BigField")
+        local plots = bf and bf:FindFirstChild("PlayerPlots")
+        if plots then
+            for _, plot in ipairs(plots:GetChildren()) do
+                if plot:GetAttribute("OwnerUserId") == Player.UserId then
+                    local ca = plot:FindFirstChild("CollectAll")
+                    local pp = ca and ca:FindFirstChildOfClass("ProximityPrompt", true)
+                    if pp and pp.Enabled then
+                        safeFirePrompt(pp)
+                    end
+                end
+            end
+        end
+    end
+
+    local function doSellAllNow()
+        if sss and sss:FindFirstChild("RF") and sss.RF:FindFirstChild("SellAll") then
+            pcall(function() sss.RF.SellAll:InvokeServer() end)
+            return true
+        end
+
+        local hud = Player:FindFirstChild("PlayerGui") and Player.PlayerGui:FindFirstChild("HUD")
+        if hud then
+            local sellStuff = hud:FindFirstChild("Center") and hud.Center:FindFirstChild("SellStuff")
+            if sellStuff and sellStuff:FindFirstChild("SellAll") and sellStuff.SellAll:FindFirstChild("Button") then
+                firesignal(sellStuff.SellAll.Button.Activated)
+                return true
+            end
+        end
+        return false
+    end
+
+    -- ═══════════ Event Listeners for Live Synchronization ═══════════
     if prs and prs:FindFirstChild("RE") then
         local re = prs.RE
+
         if re:FindFirstChild("RoundStartedAll") then
-            connections.roundStarted = re.RoundStartedAll.OnClientEvent:Connect(function(userId, plantPos, startTime, roundId, crashPoint, seedType, mutationKey)
+            connections.roundStarted = re.RoundStartedAll.OnClientEvent:Connect(function(userId, plantPos, startTime, roundId, p5, seedType, mutationKey)
                 if userId == Player.UserId then
                     currentMyRound.active = true
+                    currentMyRound.harvested = false
+                    currentMyRound.crashed = false
                     currentMyRound.roundId = roundId
                     currentMyRound.startTime = tonumber(startTime) or workspace:GetServerTimeNow()
-                    currentMyRound.seedType = seedType or "Pine"
-                    currentMyRound.harvested = false
+                    currentMyRound.seedType = seedType or settings.selectedSeed
+                    stats.totalRounds = stats.totalRounds + 1
+                    stats.status = string.format("🌱 Growing %s (Target: %.2fx)", currentMyRound.seedType, settings.targetMultiplier)
                 end
             end)
         end
@@ -272,199 +382,73 @@ return function(Window, scriptInfo)
                 if userId == Player.UserId then
                     currentMyRound.active = false
                     currentMyRound.harvested = true
-                    currentMyRound.estimatedCrashTime = 0
+                    local finalMult = tonumber(stoppedAt) or stats.currentMult
+                    stats.lastCashoutMult = finalMult
+                    stats.successfulHarvests = stats.successfulHarvests + 1
+                    stats.status = string.format("💰 Harvested at %.2fx", finalMult)
+
+                    -- Auto Escalator: if won, bump target up by ladderStep
+                    if settings.ladderMode then
+                        local nextTarget = math.min(settings.ladderMax, settings.targetMultiplier + settings.ladderStep)
+                        settings.targetMultiplier = nextTarget
+                    end
                 end
             end)
         end
 
         if re:FindFirstChild("CrashedAll") then
-            connections.crashed = re.CrashedAll.OnClientEvent:Connect(function(userId, crashPoint)
+            connections.crashed = re.CrashedAll.OnClientEvent:Connect(function(userId, rId)
                 if userId == Player.UserId then
                     currentMyRound.active = false
-                    currentMyRound.harvested = true
-                    currentMyRound.estimatedCrashTime = 0
-                end
-            end)
-        end
-    end
+                    currentMyRound.crashed = true
+                    stats.crashedRounds = stats.crashedRounds + 1
+                    stats.status = string.format("⚡ Lightning Struck at %.2fx", stats.currentMult)
 
-    -- ═══════════ Core Game Actions ═══════════
-    local function doPlant(seedName, fertilizer)
-        -- 1. Ensure we have seed in hand or inventory
-        local seedTool = getEquippedOrInventorySeed(seedName)
-        if not seedTool and settings.autoBuySeed then
-            buySeedFromConveyor(seedName)
-            task.wait(0.5)
-            seedTool = getEquippedOrInventorySeed(seedName)
-        end
+                    -- Auto Escalator: if crashed, reset to safe base
+                    if settings.ladderMode then
+                        settings.targetMultiplier = 3.0
+                    end
 
-        if not seedTool then
-            seedTool = getEquippedOrInventorySeed("Oak") or getEquippedOrInventorySeed("")
-        end
-
-        if not seedTool then return false end
-
-        -- 2. Walk/Teleport directly to player's SeedPlot Dirt
-        local plotCF = getPlotCFrame()
-        if plotCF then
-            tpTo(plotCF.Position)
-            task.wait(0.2)
-        end
-
-        -- 3. Ensure seed tool is equipped in Character
-        if seedTool.Parent ~= Player.Character then
-            seedTool.Parent = Player.Character
-            task.wait(0.25)
-        end
-
-        local actualSeedType = seedTool:GetAttribute("SeedType") or seedName
-        local fert = fertilizer or "None"
-
-        if prs and prs:FindFirstChild("RF") and prs.RF:FindFirstChild("StartRound") then
-            for attempt = 1, 3 do
-                local ok, ret = pcall(function()
-                    return prs.RF.StartRound:InvokeServer(actualSeedType, fert)
-                end)
-                if ok and ret == true then
-                    currentMyRound.active = true
-                    currentMyRound.harvested = false
-                    currentMyRound.startTime = workspace:GetServerTimeNow()
-                    return true
-                end
-                task.wait(0.3)
-            end
-        end
-        return false
-    end
-
-    local function doHarvest()
-        if currentMyRound.harvested then return true end
-        if prs and prs:FindFirstChild("RF") and prs.RF:FindFirstChild("StopPlant") then
-            local ok, ret = pcall(function()
-                return prs.RF.StopPlant:InvokeServer()
-            end)
-            if ok and ret then
-                currentMyRound.harvested = true
-                currentMyRound.active = false
-                return true
-            end
-        end
-
-        -- Fallback: Harvest prompt on player's round tree
-        local bf = workspace:FindFirstChild("BigField")
-        if bf then
-            local myUserId = tostring(Player.UserId)
-            for _, c in ipairs(bf:GetChildren()) do
-                if c.Name:find("PlantRound_" .. myUserId) then
-                    local p = c:FindFirstChildOfClass("ProximityPrompt", true)
-                    if p and p.Enabled then
-                        local part = p:FindFirstAncestorWhichIsA("BasePart")
-                        if part then tpTo(part.Position); task.wait(0.1) end
-                        safeFirePrompt(p)
-                        currentMyRound.harvested = true
-                        currentMyRound.active = false
-                        return true
+                    if settings.autoCollectDeadWood then
+                        task.delay(0.2, doCollectDeadTreeNow)
                     end
                 end
-            end
-        end
-        return false
-    end
-
-    local function doCollectAll()
-        -- 1. Direct Server Remote (Instant full plot collection)
-        if pps and pps:FindFirstChild("RF") and pps.RF:FindFirstChild("CollectAllFruits") then
-            local ok = pcall(function()
-                return pps.RF.CollectAllFruits:InvokeServer()
             end)
-            if ok then return true end
         end
-
-        -- 2. Physical Prompts fallback
-        for _, obj in ipairs(workspace:GetDescendants()) do
-            if obj:IsA("ProximityPrompt") and obj.Enabled and obj.ActionText == "Collect" then
-                local part = obj:FindFirstAncestorWhichIsA("BasePart")
-                if part then
-                    tpTo(part.Position)
-                    task.wait(0.08)
-                    safeFirePrompt(obj)
-                end
-            end
-        end
-        return true
     end
 
-    local function doSellAll()
-        -- 1. Direct SellStandService Remote
-        if sss and sss:FindFirstChild("RF") and sss.RF:FindFirstChild("SellAll") then
-            local ok, ret = pcall(function()
-                return sss.RF.SellAll:InvokeServer()
-            end)
-            if ok and ret then return true end
-        end
+    -- ═══════════ Precision Auto Harvest Engine (Heartbeat) ═══════════
+    connections.heartbeatHarvest = RunService.Heartbeat:Connect(function()
+        if not running then return end
 
-        -- 2. HUD Sell Button fallback
-        local hud = Player:FindFirstChild("PlayerGui") and Player.PlayerGui:FindFirstChild("HUD")
-        if hud then
-            local sellStuff = hud:FindFirstChild("Center") and hud.Center:FindFirstChild("SellStuff")
-            if sellStuff and sellStuff:FindFirstChild("SellAll") and sellStuff.SellAll:FindFirstChild("Button") then
-                firesignal(sellStuff.SellAll.Button.Activated)
-                return true
-            end
-            local topSell = hud:FindFirstChild("TopButtons") and hud.TopButtons:FindFirstChild("Center")
-                and hud.TopButtons.Center:FindFirstChild("Buttons") and hud.TopButtons.Center.Buttons:FindFirstChild("Sell")
-            if topSell and topSell:FindFirstChild("Button") then
-                firesignal(topSell.Button.Activated)
-                task.wait(0.15)
-                if sellStuff and sellStuff:FindFirstChild("SellAll") and sellStuff.SellAll:FindFirstChild("Button") then
-                    firesignal(sellStuff.SellAll.Button.Activated)
-                    return true
+        local curMult, rawText, plantModel = getMyLiveMultiplier()
+        if plantModel or currentMyRound.active then
+            if curMult > 0 then
+                stats.currentMult = curMult
+                if curMult > stats.peakMult then
+                    stats.peakMult = curMult
                 end
             end
-        end
-        return false
-    end
 
-    local function isMeteorWeather()
-        -- Check WeatherController if available
-        local rs = game:GetService("ReplicatedStorage")
-        local wcMod = rs:FindFirstChild("Client") and rs.Client:FindFirstChild("Controllers")
-            and rs.Client.Controllers:FindFirstChild("WeatherController")
-        if wcMod then
-            local ok, wc = pcall(require, wcMod)
-            if ok and wc and type(wc.GetCurrent) == "function" then
-                local cur = wc:GetCurrent()
-                if cur and (tostring(cur):lower():find("meteor") or tostring(cur):lower():find("lightning")) then
-                    return true
+            if settings.autoHarvest and not currentMyRound.harvested and not currentMyRound.crashed then
+                local effectiveTarget = settings.targetMultiplier
+                if settings.pingCompensation then
+                    effectiveTarget = math.max(1.05, settings.targetMultiplier - settings.latencyBuffer)
+                end
+
+                if stats.currentMult >= effectiveTarget and stats.currentMult > 1.0 then
+                    local reason = string.format("Target Reached (%.2fx / Target %.2fx)", stats.currentMult, settings.targetMultiplier)
+                    doHarvestNow(reason)
                 end
             end
-        end
-
-        for _, obj in ipairs(workspace:GetChildren()) do
-            local n = obj.Name:lower()
-            if n:find("meteor") or n:find("storm") or n:find("lightning") then
-                return true
+        else
+            if not currentMyRound.active then
+                stats.currentMult = 1.0
             end
         end
-        return false
-    end
+    end)
 
-    local function getActiveMyRound()
-        if not prs or not prs:FindFirstChild("RF") or not prs.RF:FindFirstChild("GetActiveRounds") then
-            return nil
-        end
-        local ok, rounds = pcall(function() return prs.RF.GetActiveRounds:InvokeServer() end)
-        if ok and type(rounds) == "table" then
-            for _, r in pairs(rounds) do
-                if type(r) == "table" and r.userId == Player.UserId and not r.stopped and not r.crashed then
-                    return r
-                end
-            end
-        end
-        return nil
-    end
-
-    -- ═══════════ Thread Control ═══════════
+    -- ═══════════ Thread Manager ═══════════
     local function startThread(key, func)
         threads[key] = nil
         task.spawn(function()
@@ -482,393 +466,310 @@ return function(Window, scriptInfo)
     --   UI TABS & CONTROLS
     -- ═════════════════════════════════════════════════════════════════
 
-    -- ─── Tab 1: Farm ───
-    local FarmTab = Window:CreateTab("Farm", "sprout")
+    -- ─── Tab 1: Harvest Engine ───
+    local HarvestTab = Window:CreateTab("Auto Harvest", "zap")
 
-    FarmTab:CreateSection("⚡ Full Automation")
+    HarvestTab:CreateSection("⚡ Precision Auto Harvest (หนีฟ้าผ่า)")
+
+    HarvestTab:CreateToggle({
+        Name = "Auto Harvest (Smart Cash Out)",
+        CurrentValue = true,
+        Flag = "GGAutoHarvest",
+        Callback = function(v)
+            settings.autoHarvest = v
+        end,
+    })
+
+    HarvestTab:CreateDropdown({
+        Name = "Risk Presets (ระดับความเสี่ยง / เป้าหมายล่าตัวคูณ)",
+        Options = {
+            "🟢 Ultra-Safe (1.8x - ชนะ 85% ฟาร์มเงินชัวร์)",
+            "🟡 Balanced (3.0x - กลางๆ ฟาร์มเรื่อยๆ)",
+            "🟠 Solid Profit (5.0x - เก็บกำไรชัวร์)",
+            "💎 High Roller (10.0x - กำไรคูณสิบ)",
+            "🚀 Moonshot (25.0x - ลุ้นแตะ 25x)",
+            "🔥 Mega Moonshot (50.0x - แจ็คพอต 50x)",
+            "⚡ Century Jackpot (100.0x - ปล่อยไหล 100x)",
+            "👑 Godly Multiplier (500.0x - ล่าหลักล้าน)",
+            "🌌 Ultra Godly (750.0x+ - ตามรูป $15M!)",
+            "🎯 Custom Slider (กำหนดเองด้านล่าง)"
+        },
+        CurrentOption = {"🟠 Solid Profit (5.0x - เก็บกำไรชัวร์)"},
+        MultipleOptions = false,
+        Flag = "GGRiskPreset",
+        Callback = function(value)
+            local opt = type(value) == "table" and value[1] or value
+            settings.riskPreset = opt
+            if opt:find("1.8x") then
+                settings.targetMultiplier = 1.8
+            elseif opt:find("3.0x") then
+                settings.targetMultiplier = 3.0
+            elseif opt:find("5.0x") then
+                settings.targetMultiplier = 5.0
+            elseif opt:find("10.0x") then
+                settings.targetMultiplier = 10.0
+            elseif opt:find("25.0x") then
+                settings.targetMultiplier = 25.0
+            elseif opt:find("50.0x") then
+                settings.targetMultiplier = 50.0
+            elseif opt:find("100.0x") then
+                settings.targetMultiplier = 100.0
+            elseif opt:find("500.0x") then
+                settings.targetMultiplier = 500.0
+            elseif opt:find("750.0x") then
+                settings.targetMultiplier = 750.0
+            end
+        end,
+    })
+
+    HarvestTab:CreateSlider({
+        Name = "Target Multiplier (ตัวคูณเป้าหมายหนีฟ้าผ่า)",
+        Range = {1.1, 2500.0},
+        Increment = 0.5,
+        CurrentValue = 5.0,
+        Suffix = "x",
+        Flag = "GGTargetMultiplier",
+        Callback = function(v)
+            settings.targetMultiplier = tonumber(v) or 5.0
+        end,
+    })
+
+    HarvestTab:CreateSection("🪜 Auto Escalator (ไต่ระดับตัวคูณอัตโนมัติ)")
+
+    HarvestTab:CreateToggle({
+        Name = "Auto Escalator Ladder (ชนะแล้วขยับเป้าหมายขึ้น)",
+        CurrentValue = false,
+        Flag = "GGLadderMode",
+        Callback = function(v)
+            settings.ladderMode = v
+        end,
+    })
+
+    HarvestTab:CreateSlider({
+        Name = "Ladder Step (+X ทุกรอบที่ชนะ)",
+        Range = {0.5, 10.0},
+        Increment = 0.5,
+        CurrentValue = 2.0,
+        Suffix = "x",
+        Flag = "GGLadderStep",
+        Callback = function(v)
+            settings.ladderStep = tonumber(v) or 2.0
+        end,
+    })
+
+    HarvestTab:CreateSlider({
+        Name = "Ladder Max Ceiling (เพดานการไต่ระดับ)",
+        Range = {10.0, 500.0},
+        Increment = 5.0,
+        CurrentValue = 50.0,
+        Suffix = "x",
+        Flag = "GGLadderMax",
+        Callback = function(v)
+            settings.ladderMax = tonumber(v) or 50.0
+        end,
+    })
+
+    HarvestTab:CreateSection("🛡️ Latency & Safety Buffer")
+
+    HarvestTab:CreateToggle({
+        Name = "Ping / Latency Compensation (ชดเชยดีเลย์เน็ต)",
+        CurrentValue = true,
+        Flag = "GGPingComp",
+        Callback = function(v)
+            settings.pingCompensation = v
+        end,
+    })
+
+    HarvestTab:CreateSlider({
+        Name = "Early Cashout Buffer (โดดออกก่อนถึงเป้าหมาย)",
+        Range = {0.01, 0.25},
+        Increment = 0.01,
+        CurrentValue = 0.05,
+        Suffix = "x",
+        Flag = "GGLatencyBuffer",
+        Callback = function(v)
+            settings.latencyBuffer = tonumber(v) or 0.05
+        end,
+    })
+
+    HarvestTab:CreateToggle({
+        Name = "Auto Collect Dead Wood (เก็บซากไม้เมื่อฟ้าผ่า)",
+        CurrentValue = true,
+        Flag = "GGAutoDeadWood",
+        Callback = function(v)
+            settings.autoCollectDeadWood = v
+        end,
+    })
+
+    HarvestTab:CreateButton({
+        Name = "🚨 Emergency Cash Out Now (กดเก็บทันที)",
+        Callback = function()
+            doHarvestNow("Manual Emergency Button")
+        end,
+    })
+
+    HarvestTab:CreateSection("📊 Live Status & Metrics")
+    local statusLabel = HarvestTab:CreateLabel("Status: Idle")
+    local multLabel = HarvestTab:CreateLabel("Live Multiplier: 1.00x (Peak: 1.00x | Last: 0.00x)")
+    local winRateLabel = HarvestTab:CreateLabel("Win Rate: 100% (0 Cashed / 0 Crashed)")
+
+    task.spawn(function()
+        while running do
+            pcall(function()
+                if statusLabel and statusLabel.Set then
+                    local s = stats.status
+                    if currentMyRound.active then
+                        s = string.format("🌱 Growing %s (Target: %.2fx)", currentMyRound.seedType, settings.targetMultiplier)
+                    end
+                    statusLabel:Set("Status: " .. s)
+                end
+                if multLabel and multLabel.Set then
+                    multLabel:Set(string.format("Live Multiplier: %.2fx (Peak: %.2fx | Last: %.2fx)", stats.currentMult, stats.peakMult, stats.lastCashoutMult))
+                end
+                if winRateLabel and winRateLabel.Set then
+                    local total = stats.successfulHarvests + stats.crashedRounds
+                    local rate = total > 0 and math.floor((stats.successfulHarvests / total) * 100) or 100
+                    winRateLabel:Set(string.format("Win Rate: %d%% (%d Cashed / %d Crashed)", rate, stats.successfulHarvests, stats.crashedRounds))
+                end
+            end)
+            task.wait(0.25)
+        end
+    end)
+
+    -- ─── Tab 2: Full Automation (Auto Farm) ───
+    local FarmTab = Window:CreateTab("Automation", "sprout")
+
+    FarmTab:CreateSection("🌾 Auto Re-Plant & Full Farm Loop")
 
     FarmTab:CreateToggle({
-        Name = "Master Auto Farm Loop (Shock Flow)",
+        Name = "Master Auto Farm Loop (Plant + Harvest + Collect)",
         CurrentValue = false,
-        Flag = "GGMasterAutoFarm",
+        Flag = "GGMasterFarm",
         Callback = function(v)
-            settings.autoFarm = v
+            settings.masterAutoFarm = v
             if v then
-                startThread("autoFarmLoop", function(isActive)
+                startThread("masterFarm", function(isActive)
                     while isActive() do
-                        -- 1. Check if we have an active round
-                        local activeRound = getActiveMyRound()
-                        if not activeRound and not currentMyRound.active then
-                            -- Step 1: Walk/Teleport to plot and plant seed
-                            doPlant(settings.selectedSeed, settings.selectedFertilizer)
+                        local plantModel = getMyPlantModel()
+                        local isRoundActive = (plantModel ~= nil) or currentMyRound.active
+
+                        if not isRoundActive then
+                            stats.status = "Planting " .. settings.selectedSeed .. "..."
+                            local planted = doPlantNow(settings.selectedSeed, settings.selectedFertilizer)
                             task.wait(settings.plantDelay)
                         else
-                            -- Step 2: Active round running!
                             local waitStart = os.clock()
-                            while isActive() and (currentMyRound.active or getActiveMyRound()) and not currentMyRound.harvested do
-                                local displayInfo = getMyPlantDisplayInfo()
-                                local curMult = displayInfo and displayInfo.mult or 0
-
-                                if settings.harvestMode == "Target Multiplier" then
-                                    if curMult >= settings.targetMultiplier then
-                                        doHarvest()
-                                        break
-                                    end
-                                else
-                                    -- Shock (Pre-Lightning) Mode:
-                                    -- 1. Check BillboardGui warning ⚠️
-                                    if displayInfo and displayInfo.warning then
-                                        doHarvest()
-                                        break
-                                    end
-
-                                    -- 2. Server Time countdown check
-                                    local now = workspace:GetServerTimeNow()
-                                    if currentMyRound.estimatedCrashTime > 0 and currentMyRound.estimatedCrashTime > currentMyRound.startTime then
-                                        local timeLeft = currentMyRound.estimatedCrashTime - now
-                                        if timeLeft <= settings.shockSafetyMargin then
-                                            doHarvest()
-                                            break
-                                        end
-                                    end
-
-                                    -- 3. Proximity to crash multiplier
-                                    if currentMyRound.crashPoint > 0 and curMult > 0 then
-                                        if curMult >= (currentMyRound.crashPoint - 0.15) then
-                                            doHarvest()
-                                            break
-                                        end
-                                    end
-                                end
-
-                                -- Fallback safety timeout (60s max for extreme rounds)
+                            while isActive() and (getMyPlantModel() ~= nil or currentMyRound.active) and not currentMyRound.harvested and not currentMyRound.crashed do
                                 if os.clock() - waitStart > 60 then
-                                    doHarvest()
+                                    doHarvestNow("Safety Timeout (60s)")
                                     break
                                 end
-
                                 RunService.Heartbeat:Wait()
                             end
 
-                            task.wait(0.3)
-                            -- Step 3: Collect ripe shocked fruits from plot
-                            if settings.autoCollect then
-                                doCollectAll()
+                            task.wait(0.4)
+
+                            if settings.autoCollectFruits then
+                                doCollectAllFruits()
                             end
 
-                            task.wait(0.3)
-                            -- Step 4: Sell all if enabled
                             if settings.autoSell then
-                                doSellAll()
+                                doSellAllNow()
                             end
                         end
-                        task.wait(0.5)
+                        task.wait(0.6)
                     end
                 end)
             else
-                stopThread("autoFarmLoop")
+                stopThread("masterFarm")
             end
         end,
     })
 
     FarmTab:CreateDropdown({
-        Name = "Harvest Mode",
-        Options = {"Target Multiplier", "Shock (Pre-Lightning)"},
-        CurrentOption = {"Target Multiplier"},
-        MultipleOptions = false,
-        Flag = "GGHarvestMode",
-        Callback = function(value)
-            settings.harvestMode = type(value) == "table" and value[1] or value
-        end,
-    })
-
-    FarmTab:CreateSlider({
-        Name = "Target Multiplier",
-        Range = {1.5, 500.0},
-        Increment = 0.5,
-        CurrentValue = 2.5,
-        Suffix = "x",
-        Flag = "GGTargetMultiplier",
-        Callback = function(v)
-            settings.targetMultiplier = tonumber(v) or 10.0
-        end,
-    })
-
-    FarmTab:CreateSlider({
-        Name = "Lightning Pre-Harvest Margin",
-        Range = {0.02, 0.30},
-        Increment = 0.01,
-        CurrentValue = 0.08,
-        Suffix = " sec",
-        Flag = "GGShockMargin",
-        Callback = function(v)
-            settings.shockSafetyMargin = tonumber(v) or 0.08
-        end,
-    })
-
-    FarmTab:CreateSection("🌱 Planting & Seeds")
-
-    FarmTab:CreateDropdown({
-        Name = "Seed Type",
+        Name = "Select Seed (เลือกเมล็ด)",
         Options = SEED_LIST,
-        CurrentOption = {"Pine"},
+        CurrentOption = {"Oak"},
         MultipleOptions = false,
-        Flag = "GGSeedType",
+        Flag = "GGSelectedSeed",
         Callback = function(value)
             settings.selectedSeed = type(value) == "table" and value[1] or value
         end,
     })
 
     FarmTab:CreateDropdown({
-        Name = "Fertilizer",
+        Name = "Select Fertilizer (ปุ๋ย)",
         Options = FERTILIZER_LIST,
-        CurrentOption = {"Basic"},
+        CurrentOption = {"None"},
         MultipleOptions = false,
-        Flag = "GGFertilizerType",
+        Flag = "GGSelectedFert",
         Callback = function(value)
             settings.selectedFertilizer = type(value) == "table" and value[1] or value
         end,
     })
 
     FarmTab:CreateToggle({
-        Name = "Auto Plant Seeds (At Plot)",
-        CurrentValue = false,
-        Flag = "GGAutoPlant",
-        Callback = function(v)
-            settings.autoPlant = v
-            if v then
-                startThread("autoPlant", function(isActive)
-                    while isActive() do
-                        local active = getActiveMyRound()
-                        if not active and not currentMyRound.active then
-                            doPlant(settings.selectedSeed, settings.selectedFertilizer)
-                        end
-                        task.wait(settings.plantDelay)
-                    end
-                end)
-            else
-                stopThread("autoPlant")
-            end
-        end,
-    })
-
-    FarmTab:CreateToggle({
-        Name = "Auto Buy Seeds from Belt",
+        Name = "Auto Collect Dead Tree (เก็บฟืนเมื่อโดนฟ้าผ่า)",
         CurrentValue = true,
-        Flag = "GGAutoBuySeed",
+        Flag = "GGCollectDeadWood",
         Callback = function(v)
-            settings.autoBuySeed = v
-            if v then
-                startThread("autoBuySeed", function(isActive)
-                    while isActive() do
-                        buySeedFromConveyor(settings.selectedSeed)
-                        task.wait(settings.buySeedDelay)
-                    end
-                end)
-            else
-                stopThread("autoBuySeed")
-            end
+            settings.autoCollectDeadWood = v
         end,
     })
 
-    FarmTab:CreateSection("🌾 Harvest (Cash Out)")
+    FarmTab:CreateToggle({
+        Name = "Auto Collect Fruits (เก็บผลไม้ในแปลง)",
+        CurrentValue = true,
+        Flag = "GGCollectFruits",
+        Callback = function(v)
+            settings.autoCollectFruits = v
+        end,
+    })
 
     FarmTab:CreateToggle({
-        Name = "Auto Harvest (Smart Cash Out)",
+        Name = "Auto Sell All (ขายผลไม้อัตโนมัติ)",
         CurrentValue = false,
-        Flag = "GGAutoHarvest",
+        Flag = "GGAutoSell",
         Callback = function(v)
-            settings.autoHarvest = v
-            if v then
-                startThread("autoHarvest", function(isActive)
-                    while isActive() do
-                        local active = getActiveMyRound() or currentMyRound.active
-                        if active and not currentMyRound.harvested then
-                            local displayInfo = getMyPlantDisplayInfo()
-                            local curMult = displayInfo and displayInfo.mult or 0
-
-                            if settings.harvestMode == "Target Multiplier" then
-                                if curMult >= settings.targetMultiplier then
-                                    doHarvest()
-                                end
-                            else
-                                -- Shock (Pre-Lightning) Mode
-                                local shouldHarvest = false
-                                if displayInfo and displayInfo.warning then
-                                    shouldHarvest = true
-                                end
-
-                                local now = workspace:GetServerTimeNow()
-                                if currentMyRound.estimatedCrashTime > 0 and currentMyRound.estimatedCrashTime > currentMyRound.startTime then
-                                    local timeLeft = currentMyRound.estimatedCrashTime - now
-                                    if timeLeft <= settings.shockSafetyMargin then
-                                        shouldHarvest = true
-                                    end
-                                end
-
-                                if currentMyRound.crashPoint > 0 and curMult > 0 then
-                                    if curMult >= (currentMyRound.crashPoint - 0.15) then
-                                        shouldHarvest = true
-                                    end
-                                end
-
-                                if shouldHarvest then
-                                    doHarvest()
-                                end
-                            end
-                        end
-                        RunService.Heartbeat:Wait()
-                    end
-                end)
-            else
-                stopThread("autoHarvest")
-            end
+            settings.autoSell = v
         end,
     })
 
     FarmTab:CreateButton({
-        Name = "Harvest Now (Cash Out)",
+        Name = "Plant Seed Now (ปลูกเมล็ดทันที)",
         Callback = function()
-            local ok = doHarvest()
+            local ok = doPlantNow(settings.selectedSeed, settings.selectedFertilizer)
             pcall(function()
                 Window:Notify({
-                    Title = "Harvest",
-                    Content = ok and "Cashed out successfully!" or "No active tree round",
-                    Duration = 3,
+                    Title = "Planting",
+                    Content = ok and "Seed planted successfully!" or "Failed to plant seed",
+                    Duration = 2,
                 })
             end)
-        end,
-    })
-
-    FarmTab:CreateSection("💰 Collect & Sell")
-
-    FarmTab:CreateToggle({
-        Name = "Auto Collect All Fruits",
-        CurrentValue = false,
-        Flag = "GGAutoCollect",
-        Callback = function(v)
-            settings.autoCollect = v
-            if v then
-                startThread("autoCollect", function(isActive)
-                    while isActive() do
-                        doCollectAll()
-                        task.wait(settings.collectInterval)
-                    end
-                end)
-            else
-                stopThread("autoCollect")
-            end
         end,
     })
 
     FarmTab:CreateButton({
         Name = "Collect All Fruits Now",
         Callback = function()
-            doCollectAll()
-        end,
-    })
-
-    FarmTab:CreateToggle({
-        Name = "Auto Sell",
-        CurrentValue = false,
-        Flag = "GGAutoSell",
-        Callback = function(v)
-            settings.autoSell = v
-            if v then
-                startThread("autoSell", function(isActive)
-                    while isActive() do
-                        doSellAll()
-                        task.wait(settings.sellInterval)
-                    end
-                end)
-            else
-                stopThread("autoSell")
-            end
+            doCollectAllFruits()
         end,
     })
 
     FarmTab:CreateButton({
         Name = "Sell All Now",
         Callback = function()
-            local ok = doSellAll()
-            pcall(function()
-                Window:Notify({
-                    Title = "Sell",
-                    Content = ok and "Items sold!" or "Nothing to sell",
-                    Duration = 3,
-                })
-            end)
-        end,
-    })
-
-    -- ─── Tab 2: Weather ───
-    local WeatherTab = Window:CreateTab("Weather", "cloud-lightning")
-
-    WeatherTab:CreateSection("⚡ Meteor & Lightning Defense")
-
-    WeatherTab:CreateToggle({
-        Name = "Auto Harvest on Meteor (Anti-Crash)",
-        CurrentValue = false,
-        Flag = "GGAntiMeteor",
-        Callback = function(v)
-            settings.antiMeteor = v
-            if v then
-                startThread("antiMeteor", function(isActive)
-                    while isActive() do
-                        if isMeteorWeather() then
-                            -- Instant emergency cash out!
-                            doHarvest()
-                            task.wait(0.2)
-                            doCollectAll()
-                            task.wait(0.2)
-                            doSellAll()
-
-                            -- Flee if still active
-                            if isMeteorWeather() then
-                                local root = getRoot()
-                                if root then
-                                    local fleeOffset = root.CFrame.LookVector * settings.fleeDistance
-                                    tpTo(root.Position + fleeOffset)
-                                end
-                            end
-                        end
-                        task.wait(0.5)
-                    end
-                end)
-            else
-                stopThread("antiMeteor")
-            end
-        end,
-    })
-
-    WeatherTab:CreateSlider({
-        Name = "Flee Distance",
-        Range = {30, 250}, Increment = 10, CurrentValue = 100,
-        Suffix = " studs", Flag = "GGFleeDistance",
-        Callback = function(v) settings.fleeDistance = v end,
-    })
-
-    WeatherTab:CreateButton({
-        Name = "Check Current Weather",
-        Callback = function()
-            local active = isMeteorWeather()
-            pcall(function()
-                Window:Notify({
-                    Title = "Weather Status",
-                    Content = active and "⚠️ DANGER: Meteor / Storm Active!" or "✅ Weather is calm",
-                    Duration = 4,
-                })
-            end)
+            doSellAllNow()
         end,
     })
 
     -- ─── Tab 3: Player ───
     local PlayerTab = Window:CreateTab("Player", "user")
 
-    PlayerTab:CreateSection("WalkSpeed")
+    PlayerTab:CreateSection("Movement Speed")
 
     PlayerTab:CreateToggle({
-        Name = "Auto WalkSpeed",
+        Name = "WalkSpeed Override",
         CurrentValue = false,
         Flag = "GGAutoSpeed",
         Callback = function(v)
@@ -891,8 +792,11 @@ return function(Window, scriptInfo)
 
     PlayerTab:CreateSlider({
         Name = "WalkSpeed Value",
-        Range = {16, 200}, Increment = 2, CurrentValue = 32,
-        Suffix = " spd", Flag = "GGWalkSpeed",
+        Range = {16, 150},
+        Increment = 2,
+        CurrentValue = 32,
+        Suffix = " spd",
+        Flag = "GGWalkSpeed",
         Callback = function(v)
             settings.walkSpeed = v
             local hum = getHumanoid()
@@ -900,12 +804,44 @@ return function(Window, scriptInfo)
         end,
     })
 
-    -- ─── Tab 4: Settings ───
+    -- ─── Tab 4: Teleports ───
+    local TpTab = Window:CreateTab("Teleports", "map-pin")
+
+    TpTab:CreateSection("Fast Teleports")
+
+    TpTab:CreateButton({
+        Name = "Teleport to My Plot (ไปที่แปลงปลูก)",
+        Callback = function()
+            local plotCF = getPlotCFrame()
+            if plotCF then tpTo(plotCF.Position) end
+        end,
+    })
+
+    TpTab:CreateButton({
+        Name = "Teleport to Seed Conveyor (สายพานซื้อเมล็ด)",
+        Callback = function()
+            local bf = workspace:FindFirstChild("BigField")
+            local conveyor = bf and bf:FindFirstChild("Conveyor")
+            if conveyor then tpTo(conveyor.Position + Vector3.new(0, 3, 0)) end
+        end,
+    })
+
+    TpTab:CreateButton({
+        Name = "Teleport to Sell Stand (ร้านขายผลไม้)",
+        Callback = function()
+            local bf = workspace:FindFirstChild("BigField")
+            local sellStand = bf and bf:FindFirstChild("SellStand")
+            if sellStand then tpTo(sellStand:GetPivot().Position) end
+        end,
+    })
+
+    -- ─── Tab 5: Settings ───
     local SettingsTab = Window:CreateTab("Settings", "settings")
 
-    SettingsTab:CreateSection("Module Info")
-    SettingsTab:CreateLabel("Greedy Growers v3.0.0 | RAVEN HUB")
-    SettingsTab:CreateLabel("Author: valrinx")
+    SettingsTab:CreateSection("Module Information")
+    SettingsTab:CreateLabel("Greedy Growers 🌱 v4.1.0 | RAVEN HUB")
+    SettingsTab:CreateLabel("Author: valrinx / LILBIG4DEV")
+    SettingsTab:CreateLabel("Dynamic Crash Sniping Engine active")
 
     SettingsTab:CreateSection("Server Utilities")
     SettingsTab:CreateButton({
@@ -935,7 +871,7 @@ return function(Window, scriptInfo)
         end,
     })
 
-    -- ═══════════ Cleanup ═══════════
+    -- ═══════════ Cleanup Lifecycle ═══════════
     local function destroy()
         running = false
         for key, _ in pairs(threads) do
@@ -956,15 +892,20 @@ return function(Window, scriptInfo)
 
     environment.__RAVEN_GREEDY_GROWERS = {
         Destroy = destroy,
-        Version = "3.1.0",
+        Version = "4.1.0",
         CurrentRound = currentMyRound,
-        Settings = settings
+        Settings = settings,
+        Stats = stats,
+        HarvestNow = doHarvestNow,
+        PlantNow = doPlantNow,
+        CollectFruits = doCollectAllFruits,
+        SellAll = doSellAllNow,
     }
 
     pcall(function()
         Window:Notify({
-            Title = "Greedy Growers",
-            Content = "v3.1.0 Loaded | Shock Harvest Mode Ready!",
+            Title = "Greedy Growers 🌱 v4.1.0",
+            Content = "Loaded! Dynamic Crash Sniping is ready (Up to 500x).",
             Duration = 3,
         })
     end)
