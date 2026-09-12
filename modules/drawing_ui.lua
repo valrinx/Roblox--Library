@@ -766,6 +766,184 @@ end
 -- ============================================================
 --   TAB & SECTION ARCHITECTURE (Sidebar Navigation)
 -- ============================================================
+-- ============================================================
+--   PROCEDURAL VECTOR ICON ENGINE (100% Drawing API, Zero Emojis)
+--   Authentic Apple macOS SF Symbols rendered in Direct3D Primitives
+-- ============================================================
+local function resolveIconType(name, icon)
+    local str = tostring(icon or ""):lower()
+    local nameStr = tostring(name or ""):lower()
+
+    if str:find("combat") or str:find("shoot") or str:find("aim") or nameStr:find("shoot") or nameStr:find("combat") then
+        return "combat"
+    elseif str:find("move") or str:find("def") or str:find("shield") or nameStr:find("def") or nameStr:find("move") then
+        return "defense"
+    elseif str:find("esp") or str:find("vis") or str:find("eye") or nameStr:find("vis") or nameStr:find("esp") then
+        return "visuals"
+    elseif str:find("tool") or str:find("safe") or str:find("lock") or nameStr:find("safe") then
+        return "safety"
+    elseif str:find("set") or str:find("pref") or str:find("gear") or nameStr:find("set") then
+        return "settings"
+    elseif str:find("over") or str:find("home") or str:find("dash") or nameStr:find("over") or nameStr:find("home") then
+        return "overview"
+    end
+    return "overview"
+end
+
+local function createVectorIcon(iconType, baseZIndex)
+    baseZIndex = baseZIndex or 5
+    local icon = {
+        type = iconType,
+        drawings = {},
+    }
+
+    local function line()
+        local l = safeDrawing("Line")
+        if l then
+            l.Thickness = 1.2
+            l.Visible = false
+            pcall(function() l.ZIndex = baseZIndex end)
+            table.insert(icon.drawings, l)
+        end
+        return l
+    end
+
+    local function circle(filled, r)
+        local c = safeDrawing("Circle")
+        if c then
+            c.Filled = (filled == true)
+            c.Radius = r or 3
+            c.Thickness = 1.2
+            c.Visible = false
+            pcall(function() c.ZIndex = baseZIndex end)
+            table.insert(icon.drawings, c)
+        end
+        return c
+    end
+
+    local function square(filled)
+        local s = safeDrawing("Square")
+        if s then
+            s.Filled = (filled == true)
+            s.Thickness = 1.2
+            s.Visible = false
+            pcall(function() s.ZIndex = baseZIndex end)
+            table.insert(icon.drawings, s)
+        end
+        return s
+    end
+
+    if iconType == "combat" then
+        -- Tactical Precision Reticle (Outer Ring + Center Dot + 4 Crosshair Ticks)
+        icon.ring = circle(false, 5)
+        icon.dot = circle(true, 1.5)
+        icon.t = line()
+        icon.b = line()
+        icon.l = line()
+        icon.r = line()
+
+    elseif iconType == "defense" then
+        -- Tactical Armor Shield (Top + 2 Sides + 2 Diagonal Bevels + Core Dot)
+        icon.top = line()
+        icon.left = line()
+        icon.right = line()
+        icon.diagL = line()
+        icon.diagR = line()
+        icon.dot = circle(true, 1.5)
+
+    elseif iconType == "visuals" then
+        -- Sensor Aperture Eye (Iris Ring + Pupil Dot + 4 Eye Arch Rays)
+        icon.iris = circle(false, 4)
+        icon.pupil = circle(true, 2)
+        icon.archT1 = line()
+        icon.archT2 = line()
+        icon.archB1 = line()
+        icon.archB2 = line()
+
+    elseif iconType == "safety" then
+        -- Security Padlock (U-Shackle + Solid Rect Body + Keyhole Dot)
+        icon.body = square(false)
+        icon.shackle = circle(false, 3.5)
+        icon.keyhole = circle(true, 1.5)
+
+    elseif iconType == "settings" then
+        -- Control Center Sliders (2 Horizontal Rails + 2 Tactile Slider Knobs)
+        icon.rail1 = line()
+        icon.knob1 = circle(true, 2)
+        icon.rail2 = line()
+        icon.knob2 = circle(true, 2)
+
+    else -- "overview" (Launchpad 2x2 App Grid)
+        icon.b1 = square(true)
+        icon.b2 = square(true)
+        icon.b3 = square(true)
+        icon.b4 = square(true)
+    end
+
+    function icon:Update(center, color, visible)
+        if not visible then
+            for _, d in ipairs(self.drawings) do
+                setObjVisible(d, false)
+            end
+            return
+        end
+
+        local cx = center.X
+        local cy = center.Y
+
+        if self.type == "combat" then
+            if self.ring then self.ring.Position = center; self.ring.Color = color; self.ring.Visible = true end
+            if self.dot then self.dot.Position = center; self.dot.Color = color; self.dot.Visible = true end
+            if self.t then self.t.From = Vector2.new(cx, cy - 7); self.t.To = Vector2.new(cx, cy - 4); self.t.Color = color; self.t.Visible = true end
+            if self.b then self.b.From = Vector2.new(cx, cy + 4); self.b.To = Vector2.new(cx, cy + 7); self.b.Color = color; self.b.Visible = true end
+            if self.l then self.l.From = Vector2.new(cx - 7, cy); self.l.To = Vector2.new(cx - 4, cy); self.l.Color = color; self.l.Visible = true end
+            if self.r then self.r.From = Vector2.new(cx + 4, cy); self.r.To = Vector2.new(cx + 7, cy); self.r.Color = color; self.r.Visible = true end
+
+        elseif self.type == "defense" then
+            if self.top then self.top.From = Vector2.new(cx - 5, cy - 5); self.top.To = Vector2.new(cx + 5, cy - 5); self.top.Color = color; self.top.Visible = true end
+            if self.left then self.left.From = Vector2.new(cx - 5, cy - 5); self.left.To = Vector2.new(cx - 5, cy); self.left.Color = color; self.left.Visible = true end
+            if self.right then self.right.From = Vector2.new(cx + 5, cy - 5); self.right.To = Vector2.new(cx + 5, cy); self.right.Color = color; self.right.Visible = true end
+            if self.diagL then self.diagL.From = Vector2.new(cx - 5, cy); self.diagL.To = Vector2.new(cx, cy + 6); self.diagL.Color = color; self.diagL.Visible = true end
+            if self.diagR then self.diagR.From = Vector2.new(cx + 5, cy); self.diagR.To = Vector2.new(cx, cy + 6); self.diagR.Color = color; self.diagR.Visible = true end
+            if self.dot then self.dot.Position = Vector2.new(cx, cy - 1); self.dot.Color = color; self.dot.Visible = true end
+
+        elseif self.type == "visuals" then
+            if self.iris then self.iris.Position = center; self.iris.Color = color; self.iris.Visible = true end
+            if self.pupil then self.pupil.Position = center; self.pupil.Color = color; self.pupil.Visible = true end
+            if self.archT1 then self.archT1.From = Vector2.new(cx - 7, cy); self.archT1.To = Vector2.new(cx, cy - 4); self.archT1.Color = color; self.archT1.Visible = true end
+            if self.archT2 then self.archT2.From = Vector2.new(cx, cy - 4); self.archT2.To = Vector2.new(cx + 7, cy); self.archT2.Color = color; self.archT2.Visible = true end
+            if self.archB1 then self.archB1.From = Vector2.new(cx - 7, cy); self.archB1.To = Vector2.new(cx, cy + 4); self.archB1.Color = color; self.archB1.Visible = true end
+            if self.archB2 then self.archB2.From = Vector2.new(cx, cy + 4); self.archB2.To = Vector2.new(cx + 7, cy); self.archB2.Color = color; self.archB2.Visible = true end
+
+        elseif self.type == "safety" then
+            if self.body then self.body.Position = Vector2.new(cx - 5, cy - 1); self.body.Size = Vector2.new(10, 7); self.body.Color = color; self.body.Visible = true end
+            if self.shackle then self.shackle.Position = Vector2.new(cx, cy - 2); self.shackle.Color = color; self.shackle.Visible = true end
+            if self.keyhole then self.keyhole.Position = Vector2.new(cx, cy + 2.5); self.keyhole.Color = color; self.keyhole.Visible = true end
+
+        elseif self.type == "settings" then
+            if self.rail1 then self.rail1.From = Vector2.new(cx - 6, cy - 3); self.rail1.To = Vector2.new(cx + 6, cy - 3); self.rail1.Color = color; self.rail1.Visible = true end
+            if self.knob1 then self.knob1.Position = Vector2.new(cx - 2, cy - 3); self.knob1.Color = color; self.knob1.Visible = true end
+            if self.rail2 then self.rail2.From = Vector2.new(cx - 6, cy + 3); self.rail2.To = Vector2.new(cx + 6, cy + 3); self.rail2.Color = color; self.rail2.Visible = true end
+            if self.knob2 then self.knob2.Position = Vector2.new(cx + 2, cy + 3); self.knob2.Color = color; self.knob2.Visible = true end
+
+        elseif self.type == "overview" then
+            local sz = Vector2.new(4, 4)
+            if self.b1 then self.b1.Position = Vector2.new(cx - 5, cy - 5); self.b1.Size = sz; self.b1.Color = color; self.b1.Visible = true end
+            if self.b2 then self.b2.Position = Vector2.new(cx + 1, cy - 5); self.b2.Size = sz; self.b2.Color = color; self.b2.Visible = true end
+            if self.b3 then self.b3.Position = Vector2.new(cx - 5, cy + 1); self.b3.Size = sz; self.b3.Color = color; self.b3.Visible = true end
+            if self.b4 then self.b4.Position = Vector2.new(cx + 1, cy + 1); self.b4.Size = sz; self.b4.Color = color; self.b4.Visible = true end
+        end
+    end
+
+    function icon:Remove()
+        for _, d in ipairs(self.drawings) do
+            removeObj(d)
+        end
+    end
+
+    return icon
+end
+
 local SectionMethods = {}
 SectionMethods.__index = SectionMethods
 
@@ -806,9 +984,12 @@ function DrawingUI:CreateTab(name, icon)
         return existing
     end
 
+    local resolvedIcon = resolveIconType(name, icon)
     local tab = setmetatable({
         name = sanitizeText(tostring(name or "Tab")),
         icon = icon,
+        iconType = resolvedIcon,
+        iconObject = createVectorIcon(resolvedIcon, 5),
         sections = {},
         window = self,
         scrollOffset = 0,
@@ -871,14 +1052,23 @@ function TabMethods:CreateSection(secName)
         items = {},
         tab = self,
         window = self.window,
+        accentBar = safeDrawing("Square"),
         titleDrawing = createBoldText(5, true),
         card = createRoundedCard(3),
     }, SectionMethods)
 
+    if sec.accentBar then
+        sec.accentBar.Filled = true
+        sec.accentBar.Thickness = 1
+        sec.accentBar.Color = self.window.theme.sectionTitle
+        sec.accentBar.Visible = false
+        pcall(function() sec.accentBar.ZIndex = 5 end)
+    end
+
     if sec.titleDrawing then
         sec.titleDrawing.Size = 13
         sec.titleDrawing.Color = self.window.theme.sectionTitle
-        sec.titleDrawing.Text = string.format("-  %s", string.upper(sec.name))
+        sec.titleDrawing.Text = string.upper(sec.name)
         sec.titleDrawing.Visible = false
     end
 
@@ -1827,8 +2017,14 @@ function DrawingUI:Render()
             end
         end
 
+        if tab.iconObject then
+            local iconCol = isActive and self.theme.tabActiveBar or self.theme.tabInactive
+            tab.iconObject:Update(Vector2.new(tabX + 22, btnY + 19), iconCol, true)
+        end
+
         if tab.tabText then
-            tab.tabText.Position = Vector2.new(tabX + 16, btnY + 11)
+            local textX = tab.iconObject and (tabX + 38) or (tabX + 16)
+            tab.tabText.Position = Vector2.new(textX, btnY + 11)
             tab.tabText.Color = isActive and self.theme.tabActive or self.theme.tabInactive
             tab.tabText.Size = 13
             tab.tabText.Visible = true
@@ -1845,6 +2041,7 @@ function DrawingUI:Render()
     for idx, tab in ipairs(self.tabs) do
         if idx ~= self.activeTabIndex then
             for _, sec in ipairs(tab.sections) do
+                setObjVisible(sec.accentBar, false)
                 setObjVisible(sec.titleDrawing, false)
                 if sec.card then
                     sec.card:Update(Vector2.zero, Vector2.zero, 0, Color3.new(), nil, false)
@@ -1882,11 +2079,17 @@ function DrawingUI:Render()
 
             local secCardH = #sec.items > 0 and (secItemsH + 8) or 0
 
-            -- Section Title Header (macOS Uppercase with Bullet)
+            -- Section Title Header (macOS Uppercase with Vector Accent Bar)
             local titleY = cursorY
             local inTitleBounds = (titleY >= (contentTop - 10) and titleY <= (contentTop + contentMaxHeight - 16))
+            if sec.accentBar then
+                sec.accentBar.Position = Vector2.new(contentLeft + 4, titleY + 2)
+                sec.accentBar.Size = Vector2.new(3, 11)
+                sec.accentBar.Color = self.theme.sectionTitle
+                sec.accentBar.Visible = inTitleBounds
+            end
             if sec.titleDrawing then
-                sec.titleDrawing.Position = Vector2.new(contentLeft + 4, titleY)
+                sec.titleDrawing.Position = Vector2.new(contentLeft + 14, titleY)
                 sec.titleDrawing.Visible = inTitleBounds
             end
             cursorY = cursorY + 24
