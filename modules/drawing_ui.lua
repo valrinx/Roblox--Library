@@ -419,7 +419,7 @@ local MAC_THEME = {
     rowHover       = Color3.fromRGB(42, 47, 62),       -- Smooth Row Hover Highlight
 
     -- Controls & Typography
-    text           = Color3.fromRGB(255, 255, 255),    -- Pure White Bold Labels (Maximum Contrast)
+    text           = Color3.fromRGB(245, 248, 255),    -- Crisp Apple High-Contrast White (Zero Bloom)
     textMuted      = Color3.fromRGB(168, 176, 196),    -- Secondary Values & Descriptions
     controlBg      = Color3.fromRGB(40, 45, 60),       -- Buttons & Badges Surface
     controlBorder  = Color3.fromRGB(64, 72, 94),       -- Buttons & Badges Border Stroke
@@ -543,7 +543,7 @@ function DrawingUI:CreateWindow(config)
     -- Header Title & Subtitle (Double-Strike Bold Vector Typography, Layer 10)
     self.drawings.title = createBoldText(10, true)
     if self.drawings.title then
-        self.drawings.title.Size = 18
+        self.drawings.title.Size = 14
         self.drawings.title.Color = self.theme.title
         self.drawings.title.Text = self.title
         self.drawings.title.Visible = false
@@ -596,7 +596,7 @@ function DrawingUI:CreateWindow(config)
 
     self.drawings.userName = createBoldText(4, true)
     if self.drawings.userName then
-        self.drawings.userName.Size = 14
+        self.drawings.userName.Size = 13
         self.drawings.userName.Color = self.theme.text
         local lp = Players.LocalPlayer
         self.drawings.userName.Text = lp and (lp.DisplayName or lp.Name) or "User"
@@ -689,7 +689,7 @@ function DrawingUI:CreateTab(name, icon)
     }, TabMethods)
 
     if tab.tabText then
-        tab.tabText.Size = 15
+        tab.tabText.Size = 13
         tab.tabText.Color = self.theme.tabInactive
         tab.tabText.Text = tab.name
         tab.tabText.Visible = false
@@ -747,7 +747,7 @@ function TabMethods:CreateSection(secName)
     }, SectionMethods)
 
     if sec.titleDrawing then
-        sec.titleDrawing.Size = 14
+        sec.titleDrawing.Size = 13
         sec.titleDrawing.Color = self.window.theme.sectionTitle
         sec.titleDrawing.Text = string.format("-  %s", string.upper(sec.name))
         sec.titleDrawing.Visible = false
@@ -791,7 +791,7 @@ function SectionMethods:CreateToggle(cfg)
     end
 
     if item.label then
-        item.label.Size = 16
+        item.label.Size = 13
         item.label.Color = tab.window.theme.text
         item.label.Text = item.name
         item.label.Visible = false
@@ -897,14 +897,14 @@ function SectionMethods:CreateSlider(cfg)
     end
 
     if item.label then
-        item.label.Size = 16
+        item.label.Size = 13
         item.label.Color = tab.window.theme.text
         item.label.Text = item.name
         item.label.Visible = false
     end
 
     if item.valText then
-        item.valText.Size = 14
+        item.valText.Size = 13
         item.valText.Color = tab.window.theme.accent
         item.valText.Center = true
         item.valText.Visible = false
@@ -954,7 +954,7 @@ function SectionMethods:CreateButton(cfg)
     end
 
     if item.label then
-        item.label.Size = 15
+        item.label.Size = 13
         item.label.Color = tab.window.theme.text
         item.label.Text = item.name
         item.label.Center = true
@@ -995,7 +995,7 @@ function SectionMethods:CreateLabel(cfg)
     end
 
     if item.label then
-        item.label.Size = 15
+        item.label.Size = 13
         item.label.Color = tab.window.theme.textMuted
         item.label.Text = item.text
         item.label.Visible = false
@@ -1042,14 +1042,14 @@ function SectionMethods:CreateStatus(cfg)
     end
 
     if item.titleText then
-        item.titleText.Size = 15
+        item.titleText.Size = 13
         item.titleText.Color = tab.window.theme.sectionTitle
         item.titleText.Text = item.title
         item.titleText.Visible = false
     end
 
     if item.descText then
-        item.descText.Size = 14
+        item.descText.Size = 13
         item.descText.Color = tab.window.theme.text
         item.descText.Text = item.content
         item.descText.Visible = false
@@ -1147,14 +1147,14 @@ function SectionMethods:CreateDropdown(cfg)
     end
 
     if item.label then
-        item.label.Size = 16
+        item.label.Size = 13
         item.label.Color = tab.window.theme.text
         item.label.Text = item.name
         item.label.Visible = false
     end
 
     if item.valText then
-        item.valText.Size = 14
+        item.valText.Size = 13
         item.valText.Color = tab.window.theme.accent
         item.valText.Text = item.current
         item.valText.Visible = false
@@ -1252,7 +1252,7 @@ function SectionMethods:CreateKeybind(cfg)
     end
 
     if item.label then
-        item.label.Size = 16
+        item.label.Size = 13
         item.label.Color = tab.window.theme.text
         item.label.Text = item.name
         item.label.Visible = false
@@ -1338,7 +1338,7 @@ function SectionMethods:CreateInput(cfg)
     end
 
     if item.label then
-        item.label.Size = 16
+        item.label.Size = 13
         item.label.Color = tab.window.theme.text
         item.label.Text = item.name
         item.label.Visible = false
@@ -1593,12 +1593,12 @@ function DrawingUI:Render()
 
     -- 5. Title & Subtitle (Crisp Bold Typography)
     if self.drawings.title then
-        self.drawings.title.Position = Vector2.new(p.X + 78, p.Y + 12)
+        self.drawings.title.Position = Vector2.new(p.X + 78, p.Y + 14)
         self.drawings.title.Visible = true
     end
 
     if self.drawings.subtitle then
-        self.drawings.subtitle.Position = Vector2.new(p.X + 195, p.Y + 15)
+        self.drawings.subtitle.Position = Vector2.new(p.X + 175, p.Y + 15)
         self.drawings.subtitle.Visible = true
     end
 
@@ -1671,9 +1671,9 @@ function DrawingUI:Render()
         end
 
         if tab.tabText then
-            tab.tabText.Position = Vector2.new(tabX + 16, btnY + 10)
+            tab.tabText.Position = Vector2.new(tabX + 16, btnY + 11)
             tab.tabText.Color = isActive and self.theme.tabActive or self.theme.tabInactive
-            tab.tabText.Size = isActive and 16 or 15
+            tab.tabText.Size = 13
             tab.tabText.Visible = true
         end
     end
@@ -1814,7 +1814,7 @@ function DrawingUI:Render()
                         local pillY = rowY + math.floor((itemHeight - pillH) / 2)
 
                         if item.label then
-                            item.label.Position = Vector2.new(contentLeft + 16, rowY + 12)
+                            item.label.Position = Vector2.new(contentLeft + 16, rowY + 14)
                             item.label.Visible = true
                         end
 
@@ -1838,7 +1838,7 @@ function DrawingUI:Render()
                         local badgeY = rowY + 6
 
                         if item.label then
-                            item.label.Position = Vector2.new(contentLeft + 16, rowY + 8)
+                            item.label.Position = Vector2.new(contentLeft + 16, rowY + 9)
                             item.label.Visible = true
                         end
 
@@ -1855,7 +1855,7 @@ function DrawingUI:Render()
                         end
 
                         if item.valText then
-                            item.valText.Position = Vector2.new(badgeX + badgeW / 2, badgeY + 3)
+                            item.valText.Position = Vector2.new(badgeX + badgeW / 2, badgeY + 4)
                             local valDisplay = item.value
                             if type(valDisplay) == "number" and valDisplay ~= math.floor(valDisplay) then
                                 valDisplay = string.format("%.3f", valDisplay):gsub("%.?0+$", "")
@@ -1902,7 +1902,7 @@ function DrawingUI:Render()
                         end
 
                         if item.label then
-                            item.label.Position = Vector2.new(btnX + btnW / 2, btnY + 8)
+                            item.label.Position = Vector2.new(btnX + btnW / 2, btnY + 9)
                             item.label.Visible = true
                         end
 
@@ -1913,7 +1913,7 @@ function DrawingUI:Render()
                         local badgeY = rowY + 8
 
                         if item.label then
-                            item.label.Position = Vector2.new(contentLeft + 16, rowY + 12)
+                            item.label.Position = Vector2.new(contentLeft + 16, rowY + 14)
                             item.label.Visible = true
                         end
 
@@ -1930,13 +1930,13 @@ function DrawingUI:Render()
                         end
 
                         if item.valText then
-                            item.valText.Position = Vector2.new(badgeX + 12, badgeY + 6)
+                            item.valText.Position = Vector2.new(badgeX + 12, badgeY + 7)
                             item.valText.Text = tostring(item.current)
                             item.valText.Visible = true
                         end
 
                         if item.arrow then
-                            item.arrow.Position = Vector2.new(badgeX + badgeW - 18, badgeY + 6)
+                            item.arrow.Position = Vector2.new(badgeX + badgeW - 18, badgeY + 7)
                             item.arrow.Visible = true
                         end
 
@@ -1947,7 +1947,7 @@ function DrawingUI:Render()
                         local badgeY = rowY + 9
 
                         if item.label then
-                            item.label.Position = Vector2.new(contentLeft + 16, rowY + 12)
+                            item.label.Position = Vector2.new(contentLeft + 16, rowY + 14)
                             item.label.Visible = true
                         end
 
@@ -1964,7 +1964,7 @@ function DrawingUI:Render()
                         end
 
                         if item.keyText then
-                            item.keyText.Position = Vector2.new(badgeX + badgeW / 2, badgeY + 5)
+                            item.keyText.Position = Vector2.new(badgeX + badgeW / 2, badgeY + 6)
                             item.keyText.Color = item.listening and self.theme.accent or self.theme.text
                             item.keyText.Visible = true
                         end
@@ -1982,7 +1982,7 @@ function DrawingUI:Render()
 
                     elseif item.type == "label" then
                         if item.label then
-                            item.label.Position = Vector2.new(contentLeft + 16, rowY + 8)
+                            item.label.Position = Vector2.new(contentLeft + 16, rowY + 9)
                             item.label.Visible = true
                         end
 
@@ -2000,7 +2000,7 @@ function DrawingUI:Render()
                         local inY = rowY + 8
 
                         if item.label then
-                            item.label.Position = Vector2.new(contentLeft + 16, rowY + 12)
+                            item.label.Position = Vector2.new(contentLeft + 16, rowY + 14)
                             item.label.Visible = true
                         end
 
