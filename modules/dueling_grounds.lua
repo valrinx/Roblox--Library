@@ -5,6 +5,12 @@ return function(Window, scriptInfo)
     local RunService = game:GetService("RunService")
     local Stats = game:GetService("Stats")
 
+    local environment = getgenv and getgenv() or _G
+    if type(environment.__RAVEN_DUELING_GROUNDS) == "table"
+        and type(environment.__RAVEN_DUELING_GROUNDS.Destroy) == "function" then
+        pcall(environment.__RAVEN_DUELING_GROUNDS.Destroy)
+    end
+
     local localPlayer = Players.LocalPlayer
     local running = true
     local connections = {}
@@ -32,6 +38,8 @@ return function(Window, scriptInfo)
         requireFacing = false,
         closeRange360 = true,
         multiHitParry = true,
+        jumpParryAssist = true, -- Special airborne prediction & extended parry window for jump attacks
+        autoFaceOnParry = true, -- Automatically face attacker on parry to ensure guard hitbox aligns with incoming strikes
 
         -- Auto Counter
         autoCounter = true,
@@ -164,10 +172,14 @@ return function(Window, scriptInfo)
             return a.time < b.time
         end)
 
+        local modName = moduleScript.Name:lower()
+        local isJump = modName:find("jump") ~= nil or modName:find("air") ~= nil or modName:find("slam") ~= nil
+
         attackCatalog[animationId] = {
             name = moduleScript.Name,
             weapon = weaponName,
-            category = categoryName or "BasicAttack",
+            category = isJump and "JumpAttack" or (categoryName or "BasicAttack"),
+            isJump = isJump,
             markers = markers,
         }
         catalogModuleCount += 1
@@ -278,8 +290,13 @@ return function(Window, scriptInfo)
             return false
         end
         local delta = targetRoot.Position - localRoot.Position
-        if math.abs(delta.Y) > 16 then
+        if delta.Y > 22 or delta.Y < -16 then
             return false
+        end
+        -- For elevated/jump attacks, check horizontal strike distance so vertical height doesn't artificially push target out of range
+        if delta.Y > 1.5 then
+            local flatDistance = Vector2.new(delta.X, delta.Z).Magnitude
+            return flatDistance <= maxRange
         end
         return delta.Magnitude <= maxRange
     end
@@ -414,7 +431,47 @@ return function(Window, scriptInfo)
         fireGuardSignal("Released")
     end
 
-    local function tapGuard(opponentCharacter)
+    -- Face target immediately (supporting 360, cross-ups, and vertical head slams)
+    local function snapFaceTarget(targetCharacter)
+        local localModel = getLocalCharacter()
+        local localRoot = getRoot(localModel)
+        local targetRoot = getRoot(targetCharacter)
+        if not localRoot or not targetRoot then
+            return
+        end
+        local flatTarget = Vector3.new(targetRoot.Position.X, localRoot.Position.Y, targetRoot.Position.Z)
+        local direction = flatTarget - localRoot.Position
+
+        -- If target is directly overhead (landing onto head / cross-up with < 0.6 studs horizontal delta),
+        -- turn to face opposite to the target's look direction so our guard hitbox faces directly into their strike
+        if direction.Magnitude < 0.6 then
+            local oppLook = targetRoot.CFrame.LookVector
+            local flatOppLook = Vector3.new(oppLook.X, 0, oppLook.Z)
+            if flatOppLook.Magnitude > 0.001 then
+                direction = -flatOppLook.Unit
+            else
+                direction = localRoot.CFrame.LookVector
+            end
+        end
+
+        local flatLookDir = Vector3.new(direction.X, 0, direction.Z)
+        if flatLookDir.Magnitude < 0.001 then
+            flatLookDir = localRoot.CFrame.LookVector
+        else
+            flatLookDir = flatLookDir.Unit
+        end
+
+        local desiredCFrame = CFrame.lookAt(localRoot.Position, localRoot.Position + flatLookDir)
+        localRoot.CFrame = desiredCFrame
+
+        if desiredLookRemote then
+            pcall(function()
+                desiredLookRemote:FireServer(flatLookDir)
+            end)
+        end
+    end
+
+    local function tapGuard(opponentCharacter, customHold)
         local now = os.clock()
         local minInterval = settings.multiHitParry and 0.04 or 0.08
         if now - lastParryAt < minInterval then
@@ -427,12 +484,17 @@ return function(Window, scriptInfo)
 
         if opponentCharacter then
             lastAttackingOpponent = opponentCharacter
+            -- Auto snap-face attacker on parry to align shield/weapon hitbox with incoming strike angle
+            if settings.autoFaceOnParry ~= false then
+                snapFaceTarget(opponentCharacter)
+            end
         end
 
         guardHeldByHub = true
         fireGuardSignal("Pressed")
 
-        task.delay(settings.guardHold, function()
+        local holdTime = customHold or settings.guardHold
+        task.delay(holdTime, function()
             if running and token == guardReleaseToken then
                 releaseGuard()
             end
@@ -489,29 +551,6 @@ return function(Window, scriptInfo)
             return true
         end
         return false
-    end
-
-    -- Face target immediately
-    local function snapFaceTarget(targetCharacter)
-        local localModel = getLocalCharacter()
-        local localRoot = getRoot(localModel)
-        local targetRoot = getRoot(targetCharacter)
-        if not localRoot or not targetRoot then
-            return
-        end
-        local flatTarget = Vector3.new(targetRoot.Position.X, localRoot.Position.Y, targetRoot.Position.Z)
-        local direction = flatTarget - localRoot.Position
-        if direction.Magnitude < 0.001 then
-            return
-        end
-        local desiredCFrame = CFrame.lookAt(localRoot.Position, flatTarget)
-        localRoot.CFrame = desiredCFrame
-
-        if desiredLookRemote then
-            pcall(function()
-                desiredLookRemote:FireServer(direction.Unit)
-            end)
-        end
     end
 
     -- Smooth face target for combat assist
@@ -697,18 +736,24 @@ return function(Window, scriptInfo)
     -- Track seen animation markers per cycle to support multi-hits and looping swings
     local trackMarkerSeen = setmetatable({}, {__mode = "k"})
 
-    local function opponentFacingLocal(opponentRoot, localRoot, distance)
-        if settings.closeRange360 and distance <= 8.5 then
+    local function opponentFacingLocal(opponentRoot, localRoot, distance, isAirborne)
+        -- Airborne attacks (jumps/slams) have downward AOE cones and cross-up trajectories; auto-grant 360 parry
+        if isAirborne or (settings.closeRange360 and distance <= 11) then
             return true
         end
         if not settings.requireFacing then
             return true
         end
         local offset = localRoot.Position - opponentRoot.Position
-        if offset.Magnitude < 0.001 then
+        local flatOffset = Vector3.new(offset.X, 0, offset.Z)
+        if flatOffset.Magnitude < 0.001 then
             return true
         end
-        return opponentRoot.CFrame.LookVector:Dot(offset.Unit) >= -0.25
+        local flatLook = Vector3.new(opponentRoot.CFrame.LookVector.X, 0, opponentRoot.CFrame.LookVector.Z)
+        if flatLook.Magnitude < 0.001 then
+            return true
+        end
+        return flatLook.Unit:Dot(flatOffset.Unit) >= -0.35
     end
 
     -- High-Performance Auto Parry Scanner
@@ -728,14 +773,30 @@ return function(Window, scriptInfo)
                 local hum = obj:FindFirstChildOfClass("Humanoid")
                 local root = getRoot(obj)
                 if hum and root and modelValidTarget(obj, localModel, settings.parryRange) then
-                    local distance = (root.Position - localRoot.Position).Magnitude
-                    if opponentFacingLocal(root, localRoot, distance) then
-                        local animator = hum:FindFirstChildOfClass("Animator")
-                        if animator then
-                            for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
-                                local animationId = track.Animation and normalizeAssetId(track.Animation.AnimationId)
-                                local attack = animationId and attackCatalog[animationId]
-                                if attack then
+                    local delta = root.Position - localRoot.Position
+                    local distance = delta.Magnitude
+                    local verticalDist = delta.Y
+                    local humState = hum:GetState()
+                    local floorMat = hum.FloorMaterial
+                    local vel = root.AssemblyLinearVelocity or root.Velocity or Vector3.zero
+                    local velY = vel.Y
+
+                    -- Robust multi-layer airborne & vertical jump detection
+                    local isAirborne = (verticalDist > 1.2)
+                        or (floorMat == Enum.Material.Air)
+                        or (humState == Enum.HumanoidStateType.Freefall)
+                        or (humState == Enum.HumanoidStateType.Jumping)
+                        or (math.abs(velY) > 2)
+
+                    local animator = hum:FindFirstChildOfClass("Animator")
+                    if animator then
+                        for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+                            local animationId = track.Animation and normalizeAssetId(track.Animation.AnimationId)
+                            local attack = animationId and attackCatalog[animationId]
+                            if attack then
+                                local isJump = settings.jumpParryAssist and (attack.isJump or isAirborne)
+
+                                if opponentFacingLocal(root, localRoot, distance, isAirborne or isJump) then
                                     local seen = trackMarkerSeen[track]
                                     if not seen then
                                         seen = {}
@@ -749,6 +810,29 @@ return function(Window, scriptInfo)
                                     for _, marker in ipairs(attack.markers) do
                                         local triggerTime = math.max(0, marker.time - animationLead)
                                         local upperWindow = marker.time + 0.055 * speed
+                                        local holdDuration = settings.guardHold
+
+                                        -- Specialized Aerial & Jump Attack Timing Engine
+                                        if isJump then
+                                            -- Jump attacks strike downwards onto head from above:
+                                            -- If opponent is high up (> 6.2 studs) and still ascending/high, wait until they enter strike reach
+                                            local inStrikeReach = (verticalDist <= 6.2) or (verticalDist <= 7.5 and velY < -8)
+
+                                            if inStrikeReach then
+                                                -- In strike reach! Trigger parry immediately and hold through the full landing impact
+                                                triggerTime = 0
+                                                upperWindow = math.max(marker.time + 0.35 * speed, 0.40)
+                                                holdDuration = math.max(settings.guardHold, 0.26)
+                                            else
+                                                -- High in air, skip this tick until enemy descends into striking distance
+                                                continue
+                                            end
+                                        elseif marker.time <= 0.15 then
+                                            -- Fast startup grounded attacks
+                                            triggerTime = 0
+                                            upperWindow = math.max(marker.time + 0.20 * speed, 0.26)
+                                            holdDuration = math.max(settings.guardHold, 0.14)
+                                        end
 
                                         -- Cycle reset for looping/repeated attacks
                                         if trackPos < triggerTime - 0.1 then
@@ -759,7 +843,7 @@ return function(Window, scriptInfo)
                                             and trackPos >= triggerTime
                                             and trackPos <= upperWindow then
                                             seen[marker.index] = true
-                                            tapGuard(obj)
+                                            tapGuard(obj, holdDuration)
                                         end
                                     end
                                 end
@@ -774,8 +858,8 @@ return function(Window, scriptInfo)
     -- UI Creation via MacLib
     local CombatTab = Window:CreateTab("Combat", "swords")
 
-    -- Auto Parry Section
-    CombatTab:CreateSection("Auto Parry (Overhauled)")
+    -- Auto Parry Section (Left Column)
+    CombatTab:CreateSection("Auto Parry (Overhauled)", "Left")
     local statusLabel = CombatTab:CreateLabel("Catalog: " .. tostring(catalogModuleCount) .. " attacks loaded")
 
     CombatTab:CreateToggle({
@@ -863,6 +947,24 @@ return function(Window, scriptInfo)
         end,
     })
 
+    CombatTab:CreateToggle({
+        Name = "Jump Attack Prediction",
+        CurrentValue = true,
+        Flag = "DGJumpParryAssist",
+        Callback = function(value)
+            settings.jumpParryAssist = value
+        end,
+    })
+
+    CombatTab:CreateToggle({
+        Name = "Auto Face on Parry",
+        CurrentValue = true,
+        Flag = "DGAutoFaceOnParry",
+        Callback = function(value)
+            settings.autoFaceOnParry = value
+        end,
+    })
+
     CombatTab:CreateButton({
         Name = "Reload Attack Catalog",
         Callback = function()
@@ -870,8 +972,8 @@ return function(Window, scriptInfo)
         end,
     })
 
-    -- Auto Counter Section
-    CombatTab:CreateSection("Auto Counter (Riposte)")
+    -- Auto Counter Section (Right Column)
+    CombatTab:CreateSection("Auto Counter (Riposte)", "Right")
 
     CombatTab:CreateToggle({
         Name = "Auto Counter on Parry",
@@ -940,8 +1042,8 @@ return function(Window, scriptInfo)
         end,
     })
 
-    -- Combat Assist Section
-    CombatTab:CreateSection("Combat Assist")
+    -- Combat Assist Section (Right Column)
+    CombatTab:CreateSection("Combat Assist", "Right")
 
     CombatTab:CreateToggle({
         Name = "Auto Face Target",
@@ -1088,4 +1190,7 @@ return function(Window, scriptInfo)
     if scriptInfo and type(scriptInfo.registerCleanup) == "function" then
         scriptInfo.registerCleanup(destroyScript)
     end
+    environment.__RAVEN_DUELING_GROUNDS = {
+        Destroy = destroyScript
+    }
 end

@@ -216,11 +216,11 @@ local SCRIPTS = {
     },
     {
         name        = "Dueling Grounds ⚔️",
-        description = "Overhauled Auto Parry | Auto Counter (Riposte) | Combat Assist",
+        description = "Marker-Driven Auto Parry | 81 Attack Animations | Jump Attack Prediction | Auto Counter (Riposte) | Combat Assist",
         placeIds    = {94217045453265},
         gameIds     = {9051406594},
-        version     = "v1.0.1",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/dueling_grounds.lua",
+        version     = "v2.0.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/dueling_grounds.lua?v=dg-2.0.0",
     },
     {
         name        = "My Knife Farm",
@@ -548,6 +548,15 @@ local SCRIPTS = {
         version     = "v1.0.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/color_my_flag.lua?v=color-my-flag-1.0.0",
     },
+    {
+        name        = "Guess The Person",
+        description = "Auto Solver | Free Auto-Flip Unlock | Auto Ask & Answer | Solo Infinite Bot Farm | Auto Rematch",
+        placeIds    = {88989028816809},
+        gameIds     = {10637759898},
+        version     = "v1.0.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/guess_the_person.lua?v=gtp-1.0.0",
+    },
+
     --[[
     {
         name      = "Another Game",

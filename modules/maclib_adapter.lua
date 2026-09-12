@@ -337,9 +337,12 @@ return function(MacLib)
     local TabMethods = {}
     local WindowMethods = {}
 
-    function TabMethods:_newSection(name)
+    function TabMethods:_newSection(name, explicitSide)
         self._sectionCount = self._sectionCount + 1
-        local side = self._sectionCount % 2 == 1 and "Left" or "Right"
+        local side = explicitSide
+        if not side or (side ~= "Left" and side ~= "Right") then
+            side = self._sectionCount % 2 == 1 and "Left" or "Right"
+        end
         local nativeSection = self._native:Section({Side = side})
         if name and tostring(name) ~= "" then
             nativeSection:Header({Name = tostring(name)})
@@ -352,8 +355,8 @@ return function(MacLib)
         return self._currentSection or self:_newSection("Controls")
     end
 
-    function TabMethods:CreateSection(name)
-        return self:_newSection(name)
+    function TabMethods:CreateSection(name, side)
+        return self:_newSection(name, side)
     end
 
     function TabMethods:CreateLabel(text)
