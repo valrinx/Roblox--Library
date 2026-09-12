@@ -870,11 +870,23 @@ local function loadScriptModule(scriptInfo)
     setModuleStatus("Loading " .. scriptInfo.name .. "...")
 
     local ok, result = pcall(function()
-        local sep = scriptInfo.moduleUrl:find("%?") and "&" or "?"
-        local fetchUrl = scriptInfo.moduleUrl .. sep .. "_cb=" .. tostring(os.time()) .. "_" .. tostring(math.random(1000, 9999))
-        local raw = game:HttpGet(fetchUrl)
-        assert(type(raw) == "string" and #raw > 10,
-            "HttpGet empty ?????????? URL: " .. scriptInfo.moduleUrl)
+        local raw
+        if type(readfile) == "function" then
+            local modFile = scriptInfo.moduleUrl:match("modules/[%w_%.%-%%]+")
+            if modFile then
+                local okRead, localSrc = pcall(readfile, modFile)
+                if okRead and type(localSrc) == "string" and #localSrc > 100 then
+                    raw = localSrc
+                end
+            end
+        end
+        if not raw then
+            local sep = scriptInfo.moduleUrl:find("%?") and "&" or "?"
+            local fetchUrl = scriptInfo.moduleUrl .. sep .. "_cb=" .. tostring(os.time()) .. "_" .. tostring(math.random(1000, 9999))
+            raw = game:HttpGet(fetchUrl)
+            assert(type(raw) == "string" and #raw > 10,
+                "HttpGet empty URL: " .. scriptInfo.moduleUrl)
+        end
 
         local fn, compileErr = loadstring(raw)
         assert(fn, "loadstring error: " .. tostring(compileErr))
