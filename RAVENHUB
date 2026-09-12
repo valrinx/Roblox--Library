@@ -284,7 +284,7 @@ local SCRIPTS = {
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/illegal_soccer.lua",
     },
     {
-        name        = "Dueling Grounds ⚔️",
+        name        = "Dueling Grounds",
         description = "Marker-Driven Auto Parry | 81 Attack Animations | Jump Attack Prediction | Auto Counter (Riposte) | Combat Assist",
         placeIds    = {94217045453265},
         gameIds     = {9051406594},
@@ -292,7 +292,7 @@ local SCRIPTS = {
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/dueling_grounds.lua?v=dg-2.0.0",
     },
     {
-        name        = "Volleyball Legends 🏐",
+        name        = "Volleyball Legends",
         description = "Ball ESP & Landing Prediction | Auto Hit / Receive | Auto Dive | Auto Serve | Safe Mode",
         placeIds    = {74691681039273, 85395484560711},
         gameIds     = {6931042565},
@@ -300,7 +300,7 @@ local SCRIPTS = {
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/volleyball_legends.lua",
     },
     {
-        name        = "Basketball: Zero 🏀",
+        name        = "Basketball: Zero",
         description = "Auto Green Release | Auto Steal | Always Run | Anti-Ankle Break | Ball & Rim ESP",
         placeIds    = {70454767164205, 71683821699644, 72476829463897, 73708914208963, 90346996348563, 91733245171139, 95656979989750, 98118902024430, 129230994638464, 130739873848552, 140469311035169},
         gameIds     = {7028566528},
@@ -308,7 +308,7 @@ local SCRIPTS = {
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/basketball_zero.lua",
     },
     {
-        name        = "BloxStrike 🎯",
+        name        = "BloxStrike",
         description = "ESP Visuals (Drawing API) | Match Telemetry | Player State | Performance Monitor",
         placeIds    = {114234929420007, 108194354348181},
         gameIds     = {7633926880},
@@ -467,7 +467,7 @@ local SCRIPTS = {
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/dont_look_back.lua",
     },
     {
-        name        = "Mine a Mountain ⛰️",
+        name        = "Mine a Mountain",
         description = "Crystal ESP | Auto Mine | Auto Sell | Auto Bomb | Teleport | Stat Tracker",
         placeIds    = {125927821145949},
         gameIds     = {10187294555},
@@ -507,7 +507,7 @@ local SCRIPTS = {
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/load_the_truck.lua",
     },
     {
-        name        = "Fish an Anime RNG 🎲",
+        name        = "Fish an Anime RNG",
         description = "Native Auto Fish | Backpack | Rewards | Rebirth | Performance | ESP",
         placeIds    = {74729868188364},
         gameIds     = {9582986239},
@@ -942,7 +942,7 @@ end
 
 pcall(function()
     if type(Window.SortTabs) == "function" then
-        Window:SortTabs({"Overview", "Main", "Dungeon", "ESP", "Misc", "Settings"})
+        Window:SortTabs({"Overview", "Match Info", "Visuals", "Combat", "Main", "Dungeon", "ESP", "Defense", "Shooting", "Misc", "Settings"})
     end
 end)
 

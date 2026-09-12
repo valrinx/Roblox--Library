@@ -1,5 +1,5 @@
 -- ============================================================
---   RAVEN HUB  |  100% Drawing API Menu Engine v1.1.0
+--   RAVEN HUB  |  100% Drawing API Menu Engine v1.2.0
 --   Anti-Cheat Ghost Architecture (Zero ScreenGui / Zero Instances)
 --   BAC / Frog Anti-Cheat Compliant (100% Immune to Object Injection)
 -- ============================================================
@@ -25,13 +25,56 @@ local function pointInBox(pt, boxPos, boxSize)
        and pt.Y >= boxPos.Y and pt.Y <= (boxPos.Y + boxSize.Y)
 end
 
+local function sanitizeText(str)
+    if type(str) ~= "string" then return tostring(str or "") end
+    -- Strip 4-byte emojis and unsupported glyphs that break Drawing API
+    local clean = str:gsub("[ð-ô][-¿][-¿][-¿]", "")
+    clean = clean:gsub("[â][-][-¿]", "")
+    clean = clean:gsub("[â][­-¯][-¿]", "")
+    clean = clean:gsub("%s+", " ")
+    return clean:gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+local function setObjVisible(obj, visible)
+    if obj then
+        pcall(function()
+            obj.Visible = visible
+        end)
+    end
+end
+
+local function removeObj(obj)
+    if obj then
+        pcall(function()
+            obj:Remove()
+        end)
+    end
+end
+
+local function hideItem(item)
+    for _, prop in pairs(item) do
+        if type(prop) == "userdata" or type(prop) == "table" then
+            setObjVisible(prop, false)
+        end
+    end
+    item.hitBox = nil
+end
+
+local function removeItem(item)
+    for _, prop in pairs(item) do
+        if type(prop) == "userdata" or type(prop) == "table" then
+            removeObj(prop)
+        end
+    end
+end
+
 -- ============================================================
---   NOTIFICATIONS (DRAWING + STARTERGUI FALLBACK)
+--   NOTIFICATIONS
 -- ============================================================
 function DrawingUI.Notify(options)
     options = options or {}
-    local title = tostring(options.Title or "RAVEN HUB")
-    local content = tostring(options.Content or options.Description or options.Text or "")
+    local title = sanitizeText(tostring(options.Title or "RAVEN HUB"))
+    local content = sanitizeText(tostring(options.Content or options.Description or options.Text or ""))
     local duration = tonumber(options.Duration or options.Lifetime) or 5
 
     pcall(function()
@@ -63,10 +106,11 @@ function DrawingUI.CreateWindow(selfOrConfig, maybeConfig)
     else
         config = maybeConfig or selfOrConfig or {}
     end
+
     local self = setmetatable({}, DrawingUI)
 
-    self.title = config.Name or config.Title or "RAVEN HUB"
-    self.subtitle = config.LoadingSubtitle or config.Subtitle or "Ghost Architecture (100% Drawing)"
+    self.title = sanitizeText(tostring(config.Name or config.Title or "RAVEN HUB"))
+    self.subtitle = sanitizeText(tostring(config.LoadingSubtitle or config.Subtitle or "Ghost Architecture (100% Drawing)"))
     self.toggleKey = config.Keybind or config.ToggleKey or Enum.KeyCode.RightShift
 
     self.visible = true
@@ -76,7 +120,7 @@ function DrawingUI.CreateWindow(selfOrConfig, maybeConfig)
 
     -- Window Layout Parameters
     self.pos = config.Position or Vector2.new(50, 50)
-    self.size = config.Size or Vector2.new(520, 440)
+    self.size = config.Size or Vector2.new(530, 440)
     self.headerHeight = 38
     self.tabBarHeight = 30
 
@@ -135,6 +179,7 @@ function DrawingUI.CreateWindow(selfOrConfig, maybeConfig)
         self.drawings.title.Outline = true
         self.drawings.title.OutlineColor = Color3.fromRGB(0, 0, 0)
         self.drawings.title.Color = self.theme.title
+        self.drawings.title.Text = self.title
         self.drawings.title.Visible = false
     end
 
@@ -144,6 +189,7 @@ function DrawingUI.CreateWindow(selfOrConfig, maybeConfig)
         self.drawings.subtitle.Outline = true
         self.drawings.subtitle.OutlineColor = Color3.fromRGB(0, 0, 0)
         self.drawings.subtitle.Color = self.theme.subtitle
+        self.drawings.subtitle.Text = self.subtitle
         self.drawings.subtitle.Visible = false
     end
 
@@ -189,7 +235,7 @@ function DrawingUI:InsertConfigSection()
 end
 
 -- ============================================================
---   TAB & CONTROL BUILDERS
+--   TAB & SECTION ARCHITECTURE
 -- ============================================================
 local SectionMethods = {}
 SectionMethods.__index = SectionMethods
@@ -204,49 +250,17 @@ function TabMethods:_ensureSection()
     return self:CreateSection("General")
 end
 
-function TabMethods:CreateToggle(cfg)
-    return self:_ensureSection():CreateToggle(cfg)
-end
-
-function TabMethods:CreateSlider(cfg)
-    return self:_ensureSection():CreateSlider(cfg)
-end
-
-function TabMethods:CreateButton(cfg)
-    return self:_ensureSection():CreateButton(cfg)
-end
-
-function TabMethods:CreateLabel(cfg)
-    return self:_ensureSection():CreateLabel(cfg)
-end
-
-function TabMethods:CreateStatus(cfg)
-    return self:_ensureSection():CreateStatus(cfg)
-end
-
-function TabMethods:CreateParagraph(cfg)
-    return self:_ensureSection():CreateParagraph(cfg)
-end
-
-function TabMethods:CreateDivider()
-    return self:_ensureSection():CreateDivider()
-end
-
-function TabMethods:CreateDropdown(cfg)
-    return self:_ensureSection():CreateDropdown(cfg)
-end
-
-function TabMethods:CreateKeybind(cfg)
-    return self:_ensureSection():CreateKeybind(cfg)
-end
-
-function TabMethods:CreateInput(cfg)
-    return self:_ensureSection():CreateInput(cfg)
-end
-
-function TabMethods:InsertConfigSection()
-    -- MacLib compatibility stub
-end
+function TabMethods:CreateToggle(cfg) return self:_ensureSection():CreateToggle(cfg) end
+function TabMethods:CreateSlider(cfg) return self:_ensureSection():CreateSlider(cfg) end
+function TabMethods:CreateButton(cfg) return self:_ensureSection():CreateButton(cfg) end
+function TabMethods:CreateLabel(cfg) return self:_ensureSection():CreateLabel(cfg) end
+function TabMethods:CreateStatus(cfg) return self:_ensureSection():CreateStatus(cfg) end
+function TabMethods:CreateParagraph(cfg) return self:_ensureSection():CreateParagraph(cfg) end
+function TabMethods:CreateDivider() return self:_ensureSection():CreateDivider() end
+function TabMethods:CreateDropdown(cfg) return self:_ensureSection():CreateDropdown(cfg) end
+function TabMethods:CreateKeybind(cfg) return self:_ensureSection():CreateKeybind(cfg) end
+function TabMethods:CreateInput(cfg) return self:_ensureSection():CreateInput(cfg) end
+function TabMethods:InsertConfigSection() end
 
 function TabMethods:Select()
     for idx, t in ipairs(self.window.tabs) do
@@ -264,7 +278,7 @@ function DrawingUI:CreateTab(name, icon)
     end
 
     local tab = setmetatable({
-        name = tostring(name or "Tab"),
+        name = sanitizeText(tostring(name or "Tab")),
         icon = icon,
         sections = {},
         window = self,
@@ -294,7 +308,7 @@ function DrawingUI:CreateTab(name, icon)
 end
 
 function DrawingUI:GetTab(name)
-    local target = tostring(name or ""):lower()
+    local target = sanitizeText(tostring(name or "")):lower()
     for _, tab in ipairs(self.tabs) do
         if tab.name and tab.name:lower() == target then
             return tab
@@ -307,7 +321,7 @@ function DrawingUI:SortTabs(orderedNames)
     if type(orderedNames) ~= "table" or #orderedNames == 0 then return end
     local orderMap = {}
     for idx, n in ipairs(orderedNames) do
-        orderMap[tostring(n):lower()] = idx
+        orderMap[sanitizeText(tostring(n)):lower()] = idx
     end
 
     table.sort(self.tabs, function(a, b)
@@ -329,7 +343,7 @@ end
 
 function TabMethods:CreateSection(secName)
     local sec = setmetatable({
-        name = tostring(secName or "Section"),
+        name = sanitizeText(tostring(secName or "Section")),
         items = {},
         tab = self,
         window = self.window,
@@ -358,14 +372,14 @@ function TabMethods:CreateSection(secName)
 end
 
 -- ============================================================
---   SECTION CONTROLS IMPLEMENTATION
+--   SECTION CONTROLS
 -- ============================================================
 function SectionMethods:CreateToggle(cfg)
     cfg = cfg or {}
     local tab = self.tab
     local item = {
         type = "toggle",
-        name = tostring(cfg.Name or "Toggle"),
+        name = sanitizeText(tostring(cfg.Name or "Toggle")),
         value = cfg.CurrentValue == true or cfg.Default == true,
         callback = cfg.Callback or function() end,
         flag = cfg.Flag,
@@ -430,11 +444,11 @@ function SectionMethods:CreateSlider(cfg)
 
     local item = {
         type = "slider",
-        name = tostring(cfg.Name or "Slider"),
+        name = sanitizeText(tostring(cfg.Name or "Slider")),
         min = minVal,
         max = maxVal,
         increment = tonumber(cfg.Increment) or 1,
-        suffix = tostring(cfg.Suffix or ""),
+        suffix = sanitizeText(tostring(cfg.Suffix or "")),
         value = math.clamp(currentVal, minVal, maxVal),
         callback = cfg.Callback or function() end,
         flag = cfg.Flag,
@@ -497,7 +511,7 @@ function SectionMethods:CreateButton(cfg)
     local tab = self.tab
     local item = {
         type = "button",
-        name = tostring(cfg.Name or "Button"),
+        name = sanitizeText(tostring(cfg.Name or "Button")),
         callback = cfg.Callback or function() end,
         label = safeDrawing("Text"),
         box = safeDrawing("Square"),
@@ -533,8 +547,8 @@ function SectionMethods:CreateParagraph(cfg)
     local tab = self.tab
     local item = {
         type = "paragraph",
-        title = tostring(cfg.Title or "Paragraph"),
-        content = tostring(cfg.Content or ""),
+        title = sanitizeText(tostring(cfg.Title or "Paragraph")),
+        content = sanitizeText(tostring(cfg.Content or "")),
         titleText = safeDrawing("Text"),
         descText = safeDrawing("Text"),
     }
@@ -558,17 +572,21 @@ function SectionMethods:CreateParagraph(cfg)
     end
 
     function item:Set(val)
-        item.content = tostring(val or "")
+        item.content = sanitizeText(tostring(val or ""))
         if item.descText then
             item.descText.Text = item.content
         end
     end
 
     function item:SetTitle(val)
-        item.title = tostring(val or "")
+        item.title = sanitizeText(tostring(val or ""))
         if item.titleText then
             item.titleText.Text = item.title
         end
+    end
+
+    function item:SetDesc(val)
+        item:Set(val)
     end
 
     table.insert(self.items, item)
@@ -586,6 +604,24 @@ function SectionMethods:CreateStatus(cfg)
         Title = cfg.Title or "Status",
         Content = cfg.Content or "",
     })
+
+    function item:Set(text)
+        local str = tostring(text or "")
+        local lower = string.lower(str)
+        local title = cfg.Title or "Status"
+        if lower:find("failed", 1, true) then
+            title = "Module failed to load"
+        elseif lower:find("loaded", 1, true) then
+            title = "Experience module ready"
+        elseif lower:find("no matching", 1, true) then
+            title = "No compatible module"
+        elseif lower:find("loading", 1, true) then
+            title = "Loading module"
+        end
+        self:SetTitle(title)
+        self:SetDesc(str)
+    end
+
     return item
 end
 
@@ -610,7 +646,7 @@ function SectionMethods:CreateDropdown(cfg)
     local rawOptions = cfg.Options or {}
     local optionsList = {}
     for _, opt in ipairs(rawOptions) do
-        table.insert(optionsList, tostring(opt))
+        table.insert(optionsList, sanitizeText(tostring(opt)))
     end
     if #optionsList == 0 then
         table.insert(optionsList, "Default")
@@ -620,11 +656,11 @@ function SectionMethods:CreateDropdown(cfg)
     if type(initial) == "table" then
         initial = initial[1]
     end
-    initial = tostring(initial or optionsList[1] or "")
+    initial = sanitizeText(tostring(initial or optionsList[1] or ""))
 
     local item = {
         type = "dropdown",
-        name = tostring(cfg.Name or "Dropdown"),
+        name = sanitizeText(tostring(cfg.Name or "Dropdown")),
         options = optionsList,
         selected = initial,
         callback = cfg.Callback or function() end,
@@ -673,10 +709,12 @@ function SectionMethods:CreateDropdown(cfg)
         if type(choice) == "table" then
             choice = choice[1]
         end
-        choice = tostring(choice or "")
+        choice = sanitizeText(tostring(choice or ""))
         item.selected = choice
         if item.selectedText then
-            item.selectedText.Text = item.selected
+            local textVal = item.selected
+            if #textVal > 18 then textVal = textVal:sub(1, 16) .. ".." end
+            item.selectedText.Text = textVal
         end
         if item.flag then
             DrawingUI.Flags[item.flag] = item.selected
@@ -693,7 +731,7 @@ function SectionMethods:CreateDropdown(cfg)
     function item:Refresh(newList, keepCurrent)
         item.options = {}
         for _, opt in ipairs(newList or {}) do
-            table.insert(item.options, tostring(opt))
+            table.insert(item.options, sanitizeText(tostring(opt)))
         end
         if #item.options == 0 then
             table.insert(item.options, "Default")
@@ -711,67 +749,6 @@ function SectionMethods:CreateDropdown(cfg)
     return item
 end
 
-function SectionMethods:CreateInput(cfg)
-    cfg = cfg or {}
-    local tab = self.tab
-    local initialText = tostring(cfg.CurrentValue or cfg.Default or "")
-
-    local item = {
-        type = "input",
-        name = tostring(cfg.Name or "Input"),
-        text = initialText,
-        placeholder = tostring(cfg.PlaceholderText or "Text..."),
-        callback = cfg.Callback or function() end,
-        flag = cfg.Flag,
-        label = safeDrawing("Text"),
-        box = safeDrawing("Square"),
-        inputText = safeDrawing("Text"),
-    }
-
-    if item.label then
-        item.label.Size = 12
-        item.label.Outline = true
-        item.label.OutlineColor = Color3.fromRGB(0, 0, 0)
-        item.label.Color = tab.window.theme.text
-        item.label.Text = item.name
-        item.label.Visible = false
-    end
-
-    if item.box then
-        item.box.Thickness = 1
-        item.box.Filled = true
-        item.box.Color = tab.window.theme.controlBg
-        item.box.Visible = false
-    end
-
-    if item.inputText then
-        item.inputText.Size = 11
-        item.inputText.Outline = true
-        item.inputText.OutlineColor = Color3.fromRGB(0, 0, 0)
-        item.inputText.Color = tab.window.theme.textMuted
-        item.inputText.Text = #item.text > 0 and item.text or item.placeholder
-        item.inputText.Visible = false
-    end
-
-    function item:Set(val)
-        item.text = tostring(val or "")
-        if item.inputText then
-            item.inputText.Text = #item.text > 0 and item.text or item.placeholder
-        end
-        if item.flag then
-            DrawingUI.Flags[item.flag] = item.text
-        end
-        pcall(item.callback, item.text)
-    end
-
-    if item.flag then
-        DrawingUI.Flags[item.flag] = item.text
-    end
-
-    table.insert(self.items, item)
-    return item
-end
-
 function SectionMethods:CreateKeybind(cfg)
     cfg = cfg or {}
     local tab = self.tab
@@ -782,7 +759,7 @@ function SectionMethods:CreateKeybind(cfg)
 
     local item = {
         type = "keybind",
-        name = tostring(cfg.Name or "Keybind"),
+        name = sanitizeText(tostring(cfg.Name or "Keybind")),
         key = tostring(initialKey),
         listening = false,
         callback = cfg.Callback or function() end,
@@ -837,6 +814,67 @@ function SectionMethods:CreateKeybind(cfg)
     return item
 end
 
+function SectionMethods:CreateInput(cfg)
+    cfg = cfg or {}
+    local tab = self.tab
+    local initialText = sanitizeText(tostring(cfg.CurrentValue or cfg.Default or ""))
+
+    local item = {
+        type = "input",
+        name = sanitizeText(tostring(cfg.Name or "Input")),
+        text = initialText,
+        placeholder = sanitizeText(tostring(cfg.PlaceholderText or "Type here...")),
+        callback = cfg.Callback or function() end,
+        flag = cfg.Flag,
+        label = safeDrawing("Text"),
+        box = safeDrawing("Square"),
+        inputText = safeDrawing("Text"),
+    }
+
+    if item.label then
+        item.label.Size = 12
+        item.label.Outline = true
+        item.label.OutlineColor = Color3.fromRGB(0, 0, 0)
+        item.label.Color = tab.window.theme.text
+        item.label.Text = item.name
+        item.label.Visible = false
+    end
+
+    if item.box then
+        item.box.Thickness = 1
+        item.box.Filled = true
+        item.box.Color = tab.window.theme.controlBg
+        item.box.Visible = false
+    end
+
+    if item.inputText then
+        item.inputText.Size = 11
+        item.inputText.Outline = true
+        item.inputText.OutlineColor = Color3.fromRGB(0, 0, 0)
+        item.inputText.Color = tab.window.theme.textMuted
+        item.inputText.Text = #item.text > 0 and item.text or item.placeholder
+        item.inputText.Visible = false
+    end
+
+    function item:Set(val)
+        item.text = sanitizeText(tostring(val or ""))
+        if item.inputText then
+            item.inputText.Text = #item.text > 0 and item.text or item.placeholder
+        end
+        if item.flag then
+            DrawingUI.Flags[item.flag] = item.text
+        end
+        pcall(item.callback, item.text)
+    end
+
+    if item.flag then
+        DrawingUI.Flags[item.flag] = item.text
+    end
+
+    table.insert(self.items, item)
+    return item
+end
+
 -- ============================================================
 --   INPUT & INTERACTION HANDLERS
 -- ============================================================
@@ -861,6 +899,7 @@ function DrawingUI:InitInputHandlers()
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             local mouse = UserInputService:GetMouseLocation()
 
+            -- 1. Window Dragging
             if pointInBox(mouse, self.pos, Vector2.new(self.size.X, self.headerHeight)) then
                 self.dragging = true
                 self.dragStart = mouse
@@ -868,6 +907,7 @@ function DrawingUI:InitInputHandlers()
                 return
             end
 
+            -- 2. Tab Bar Switching
             local tabY = self.pos.Y + self.headerHeight
             if pointInBox(mouse, Vector2.new(self.pos.X, tabY), Vector2.new(self.size.X, self.tabBarHeight)) then
                 local tabCount = math.max(#self.tabs, 1)
@@ -881,6 +921,7 @@ function DrawingUI:InitInputHandlers()
                 end
             end
 
+            -- 3. Active Tab Controls
             local activeTab = self.tabs[self.activeTabIndex]
             if activeTab then
                 for _, sec in ipairs(activeTab.sections) do
@@ -969,31 +1010,29 @@ function DrawingUI:InitInputHandlers()
 end
 
 -- ============================================================
---   MAIN RENDER LOOP (100% DRAWING PRIMITIVES)
+--   MAIN RENDER LOOP
 -- ============================================================
 function DrawingUI:Render()
+    -- 0. Handle Hidden Window
     if not self.visible then
         for _, d in pairs(self.drawings) do
-            if d and d.Visible then d.Visible = false end
+            setObjVisible(d, false)
         end
         for _, tab in ipairs(self.tabs) do
-            if tab.tabBtn then tab.tabBtn.Visible = false end
-            if tab.tabLine then tab.tabLine.Visible = false end
+            setObjVisible(tab.tabBtn, false)
+            setObjVisible(tab.tabLine, false)
             for _, sec in ipairs(tab.sections) do
-                if sec.titleDrawing then sec.titleDrawing.Visible = false end
-                if sec.lineDrawing then sec.lineDrawing.Visible = false end
+                setObjVisible(sec.titleDrawing, false)
+                setObjVisible(sec.lineDrawing, false)
                 for _, item in ipairs(sec.items) do
-                    for _, prop in pairs(item) do
-                        if type(prop) == "table" and prop.Visible ~= nil then
-                            prop.Visible = false
-                        end
-                    end
+                    hideItem(item)
                 end
             end
         end
         return
     end
 
+    -- 1. Window Frame & Header
     if self.drawings.bg then
         self.drawings.bg.Position = self.pos
         self.drawings.bg.Size = self.size
@@ -1029,6 +1068,7 @@ function DrawingUI:Render()
         self.drawings.hint.Visible = true
     end
 
+    -- 2. Tab Bar
     local tabY = self.pos.Y + self.headerHeight
     if self.drawings.tabBar then
         self.drawings.tabBar.Position = Vector2.new(self.pos.X, tabY)
@@ -1058,6 +1098,7 @@ function DrawingUI:Render()
         end
     end
 
+    -- 3. Body Viewport Clipping Bounds
     local clipTop = tabY + self.tabBarHeight
     local clipBottom = self.pos.Y + self.size.Y - 6
     local marginX = 16
@@ -1090,7 +1131,7 @@ function DrawingUI:Render()
                     if item.type == "slider" then
                         itemH = 32
                     elseif item.type == "paragraph" then
-                        itemH = 30
+                        itemH = (item.content and #item.content > 0) and 34 or 18
                     elseif item.type == "dropdown" then
                         itemH = 24
                     elseif item.type == "divider" then
@@ -1200,9 +1241,7 @@ function DrawingUI:Render()
 
                         if item.selectedText then
                             local textVal = item.selected
-                            if #textVal > 18 then
-                                textVal = textVal:sub(1, 16) .. ".."
-                            end
+                            if #textVal > 18 then textVal = textVal:sub(1, 16) .. ".." end
                             item.selectedText.Text = textVal
                             item.selectedText.Position = Vector2.new(dropX + 6, dropY + 3)
                             item.selectedText.Visible = isItemInView
@@ -1297,8 +1336,12 @@ function DrawingUI:Render()
                         end
 
                         if item.descText then
-                            item.descText.Position = Vector2.new(self.pos.X + marginX, cursorY + 16)
-                            item.descText.Visible = isItemInView
+                            if item.content and #item.content > 0 then
+                                item.descText.Position = Vector2.new(self.pos.X + marginX, cursorY + 18)
+                                item.descText.Visible = isItemInView
+                            else
+                                item.descText.Visible = false
+                            end
                         end
 
                         cursorY = cursorY + itemH + 2
@@ -1349,17 +1392,15 @@ function DrawingUI:Render()
             tab.maxScroll = math.max(0, totalHeight - viewportH + 20)
 
         else
-            if tab.tabBtn then tab.tabBtn.Visible = false end
-            if tab.tabLine then tab.tabLine.Visible = false end
+            -- Non-active tab: ONLY hide sections and control items
+            -- DO NOT hide tab.tabBtn or tab.tabLine!
+            if sec and sec.titleDrawing then sec.titleDrawing.Visible = false end
+            if sec and sec.lineDrawing then sec.lineDrawing.Visible = false end
             for _, sec in ipairs(tab.sections) do
-                if sec.titleDrawing then sec.titleDrawing.Visible = false end
-                if sec.lineDrawing then sec.lineDrawing.Visible = false end
+                setObjVisible(sec.titleDrawing, false)
+                setObjVisible(sec.lineDrawing, false)
                 for _, item in ipairs(sec.items) do
-                    for _, prop in pairs(item) do
-                        if type(prop) == "table" and prop.Visible ~= nil then
-                            prop.Visible = false
-                        end
-                    end
+                    hideItem(item)
                 end
             end
         end
@@ -1385,22 +1426,18 @@ function DrawingUI:Destroy()
     table.clear(self.connections)
 
     for _, d in pairs(self.drawings) do
-        if d then pcall(function() d:Remove() end) end
+        removeObj(d)
     end
     table.clear(self.drawings)
 
     for _, tab in ipairs(self.tabs) do
-        if tab.tabBtn then pcall(function() tab.tabBtn:Remove() end) end
-        if tab.tabLine then pcall(function() tab.tabLine:Remove() end) end
+        removeObj(tab.tabBtn)
+        removeObj(tab.tabLine)
         for _, sec in ipairs(tab.sections) do
-            if sec.titleDrawing then pcall(function() sec.titleDrawing:Remove() end) end
-            if sec.lineDrawing then pcall(function() sec.lineDrawing:Remove() end) end
+            removeObj(sec.titleDrawing)
+            removeObj(sec.lineDrawing)
             for _, item in ipairs(sec.items) do
-                for _, prop in pairs(item) do
-                    if type(prop) == "table" and type(prop.Remove) == "function" then
-                        pcall(function() prop:Remove() end)
-                    end
-                end
+                removeItem(item)
             end
         end
     end

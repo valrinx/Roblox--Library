@@ -571,7 +571,7 @@ return function(Window, scriptInfo)
                     local screenPos, onScreen = camera:WorldToViewportPoint(c4Pos)
                     if onScreen and screenPos.Z > 0 then
                         local c4Dist = math.floor((c4Pos - myPos).Magnitude * 0.28)
-                        c4Visual.txt.Text = string.format("[💣 C4 BOMB - %dm]", c4Dist)
+                        c4Visual.txt.Text = string.format("[C4 BOMB - %dm]", c4Dist)
                         c4Visual.txt.Position = Vector2.new(screenPos.X, screenPos.Y - 10)
                         c4Visual.txt.Visible = true
 
