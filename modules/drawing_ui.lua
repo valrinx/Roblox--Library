@@ -1,8 +1,8 @@
 -- ============================================================
 --   RAVEN HUB  |  MacLib macOS Edition (100% Drawing API Engine)
---   Authentic Apple macOS Aesthetic | Smooth Rounded Corners
---   Proportional Modern Typography | macOS Capsule Toggles
---   100% BAC / Frog Compliant (Zero Object Injection)
+--   Authentic Apple macOS Aesthetic | 1:1 MacLib Visual Fidelity
+--   High-Contrast Bold Typography | macOS Section Container Cards
+--   Apple Capsule Switches | 100% BAC / Frog Anti-Cheat Compliant
 -- ============================================================
 
 local DrawingUI = {}
@@ -60,15 +60,26 @@ end
 -- ============================================================
 --   ROUNDED GEOMETRY HELPERS (Drawing API Smooth macOS Shapes)
 -- ============================================================
-local function createRoundedCard()
+local function createRoundedCard(baseZIndex)
+    baseZIndex = baseZIndex or 1
     local card = {
-        mid   = safeDrawing("Square"),
-        left  = safeDrawing("Square"),
-        right = safeDrawing("Square"),
-        tl    = safeDrawing("Circle"),
-        tr    = safeDrawing("Circle"),
-        bl    = safeDrawing("Circle"),
-        br    = safeDrawing("Circle"),
+        -- Outer border stroke (optional)
+        borderMid   = safeDrawing("Square"),
+        borderLeft  = safeDrawing("Square"),
+        borderRight = safeDrawing("Square"),
+        borderTL    = safeDrawing("Circle"),
+        borderTR    = safeDrawing("Circle"),
+        borderBL    = safeDrawing("Circle"),
+        borderBR    = safeDrawing("Circle"),
+
+        -- Inner card fill
+        bgMid       = safeDrawing("Square"),
+        bgLeft      = safeDrawing("Square"),
+        bgRight     = safeDrawing("Square"),
+        bgTL        = safeDrawing("Circle"),
+        bgTR        = safeDrawing("Circle"),
+        bgBL        = safeDrawing("Circle"),
+        bgBR        = safeDrawing("Circle"),
     }
 
     for _, obj in pairs(card) do
@@ -76,11 +87,12 @@ local function createRoundedCard()
             obj.Filled = true
             obj.Thickness = 1
             obj.Visible = false
+            pcall(function() obj.ZIndex = baseZIndex end)
         end
     end
 
-    function card:Update(pos, size, radius, color, visible)
-        if not visible then
+    function card:Update(pos, size, radius, bgColor, borderColor, visible)
+        if not visible or size.X <= 0 or size.Y <= 0 then
             for _, o in pairs(self) do
                 if type(o) == "userdata" or type(o) == "table" then
                     setObjVisible(o, false)
@@ -89,52 +101,109 @@ local function createRoundedCard()
             return
         end
 
-        local r = radius
-        -- Middle rectangle
-        if self.mid then
-            self.mid.Position = Vector2.new(pos.X + r, pos.Y)
-            self.mid.Size = Vector2.new(math.max(1, size.X - 2 * r), size.Y)
-            self.mid.Color = color
-            self.mid.Visible = true
+        local r = math.clamp(radius or 8, 1, math.floor(math.min(size.X, size.Y) / 2))
+
+        -- 1. Outer Border Stroke (when borderColor provided)
+        if borderColor then
+            if self.borderMid then
+                self.borderMid.Position = Vector2.new(pos.X + r, pos.Y)
+                self.borderMid.Size = Vector2.new(math.max(1, size.X - 2 * r), size.Y)
+                self.borderMid.Color = borderColor
+                self.borderMid.Visible = true
+            end
+            if self.borderLeft then
+                self.borderLeft.Position = Vector2.new(pos.X, pos.Y + r)
+                self.borderLeft.Size = Vector2.new(r, math.max(1, size.Y - 2 * r))
+                self.borderLeft.Color = borderColor
+                self.borderLeft.Visible = true
+            end
+            if self.borderRight then
+                self.borderRight.Position = Vector2.new(pos.X + size.X - r, pos.Y + r)
+                self.borderRight.Size = Vector2.new(r, math.max(1, size.Y - 2 * r))
+                self.borderRight.Color = borderColor
+                self.borderRight.Visible = true
+            end
+            if self.borderTL then
+                self.borderTL.Radius = r
+                self.borderTL.Position = Vector2.new(pos.X + r, pos.Y + r)
+                self.borderTL.Color = borderColor
+                self.borderTL.Visible = true
+            end
+            if self.borderTR then
+                self.borderTR.Radius = r
+                self.borderTR.Position = Vector2.new(pos.X + size.X - r, pos.Y + r)
+                self.borderTR.Color = borderColor
+                self.borderTR.Visible = true
+            end
+            if self.borderBL then
+                self.borderBL.Radius = r
+                self.borderBL.Position = Vector2.new(pos.X + r, pos.Y + size.Y - r)
+                self.borderBL.Color = borderColor
+                self.borderBL.Visible = true
+            end
+            if self.borderBR then
+                self.borderBR.Radius = r
+                self.borderBR.Position = Vector2.new(pos.X + size.X - r, pos.Y + size.Y - r)
+                self.borderBR.Color = borderColor
+                self.borderBR.Visible = true
+            end
+        else
+            setObjVisible(self.borderMid, false)
+            setObjVisible(self.borderLeft, false)
+            setObjVisible(self.borderRight, false)
+            setObjVisible(self.borderTL, false)
+            setObjVisible(self.borderTR, false)
+            setObjVisible(self.borderBL, false)
+            setObjVisible(self.borderBR, false)
         end
-        -- Left rectangle
-        if self.left then
-            self.left.Position = Vector2.new(pos.X, pos.Y + r)
-            self.left.Size = Vector2.new(r, math.max(1, size.Y - 2 * r))
-            self.left.Color = color
-            self.left.Visible = true
+
+        -- 2. Inner Card Fill (1px inset if border is present)
+        local inset = borderColor and 1 or 0
+        local innerPos = pos + Vector2.new(inset, inset)
+        local innerSize = size - Vector2.new(inset * 2, inset * 2)
+        local innerR = math.max(1, r - inset)
+
+        if self.bgMid then
+            self.bgMid.Position = Vector2.new(innerPos.X + innerR, innerPos.Y)
+            self.bgMid.Size = Vector2.new(math.max(1, innerSize.X - 2 * innerR), innerSize.Y)
+            self.bgMid.Color = bgColor
+            self.bgMid.Visible = true
         end
-        -- Right rectangle
-        if self.right then
-            self.right.Position = Vector2.new(pos.X + size.X - r, pos.Y + r)
-            self.right.Size = Vector2.new(r, math.max(1, size.Y - 2 * r))
-            self.right.Color = color
-            self.right.Visible = true
+        if self.bgLeft then
+            self.bgLeft.Position = Vector2.new(innerPos.X, innerPos.Y + innerR)
+            self.bgLeft.Size = Vector2.new(innerR, math.max(1, innerSize.Y - 2 * innerR))
+            self.bgLeft.Color = bgColor
+            self.bgLeft.Visible = true
         end
-        -- Corners
-        if self.tl then
-            self.tl.Radius = r
-            self.tl.Position = Vector2.new(pos.X + r, pos.Y + r)
-            self.tl.Color = color
-            self.tl.Visible = true
+        if self.bgRight then
+            self.bgRight.Position = Vector2.new(innerPos.X + innerSize.X - innerR, innerPos.Y + innerR)
+            self.bgRight.Size = Vector2.new(innerR, math.max(1, innerSize.Y - 2 * innerR))
+            self.bgRight.Color = bgColor
+            self.bgRight.Visible = true
         end
-        if self.tr then
-            self.tr.Radius = r
-            self.tr.Position = Vector2.new(pos.X + size.X - r, pos.Y + r)
-            self.tr.Color = color
-            self.tr.Visible = true
+        if self.bgTL then
+            self.bgTL.Radius = innerR
+            self.bgTL.Position = Vector2.new(innerPos.X + innerR, innerPos.Y + innerR)
+            self.bgTL.Color = bgColor
+            self.bgTL.Visible = true
         end
-        if self.bl then
-            self.bl.Radius = r
-            self.bl.Position = Vector2.new(pos.X + r, pos.Y + size.Y - r)
-            self.bl.Color = color
-            self.bl.Visible = true
+        if self.bgTR then
+            self.bgTR.Radius = innerR
+            self.bgTR.Position = Vector2.new(innerPos.X + innerSize.X - innerR, innerPos.Y + innerR)
+            self.bgTR.Color = bgColor
+            self.bgTR.Visible = true
         end
-        if self.br then
-            self.br.Radius = r
-            self.br.Position = Vector2.new(pos.X + size.X - r, pos.Y + size.Y - r)
-            self.br.Color = color
-            self.br.Visible = true
+        if self.bgBL then
+            self.bgBL.Radius = innerR
+            self.bgBL.Position = Vector2.new(innerPos.X + innerR, innerPos.Y + innerSize.Y - innerR)
+            self.bgBL.Color = bgColor
+            self.bgBL.Visible = true
+        end
+        if self.bgBR then
+            self.bgBR.Radius = innerR
+            self.bgBR.Position = Vector2.new(innerPos.X + innerSize.X - innerR, innerPos.Y + innerSize.Y - innerR)
+            self.bgBR.Color = bgColor
+            self.bgBR.Visible = true
         end
     end
 
@@ -149,55 +218,99 @@ local function createRoundedCard()
     return card
 end
 
-local function createPillSwitch()
+-- ============================================================
+--   APPLE CAPSULE SWITCH (1:1 macOS Pill Toggle)
+-- ============================================================
+local function createPillSwitch(baseZIndex)
+    baseZIndex = baseZIndex or 5
     local pill = {
-        cLeft  = safeDrawing("Circle"),
-        cRight = safeDrawing("Circle"),
-        mid    = safeDrawing("Square"),
-        knob   = safeDrawing("Circle"),
+        borderLeft  = safeDrawing("Circle"),
+        borderRight = safeDrawing("Circle"),
+        borderMid   = safeDrawing("Square"),
+        cLeft       = safeDrawing("Circle"),
+        cRight      = safeDrawing("Circle"),
+        mid         = safeDrawing("Square"),
+        knobShadow  = safeDrawing("Circle"),
+        knob        = safeDrawing("Circle"),
     }
 
-    if pill.cLeft then pill.cLeft.Filled = true; pill.cLeft.Visible = false end
-    if pill.cRight then pill.cRight.Filled = true; pill.cRight.Visible = false end
-    if pill.mid then pill.mid.Filled = true; pill.mid.Thickness = 1; pill.mid.Visible = false end
-    if pill.knob then pill.knob.Filled = true; pill.knob.Visible = false end
+    if pill.borderLeft then pill.borderLeft.Filled = true; pill.borderLeft.Visible = false; pcall(function() pill.borderLeft.ZIndex = baseZIndex end) end
+    if pill.borderRight then pill.borderRight.Filled = true; pill.borderRight.Visible = false; pcall(function() pill.borderRight.ZIndex = baseZIndex end) end
+    if pill.borderMid then pill.borderMid.Filled = true; pill.borderMid.Thickness = 1; pill.borderMid.Visible = false; pcall(function() pill.borderMid.ZIndex = baseZIndex end) end
+    if pill.cLeft then pill.cLeft.Filled = true; pill.cLeft.Visible = false; pcall(function() pill.cLeft.ZIndex = baseZIndex + 1 end) end
+    if pill.cRight then pill.cRight.Filled = true; pill.cRight.Visible = false; pcall(function() pill.cRight.ZIndex = baseZIndex + 1 end) end
+    if pill.mid then pill.mid.Filled = true; pill.mid.Thickness = 1; pill.mid.Visible = false; pcall(function() pill.mid.ZIndex = baseZIndex + 1 end) end
+    if pill.knobShadow then pill.knobShadow.Filled = true; pill.knobShadow.Visible = false; pcall(function() pill.knobShadow.ZIndex = baseZIndex + 2 end) end
+    if pill.knob then pill.knob.Filled = true; pill.knob.Visible = false; pcall(function() pill.knob.ZIndex = baseZIndex + 3 end) end
 
-    function pill:Update(pos, size, value, colorOn, colorOff, knobColor, visible)
+    function pill:Update(pos, size, value, colorOn, colorOff, borderColor, knobColor, visible)
         if not visible then
+            setObjVisible(self.borderLeft, false)
+            setObjVisible(self.borderRight, false)
+            setObjVisible(self.borderMid, false)
             setObjVisible(self.cLeft, false)
             setObjVisible(self.cRight, false)
             setObjVisible(self.mid, false)
+            setObjVisible(self.knobShadow, false)
             setObjVisible(self.knob, false)
             return
         end
 
         local r = size.Y / 2
         local bgCol = value and colorOn or colorOff
+        local borderCol = value and colorOn or borderColor
 
+        -- Outer border outline
+        if self.borderLeft then
+            self.borderLeft.Radius = r
+            self.borderLeft.Position = Vector2.new(pos.X + r, pos.Y + r)
+            self.borderLeft.Color = borderCol
+            self.borderLeft.Visible = true
+        end
+        if self.borderRight then
+            self.borderRight.Radius = r
+            self.borderRight.Position = Vector2.new(pos.X + size.X - r, pos.Y + r)
+            self.borderRight.Color = borderCol
+            self.borderRight.Visible = true
+        end
+        if self.borderMid then
+            self.borderMid.Position = Vector2.new(pos.X + r, pos.Y)
+            self.borderMid.Size = Vector2.new(math.max(1, size.X - 2 * r), size.Y)
+            self.borderMid.Color = borderCol
+            self.borderMid.Visible = true
+        end
+
+        -- Inner track fill (1px inset)
+        local ir = math.max(1, r - 1)
         if self.cLeft then
-            self.cLeft.Radius = r
+            self.cLeft.Radius = ir
             self.cLeft.Position = Vector2.new(pos.X + r, pos.Y + r)
             self.cLeft.Color = bgCol
             self.cLeft.Visible = true
         end
-
         if self.cRight then
-            self.cRight.Radius = r
+            self.cRight.Radius = ir
             self.cRight.Position = Vector2.new(pos.X + size.X - r, pos.Y + r)
             self.cRight.Color = bgCol
             self.cRight.Visible = true
         end
-
         if self.mid then
-            self.mid.Position = Vector2.new(pos.X + r, pos.Y)
-            self.mid.Size = Vector2.new(math.max(1, size.X - 2 * r), size.Y)
+            self.mid.Position = Vector2.new(pos.X + r, pos.Y + 1)
+            self.mid.Size = Vector2.new(math.max(1, size.X - 2 * r), math.max(1, size.Y - 2))
             self.mid.Color = bgCol
             self.mid.Visible = true
         end
 
+        -- Circular knob with smooth drop shadow
+        local knobR = r - 2.5
+        local knobX = value and (pos.X + size.X - r) or (pos.X + r)
+        if self.knobShadow then
+            self.knobShadow.Radius = knobR + 1
+            self.knobShadow.Position = Vector2.new(knobX, pos.Y + r + 0.5)
+            self.knobShadow.Color = Color3.fromRGB(14, 16, 22)
+            self.knobShadow.Visible = true
+        end
         if self.knob then
-            local knobR = r - 2.5
-            local knobX = value and (pos.X + size.X - r) or (pos.X + r)
             self.knob.Radius = knobR
             self.knob.Position = Vector2.new(knobX, pos.Y + r)
             self.knob.Color = knobColor
@@ -206,9 +319,13 @@ local function createPillSwitch()
     end
 
     function pill:Remove()
+        removeObj(self.borderLeft)
+        removeObj(self.borderRight)
+        removeObj(self.borderMid)
         removeObj(self.cLeft)
         removeObj(self.cRight)
         removeObj(self.mid)
+        removeObj(self.knobShadow)
         removeObj(self.knob)
     end
 
@@ -217,13 +334,16 @@ end
 
 local function hideItem(item)
     if item.pill then
-        pcall(function() item.pill:Update(Vector2.zero, Vector2.zero, false, Color3.new(), Color3.new(), Color3.new(), false) end)
+        pcall(function() item.pill:Update(Vector2.zero, Vector2.zero, false, Color3.new(), Color3.new(), Color3.new(), Color3.new(), false) end)
     end
     if item.card then
-        pcall(function() item.card:Update(Vector2.zero, Vector2.zero, 0, Color3.new(), false) end)
+        pcall(function() item.card:Update(Vector2.zero, Vector2.zero, 0, Color3.new(), nil, false) end)
+    end
+    if item.buttonCard then
+        pcall(function() item.buttonCard:Update(Vector2.zero, Vector2.zero, 0, Color3.new(), nil, false) end)
     end
     for k, prop in pairs(item) do
-        if k ~= "pill" and k ~= "card" then
+        if k ~= "pill" and k ~= "card" and k ~= "buttonCard" and type(prop) ~= "function" and type(prop) ~= "table" then
             setObjVisible(prop, false)
         end
     end
@@ -237,53 +357,63 @@ local function removeItem(item)
     if item.card then
         pcall(function() item.card:Remove() end)
     end
+    if item.buttonCard then
+        pcall(function() item.buttonCard:Remove() end)
+    end
     for k, prop in pairs(item) do
-        if k ~= "pill" and k ~= "card" then
+        if k ~= "pill" and k ~= "card" and k ~= "buttonCard" and type(prop) ~= "function" and type(prop) ~= "table" then
             removeObj(prop)
         end
     end
 end
 
 -- ============================================================
---   APPLE macOS DARK THEME PALETTE (1:1 MacLib Fidelity)
+--   APPLE macOS DARK THEME PALETTE (1:1 MacLib High-Fidelity)
 -- ============================================================
 local MAC_THEME = {
-    bg             = Color3.fromRGB(15, 16, 20),      -- Sleek macOS Charcoal
-    bgSidebar      = Color3.fromRGB(12, 13, 16),      -- Ultra Dark Sidebar
-    bgHeader       = Color3.fromRGB(18, 19, 24),      -- Top Window Header
-    border         = Color3.fromRGB(44, 48, 60),      -- Window 1px Outer Stroke
-    divider        = Color3.fromRGB(34, 37, 48),      -- Subtle Dividers
+    -- Window Surfaces (macOS Sonoma / Sequoia Dark Glass Charcoal)
+    bg             = Color3.fromRGB(24, 26, 33),       -- Main Window Charcoal Surface
+    bgSidebar      = Color3.fromRGB(18, 19, 25),       -- Inset Sidebar Dark Tone
+    bgHeader       = Color3.fromRGB(28, 30, 39),       -- Header Top Surface
+    border         = Color3.fromRGB(56, 62, 80),       -- Outer 1px Window Stroke
+    divider        = Color3.fromRGB(40, 44, 58),       -- Section / Sidebar Separators
 
-    -- macOS Window Traffic Lights (1:1 MacLib Values)
-    trafficRed     = Color3.fromRGB(250, 93, 86),
-    trafficYellow  = Color3.fromRGB(252, 190, 57),
-    trafficGreen   = Color3.fromRGB(119, 174, 94),
+    -- macOS Window Traffic Lights (1:1 Apple Specifications)
+    trafficRed     = Color3.fromRGB(255, 95, 87),
+    trafficYellow  = Color3.fromRGB(255, 189, 46),
+    trafficGreen   = Color3.fromRGB(39, 201, 63),
 
-    -- Typography & Highlights (Proportional Font 0 / Clean Antialiased)
-    title          = Color3.fromRGB(255, 255, 255),    -- Pure White Header
-    subtitle       = Color3.fromRGB(140, 145, 160),    -- Clear Slate Grey
-    tabInactive    = Color3.fromRGB(155, 160, 175),    -- High-Legibility Inactive Tab
+    -- Typography (High-Contrast Bold, Razor-Sharp Dark Outline)
+    title          = Color3.fromRGB(255, 255, 255),    -- Pure White Window Header
+    subtitle       = Color3.fromRGB(145, 155, 178),    -- Clean Slate Grey Subtitle
+    outline        = Color3.fromRGB(8, 9, 13),         -- Crisp Dark Shadow Outline
+    tabInactive    = Color3.fromRGB(152, 160, 180),    -- High-Legibility Inactive Tab
     tabActive      = Color3.fromRGB(255, 255, 255),    -- Pure White Active Tab
-    tabActiveBg    = Color3.fromRGB(28, 34, 48),       -- Active Tab Background Pill
-    tabActiveBar   = Color3.fromRGB(59, 130, 246),     -- Apple Vivid Blue Indicator
+    tabActiveBg    = Color3.fromRGB(38, 44, 62),       -- Active Tab Rounded Pill
+    tabActiveBar   = Color3.fromRGB(56, 139, 253),     -- Apple Vivid Blue Tab Accent
 
-    -- Controls & Cards
-    cardBg         = Color3.fromRGB(22, 25, 32),       -- Individual Card Background
-    cardBorder     = Color3.fromRGB(42, 46, 58),       -- Card Border Stroke
-    sectionTitle   = Color3.fromRGB(56, 139, 253),     -- Vibrant Apple Blue Section Header
-    text           = Color3.fromRGB(245, 245, 247),    -- Crisp Soft White Labels
-    textMuted      = Color3.fromRGB(155, 160, 175),    -- High-Contrast Muted Values
+    -- Section Container Cards (1:1 MacLib Grouped Inset Cards)
+    sectionTitle   = Color3.fromRGB(88, 166, 255),     -- Vivid Apple Blue Section Header
+    cardBg         = Color3.fromRGB(34, 38, 50),       -- Group Card Solid Surface (Clear contrast against bg)
+    cardBorder     = Color3.fromRGB(58, 64, 84),       -- Group Card 1px Outer Stroke
+    rowDivider     = Color3.fromRGB(44, 49, 64),       -- Subtle Inner Row Separator
+    rowHover       = Color3.fromRGB(42, 47, 62),       -- Smooth Row Hover Highlight
 
-    controlBg      = Color3.fromRGB(22, 25, 32),       -- Buttons & Badges Background
-    controlBorder  = Color3.fromRGB(42, 46, 58),       -- Buttons & Badges Stroke
+    -- Controls & Typography
+    text           = Color3.fromRGB(255, 255, 255),    -- Pure White Bold Labels (Maximum Contrast)
+    textMuted      = Color3.fromRGB(168, 176, 196),    -- Secondary Values & Descriptions
+    controlBg      = Color3.fromRGB(40, 45, 60),       -- Buttons & Badges Surface
+    controlBorder  = Color3.fromRGB(64, 72, 94),       -- Buttons & Badges Border Stroke
 
     -- Apple Switches & Sliders
-    toggleOn       = Color3.fromRGB(52, 199, 89),      -- Vivid Apple iOS Green
-    toggleOff      = Color3.fromRGB(44, 46, 56),       -- Dark Slate Switch
-    knob           = Color3.fromRGB(255, 255, 255),    -- Pure White Knob
-    sliderTrack    = Color3.fromRGB(36, 40, 52),       -- Slider Track
-    sliderFill     = Color3.fromRGB(56, 139, 253),     -- Apple Blue Slider Fill
-    accent         = Color3.fromRGB(56, 139, 253),
+    toggleOn       = Color3.fromRGB(52, 199, 89),      -- Authentic Apple Green (#34C759)
+    toggleOff      = Color3.fromRGB(48, 52, 66),       -- Dark Slate Switch Track
+    toggleBorder   = Color3.fromRGB(68, 74, 94),       -- Switch Border Stroke
+    knob           = Color3.fromRGB(255, 255, 255),    -- Pure White Solid Knob
+    knobShadow     = Color3.fromRGB(14, 16, 22),       -- Drop Shadow for Knob
+    sliderTrack    = Color3.fromRGB(42, 47, 62),       -- Slider Track
+    sliderFill     = Color3.fromRGB(56, 139, 253),     -- Apple Vivid Blue Fill
+    accent         = Color3.fromRGB(56, 139, 253),     -- Apple Vivid Blue Accent
 }
 
 -- ============================================================
@@ -326,52 +456,49 @@ function DrawingUI:CreateWindow(config)
     self.theme = MAC_THEME
     self.tabs = {}
     self.activeTabIndex = 1
-    self.headerHeight = 42
-    self.sidebarWidth = 165
+    self.headerHeight = 44
+    self.sidebarWidth = 170
 
     self.drawings = {}
 
-    -- Window Outer Background
-    self.drawings.bg = safeDrawing("Square")
-    if self.drawings.bg then
-        self.drawings.bg.Filled = true
-        self.drawings.bg.Color = self.theme.bg
-        self.drawings.bg.Thickness = 1
-        self.drawings.bg.Visible = false
+    -- Main Window 12px Rounded Background & 1px Border Stroke (Layer 1)
+    self.windowCard = createRoundedCard(1)
+
+    -- Left Sidebar Surface & Divider Line (Layer 2)
+    self.drawings.sidebarBg = safeDrawing("Square")
+    if self.drawings.sidebarBg then
+        self.drawings.sidebarBg.Filled = true
+        self.drawings.sidebarBg.Color = self.theme.bgSidebar
+        self.drawings.sidebarBg.Thickness = 1
+        self.drawings.sidebarBg.Visible = false
+        pcall(function() self.drawings.sidebarBg.ZIndex = 2 end)
     end
 
-    -- Window Outer 1px macOS Border
-    self.drawings.border = safeDrawing("Square")
-    if self.drawings.border then
-        self.drawings.border.Filled = false
-        self.drawings.border.Color = self.theme.border
-        self.drawings.border.Thickness = 1
-        self.drawings.border.Visible = false
+    self.drawings.sidebarLine = safeDrawing("Line")
+    if self.drawings.sidebarLine then
+        self.drawings.sidebarLine.Thickness = 1
+        self.drawings.sidebarLine.Color = self.theme.divider
+        self.drawings.sidebarLine.Visible = false
+        pcall(function() self.drawings.sidebarLine.ZIndex = 2 end)
     end
 
-    -- Header Bar
-    self.drawings.header = safeDrawing("Square")
-    if self.drawings.header then
-        self.drawings.header.Filled = true
-        self.drawings.header.Color = self.theme.bgHeader
-        self.drawings.header.Thickness = 1
-        self.drawings.header.Visible = false
-    end
-
+    -- Header Divider Line (Layer 10)
     self.drawings.headerLine = safeDrawing("Line")
     if self.drawings.headerLine then
         self.drawings.headerLine.Thickness = 1
         self.drawings.headerLine.Color = self.theme.divider
         self.drawings.headerLine.Visible = false
+        pcall(function() self.drawings.headerLine.ZIndex = 10 end)
     end
 
-    -- Traffic Lights: Red (Close/Destroy)
+    -- Traffic Lights: Red (Close/Destroy) (Layer 10)
     self.drawings.trafficRed = safeDrawing("Circle")
     if self.drawings.trafficRed then
         self.drawings.trafficRed.Filled = true
         self.drawings.trafficRed.Color = self.theme.trafficRed
         self.drawings.trafficRed.Radius = 6.5
         self.drawings.trafficRed.Visible = false
+        pcall(function() self.drawings.trafficRed.ZIndex = 10 end)
     end
 
     -- Traffic Lights: Yellow (Minimize/Hide)
@@ -381,6 +508,7 @@ function DrawingUI:CreateWindow(config)
         self.drawings.trafficYellow.Color = self.theme.trafficYellow
         self.drawings.trafficYellow.Radius = 6.5
         self.drawings.trafficYellow.Visible = false
+        pcall(function() self.drawings.trafficYellow.ZIndex = 10 end)
     end
 
     -- Traffic Lights: Green (Expand/Active)
@@ -390,75 +518,52 @@ function DrawingUI:CreateWindow(config)
         self.drawings.trafficGreen.Color = self.theme.trafficGreen
         self.drawings.trafficGreen.Radius = 6.5
         self.drawings.trafficGreen.Visible = false
+        pcall(function() self.drawings.trafficGreen.ZIndex = 10 end)
     end
 
-    -- Header Title & Subtitle (Proportional Font 0, Size 16/13, Clean Antialiased)
+    -- Header Title & Subtitle (Bold High-Contrast Outlined, Layer 10)
     self.drawings.title = safeDrawing("Text")
     if self.drawings.title then
         self.drawings.title.Font = 0
-        self.drawings.title.Size = 16
-        self.drawings.title.Outline = false
+        self.drawings.title.Size = 18
+        self.drawings.title.Outline = true
+        self.drawings.title.OutlineColor = self.theme.outline
         self.drawings.title.Color = self.theme.title
         self.drawings.title.Text = self.title
         self.drawings.title.Visible = false
+        pcall(function() self.drawings.title.ZIndex = 10 end)
     end
 
     self.drawings.subtitle = safeDrawing("Text")
     if self.drawings.subtitle then
         self.drawings.subtitle.Font = 0
         self.drawings.subtitle.Size = 13
-        self.drawings.subtitle.Outline = false
+        self.drawings.subtitle.Outline = true
+        self.drawings.subtitle.OutlineColor = self.theme.outline
         self.drawings.subtitle.Color = self.theme.subtitle
         self.drawings.subtitle.Text = self.subtitle
         self.drawings.subtitle.Visible = false
+        pcall(function() self.drawings.subtitle.ZIndex = 10 end)
     end
 
-    -- Keybind Badge on Top-Right
-    self.drawings.keyBadgeBg = safeDrawing("Square")
-    if self.drawings.keyBadgeBg then
-        self.drawings.keyBadgeBg.Filled = true
-        self.drawings.keyBadgeBg.Color = self.theme.controlBg
-        self.drawings.keyBadgeBg.Thickness = 1
-        self.drawings.keyBadgeBg.Visible = false
-    end
-
-    self.drawings.keyBadgeBorder = safeDrawing("Square")
-    if self.drawings.keyBadgeBorder then
-        self.drawings.keyBadgeBorder.Filled = false
-        self.drawings.keyBadgeBorder.Color = self.theme.controlBorder
-        self.drawings.keyBadgeBorder.Thickness = 1
-        self.drawings.keyBadgeBorder.Visible = false
-    end
+    -- Keybind Badge on Top-Right (Layer 10)
+    self.keyBadgeCard = createRoundedCard(10)
 
     self.drawings.hint = safeDrawing("Text")
     if self.drawings.hint then
         self.drawings.hint.Font = 0
         self.drawings.hint.Size = 12
-        self.drawings.hint.Outline = false
+        self.drawings.hint.Outline = true
+        self.drawings.hint.OutlineColor = self.theme.outline
         self.drawings.hint.Color = self.theme.textMuted
         self.drawings.hint.Text = "[RShift] Toggle"
         self.drawings.hint.Center = true
         self.drawings.hint.Visible = false
-    end
-
-    -- Left Sidebar
-    self.drawings.sidebarBg = safeDrawing("Square")
-    if self.drawings.sidebarBg then
-        self.drawings.sidebarBg.Filled = true
-        self.drawings.sidebarBg.Color = self.theme.bgSidebar
-        self.drawings.sidebarBg.Thickness = 1
-        self.drawings.sidebarBg.Visible = false
-    end
-
-    self.drawings.sidebarLine = safeDrawing("Line")
-    if self.drawings.sidebarLine then
-        self.drawings.sidebarLine.Thickness = 1
-        self.drawings.sidebarLine.Color = self.theme.divider
-        self.drawings.sidebarLine.Visible = false
+        pcall(function() self.drawings.hint.ZIndex = 11 end)
     end
 
     -- Active Tab Rounded Pill Highlight
-    self.activeTabPill = createRoundedCard()
+    self.activeTabPill = createRoundedCard(3)
 
     -- Active Tab Accent Left Line
     self.activeTabBar = safeDrawing("Square")
@@ -467,10 +572,11 @@ function DrawingUI:CreateWindow(config)
         self.activeTabBar.Color = self.theme.tabActiveBar
         self.activeTabBar.Thickness = 1
         self.activeTabBar.Visible = false
+        pcall(function() self.activeTabBar.ZIndex = 4 end)
     end
 
     -- User Info Profile Card (Bottom of Sidebar)
-    self.userCardPill = createRoundedCard()
+    self.userCardPill = createRoundedCard(2)
 
     self.drawings.userDot = safeDrawing("Circle")
     if self.drawings.userDot then
@@ -478,27 +584,32 @@ function DrawingUI:CreateWindow(config)
         self.drawings.userDot.Color = self.theme.toggleOn
         self.drawings.userDot.Radius = 4.5
         self.drawings.userDot.Visible = false
+        pcall(function() self.drawings.userDot.ZIndex = 4 end)
     end
 
     self.drawings.userName = safeDrawing("Text")
     if self.drawings.userName then
         self.drawings.userName.Font = 0
-        self.drawings.userName.Size = 13
-        self.drawings.userName.Outline = false
+        self.drawings.userName.Size = 14
+        self.drawings.userName.Outline = true
+        self.drawings.userName.OutlineColor = self.theme.outline
         self.drawings.userName.Color = self.theme.text
         local lp = Players.LocalPlayer
         self.drawings.userName.Text = lp and (lp.DisplayName or lp.Name) or "User"
         self.drawings.userName.Visible = false
+        pcall(function() self.drawings.userName.ZIndex = 4 end)
     end
 
     self.drawings.userStatus = safeDrawing("Text")
     if self.drawings.userStatus then
         self.drawings.userStatus.Font = 0
-        self.drawings.userStatus.Size = 11
-        self.drawings.userStatus.Outline = false
+        self.drawings.userStatus.Size = 12
+        self.drawings.userStatus.Outline = true
+        self.drawings.userStatus.OutlineColor = self.theme.outline
         self.drawings.userStatus.Color = self.theme.textMuted
-        self.drawings.userStatus.Text = "MacLib • Protected"
+        self.drawings.userStatus.Text = "MacLib | 100% Drawing Safe"
         self.drawings.userStatus.Visible = false
+        pcall(function() self.drawings.userStatus.ZIndex = 4 end)
     end
 
     self.dragging = false
@@ -521,7 +632,7 @@ function DrawingUI:OnUnload(callback)
 end
 
 function DrawingUI:InsertConfigSection()
-    -- Compatibility stub
+    -- MacLib compatibility stub
 end
 
 -- ============================================================
@@ -581,10 +692,12 @@ function DrawingUI:CreateTab(name, icon)
     if tab.tabText then
         tab.tabText.Font = 0
         tab.tabText.Size = 15
-        tab.tabText.Outline = false
+        tab.tabText.Outline = true
+        tab.tabText.OutlineColor = self.theme.outline
         tab.tabText.Color = self.theme.tabInactive
         tab.tabText.Text = tab.name
         tab.tabText.Visible = false
+        pcall(function() tab.tabText.ZIndex = 4 end)
     end
 
     table.insert(self.tabs, tab)
@@ -635,15 +748,18 @@ function TabMethods:CreateSection(secName)
         tab = self,
         window = self.window,
         titleDrawing = safeDrawing("Text"),
+        card = createRoundedCard(3),
     }, SectionMethods)
 
     if sec.titleDrawing then
         sec.titleDrawing.Font = 0
-        sec.titleDrawing.Size = 13
-        sec.titleDrawing.Outline = false
+        sec.titleDrawing.Size = 14
+        sec.titleDrawing.Outline = true
+        sec.titleDrawing.OutlineColor = self.window.theme.outline
         sec.titleDrawing.Color = self.window.theme.sectionTitle
-        sec.titleDrawing.Text = "- " .. string.upper(sec.name)
+        sec.titleDrawing.Text = string.format("-  %s", string.upper(sec.name))
         sec.titleDrawing.Visible = false
+        pcall(function() sec.titleDrawing.ZIndex = 5 end)
     end
 
     self._currentSection = sec
@@ -652,7 +768,7 @@ function TabMethods:CreateSection(secName)
 end
 
 -- ============================================================
---   SECTION CONTROLS (macOS Capsule Switches, Cards, Sliders)
+--   SECTION CONTROLS (1:1 MacLib High-Contrast Controls)
 -- ============================================================
 function SectionMethods:CreateToggle(cfg)
     cfg = cfg or {}
@@ -663,17 +779,35 @@ function SectionMethods:CreateToggle(cfg)
         value = cfg.CurrentValue == true or cfg.Default == true,
         callback = cfg.Callback or function() end,
         flag = cfg.Flag,
+        -- Layering: Backgrounds created first, then foreground text and switch
+        hoverBg = safeDrawing("Square"),
+        innerDivider = safeDrawing("Line"),
         label = safeDrawing("Text"),
-        pill = createPillSwitch(),
+        pill = createPillSwitch(5),
     }
+
+    if item.hoverBg then
+        item.hoverBg.Filled = true
+        item.hoverBg.Thickness = 1
+        item.hoverBg.Visible = false
+        pcall(function() item.hoverBg.ZIndex = 4 end)
+    end
+
+    if item.innerDivider then
+        item.innerDivider.Thickness = 1
+        item.innerDivider.Visible = false
+        pcall(function() item.innerDivider.ZIndex = 4 end)
+    end
 
     if item.label then
         item.label.Font = 0
-        item.label.Size = 15
-        item.label.Outline = false
+        item.label.Size = 16
+        item.label.Outline = true
+        item.label.OutlineColor = tab.window.theme.outline
         item.label.Color = tab.window.theme.text
         item.label.Text = item.name
         item.label.Visible = false
+        pcall(function() item.label.ZIndex = 6 end)
     end
 
     function item:Set(val)
@@ -710,22 +844,29 @@ function SectionMethods:CreateSlider(cfg)
         value = math.clamp(currentVal, minVal, maxVal),
         callback = cfg.Callback or function() end,
         flag = cfg.Flag,
-        label = safeDrawing("Text"),
+        -- Layering: Backgrounds first
+        hoverBg = safeDrawing("Square"),
+        innerDivider = safeDrawing("Line"),
         valBadgeBg = safeDrawing("Square"),
         valBadgeBorder = safeDrawing("Square"),
-        valText = safeDrawing("Text"),
         track = safeDrawing("Square"),
         fill = safeDrawing("Square"),
         knob = safeDrawing("Circle"),
+        label = safeDrawing("Text"),
+        valText = safeDrawing("Text"),
     }
 
-    if item.label then
-        item.label.Font = 0
-        item.label.Size = 15
-        item.label.Outline = false
-        item.label.Color = tab.window.theme.text
-        item.label.Text = item.name
-        item.label.Visible = false
+    if item.hoverBg then
+        item.hoverBg.Filled = true
+        item.hoverBg.Thickness = 1
+        item.hoverBg.Visible = false
+        pcall(function() item.hoverBg.ZIndex = 4 end)
+    end
+
+    if item.innerDivider then
+        item.innerDivider.Thickness = 1
+        item.innerDivider.Visible = false
+        pcall(function() item.innerDivider.ZIndex = 4 end)
     end
 
     if item.valBadgeBg then
@@ -733,6 +874,7 @@ function SectionMethods:CreateSlider(cfg)
         item.valBadgeBg.Color = tab.window.theme.controlBg
         item.valBadgeBg.Thickness = 1
         item.valBadgeBg.Visible = false
+        pcall(function() item.valBadgeBg.ZIndex = 5 end)
     end
 
     if item.valBadgeBorder then
@@ -740,15 +882,7 @@ function SectionMethods:CreateSlider(cfg)
         item.valBadgeBorder.Color = tab.window.theme.controlBorder
         item.valBadgeBorder.Thickness = 1
         item.valBadgeBorder.Visible = false
-    end
-
-    if item.valText then
-        item.valText.Font = 0
-        item.valText.Size = 13
-        item.valText.Outline = false
-        item.valText.Color = tab.window.theme.textMuted
-        item.valText.Center = true
-        item.valText.Visible = false
+        pcall(function() item.valBadgeBorder.ZIndex = 5 end)
     end
 
     if item.track then
@@ -756,6 +890,7 @@ function SectionMethods:CreateSlider(cfg)
         item.track.Filled = true
         item.track.Color = tab.window.theme.sliderTrack
         item.track.Visible = false
+        pcall(function() item.track.ZIndex = 5 end)
     end
 
     if item.fill then
@@ -763,13 +898,37 @@ function SectionMethods:CreateSlider(cfg)
         item.fill.Filled = true
         item.fill.Color = tab.window.theme.sliderFill
         item.fill.Visible = false
+        pcall(function() item.fill.ZIndex = 5 end)
     end
 
     if item.knob then
         item.knob.Filled = true
         item.knob.Color = tab.window.theme.knob
-        item.knob.Radius = 7.5
+        item.knob.Radius = 8
         item.knob.Visible = false
+        pcall(function() item.knob.ZIndex = 6 end)
+    end
+
+    if item.label then
+        item.label.Font = 0
+        item.label.Size = 16
+        item.label.Outline = true
+        item.label.OutlineColor = tab.window.theme.outline
+        item.label.Color = tab.window.theme.text
+        item.label.Text = item.name
+        item.label.Visible = false
+        pcall(function() item.label.ZIndex = 6 end)
+    end
+
+    if item.valText then
+        item.valText.Font = 0
+        item.valText.Size = 14
+        item.valText.Outline = true
+        item.valText.OutlineColor = tab.window.theme.outline
+        item.valText.Color = tab.window.theme.accent
+        item.valText.Center = true
+        item.valText.Visible = false
+        pcall(function() item.valText.ZIndex = 6 end)
     end
 
     function item:Set(val)
@@ -796,18 +955,35 @@ function SectionMethods:CreateButton(cfg)
         type = "button",
         name = sanitizeText(tostring(cfg.Name or "Button")),
         callback = cfg.Callback or function() end,
-        card = createRoundedCard(),
+        hoverBg = safeDrawing("Square"),
+        innerDivider = safeDrawing("Line"),
+        buttonCard = createRoundedCard(5),
         label = safeDrawing("Text"),
     }
 
+    if item.hoverBg then
+        item.hoverBg.Filled = true
+        item.hoverBg.Thickness = 1
+        item.hoverBg.Visible = false
+        pcall(function() item.hoverBg.ZIndex = 4 end)
+    end
+
+    if item.innerDivider then
+        item.innerDivider.Thickness = 1
+        item.innerDivider.Visible = false
+        pcall(function() item.innerDivider.ZIndex = 4 end)
+    end
+
     if item.label then
         item.label.Font = 0
-        item.label.Size = 14
-        item.label.Outline = false
+        item.label.Size = 15
+        item.label.Outline = true
+        item.label.OutlineColor = tab.window.theme.outline
         item.label.Color = tab.window.theme.text
         item.label.Text = item.name
         item.label.Center = true
         item.label.Visible = false
+        pcall(function() item.label.ZIndex = 6 end)
     end
 
     function item:Click()
@@ -825,20 +1001,37 @@ function SectionMethods:CreateLabel(cfg)
     local item = {
         type = "label",
         text = text,
+        hoverBg = safeDrawing("Square"),
+        innerDivider = safeDrawing("Line"),
         label = safeDrawing("Text"),
     }
 
+    if item.hoverBg then
+        item.hoverBg.Filled = true
+        item.hoverBg.Thickness = 1
+        item.hoverBg.Visible = false
+        pcall(function() item.hoverBg.ZIndex = 4 end)
+    end
+
+    if item.innerDivider then
+        item.innerDivider.Thickness = 1
+        item.innerDivider.Visible = false
+        pcall(function() item.innerDivider.ZIndex = 4 end)
+    end
+
     if item.label then
         item.label.Font = 0
-        item.label.Size = 14
-        item.label.Outline = false
+        item.label.Size = 15
+        item.label.Outline = true
+        item.label.OutlineColor = tab.window.theme.outline
         item.label.Color = tab.window.theme.textMuted
         item.label.Text = item.text
         item.label.Visible = false
+        pcall(function() item.label.ZIndex = 6 end)
     end
 
     function item:Set(newText)
-        item.text = sanitizeText(tostring(newText or ""))
+        item.text = sanitizeText(tostring(type(newText) == "table" and (newText.Text or newText.Name) or newText or ""))
         if item.label then
             item.label.Text = item.text
         end
@@ -858,27 +1051,45 @@ function SectionMethods:CreateStatus(cfg)
         type = "paragraph",
         title = title,
         content = desc,
-        card = createRoundedCard(),
+        hoverBg = safeDrawing("Square"),
+        innerDivider = safeDrawing("Line"),
         titleText = safeDrawing("Text"),
         descText = safeDrawing("Text"),
     }
 
+    if item.hoverBg then
+        item.hoverBg.Filled = true
+        item.hoverBg.Thickness = 1
+        item.hoverBg.Visible = false
+        pcall(function() item.hoverBg.ZIndex = 4 end)
+    end
+
+    if item.innerDivider then
+        item.innerDivider.Thickness = 1
+        item.innerDivider.Visible = false
+        pcall(function() item.innerDivider.ZIndex = 4 end)
+    end
+
     if item.titleText then
         item.titleText.Font = 0
-        item.titleText.Size = 14
-        item.titleText.Outline = false
-        item.titleText.Color = tab.window.theme.text
+        item.titleText.Size = 15
+        item.titleText.Outline = true
+        item.titleText.OutlineColor = tab.window.theme.outline
+        item.titleText.Color = tab.window.theme.sectionTitle
         item.titleText.Text = item.title
         item.titleText.Visible = false
+        pcall(function() item.titleText.ZIndex = 6 end)
     end
 
     if item.descText then
         item.descText.Font = 0
-        item.descText.Size = 12
-        item.descText.Outline = false
-        item.descText.Color = tab.window.theme.textMuted
+        item.descText.Size = 13
+        item.descText.Outline = true
+        item.descText.OutlineColor = tab.window.theme.outline
+        item.descText.Color = tab.window.theme.text
         item.descText.Text = item.content
         item.descText.Visible = false
+        pcall(function() item.descText.ZIndex = 6 end)
     end
 
     function item:Set(newDesc)
@@ -903,8 +1114,9 @@ function SectionMethods:CreateDivider()
     }
     if item.line then
         item.line.Thickness = 1
-        item.line.Color = self.tab.window.theme.divider
+        item.line.Color = self.tab.window.theme.rowDivider
         item.line.Visible = false
+        pcall(function() item.line.ZIndex = 4 end)
     end
     table.insert(self.items, item)
     return item
@@ -913,8 +1125,18 @@ end
 function SectionMethods:CreateDropdown(cfg)
     cfg = cfg or {}
     local tab = self.tab
-    local options = cfg.Options or {"Option 1"}
-    local defaultVal = tostring(cfg.CurrentOption or cfg.Default or options[1] or "")
+    local rawOptions = cfg.Options or {"Option 1"}
+    local options = {}
+    for _, opt in ipairs(rawOptions) do
+        table.insert(options, tostring(opt))
+    end
+    if #options == 0 then table.insert(options, "Default") end
+
+    local defaultVal = cfg.CurrentOption or cfg.Default or options[1] or ""
+    if type(defaultVal) == "table" then
+        defaultVal = defaultVal[1] or options[1] or ""
+    end
+    defaultVal = tostring(defaultVal)
 
     local item = {
         type = "dropdown",
@@ -923,33 +1145,82 @@ function SectionMethods:CreateDropdown(cfg)
         current = defaultVal,
         callback = cfg.Callback or function() end,
         flag = cfg.Flag,
-        card = createRoundedCard(),
+        hoverBg = safeDrawing("Square"),
+        innerDivider = safeDrawing("Line"),
+        badgeBg = safeDrawing("Square"),
+        badgeBorder = safeDrawing("Square"),
         label = safeDrawing("Text"),
+        valText = safeDrawing("Text"),
         arrow = safeDrawing("Text"),
     }
 
+    if item.hoverBg then
+        item.hoverBg.Filled = true
+        item.hoverBg.Thickness = 1
+        item.hoverBg.Visible = false
+        pcall(function() item.hoverBg.ZIndex = 4 end)
+    end
+
+    if item.innerDivider then
+        item.innerDivider.Thickness = 1
+        item.innerDivider.Visible = false
+        pcall(function() item.innerDivider.ZIndex = 4 end)
+    end
+
+    if item.badgeBg then
+        item.badgeBg.Filled = true
+        item.badgeBg.Color = tab.window.theme.controlBg
+        item.badgeBg.Thickness = 1
+        item.badgeBg.Visible = false
+        pcall(function() item.badgeBg.ZIndex = 5 end)
+    end
+
+    if item.badgeBorder then
+        item.badgeBorder.Filled = false
+        item.badgeBorder.Color = tab.window.theme.controlBorder
+        item.badgeBorder.Thickness = 1
+        item.badgeBorder.Visible = false
+        pcall(function() item.badgeBorder.ZIndex = 5 end)
+    end
+
     if item.label then
         item.label.Font = 0
-        item.label.Size = 14
-        item.label.Outline = false
+        item.label.Size = 16
+        item.label.Outline = true
+        item.label.OutlineColor = tab.window.theme.outline
         item.label.Color = tab.window.theme.text
-        item.label.Text = string.format("%s:  %s", item.name, item.current)
+        item.label.Text = item.name
         item.label.Visible = false
+        pcall(function() item.label.ZIndex = 6 end)
+    end
+
+    if item.valText then
+        item.valText.Font = 0
+        item.valText.Size = 14
+        item.valText.Outline = true
+        item.valText.OutlineColor = tab.window.theme.outline
+        item.valText.Color = tab.window.theme.accent
+        item.valText.Text = item.current
+        item.valText.Visible = false
+        pcall(function() item.valText.ZIndex = 6 end)
     end
 
     if item.arrow then
         item.arrow.Font = 0
         item.arrow.Size = 13
-        item.arrow.Outline = false
+        item.arrow.Outline = true
+        item.arrow.OutlineColor = tab.window.theme.outline
         item.arrow.Color = tab.window.theme.textMuted
-        item.arrow.Text = ">"
+        item.arrow.Text = "v"
         item.arrow.Visible = false
+        pcall(function() item.arrow.ZIndex = 6 end)
     end
 
     function item:Set(val)
-        item.current = tostring(val)
-        if item.label then
-            item.label.Text = string.format("%s:  %s", item.name, item.current)
+        if type(val) == "table" then val = val[1] end
+        item.current = tostring(val or "")
+        if item.valText then
+            item.valText.Text = item.current
         end
         if item.flag then
             DrawingUI.Flags[item.flag] = item.current
@@ -992,19 +1263,25 @@ function SectionMethods:CreateKeybind(cfg)
         callback = cfg.Callback or function() end,
         flag = cfg.Flag,
         listening = false,
-        label = safeDrawing("Text"),
+        hoverBg = safeDrawing("Square"),
+        innerDivider = safeDrawing("Line"),
         badgeBg = safeDrawing("Square"),
         badgeBorder = safeDrawing("Square"),
+        label = safeDrawing("Text"),
         keyText = safeDrawing("Text"),
     }
 
-    if item.label then
-        item.label.Font = 0
-        item.label.Size = 15
-        item.label.Outline = false
-        item.label.Color = tab.window.theme.text
-        item.label.Text = item.name
-        item.label.Visible = false
+    if item.hoverBg then
+        item.hoverBg.Filled = true
+        item.hoverBg.Thickness = 1
+        item.hoverBg.Visible = false
+        pcall(function() item.hoverBg.ZIndex = 4 end)
+    end
+
+    if item.innerDivider then
+        item.innerDivider.Thickness = 1
+        item.innerDivider.Visible = false
+        pcall(function() item.innerDivider.ZIndex = 4 end)
     end
 
     if item.badgeBg then
@@ -1012,6 +1289,7 @@ function SectionMethods:CreateKeybind(cfg)
         item.badgeBg.Color = tab.window.theme.controlBg
         item.badgeBg.Thickness = 1
         item.badgeBg.Visible = false
+        pcall(function() item.badgeBg.ZIndex = 5 end)
     end
 
     if item.badgeBorder then
@@ -1019,24 +1297,41 @@ function SectionMethods:CreateKeybind(cfg)
         item.badgeBorder.Color = tab.window.theme.controlBorder
         item.badgeBorder.Thickness = 1
         item.badgeBorder.Visible = false
+        pcall(function() item.badgeBorder.ZIndex = 5 end)
+    end
+
+    if item.label then
+        item.label.Font = 0
+        item.label.Size = 16
+        item.label.Outline = true
+        item.label.OutlineColor = tab.window.theme.outline
+        item.label.Color = tab.window.theme.text
+        item.label.Text = item.name
+        item.label.Visible = false
+        pcall(function() item.label.ZIndex = 6 end)
     end
 
     if item.keyText then
         item.keyText.Font = 0
-        item.keyText.Size = 12
-        item.keyText.Outline = false
-        item.keyText.Color = tab.window.theme.textMuted
+        item.keyText.Size = 13
+        item.keyText.Outline = true
+        item.keyText.OutlineColor = tab.window.theme.outline
+        item.keyText.Color = tab.window.theme.text
         item.keyText.Center = true
         item.keyText.Text = string.format("[%s]", item.key)
         item.keyText.Visible = false
+        pcall(function() item.keyText.ZIndex = 6 end)
     end
 
     function item:Set(newKey)
-        item.key = tostring(newKey)
+        if typeof(newKey) == "EnumItem" then
+            newKey = newKey.Name
+        end
+        item.key = tostring(newKey or "None")
         item.listening = false
         if item.keyText then
             item.keyText.Text = string.format("[%s]", item.key)
-            item.keyText.Color = tab.window.theme.textMuted
+            item.keyText.Color = tab.window.theme.text
         end
         if item.flag then
             DrawingUI.Flags[item.flag] = item.key
@@ -1062,27 +1357,63 @@ function SectionMethods:CreateInput(cfg)
         placeholder = sanitizeText(tostring(cfg.PlaceholderText or "Type here...")),
         callback = cfg.Callback or function() end,
         flag = cfg.Flag,
-        card = createRoundedCard(),
+        hoverBg = safeDrawing("Square"),
+        innerDivider = safeDrawing("Line"),
+        badgeBg = safeDrawing("Square"),
+        badgeBorder = safeDrawing("Square"),
         label = safeDrawing("Text"),
         valText = safeDrawing("Text"),
     }
 
+    if item.hoverBg then
+        item.hoverBg.Filled = true
+        item.hoverBg.Thickness = 1
+        item.hoverBg.Visible = false
+        pcall(function() item.hoverBg.ZIndex = 4 end)
+    end
+
+    if item.innerDivider then
+        item.innerDivider.Thickness = 1
+        item.innerDivider.Visible = false
+        pcall(function() item.innerDivider.ZIndex = 4 end)
+    end
+
+    if item.badgeBg then
+        item.badgeBg.Filled = true
+        item.badgeBg.Color = tab.window.theme.controlBg
+        item.badgeBg.Thickness = 1
+        item.badgeBg.Visible = false
+        pcall(function() item.badgeBg.ZIndex = 5 end)
+    end
+
+    if item.badgeBorder then
+        item.badgeBorder.Filled = false
+        item.badgeBorder.Color = tab.window.theme.controlBorder
+        item.badgeBorder.Thickness = 1
+        item.badgeBorder.Visible = false
+        pcall(function() item.badgeBorder.ZIndex = 5 end)
+    end
+
     if item.label then
         item.label.Font = 0
-        item.label.Size = 14
-        item.label.Outline = false
+        item.label.Size = 16
+        item.label.Outline = true
+        item.label.OutlineColor = tab.window.theme.outline
         item.label.Color = tab.window.theme.text
         item.label.Text = item.name
         item.label.Visible = false
+        pcall(function() item.label.ZIndex = 6 end)
     end
 
     if item.valText then
         item.valText.Font = 0
         item.valText.Size = 13
-        item.valText.Outline = false
-        item.valText.Color = tab.window.theme.textMuted
+        item.valText.Outline = true
+        item.valText.OutlineColor = tab.window.theme.outline
+        item.valText.Color = tab.window.theme.text
         item.valText.Text = #item.text > 0 and item.text or item.placeholder
         item.valText.Visible = false
+        pcall(function() item.valText.ZIndex = 6 end)
     end
 
     function item:Set(val)
@@ -1168,11 +1499,13 @@ function DrawingUI:InitInputHandlers()
                                 return
                             elseif item.type == "slider" then
                                 self.activeSlider = item
-                                local rel = math.clamp((mousePos.X - item.trackPos.X) / item.trackWidth, 0, 1)
-                                local rawVal = item.min + (item.max - item.min) * rel
-                                local steps = math.round((rawVal - item.min) / item.increment)
-                                local steppedVal = item.min + steps * item.increment
-                                item:Set(steppedVal)
+                                if item.trackPos and item.trackWidth then
+                                    local rel = math.clamp((mousePos.X - item.trackPos.X) / item.trackWidth, 0, 1)
+                                    local rawVal = item.min + (item.max - item.min) * rel
+                                    local steps = math.round((rawVal - item.min) / item.increment)
+                                    local steppedVal = item.min + steps * item.increment
+                                    item:Set(steppedVal)
+                                end
                                 return
                             elseif item.type == "keybind" then
                                 item.listening = true
@@ -1228,7 +1561,7 @@ function DrawingUI:InitInputHandlers()
         elseif input.UserInputType == Enum.UserInputType.MouseWheel then
             local curTab = self.tabs[self.activeTabIndex]
             if curTab and curTab.maxScroll > 0 then
-                curTab.scrollOffset = math.clamp(curTab.scrollOffset - (input.Position.Z * 28), 0, curTab.maxScroll)
+                curTab.scrollOffset = math.clamp(curTab.scrollOffset - (input.Position.Z * 32), 0, curTab.maxScroll)
             end
         end
     end)
@@ -1248,17 +1581,21 @@ end
 function DrawingUI:Toggle()
     self.visible = not self.visible
     if not self.visible then
+        if self.windowCard then self.windowCard:Update(Vector2.zero, Vector2.zero, 0, Color3.new(), nil, false) end
+        if self.keyBadgeCard then self.keyBadgeCard:Update(Vector2.zero, Vector2.zero, 0, Color3.new(), nil, false) end
+
         for _, d in pairs(self.drawings) do
             setObjVisible(d, false)
         end
-        if self.activeTabPill then self.activeTabPill:Update(Vector2.zero, Vector2.zero, 0, Color3.new(), false) end
+        if self.activeTabPill then self.activeTabPill:Update(Vector2.zero, Vector2.zero, 0, Color3.new(), nil, false) end
         setObjVisible(self.activeTabBar, false)
-        if self.userCardPill then self.userCardPill:Update(Vector2.zero, Vector2.zero, 0, Color3.new(), false) end
+        if self.userCardPill then self.userCardPill:Update(Vector2.zero, Vector2.zero, 0, Color3.new(), nil, false) end
 
         for _, tab in ipairs(self.tabs) do
             setObjVisible(tab.tabText, false)
             for _, sec in ipairs(tab.sections) do
                 setObjVisible(sec.titleDrawing, false)
+                if sec.card then sec.card:Update(Vector2.zero, Vector2.zero, 0, Color3.new(), nil, false) end
                 for _, item in ipairs(sec.items) do
                     hideItem(item)
                 end
@@ -1278,33 +1615,32 @@ function DrawingUI:Render()
     local sideW = self.sidebarWidth
     local headH = self.headerHeight
 
-    -- 1. Main Window Background & Border
-    if self.drawings.bg then
-        self.drawings.bg.Position = p
-        self.drawings.bg.Size = sz
-        self.drawings.bg.Visible = true
+    -- 1. Main Window 12px Rounded Surface with 1px Border Stroke
+    if self.windowCard then
+        self.windowCard:Update(p, sz, 12, self.theme.bg, self.theme.border, true)
     end
 
-    if self.drawings.border then
-        self.drawings.border.Position = p
-        self.drawings.border.Size = sz
-        self.drawings.border.Visible = true
+    -- 2. Left Sidebar Background & Vertical Divider
+    if self.drawings.sidebarBg then
+        self.drawings.sidebarBg.Position = Vector2.new(p.X, p.Y + headH)
+        self.drawings.sidebarBg.Size = Vector2.new(sideW, sz.Y - headH - 10)
+        self.drawings.sidebarBg.Visible = true
     end
 
-    -- 2. Header Bar & Divider
-    if self.drawings.header then
-        self.drawings.header.Position = p
-        self.drawings.header.Size = Vector2.new(sz.X, headH)
-        self.drawings.header.Visible = true
+    if self.drawings.sidebarLine then
+        self.drawings.sidebarLine.From = Vector2.new(p.X + sideW, p.Y + headH)
+        self.drawings.sidebarLine.To = Vector2.new(p.X + sideW, p.Y + sz.Y - 2)
+        self.drawings.sidebarLine.Visible = true
     end
 
+    -- 3. Header Divider
     if self.drawings.headerLine then
         self.drawings.headerLine.From = Vector2.new(p.X, p.Y + headH)
         self.drawings.headerLine.To = Vector2.new(p.X + sz.X, p.Y + headH)
         self.drawings.headerLine.Visible = true
     end
 
-    -- 3. Traffic Lights (1:1 macOS Position & Radius)
+    -- 4. Traffic Lights (1:1 macOS Position & Radius)
     if self.drawings.trafficRed then
         self.drawings.trafficRed.Position = Vector2.new(p.X + 18, p.Y + 22)
         self.drawings.trafficRed.Visible = true
@@ -1320,81 +1656,60 @@ function DrawingUI:Render()
         self.drawings.trafficGreen.Visible = true
     end
 
-    -- 4. Title & Subtitle (Proportional Font 0, Size 16/13)
+    -- 5. Title & Subtitle (Crisp Bold Typography)
     if self.drawings.title then
-        self.drawings.title.Position = Vector2.new(p.X + 75, p.Y + 13)
+        self.drawings.title.Position = Vector2.new(p.X + 78, p.Y + 12)
         self.drawings.title.Visible = true
     end
 
     if self.drawings.subtitle then
-        self.drawings.subtitle.Position = Vector2.new(p.X + 185, p.Y + 15)
+        self.drawings.subtitle.Position = Vector2.new(p.X + 195, p.Y + 15)
         self.drawings.subtitle.Visible = true
     end
 
-    -- 5. Top-Right Key Badge
-    local badgeW = 105
-    local badgeH = 22
+    -- 6. Top-Right Key Badge (Rounded Pill)
+    local badgeW = 112
+    local badgeH = 26
     local badgeX = p.X + sz.X - badgeW - 14
-    local badgeY = p.Y + 10
+    local badgeY = p.Y + 9
 
-    if self.drawings.keyBadgeBg then
-        self.drawings.keyBadgeBg.Position = Vector2.new(badgeX, badgeY)
-        self.drawings.keyBadgeBg.Size = Vector2.new(badgeW, badgeH)
-        self.drawings.keyBadgeBg.Visible = true
-    end
-
-    if self.drawings.keyBadgeBorder then
-        self.drawings.keyBadgeBorder.Position = Vector2.new(badgeX, badgeY)
-        self.drawings.keyBadgeBorder.Size = Vector2.new(badgeW, badgeH)
-        self.drawings.keyBadgeBorder.Visible = true
+    if self.keyBadgeCard then
+        self.keyBadgeCard:Update(Vector2.new(badgeX, badgeY), Vector2.new(badgeW, badgeH), 6, self.theme.controlBg, self.theme.controlBorder, true)
     end
 
     if self.drawings.hint then
-        self.drawings.hint.Position = Vector2.new(badgeX + badgeW / 2, badgeY + 4)
+        self.drawings.hint.Position = Vector2.new(badgeX + badgeW / 2, badgeY + 5)
         self.drawings.hint.Visible = true
     end
 
-    -- 6. Left Sidebar Background & Vertical Divider
-    if self.drawings.sidebarBg then
-        self.drawings.sidebarBg.Position = Vector2.new(p.X, p.Y + headH)
-        self.drawings.sidebarBg.Size = Vector2.new(sideW, sz.Y - headH)
-        self.drawings.sidebarBg.Visible = true
-    end
-
-    if self.drawings.sidebarLine then
-        self.drawings.sidebarLine.From = Vector2.new(p.X + sideW, p.Y + headH)
-        self.drawings.sidebarLine.To = Vector2.new(p.X + sideW, p.Y + sz.Y)
-        self.drawings.sidebarLine.Visible = true
-    end
-
     -- 7. Sidebar Footer (Rounded User Profile Card)
-    local cardH = 40
-    local cardY = p.Y + sz.Y - cardH - 10
+    local cardH = 44
+    local cardY = p.Y + sz.Y - cardH - 12
     local cardX = p.X + 8
     local cardW = sideW - 16
 
     if self.userCardPill then
-        self.userCardPill:Update(Vector2.new(cardX, cardY), Vector2.new(cardW, cardH), 8, self.theme.cardBg, true)
+        self.userCardPill:Update(Vector2.new(cardX, cardY), Vector2.new(cardW, cardH), 8, self.theme.cardBg, self.theme.cardBorder, true)
     end
 
     if self.drawings.userDot then
-        self.drawings.userDot.Position = Vector2.new(cardX + 14, cardY + 20)
+        self.drawings.userDot.Position = Vector2.new(cardX + 14, cardY + 22)
         self.drawings.userDot.Visible = true
     end
 
     if self.drawings.userName then
-        self.drawings.userName.Position = Vector2.new(cardX + 26, cardY + 6)
+        self.drawings.userName.Position = Vector2.new(cardX + 26, cardY + 7)
         self.drawings.userName.Visible = true
     end
 
     if self.drawings.userStatus then
-        self.drawings.userStatus.Position = Vector2.new(cardX + 26, cardY + 22)
+        self.drawings.userStatus.Position = Vector2.new(cardX + 26, cardY + 24)
         self.drawings.userStatus.Visible = true
     end
 
     -- 8. Render Tabs in Left Sidebar
     local tabStartY = p.Y + headH + 12
-    local tabBtnH = 36
+    local tabBtnH = 38
     local tabBtnW = sideW - 16
     local tabX = p.X + 8
 
@@ -1410,9 +1725,8 @@ function DrawingUI:Render()
         }
 
         if isActive then
-            -- Active Tab Rounded Pill Highlight
             if self.activeTabPill then
-                self.activeTabPill:Update(Vector2.new(tabX, btnY), Vector2.new(tabBtnW, tabBtnH), 8, self.theme.tabActiveBg, true)
+                self.activeTabPill:Update(Vector2.new(tabX, btnY), Vector2.new(tabBtnW, tabBtnH), 8, self.theme.tabActiveBg, nil, true)
             end
             if self.activeTabBar then
                 self.activeTabBar.Position = Vector2.new(tabX + 2, btnY + 8)
@@ -1422,7 +1736,7 @@ function DrawingUI:Render()
         end
 
         if tab.tabText then
-            tab.tabText.Position = Vector2.new(tabX + 16, btnY + 9)
+            tab.tabText.Position = Vector2.new(tabX + 16, btnY + 10)
             tab.tabText.Color = isActive and self.theme.tabActive or self.theme.tabInactive
             tab.tabText.Size = isActive and 15 or 14
             tab.tabText.Visible = true
@@ -1430,15 +1744,19 @@ function DrawingUI:Render()
     end
 
     -- 9. Render Active Tab Content on the Right
-    local contentLeft = p.X + sideW + 20
-    local contentWidth = sz.X - sideW - 40
-    local contentTop = p.Y + headH + 16
-    local contentMaxHeight = sz.Y - headH - 32
+    local contentLeft = p.X + sideW + 18
+    local contentWidth = sz.X - sideW - 36
+    local contentTop = p.Y + headH + 14
+    local contentMaxHeight = sz.Y - headH - 28
 
+    -- Hide non-active tab elements
     for idx, tab in ipairs(self.tabs) do
         if idx ~= self.activeTabIndex then
             for _, sec in ipairs(tab.sections) do
                 setObjVisible(sec.titleDrawing, false)
+                if sec.card then
+                    sec.card:Update(Vector2.zero, Vector2.zero, 0, Color3.new(), nil, false)
+                end
                 for _, item in ipairs(sec.items) do
                     hideItem(item)
                 end
@@ -1448,46 +1766,120 @@ function DrawingUI:Render()
 
     if curTab then
         local cursorY = contentTop - curTab.scrollOffset
-        local totalContentH = 0
+        local mousePos = UserInputService:GetMouseLocation()
 
         for _, sec in ipairs(curTab.sections) do
-            -- Section Title Header (MacLib Cyan/Blue Style)
-            local inHeaderBounds = (cursorY >= (contentTop - 15) and cursorY <= (contentTop + contentMaxHeight))
+            -- Precalculate item heights for this section
+            local secItemsH = 0
+            local itemHeights = {}
+
+            for i, item in ipairs(sec.items) do
+                local h = 44
+                if item.type == "slider" then
+                    h = 58
+                elseif item.type == "paragraph" then
+                    h = 64
+                elseif item.type == "divider" then
+                    h = 12
+                elseif item.type == "label" then
+                    h = 34
+                end
+                itemHeights[i] = h
+                secItemsH = secItemsH + h
+            end
+
+            local secCardH = #sec.items > 0 and (secItemsH + 8) or 0
+
+            -- Section Title Header (macOS Uppercase with Bullet)
+            local titleY = cursorY
+            local inTitleBounds = (titleY >= (contentTop - 10) and titleY <= (contentTop + contentMaxHeight - 16))
             if sec.titleDrawing then
-                sec.titleDrawing.Position = Vector2.new(contentLeft + 2, cursorY)
-                sec.titleDrawing.Visible = inHeaderBounds
+                sec.titleDrawing.Position = Vector2.new(contentLeft + 4, titleY)
+                sec.titleDrawing.Visible = inTitleBounds
             end
             cursorY = cursorY + 24
 
-            -- Render Section Controls
-            for _, item in ipairs(sec.items) do
-                local itemHeight = 38
-                if item.type == "paragraph" then
-                    itemHeight = 54
-                elseif item.type == "slider" then
-                    itemHeight = 48
-                elseif item.type == "divider" then
-                    itemHeight = 14
+            -- Section Group Container Card with Boundary Clamping (Prevent header overflow)
+            local cardY = cursorY
+            local cardBottom = cardY + secCardH
+            local isCardVisible = (secCardH > 0 and cardBottom > contentTop and cardY < (contentTop + contentMaxHeight))
+
+            if isCardVisible then
+                local drawCardY = math.max(cardY, contentTop)
+                local drawCardBottom = math.min(cardBottom, contentTop + contentMaxHeight)
+                local drawCardH = drawCardBottom - drawCardY
+
+                if drawCardH > 4 and sec.card then
+                    local isClipped = (cardY < contentTop or cardBottom > (contentTop + contentMaxHeight))
+                    local radius = isClipped and 0 or 10
+                    sec.card:Update(
+                        Vector2.new(contentLeft, drawCardY),
+                        Vector2.new(contentWidth, drawCardH),
+                        radius,
+                        self.theme.cardBg,
+                        self.theme.cardBorder,
+                        true
+                    )
+                elseif sec.card then
+                    sec.card:Update(Vector2.zero, Vector2.zero, 0, Color3.new(), nil, false)
                 end
+            else
+                if sec.card then
+                    sec.card:Update(Vector2.zero, Vector2.zero, 0, Color3.new(), nil, false)
+                end
+            end
 
-                local itemY = cursorY
-                local inBounds = (itemY >= (contentTop - 10) and (itemY + itemHeight) <= (contentTop + contentMaxHeight + 10))
+            -- Render controls inside the Section Container Card
+            local rowY = cardY + 4
 
-                if inBounds then
+            for idx, item in ipairs(sec.items) do
+                local itemHeight = itemHeights[idx] or 44
+                local inBounds = (rowY >= contentTop and (rowY + itemHeight) <= (contentTop + contentMaxHeight))
+
+                if inBounds and isCardVisible then
                     item.hitBox = {
-                        pos = Vector2.new(contentLeft, itemY),
+                        pos = Vector2.new(contentLeft, rowY),
                         size = Vector2.new(contentWidth, itemHeight)
                     }
 
+                    local isHovered = pointInBox(mousePos, item.hitBox.pos, item.hitBox.size)
+
+                    -- Subtle row hover feedback
+                    if item.hoverBg then
+                        if isHovered and item.type ~= "divider" then
+                            item.hoverBg.Position = Vector2.new(contentLeft + 2, rowY)
+                            item.hoverBg.Size = Vector2.new(contentWidth - 4, itemHeight)
+                            item.hoverBg.Color = self.theme.rowHover
+                            item.hoverBg.Filled = true
+                            item.hoverBg.Thickness = 1
+                            item.hoverBg.Visible = true
+                        else
+                            item.hoverBg.Visible = false
+                        end
+                    end
+
+                    -- Subtle inner divider line between items inside card
+                    if item.innerDivider then
+                        if idx < #sec.items and item.type ~= "divider" then
+                            item.innerDivider.From = Vector2.new(contentLeft + 16, rowY + itemHeight)
+                            item.innerDivider.To = Vector2.new(contentLeft + contentWidth - 16, rowY + itemHeight)
+                            item.innerDivider.Color = self.theme.rowDivider
+                            item.innerDivider.Thickness = 1
+                            item.innerDivider.Visible = true
+                        else
+                            item.innerDivider.Visible = false
+                        end
+                    end
+
+                    -- Specific item controls
                     if item.type == "toggle" then
-                        -- Authentic macOS Rounded Pill Toggle (Capsule)
-                        local pillW = 44
-                        local pillH = 22
-                        local pillX = contentLeft + contentWidth - pillW - 6
-                        local pillY = itemY + 8
+                        local pillW = 46
+                        local pillH = 24
+                        local pillX = contentLeft + contentWidth - pillW - 16
+                        local pillY = rowY + math.floor((itemHeight - pillH) / 2)
 
                         if item.label then
-                            item.label.Position = Vector2.new(contentLeft + 4, itemY + 10)
+                            item.label.Position = Vector2.new(contentLeft + 16, rowY + 12)
                             item.label.Visible = true
                         end
 
@@ -1498,20 +1890,20 @@ function DrawingUI:Render()
                                 item.value,
                                 self.theme.toggleOn,
                                 self.theme.toggleOff,
+                                self.theme.toggleBorder,
                                 self.theme.knob,
                                 true
                             )
                         end
 
                     elseif item.type == "slider" then
-                        -- macOS Precise Slider with Rounded Badge & Fill Track
-                        local badgeW = 60
+                        local badgeW = 72
                         local badgeH = 22
-                        local badgeX = contentLeft + contentWidth - badgeW - 6
-                        local badgeY = itemY + 2
+                        local badgeX = contentLeft + contentWidth - badgeW - 16
+                        local badgeY = rowY + 6
 
                         if item.label then
-                            item.label.Position = Vector2.new(contentLeft + 4, itemY + 4)
+                            item.label.Position = Vector2.new(contentLeft + 16, rowY + 8)
                             item.label.Visible = true
                         end
 
@@ -1528,16 +1920,20 @@ function DrawingUI:Render()
                         end
 
                         if item.valText then
-                            item.valText.Position = Vector2.new(badgeX + badgeW / 2, badgeY + 4)
-                            item.valText.Text = string.format("%s%s", tostring(item.value), item.suffix)
+                            item.valText.Position = Vector2.new(badgeX + badgeW / 2, badgeY + 3)
+                            local valDisplay = item.value
+                            if type(valDisplay) == "number" and valDisplay ~= math.floor(valDisplay) then
+                                valDisplay = string.format("%.3f", valDisplay):gsub("%.?0+$", "")
+                            end
+                            item.valText.Text = string.format("%s%s", tostring(valDisplay), item.suffix)
                             item.valText.Visible = true
                         end
 
-                        local trackW = contentWidth - 8
-                        local trackH = 4
-                        local trackX = contentLeft + 4
-                        local trackY = itemY + 32
-                        local fillW = math.clamp(((item.value - item.min) / (item.max - item.min)) * trackW, 0, trackW)
+                        local trackW = contentWidth - 32
+                        local trackH = 6
+                        local trackX = contentLeft + 16
+                        local trackY = rowY + 40
+                        local fillW = math.clamp(((item.value - item.min) / math.max(0.0001, (item.max - item.min))) * trackW, 0, trackW)
 
                         item.trackPos = Vector2.new(trackX, trackY)
                         item.trackWidth = trackW
@@ -1555,88 +1951,68 @@ function DrawingUI:Render()
                         end
 
                         if item.knob then
-                            item.knob.Position = Vector2.new(trackX + fillW, trackY + 2)
+                            item.knob.Position = Vector2.new(trackX + fillW, trackY + 3)
                             item.knob.Visible = true
                         end
 
                     elseif item.type == "button" then
-                        -- Full-Width Rounded macOS Button Card
-                        local btnW = contentWidth - 4
-                        local btnH = 36
-                        local btnX = contentLeft + 2
-                        local btnY = itemY + 2
+                        local btnW = contentWidth - 32
+                        local btnH = 34
+                        local btnX = contentLeft + 16
+                        local btnY = rowY + 5
 
-                        if item.card then
-                            item.card:Update(Vector2.new(btnX, btnY), Vector2.new(btnW, btnH), 8, self.theme.controlBg, true)
+                        if item.buttonCard then
+                            local btnBg = isHovered and Color3.fromRGB(48, 54, 72) or self.theme.controlBg
+                            item.buttonCard:Update(Vector2.new(btnX, btnY), Vector2.new(btnW, btnH), 6, btnBg, self.theme.controlBorder, true)
                         end
 
                         if item.label then
-                            item.label.Position = Vector2.new(btnX + btnW / 2, btnY + 9)
+                            item.label.Position = Vector2.new(btnX + btnW / 2, btnY + 8)
                             item.label.Visible = true
-                        end
-
-                    elseif item.type == "paragraph" then
-                        -- Full-Width Rounded Status / Paragraph Card
-                        local pW = contentWidth - 4
-                        local pH = 50
-                        local pX = contentLeft + 2
-                        local pY = itemY + 2
-
-                        if item.card then
-                            item.card:Update(Vector2.new(pX, pY), Vector2.new(pW, pH), 8, self.theme.cardBg, true)
-                        end
-
-                        if item.titleText then
-                            item.titleText.Position = Vector2.new(pX + 14, pY + 8)
-                            item.titleText.Visible = true
-                        end
-
-                        if item.descText then
-                            item.descText.Position = Vector2.new(pX + 14, pY + 28)
-                            item.descText.Visible = true
-                        end
-
-                    elseif item.type == "label" then
-                        if item.label then
-                            item.label.Position = Vector2.new(contentLeft + 4, itemY + 8)
-                            item.label.Visible = true
-                        end
-
-                    elseif item.type == "divider" then
-                        if item.line then
-                            item.line.From = Vector2.new(contentLeft, itemY + 6)
-                            item.line.To = Vector2.new(contentLeft + contentWidth, itemY + 6)
-                            item.line.Visible = true
                         end
 
                     elseif item.type == "dropdown" then
-                        local dW = contentWidth - 4
-                        local dH = 36
-                        local dX = contentLeft + 2
-                        local dY = itemY + 2
-
-                        if item.card then
-                            item.card:Update(Vector2.new(dX, dY), Vector2.new(dW, dH), 8, self.theme.controlBg, true)
-                        end
+                        local badgeW = 140
+                        local badgeH = 28
+                        local badgeX = contentLeft + contentWidth - badgeW - 16
+                        local badgeY = rowY + 8
 
                         if item.label then
-                            item.label.Position = Vector2.new(dX + 14, dY + 9)
+                            item.label.Position = Vector2.new(contentLeft + 16, rowY + 12)
                             item.label.Visible = true
                         end
 
+                        if item.badgeBg then
+                            item.badgeBg.Position = Vector2.new(badgeX, badgeY)
+                            item.badgeBg.Size = Vector2.new(badgeW, badgeH)
+                            item.badgeBg.Visible = true
+                        end
+
+                        if item.badgeBorder then
+                            item.badgeBorder.Position = Vector2.new(badgeX, badgeY)
+                            item.badgeBorder.Size = Vector2.new(badgeW, badgeH)
+                            item.badgeBorder.Visible = true
+                        end
+
+                        if item.valText then
+                            item.valText.Position = Vector2.new(badgeX + 12, badgeY + 6)
+                            item.valText.Text = tostring(item.current)
+                            item.valText.Visible = true
+                        end
+
                         if item.arrow then
-                            item.arrow.Position = Vector2.new(dX + dW - 20, dY + 9)
+                            item.arrow.Position = Vector2.new(badgeX + badgeW - 18, badgeY + 6)
                             item.arrow.Visible = true
                         end
 
                     elseif item.type == "keybind" then
-                        local badgeW = 70
-                        local badgeH = 24
-                        local badgeX = contentLeft + contentWidth - badgeW - 6
-                        local badgeY = itemY + 6
+                        local badgeW = 84
+                        local badgeH = 26
+                        local badgeX = contentLeft + contentWidth - badgeW - 16
+                        local badgeY = rowY + 9
 
                         if item.label then
-                            item.label.Position = Vector2.new(contentLeft + 4, itemY + 10)
+                            item.label.Position = Vector2.new(contentLeft + 16, rowY + 12)
                             item.label.Visible = true
                         end
 
@@ -1654,26 +2030,59 @@ function DrawingUI:Render()
 
                         if item.keyText then
                             item.keyText.Position = Vector2.new(badgeX + badgeW / 2, badgeY + 5)
+                            item.keyText.Color = item.listening and self.theme.accent or self.theme.text
                             item.keyText.Visible = true
                         end
 
-                    elseif item.type == "input" then
-                        local inW = contentWidth - 4
-                        local inH = 36
-                        local inX = contentLeft + 2
-                        local inY = itemY + 2
-
-                        if item.card then
-                            item.card:Update(Vector2.new(inX, inY), Vector2.new(inW, inH), 8, self.theme.controlBg, true)
+                    elseif item.type == "paragraph" then
+                        if item.titleText then
+                            item.titleText.Position = Vector2.new(contentLeft + 16, rowY + 8)
+                            item.titleText.Visible = true
                         end
 
+                        if item.descText then
+                            item.descText.Position = Vector2.new(contentLeft + 16, rowY + 32)
+                            item.descText.Visible = true
+                        end
+
+                    elseif item.type == "label" then
                         if item.label then
-                            item.label.Position = Vector2.new(inX + 14, inY + 9)
+                            item.label.Position = Vector2.new(contentLeft + 16, rowY + 8)
                             item.label.Visible = true
                         end
 
+                    elseif item.type == "divider" then
+                        if item.line then
+                            item.line.From = Vector2.new(contentLeft + 16, rowY + 6)
+                            item.line.To = Vector2.new(contentLeft + contentWidth - 16, rowY + 6)
+                            item.line.Visible = true
+                        end
+
+                    elseif item.type == "input" then
+                        local inW = 160
+                        local inH = 28
+                        local inX = contentLeft + contentWidth - inW - 16
+                        local inY = rowY + 8
+
+                        if item.label then
+                            item.label.Position = Vector2.new(contentLeft + 16, rowY + 12)
+                            item.label.Visible = true
+                        end
+
+                        if item.badgeBg then
+                            item.badgeBg.Position = Vector2.new(inX, inY)
+                            item.badgeBg.Size = Vector2.new(inW, inH)
+                            item.badgeBg.Visible = true
+                        end
+
+                        if item.badgeBorder then
+                            item.badgeBorder.Position = Vector2.new(inX, inY)
+                            item.badgeBorder.Size = Vector2.new(inW, inH)
+                            item.badgeBorder.Visible = true
+                        end
+
                         if item.valText then
-                            item.valText.Position = Vector2.new(inX + inW - 120, inY + 9)
+                            item.valText.Position = Vector2.new(inX + 12, inY + 6)
                             item.valText.Visible = true
                         end
                     end
@@ -1681,10 +2090,10 @@ function DrawingUI:Render()
                     hideItem(item)
                 end
 
-                cursorY = cursorY + itemHeight + 6
+                rowY = rowY + itemHeight
             end
 
-            cursorY = cursorY + 12
+            cursorY = cursorY + secCardH + 16
         end
 
         local totalH = cursorY - (contentTop - curTab.scrollOffset)
@@ -1702,9 +2111,12 @@ function DrawingUI:Destroy()
     for _, cb in ipairs(self._unloadCallbacks) do
         pcall(cb)
     end
+    table.clear(self._unloadCallbacks)
 
     for _, conn in ipairs(self.connections) do
-        pcall(function() conn:Disconnect() end)
+        if conn and conn.Disconnect then
+            pcall(function() conn:Disconnect() end)
+        end
     end
     table.clear(self.connections)
 
@@ -1713,6 +2125,8 @@ function DrawingUI:Destroy()
     end
     table.clear(self.drawings)
 
+    if self.windowCard then self.windowCard:Remove() end
+    if self.keyBadgeCard then self.keyBadgeCard:Remove() end
     if self.activeTabPill then self.activeTabPill:Remove() end
     removeObj(self.activeTabBar)
     if self.userCardPill then self.userCardPill:Remove() end
@@ -1721,6 +2135,7 @@ function DrawingUI:Destroy()
         removeObj(tab.tabText)
         for _, sec in ipairs(tab.sections) do
             removeObj(sec.titleDrawing)
+            if sec.card then sec.card:Remove() end
             for _, item in ipairs(sec.items) do
                 removeItem(item)
             end
