@@ -36,12 +36,13 @@ local function sanitizeText(str)
     if type(str) ~= "string" then return tostring(str or "") end
     local clean = str:gsub("[^ -~]", "")
     clean = clean:gsub("%s+", " ")
+    clean = clean:gsub("^%s*[:%-]%s*", "")
     local res = clean:gsub("^%s+", ""):gsub("%s+$", "")
     return res
 end
 
 local function setObjVisible(obj, visible)
-    if obj then
+    if obj and (type(obj) == "userdata" or type(obj) == "table") then
         pcall(function()
             obj.Visible = visible
         end)
@@ -49,12 +50,137 @@ local function setObjVisible(obj, visible)
 end
 
 local function removeObj(obj)
-    if obj then
+    if obj and (type(obj) == "userdata" or type(obj) == "table") then
         pcall(function()
             obj.Visible = false
-            obj:Remove()
+            if type(obj.Remove) == "function" then
+                obj:Remove()
+            end
         end)
     end
+end
+
+-- ============================================================
+--   TRUE BOLD VECTOR TYPOGRAPHY (Double-Strike 1:1 macOS Stamping)
+-- ============================================================
+local function createBoldText(baseZIndex, isHeavy)
+    baseZIndex = baseZIndex or 6
+    local t1 = safeDrawing("Text")
+    local t2 = safeDrawing("Text")
+    local t3 = isHeavy and safeDrawing("Text") or nil
+
+    if t1 then
+        t1.Font = 0
+        t1.Outline = false
+        pcall(function() t1.ZIndex = baseZIndex end)
+    end
+    if t2 then
+        t2.Font = 0
+        t2.Outline = false
+        pcall(function() t2.ZIndex = baseZIndex end)
+    end
+    if t3 then
+        t3.Font = 0
+        t3.Outline = false
+        pcall(function() t3.ZIndex = baseZIndex end)
+    end
+
+    local state = {
+        _t1 = t1,
+        _t2 = t2,
+        _t3 = t3,
+        _pos = Vector2.zero,
+        _visible = false,
+        _color = Color3.fromRGB(255, 255, 255),
+        _size = 15,
+        _text = "",
+        _center = false,
+        _zIndex = baseZIndex,
+    }
+
+    local proxy = {}
+    local mt = {
+        __index = function(_, key)
+            if key == "Position" then return state._pos
+            elseif key == "Visible" then return state._visible
+            elseif key == "Color" then return state._color
+            elseif key == "Size" then return state._size
+            elseif key == "Text" then return state._text
+            elseif key == "Center" then return state._center
+            elseif key == "ZIndex" then return state._zIndex
+            elseif key == "TextBounds" then
+                return state._t1 and state._t1.TextBounds or Vector2.zero
+            elseif key == "Remove" or key == "Destroy" then
+                return function()
+                    removeObj(state._t1)
+                    removeObj(state._t2)
+                    removeObj(state._t3)
+                end
+            end
+            if state._t1 then
+                local val = state._t1[key]
+                if type(val) == "function" then
+                    return function(_, ...)
+                        return val(state._t1, ...)
+                    end
+                end
+                return val
+            end
+            return nil
+        end,
+        __newindex = function(_, key, val)
+            if key == "Position" then
+                state._pos = val
+                if state._t1 then state._t1.Position = val end
+                if state._t2 then state._t2.Position = val + Vector2.new(1, 0) end
+                if state._t3 then state._t3.Position = val + Vector2.new(0, 1) end
+            elseif key == "Visible" then
+                state._visible = val
+                if state._t1 then state._t1.Visible = val end
+                if state._t2 then state._t2.Visible = val end
+                if state._t3 then state._t3.Visible = val end
+            elseif key == "Color" then
+                state._color = val
+                if state._t1 then state._t1.Color = val end
+                if state._t2 then state._t2.Color = val end
+                if state._t3 then state._t3.Color = val end
+            elseif key == "Size" then
+                state._size = val
+                if state._t1 then state._t1.Size = val end
+                if state._t2 then state._t2.Size = val end
+                if state._t3 then state._t3.Size = val end
+            elseif key == "Text" then
+                state._text = tostring(val or "")
+                if state._t1 then state._t1.Text = state._text end
+                if state._t2 then state._t2.Text = state._text end
+                if state._t3 then state._t3.Text = state._text end
+            elseif key == "Center" then
+                state._center = val
+                if state._t1 then state._t1.Center = val end
+                if state._t2 then state._t2.Center = val end
+                if state._t3 then state._t3.Center = val end
+            elseif key == "ZIndex" then
+                state._zIndex = val
+                if state._t1 then pcall(function() state._t1.ZIndex = val end) end
+                if state._t2 then pcall(function() state._t2.ZIndex = val end) end
+                if state._t3 then pcall(function() state._t3.ZIndex = val end) end
+            elseif key == "Font" then
+                if state._t1 then pcall(function() state._t1.Font = val end) end
+                if state._t2 then pcall(function() state._t2.Font = val end) end
+                if state._t3 then pcall(function() state._t3.Font = val end) end
+            elseif key == "Outline" then
+                if state._t1 then pcall(function() state._t1.Outline = val end) end
+                if state._t2 then pcall(function() state._t2.Outline = val end) end
+                if state._t3 then pcall(function() state._t3.Outline = val end) end
+            elseif key == "OutlineColor" then
+                if state._t1 then pcall(function() state._t1.OutlineColor = val end) end
+                if state._t2 then pcall(function() state._t2.OutlineColor = val end) end
+                if state._t3 then pcall(function() state._t3.OutlineColor = val end) end
+            end
+        end
+    }
+
+    return setmetatable(proxy, mt)
 end
 
 -- ============================================================
@@ -343,7 +469,7 @@ local function hideItem(item)
         pcall(function() item.buttonCard:Update(Vector2.zero, Vector2.zero, 0, Color3.new(), nil, false) end)
     end
     for k, prop in pairs(item) do
-        if k ~= "pill" and k ~= "card" and k ~= "buttonCard" and type(prop) ~= "function" and type(prop) ~= "table" then
+        if k ~= "pill" and k ~= "card" and k ~= "buttonCard" and type(prop) ~= "function" then
             setObjVisible(prop, false)
         end
     end
@@ -361,7 +487,7 @@ local function removeItem(item)
         pcall(function() item.buttonCard:Remove() end)
     end
     for k, prop in pairs(item) do
-        if k ~= "pill" and k ~= "card" and k ~= "buttonCard" and type(prop) ~= "function" and type(prop) ~= "table" then
+        if k ~= "pill" and k ~= "card" and k ~= "buttonCard" and type(prop) ~= "function" then
             removeObj(prop)
         end
     end
@@ -383,13 +509,13 @@ local MAC_THEME = {
     trafficYellow  = Color3.fromRGB(255, 189, 46),
     trafficGreen   = Color3.fromRGB(39, 201, 63),
 
-    -- Typography (High-Contrast Bold, Razor-Sharp Dark Outline)
+    -- Typography (High-Contrast Bold, Razor-Sharp Vector Glyphs)
     title          = Color3.fromRGB(255, 255, 255),    -- Pure White Window Header
-    subtitle       = Color3.fromRGB(145, 155, 178),    -- Clean Slate Grey Subtitle
+    subtitle       = Color3.fromRGB(168, 178, 202),    -- High-Contrast Slate Grey Subtitle
     outline        = Color3.fromRGB(8, 9, 13),         -- Crisp Dark Shadow Outline
-    tabInactive    = Color3.fromRGB(152, 160, 180),    -- High-Legibility Inactive Tab
+    tabInactive    = Color3.fromRGB(168, 178, 200),    -- High-Legibility Inactive Tab (Bright Slate White)
     tabActive      = Color3.fromRGB(255, 255, 255),    -- Pure White Active Tab
-    tabActiveBg    = Color3.fromRGB(38, 44, 62),       -- Active Tab Rounded Pill
+    tabActiveBg    = Color3.fromRGB(42, 48, 68),       -- Active Tab Elevated Rounded Pill
     tabActiveBar   = Color3.fromRGB(56, 139, 253),     -- Apple Vivid Blue Tab Accent
 
     -- Section Container Cards (1:1 MacLib Grouped Inset Cards)
@@ -521,45 +647,33 @@ function DrawingUI:CreateWindow(config)
         pcall(function() self.drawings.trafficGreen.ZIndex = 10 end)
     end
 
-    -- Header Title & Subtitle (Bold High-Contrast Outlined, Layer 10)
-    self.drawings.title = safeDrawing("Text")
+    -- Header Title & Subtitle (Double-Strike Bold Vector Typography, Layer 10)
+    self.drawings.title = createBoldText(10, true)
     if self.drawings.title then
-        self.drawings.title.Font = 0
         self.drawings.title.Size = 18
-        self.drawings.title.Outline = true
-        self.drawings.title.OutlineColor = self.theme.outline
         self.drawings.title.Color = self.theme.title
         self.drawings.title.Text = self.title
         self.drawings.title.Visible = false
-        pcall(function() self.drawings.title.ZIndex = 10 end)
     end
 
-    self.drawings.subtitle = safeDrawing("Text")
+    self.drawings.subtitle = createBoldText(10)
     if self.drawings.subtitle then
-        self.drawings.subtitle.Font = 0
         self.drawings.subtitle.Size = 13
-        self.drawings.subtitle.Outline = true
-        self.drawings.subtitle.OutlineColor = self.theme.outline
         self.drawings.subtitle.Color = self.theme.subtitle
         self.drawings.subtitle.Text = self.subtitle
         self.drawings.subtitle.Visible = false
-        pcall(function() self.drawings.subtitle.ZIndex = 10 end)
     end
 
     -- Keybind Badge on Top-Right (Layer 10)
     self.keyBadgeCard = createRoundedCard(10)
 
-    self.drawings.hint = safeDrawing("Text")
+    self.drawings.hint = createBoldText(11)
     if self.drawings.hint then
-        self.drawings.hint.Font = 0
         self.drawings.hint.Size = 12
-        self.drawings.hint.Outline = true
-        self.drawings.hint.OutlineColor = self.theme.outline
         self.drawings.hint.Color = self.theme.textMuted
         self.drawings.hint.Text = "[RShift] Toggle"
         self.drawings.hint.Center = true
         self.drawings.hint.Visible = false
-        pcall(function() self.drawings.hint.ZIndex = 11 end)
     end
 
     -- Active Tab Rounded Pill Highlight
@@ -587,29 +701,21 @@ function DrawingUI:CreateWindow(config)
         pcall(function() self.drawings.userDot.ZIndex = 4 end)
     end
 
-    self.drawings.userName = safeDrawing("Text")
+    self.drawings.userName = createBoldText(4, true)
     if self.drawings.userName then
-        self.drawings.userName.Font = 0
         self.drawings.userName.Size = 14
-        self.drawings.userName.Outline = true
-        self.drawings.userName.OutlineColor = self.theme.outline
         self.drawings.userName.Color = self.theme.text
         local lp = Players.LocalPlayer
         self.drawings.userName.Text = lp and (lp.DisplayName or lp.Name) or "User"
         self.drawings.userName.Visible = false
-        pcall(function() self.drawings.userName.ZIndex = 4 end)
     end
 
-    self.drawings.userStatus = safeDrawing("Text")
+    self.drawings.userStatus = createBoldText(4)
     if self.drawings.userStatus then
-        self.drawings.userStatus.Font = 0
         self.drawings.userStatus.Size = 12
-        self.drawings.userStatus.Outline = true
-        self.drawings.userStatus.OutlineColor = self.theme.outline
         self.drawings.userStatus.Color = self.theme.textMuted
         self.drawings.userStatus.Text = "MacLib | 100% Drawing Safe"
         self.drawings.userStatus.Visible = false
-        pcall(function() self.drawings.userStatus.ZIndex = 4 end)
     end
 
     self.dragging = false
@@ -686,18 +792,14 @@ function DrawingUI:CreateTab(name, icon)
         scrollOffset = 0,
         maxScroll = 0,
         _currentSection = nil,
-        tabText = safeDrawing("Text"),
+        tabText = createBoldText(4, true),
     }, TabMethods)
 
     if tab.tabText then
-        tab.tabText.Font = 0
         tab.tabText.Size = 15
-        tab.tabText.Outline = true
-        tab.tabText.OutlineColor = self.theme.outline
         tab.tabText.Color = self.theme.tabInactive
         tab.tabText.Text = tab.name
         tab.tabText.Visible = false
-        pcall(function() tab.tabText.ZIndex = 4 end)
     end
 
     table.insert(self.tabs, tab)
@@ -747,19 +849,15 @@ function TabMethods:CreateSection(secName)
         items = {},
         tab = self,
         window = self.window,
-        titleDrawing = safeDrawing("Text"),
+        titleDrawing = createBoldText(5, true),
         card = createRoundedCard(3),
     }, SectionMethods)
 
     if sec.titleDrawing then
-        sec.titleDrawing.Font = 0
         sec.titleDrawing.Size = 14
-        sec.titleDrawing.Outline = true
-        sec.titleDrawing.OutlineColor = self.window.theme.outline
         sec.titleDrawing.Color = self.window.theme.sectionTitle
         sec.titleDrawing.Text = string.format("-  %s", string.upper(sec.name))
         sec.titleDrawing.Visible = false
-        pcall(function() sec.titleDrawing.ZIndex = 5 end)
     end
 
     self._currentSection = sec
@@ -782,7 +880,7 @@ function SectionMethods:CreateToggle(cfg)
         -- Layering: Backgrounds created first, then foreground text and switch
         hoverBg = safeDrawing("Square"),
         innerDivider = safeDrawing("Line"),
-        label = safeDrawing("Text"),
+        label = createBoldText(6, true),
         pill = createPillSwitch(5),
     }
 
@@ -800,14 +898,10 @@ function SectionMethods:CreateToggle(cfg)
     end
 
     if item.label then
-        item.label.Font = 0
         item.label.Size = 16
-        item.label.Outline = true
-        item.label.OutlineColor = tab.window.theme.outline
         item.label.Color = tab.window.theme.text
         item.label.Text = item.name
         item.label.Visible = false
-        pcall(function() item.label.ZIndex = 6 end)
     end
 
     function item:Set(val)
@@ -852,8 +946,8 @@ function SectionMethods:CreateSlider(cfg)
         track = safeDrawing("Square"),
         fill = safeDrawing("Square"),
         knob = safeDrawing("Circle"),
-        label = safeDrawing("Text"),
-        valText = safeDrawing("Text"),
+        label = createBoldText(6, true),
+        valText = createBoldText(6, true),
     }
 
     if item.hoverBg then
@@ -910,25 +1004,17 @@ function SectionMethods:CreateSlider(cfg)
     end
 
     if item.label then
-        item.label.Font = 0
         item.label.Size = 16
-        item.label.Outline = true
-        item.label.OutlineColor = tab.window.theme.outline
         item.label.Color = tab.window.theme.text
         item.label.Text = item.name
         item.label.Visible = false
-        pcall(function() item.label.ZIndex = 6 end)
     end
 
     if item.valText then
-        item.valText.Font = 0
         item.valText.Size = 14
-        item.valText.Outline = true
-        item.valText.OutlineColor = tab.window.theme.outline
         item.valText.Color = tab.window.theme.accent
         item.valText.Center = true
         item.valText.Visible = false
-        pcall(function() item.valText.ZIndex = 6 end)
     end
 
     function item:Set(val)
@@ -958,7 +1044,7 @@ function SectionMethods:CreateButton(cfg)
         hoverBg = safeDrawing("Square"),
         innerDivider = safeDrawing("Line"),
         buttonCard = createRoundedCard(5),
-        label = safeDrawing("Text"),
+        label = createBoldText(6, true),
     }
 
     if item.hoverBg then
@@ -975,15 +1061,11 @@ function SectionMethods:CreateButton(cfg)
     end
 
     if item.label then
-        item.label.Font = 0
         item.label.Size = 15
-        item.label.Outline = true
-        item.label.OutlineColor = tab.window.theme.outline
         item.label.Color = tab.window.theme.text
         item.label.Text = item.name
         item.label.Center = true
         item.label.Visible = false
-        pcall(function() item.label.ZIndex = 6 end)
     end
 
     function item:Click()
@@ -1003,7 +1085,7 @@ function SectionMethods:CreateLabel(cfg)
         text = text,
         hoverBg = safeDrawing("Square"),
         innerDivider = safeDrawing("Line"),
-        label = safeDrawing("Text"),
+        label = createBoldText(6, true),
     }
 
     if item.hoverBg then
@@ -1020,14 +1102,10 @@ function SectionMethods:CreateLabel(cfg)
     end
 
     if item.label then
-        item.label.Font = 0
         item.label.Size = 15
-        item.label.Outline = true
-        item.label.OutlineColor = tab.window.theme.outline
         item.label.Color = tab.window.theme.textMuted
         item.label.Text = item.text
         item.label.Visible = false
-        pcall(function() item.label.ZIndex = 6 end)
     end
 
     function item:Set(newText)
@@ -1053,8 +1131,8 @@ function SectionMethods:CreateStatus(cfg)
         content = desc,
         hoverBg = safeDrawing("Square"),
         innerDivider = safeDrawing("Line"),
-        titleText = safeDrawing("Text"),
-        descText = safeDrawing("Text"),
+        titleText = createBoldText(6, true),
+        descText = createBoldText(6),
     }
 
     if item.hoverBg then
@@ -1071,25 +1149,17 @@ function SectionMethods:CreateStatus(cfg)
     end
 
     if item.titleText then
-        item.titleText.Font = 0
         item.titleText.Size = 15
-        item.titleText.Outline = true
-        item.titleText.OutlineColor = tab.window.theme.outline
         item.titleText.Color = tab.window.theme.sectionTitle
         item.titleText.Text = item.title
         item.titleText.Visible = false
-        pcall(function() item.titleText.ZIndex = 6 end)
     end
 
     if item.descText then
-        item.descText.Font = 0
-        item.descText.Size = 13
-        item.descText.Outline = true
-        item.descText.OutlineColor = tab.window.theme.outline
+        item.descText.Size = 14
         item.descText.Color = tab.window.theme.text
         item.descText.Text = item.content
         item.descText.Visible = false
-        pcall(function() item.descText.ZIndex = 6 end)
     end
 
     function item:Set(newDesc)
@@ -1149,9 +1219,9 @@ function SectionMethods:CreateDropdown(cfg)
         innerDivider = safeDrawing("Line"),
         badgeBg = safeDrawing("Square"),
         badgeBorder = safeDrawing("Square"),
-        label = safeDrawing("Text"),
-        valText = safeDrawing("Text"),
-        arrow = safeDrawing("Text"),
+        label = createBoldText(6, true),
+        valText = createBoldText(6, true),
+        arrow = createBoldText(6),
     }
 
     if item.hoverBg then
@@ -1184,36 +1254,24 @@ function SectionMethods:CreateDropdown(cfg)
     end
 
     if item.label then
-        item.label.Font = 0
         item.label.Size = 16
-        item.label.Outline = true
-        item.label.OutlineColor = tab.window.theme.outline
         item.label.Color = tab.window.theme.text
         item.label.Text = item.name
         item.label.Visible = false
-        pcall(function() item.label.ZIndex = 6 end)
     end
 
     if item.valText then
-        item.valText.Font = 0
         item.valText.Size = 14
-        item.valText.Outline = true
-        item.valText.OutlineColor = tab.window.theme.outline
         item.valText.Color = tab.window.theme.accent
         item.valText.Text = item.current
         item.valText.Visible = false
-        pcall(function() item.valText.ZIndex = 6 end)
     end
 
     if item.arrow then
-        item.arrow.Font = 0
         item.arrow.Size = 13
-        item.arrow.Outline = true
-        item.arrow.OutlineColor = tab.window.theme.outline
         item.arrow.Color = tab.window.theme.textMuted
         item.arrow.Text = "v"
         item.arrow.Visible = false
-        pcall(function() item.arrow.ZIndex = 6 end)
     end
 
     function item:Set(val)
@@ -1267,8 +1325,8 @@ function SectionMethods:CreateKeybind(cfg)
         innerDivider = safeDrawing("Line"),
         badgeBg = safeDrawing("Square"),
         badgeBorder = safeDrawing("Square"),
-        label = safeDrawing("Text"),
-        keyText = safeDrawing("Text"),
+        label = createBoldText(6, true),
+        keyText = createBoldText(6, true),
     }
 
     if item.hoverBg then
@@ -1301,26 +1359,18 @@ function SectionMethods:CreateKeybind(cfg)
     end
 
     if item.label then
-        item.label.Font = 0
         item.label.Size = 16
-        item.label.Outline = true
-        item.label.OutlineColor = tab.window.theme.outline
         item.label.Color = tab.window.theme.text
         item.label.Text = item.name
         item.label.Visible = false
-        pcall(function() item.label.ZIndex = 6 end)
     end
 
     if item.keyText then
-        item.keyText.Font = 0
         item.keyText.Size = 13
-        item.keyText.Outline = true
-        item.keyText.OutlineColor = tab.window.theme.outline
         item.keyText.Color = tab.window.theme.text
         item.keyText.Center = true
         item.keyText.Text = string.format("[%s]", item.key)
         item.keyText.Visible = false
-        pcall(function() item.keyText.ZIndex = 6 end)
     end
 
     function item:Set(newKey)
@@ -1361,8 +1411,8 @@ function SectionMethods:CreateInput(cfg)
         innerDivider = safeDrawing("Line"),
         badgeBg = safeDrawing("Square"),
         badgeBorder = safeDrawing("Square"),
-        label = safeDrawing("Text"),
-        valText = safeDrawing("Text"),
+        label = createBoldText(6, true),
+        valText = createBoldText(6),
     }
 
     if item.hoverBg then
@@ -1395,25 +1445,17 @@ function SectionMethods:CreateInput(cfg)
     end
 
     if item.label then
-        item.label.Font = 0
         item.label.Size = 16
-        item.label.Outline = true
-        item.label.OutlineColor = tab.window.theme.outline
         item.label.Color = tab.window.theme.text
         item.label.Text = item.name
         item.label.Visible = false
-        pcall(function() item.label.ZIndex = 6 end)
     end
 
     if item.valText then
-        item.valText.Font = 0
         item.valText.Size = 13
-        item.valText.Outline = true
-        item.valText.OutlineColor = tab.window.theme.outline
         item.valText.Color = tab.window.theme.text
         item.valText.Text = #item.text > 0 and item.text or item.placeholder
         item.valText.Visible = false
-        pcall(function() item.valText.ZIndex = 6 end)
     end
 
     function item:Set(val)
@@ -1436,7 +1478,7 @@ end
 -- ============================================================
 function DrawingUI:InitInputHandlers()
     local conn1 = UserInputService.InputBegan:Connect(function(input, processed)
-        if input.KeyCode == self.toggleKey then
+        if input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == self.toggleKey then
             self:Toggle()
             return
         end
@@ -1738,7 +1780,7 @@ function DrawingUI:Render()
         if tab.tabText then
             tab.tabText.Position = Vector2.new(tabX + 16, btnY + 10)
             tab.tabText.Color = isActive and self.theme.tabActive or self.theme.tabInactive
-            tab.tabText.Size = isActive and 15 or 14
+            tab.tabText.Size = isActive and 16 or 15
             tab.tabText.Visible = true
         end
     end
