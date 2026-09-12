@@ -24,25 +24,25 @@ return function(Window, scriptInfo)
     local running = true
     local connections = {}
 
-    -- Settings
+    -- Settings (All defaults disabled for 100% passive startup / zero BAC flags)
     local settings = {
         -- Tab 1: Shooting
-        autoGreen = true,
+        autoGreen = false,
         greenOffset = 0.0,
         autoFaceRim = false,
 
         -- Tab 2: Defense & Mobility
-        autoSteal = true,
+        autoSteal = false,
         stealReach = 11,
-        antiAnkleBreak = true,
-        alwaysRun = true,
+        antiAnkleBreak = false,
+        alwaysRun = false,
 
         -- Tab 3: Visuals & ESP (100% Drawing API)
-        ballEsp = true,
-        rimEsp = true,
-        playerEsp = true,
-        espDistance = true,
-        showBoxes = true,
+        ballEsp = false,
+        rimEsp = false,
+        playerEsp = false,
+        espDistance = false,
+        showBoxes = false,
         showTracers = false,
 
         -- Tab 4: Safety
@@ -67,10 +67,12 @@ return function(Window, scriptInfo)
         return model:FindFirstChildOfClass("Humanoid")
     end
 
-    -- Dynamic Game Controllers Resolution
+    -- Lazy Game Controllers Resolution (Only resolved on-demand when user activates features)
     local BallController, ShootingController, DefenseController, MovementController, Network
+    local controllersResolved = false
 
     local function resolveControllers()
+        if controllersResolved then return end
         local controllers = ReplicatedStorage:FindFirstChild("Controllers")
         if not controllers then return end
 
@@ -90,10 +92,15 @@ return function(Window, scriptInfo)
             if not Network and controllers:FindFirstChild("Network") then
                 Network = require(controllers.Network)
             end
+            controllersResolved = true
         end)
     end
 
-    resolveControllers()
+    local function ensureControllers()
+        if not controllersResolved then
+            resolveControllers()
+        end
+    end
 
     -- ------------------------------------------------------------
     -- 100% DRAWING API ESP ENGINE (Zero Object Injection / BAC Safe)
@@ -199,17 +206,30 @@ return function(Window, scriptInfo)
         end
     end
 
-    -- Find Target Rim
+    -- Find Target Rim (Cached search to prevent high-frequency workspace scanning)
+    local cachedRims = {}
+    local lastRimScan = 0
+
     local function getTargetRim(myPos)
+        local now = os.clock()
+        if (now - lastRimScan) > 3 or #cachedRims == 0 then
+            lastRimScan = now
+            table.clear(cachedRims)
+            for _, d in ipairs(workspace:GetDescendants()) do
+                if (d.Name == "Rim" or d.Name == "CloseRim") and d:IsA("BasePart") then
+                    table.insert(cachedRims, d)
+                end
+            end
+        end
+
         local bestRim = nil
         local minDist = math.huge
-
-        for _, d in ipairs(workspace:GetDescendants()) do
-            if (d.Name == "Rim" or d.Name == "CloseRim") and d:IsA("BasePart") then
-                local dist = (d.Position - myPos).Magnitude
+        for _, rim in ipairs(cachedRims) do
+            if rim and rim.Parent then
+                local dist = (rim.Position - myPos).Magnitude
                 if dist < 220 and dist > 8 and dist < minDist then
                     minDist = dist
-                    bestRim = d
+                    bestRim = rim
                 end
             end
         end
@@ -221,10 +241,17 @@ return function(Window, scriptInfo)
     --   AUTO GREEN RELEASE ENGINE
     -- ============================================================
     local hasReleasedThisShot = false
-    local shotMeterGui = localPlayer.PlayerGui:WaitForChild("ShotMeter", 5)
+
+    local function getShotMeterGui()
+        local pg = localPlayer:FindFirstChildOfClass("PlayerGui")
+        return pg and pg:FindFirstChild("ShotMeter")
+    end
 
     local function updateAutoGreen()
-        if not settings.autoGreen or not shotMeterGui then return end
+        if not settings.autoGreen then return end
+
+        local shotMeterGui = getShotMeterGui()
+        if not shotMeterGui then return end
 
         local bg = shotMeterGui:FindFirstChild("BG")
         if not bg then return end
@@ -277,6 +304,11 @@ return function(Window, scriptInfo)
     local lastStealAttempt = 0
 
     local function updateDefense(myPos)
+        if not settings.antiAnkleBreak and not settings.alwaysRun and not settings.autoSteal then
+            return
+        end
+
+        ensureControllers()
         local now = os.clock()
 
         -- 1. Anti-Ankle Break
@@ -319,6 +351,17 @@ return function(Window, scriptInfo)
     -- ============================================================
     local function updateVisuals(myPos)
         if not hasDrawing then return end
+
+        if not settings.ballEsp and not settings.rimEsp and not settings.playerEsp then
+            if next(espDrawings) ~= nil then
+                for k, d in pairs(espDrawings) do
+                    removeDrawingSet(d)
+                end
+                table.clear(espDrawings)
+            end
+            return
+        end
+
         if not camera or not camera.Parent then
             camera = workspace.CurrentCamera
         end
@@ -550,6 +593,9 @@ return function(Window, scriptInfo)
         Flag = "BZ_AutoSteal",
         Callback = function(value)
             settings.autoSteal = value
+            if value then
+                ensureControllers()
+            end
         end,
     })
 
@@ -573,6 +619,9 @@ return function(Window, scriptInfo)
         Flag = "BZ_AntiAnkleBreak",
         Callback = function(value)
             settings.antiAnkleBreak = value
+            if value then
+                ensureControllers()
+            end
         end,
     })
 
@@ -582,8 +631,11 @@ return function(Window, scriptInfo)
         Flag = "BZ_AlwaysRun",
         Callback = function(value)
             settings.alwaysRun = value
+            if value then
+                ensureControllers()
+            end
             if MovementController then
-                MovementController.AlwaysRun = value
+                pcall(function() MovementController.AlwaysRun = value end)
             end
         end,
     })
