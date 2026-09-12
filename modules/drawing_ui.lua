@@ -79,9 +79,21 @@ end
 -- ============================================================
 --   ROUNDED GEOMETRY HELPERS (Drawing API Smooth macOS Shapes)
 -- ============================================================
-local function createRoundedCard(baseZIndex)
+local function createRoundedCard(baseZIndex, isNeumorphic)
     baseZIndex = baseZIndex or 1
     local card = {
+        -- Neumorphic Extruded Shadow (Underneath, Layer baseZIndex - 1)
+        neuDropMid   = safeDrawing("Square"),
+        neuDropBR    = safeDrawing("Circle"),
+
+        -- Specular Top-Left Bevel Line (Light Highlight)
+        neuLightTop  = safeDrawing("Line"),
+        neuLightLeft = safeDrawing("Line"),
+
+        -- Ambient Bottom-Right Shadow Line (Deep Occlusion)
+        neuDarkBot   = safeDrawing("Line"),
+        neuDarkRight = safeDrawing("Line"),
+
         -- Outer border stroke (optional)
         borderMid   = safeDrawing("Square"),
         borderLeft  = safeDrawing("Square"),
@@ -101,16 +113,22 @@ local function createRoundedCard(baseZIndex)
         bgBR        = safeDrawing("Circle"),
     }
 
-    for _, obj in pairs(card) do
+    for k, obj in pairs(card) do
         if obj then
             obj.Filled = true
             obj.Thickness = 1
             obj.Visible = false
-            pcall(function() obj.ZIndex = baseZIndex end)
+            if k == "neuDropMid" or k == "neuDropBR" then
+                pcall(function() obj.ZIndex = math.max(0, baseZIndex - 1) end)
+            elseif k == "neuLightTop" or k == "neuLightLeft" or k == "neuDarkBot" or k == "neuDarkRight" then
+                pcall(function() obj.ZIndex = baseZIndex + 1 end)
+            else
+                pcall(function() obj.ZIndex = baseZIndex end)
+            end
         end
     end
 
-    function card:Update(pos, size, radius, bgColor, borderColor, visible)
+    function card:Update(pos, size, radius, bgColor, borderColor, visible, neuStyle)
         if not visible or size.X <= 0 or size.Y <= 0 then
             for _, o in pairs(self) do
                 if type(o) == "userdata" or type(o) == "table" then
@@ -122,7 +140,20 @@ local function createRoundedCard(baseZIndex)
 
         local r = math.clamp(radius or 8, 1, math.floor(math.min(size.X, size.Y) / 2))
 
-        -- 1. Outer Border Stroke (when borderColor provided)
+        -- 1. Neumorphic Extruded Drop Shadow (Layer - 1)
+        if neuStyle == "raised" then
+            if self.neuDropMid then
+                self.neuDropMid.Position = Vector2.new(pos.X + 2, pos.Y + 2)
+                self.neuDropMid.Size = size
+                self.neuDropMid.Color = Color3.fromRGB(8, 9, 12)
+                self.neuDropMid.Visible = true
+            end
+        else
+            setObjVisible(self.neuDropMid, false)
+            setObjVisible(self.neuDropBR, false)
+        end
+
+        -- 2. Outer Border Stroke (when borderColor provided)
         if borderColor then
             if self.borderMid then
                 self.borderMid.Position = Vector2.new(pos.X + r, pos.Y)
@@ -176,7 +207,7 @@ local function createRoundedCard(baseZIndex)
             setObjVisible(self.borderBR, false)
         end
 
-        -- 2. Inner Card Fill (1px inset if border is present)
+        -- 3. Inner Card Fill (1px inset if border is present)
         local inset = borderColor and 1 or 0
         local innerPos = pos + Vector2.new(inset, inset)
         local innerSize = size - Vector2.new(inset * 2, inset * 2)
@@ -223,6 +254,42 @@ local function createRoundedCard(baseZIndex)
             self.bgBR.Position = Vector2.new(innerPos.X + innerSize.X - innerR, innerPos.Y + innerSize.Y - innerR)
             self.bgBR.Color = bgColor
             self.bgBR.Visible = true
+        end
+
+        -- 4. Neumorphic Dual-Bevel Lighting (Specular Light Top-Left & Ambient Shadow Bottom-Right)
+        if neuStyle == "raised" then
+            local highlightCol = Color3.fromRGB(56, 64, 86)
+            local shadowCol = Color3.fromRGB(10, 11, 15)
+
+            if self.neuLightTop then
+                self.neuLightTop.From = Vector2.new(pos.X + r, pos.Y)
+                self.neuLightTop.To = Vector2.new(pos.X + size.X - r, pos.Y)
+                self.neuLightTop.Color = highlightCol
+                self.neuLightTop.Visible = true
+            end
+            if self.neuLightLeft then
+                self.neuLightLeft.From = Vector2.new(pos.X, pos.Y + r)
+                self.neuLightLeft.To = Vector2.new(pos.X, pos.Y + size.Y - r)
+                self.neuLightLeft.Color = highlightCol
+                self.neuLightLeft.Visible = true
+            end
+            if self.neuDarkBot then
+                self.neuDarkBot.From = Vector2.new(pos.X + r, pos.Y + size.Y)
+                self.neuDarkBot.To = Vector2.new(pos.X + size.X - r, pos.Y + size.Y)
+                self.neuDarkBot.Color = shadowCol
+                self.neuDarkBot.Visible = true
+            end
+            if self.neuDarkRight then
+                self.neuDarkRight.From = Vector2.new(pos.X + size.X, pos.Y + r)
+                self.neuDarkRight.To = Vector2.new(pos.X + size.X, pos.Y + size.Y - r)
+                self.neuDarkRight.Color = shadowCol
+                self.neuDarkRight.Visible = true
+            end
+        else
+            setObjVisible(self.neuLightTop, false)
+            setObjVisible(self.neuLightLeft, false)
+            setObjVisible(self.neuDarkBot, false)
+            setObjVisible(self.neuDarkRight, false)
         end
     end
 
@@ -279,54 +346,56 @@ local function createPillSwitch(baseZIndex)
         local bgCol = value and colorOn or colorOff
         local borderCol = value and colorOn or borderColor
 
-        -- Outer border outline
+        -- 1. Outer Neumorphic Cavity Rim (Sunken well effect)
+        local cavityRimCol = value and Color3.fromRGB(44, 180, 78) or Color3.fromRGB(36, 40, 52)
         if self.borderLeft then
             self.borderLeft.Radius = r
             self.borderLeft.Position = Vector2.new(pos.X + r, pos.Y + r)
-            self.borderLeft.Color = borderCol
+            self.borderLeft.Color = cavityRimCol
             self.borderLeft.Visible = true
         end
         if self.borderRight then
             self.borderRight.Radius = r
             self.borderRight.Position = Vector2.new(pos.X + size.X - r, pos.Y + r)
-            self.borderRight.Color = borderCol
+            self.borderRight.Color = cavityRimCol
             self.borderRight.Visible = true
         end
         if self.borderMid then
             self.borderMid.Position = Vector2.new(pos.X + r, pos.Y)
             self.borderMid.Size = Vector2.new(math.max(1, size.X - 2 * r), size.Y)
-            self.borderMid.Color = borderCol
+            self.borderMid.Color = cavityRimCol
             self.borderMid.Visible = true
         end
 
-        -- Inner track fill (1px inset)
+        -- 2. Inner Track Fill (Sunken Debossed Cavity)
         local ir = math.max(1, r - 1)
+        local trackCol = value and colorOn or Color3.fromRGB(16, 18, 24)
         if self.cLeft then
             self.cLeft.Radius = ir
             self.cLeft.Position = Vector2.new(pos.X + r, pos.Y + r)
-            self.cLeft.Color = bgCol
+            self.cLeft.Color = trackCol
             self.cLeft.Visible = true
         end
         if self.cRight then
             self.cRight.Radius = ir
             self.cRight.Position = Vector2.new(pos.X + size.X - r, pos.Y + r)
-            self.cRight.Color = bgCol
+            self.cRight.Color = trackCol
             self.cRight.Visible = true
         end
         if self.mid then
             self.mid.Position = Vector2.new(pos.X + r, pos.Y + 1)
             self.mid.Size = Vector2.new(math.max(1, size.X - 2 * r), math.max(1, size.Y - 2))
-            self.mid.Color = bgCol
+            self.mid.Color = trackCol
             self.mid.Visible = true
         end
 
-        -- Circular knob with smooth drop shadow
+        -- 3. Extruded Physical Knob with Dual-Layer Drop Shadow
         local knobR = r - 2.5
         local knobX = value and (pos.X + size.X - r) or (pos.X + r)
         if self.knobShadow then
-            self.knobShadow.Radius = knobR + 1
-            self.knobShadow.Position = Vector2.new(knobX, pos.Y + r + 0.5)
-            self.knobShadow.Color = Color3.fromRGB(14, 16, 22)
+            self.knobShadow.Radius = knobR + 1.5
+            self.knobShadow.Position = Vector2.new(knobX, pos.Y + r + 1)
+            self.knobShadow.Color = Color3.fromRGB(6, 7, 10)
             self.knobShadow.Visible = true
         end
         if self.knob then
@@ -390,47 +459,59 @@ end
 --   APPLE macOS DARK THEME PALETTE (1:1 MacLib High-Fidelity)
 -- ============================================================
 local MAC_THEME = {
-    -- Window Surfaces (macOS Sonoma / Sequoia Dark Glass Charcoal)
-    bg             = Color3.fromRGB(24, 26, 33),       -- Main Window Charcoal Surface
-    bgSidebar      = Color3.fromRGB(18, 19, 25),       -- Inset Sidebar Dark Tone
-    bgHeader       = Color3.fromRGB(28, 30, 39),       -- Header Top Surface
-    border         = Color3.fromRGB(56, 62, 80),       -- Outer 1px Window Stroke
-    divider        = Color3.fromRGB(40, 44, 58),       -- Section / Sidebar Separators
+    -- Window Surfaces (Neumorphic macOS Dark Slate & Frosted Aluminum)
+    bg             = Color3.fromRGB(24, 27, 36),       -- Main Chassis Base Surface (#181B24)
+    bgSidebar      = Color3.fromRGB(18, 20, 28),       -- Debossed Inset Sidebar Cavity (#12141C)
+    bgHeader       = Color3.fromRGB(26, 29, 39),       -- Header Top Surface (#1A1D27)
+    border         = Color3.fromRGB(48, 54, 72),       -- Outer 1px Specular Stroke (#303648)
+    divider        = Color3.fromRGB(12, 14, 18),       -- Deep Carved Seam Shadow (#0C0E12)
+    dividerLight   = Color3.fromRGB(40, 46, 62),       -- Subtle Bevel Seam Reflection (#282E3E)
 
-    -- macOS Window Traffic Lights (1:1 Apple Specifications)
+    -- Neumorphic Dual-Lighting (Specular Highlights & Ambient Shadows)
+    neuHighlight   = Color3.fromRGB(56, 64, 86),       -- Top-Left Specular Rim (Soft Light Bevel)
+    neuShadow      = Color3.fromRGB(10, 11, 15),       -- Bottom-Right Deep Ambient Occlusion Shadow
+    neuRaisedBg    = Color3.fromRGB(30, 34, 46),       -- Extruded Raised Surface (Cards & Buttons)
+    neuRaisedHover = Color3.fromRGB(36, 42, 58),       -- Raised Surface Hover Glow
+    neuInsetBg     = Color3.fromRGB(16, 18, 24),       -- Debossed / Sunken Cavity (Tracks & Wells)
+    neuDropShadow  = Color3.fromRGB(6, 7, 10),         -- Deep Window Cast Shadow
+
+    -- macOS Window Traffic Lights (1:1 Apple Specifications with Neumorphic Sockets)
     trafficRed     = Color3.fromRGB(255, 95, 87),
     trafficYellow  = Color3.fromRGB(255, 189, 46),
     trafficGreen   = Color3.fromRGB(39, 201, 63),
+    trafficSocket  = Color3.fromRGB(14, 16, 22),       -- Recessed Socket Ring
 
-    -- Typography (High-Contrast Bold, Razor-Sharp Vector Glyphs)
-    title          = Color3.fromRGB(255, 255, 255),    -- Pure White Window Header
-    subtitle       = Color3.fromRGB(168, 178, 202),    -- High-Contrast Slate Grey Subtitle
+    -- Typography (High-Contrast, Maximum Clarity, 100% Crisp Integer Grid)
+    title          = Color3.fromRGB(255, 255, 255),    -- Pure White Window Header (#FFFFFF)
+    subtitle       = Color3.fromRGB(168, 180, 204),    -- High-Contrast Slate Grey Subtitle (#A8B4CC)
     outline        = Color3.fromRGB(8, 9, 13),         -- Crisp Dark Shadow Outline
-    tabInactive    = Color3.fromRGB(168, 178, 200),    -- High-Legibility Inactive Tab (Bright Slate White)
+    tabInactive    = Color3.fromRGB(168, 180, 204),    -- High-Legibility Inactive Tab (Bright Slate White)
     tabActive      = Color3.fromRGB(255, 255, 255),    -- Pure White Active Tab
-    tabActiveBg    = Color3.fromRGB(42, 48, 68),       -- Active Tab Elevated Rounded Pill
+    tabActiveBg    = Color3.fromRGB(38, 44, 60),       -- Active Tab Elevated Neumorphic Pill
     tabActiveBar   = Color3.fromRGB(56, 139, 253),     -- Apple Vivid Blue Tab Accent
 
-    -- Section Container Cards (1:1 MacLib Grouped Inset Cards)
-    sectionTitle   = Color3.fromRGB(88, 166, 255),     -- Vivid Apple Blue Section Header
-    cardBg         = Color3.fromRGB(34, 38, 50),       -- Group Card Solid Surface (Clear contrast against bg)
-    cardBorder     = Color3.fromRGB(58, 64, 84),       -- Group Card 1px Outer Stroke
-    rowDivider     = Color3.fromRGB(44, 49, 64),       -- Subtle Inner Row Separator
-    rowHover       = Color3.fromRGB(42, 47, 62),       -- Smooth Row Hover Highlight
+    -- Section Container Cards (Grouped Neumorphic Inset/Raised Cards)
+    sectionTitle   = Color3.fromRGB(96, 172, 255),     -- Vivid Apple Blue Section Header
+    cardBg         = Color3.fromRGB(30, 34, 46),       -- Neumorphic Raised Surface (#1E222E)
+    cardBorder     = Color3.fromRGB(48, 54, 72),       -- Top-Left Specular Bevel
+    cardShadow     = Color3.fromRGB(10, 11, 15),       -- Bottom-Right Soft Shadow
+    rowDivider     = Color3.fromRGB(38, 43, 58),       -- Subtle Inner Row Separator
+    rowHover       = Color3.fromRGB(36, 41, 56),       -- Smooth Row Hover Highlight
 
-    -- Controls & Typography
-    text           = Color3.fromRGB(245, 248, 255),    -- Crisp Apple High-Contrast White (Zero Bloom)
+    -- Controls & Typography (Ultra Crisp 13px)
+    text           = Color3.fromRGB(248, 250, 255),    -- Crisp Apple High-Contrast White (Zero Bloom)
     textMuted      = Color3.fromRGB(168, 176, 196),    -- Secondary Values & Descriptions
-    controlBg      = Color3.fromRGB(40, 45, 60),       -- Buttons & Badges Surface
-    controlBorder  = Color3.fromRGB(64, 72, 94),       -- Buttons & Badges Border Stroke
+    controlBg      = Color3.fromRGB(34, 39, 52),       -- Buttons & Badges Raised Surface
+    controlBorder  = Color3.fromRGB(52, 60, 80),       -- Specular Bevel Border
+    controlShadow  = Color3.fromRGB(12, 14, 18),       -- Ambient Shadow
 
-    -- Apple Switches & Sliders
+    -- Apple Switches & Sliders (Neumorphic Inset / Raised)
     toggleOn       = Color3.fromRGB(52, 199, 89),      -- Authentic Apple Green (#34C759)
-    toggleOff      = Color3.fromRGB(48, 52, 66),       -- Dark Slate Switch Track
-    toggleBorder   = Color3.fromRGB(68, 74, 94),       -- Switch Border Stroke
+    toggleOff      = Color3.fromRGB(18, 20, 26),       -- Sunken Dark Cavity Track
+    toggleBorder   = Color3.fromRGB(36, 40, 52),       -- Sunken Rim
     knob           = Color3.fromRGB(255, 255, 255),    -- Pure White Solid Knob
-    knobShadow     = Color3.fromRGB(14, 16, 22),       -- Drop Shadow for Knob
-    sliderTrack    = Color3.fromRGB(42, 47, 62),       -- Slider Track
+    knobShadow     = Color3.fromRGB(8, 9, 12),         -- Drop Shadow for Knob
+    sliderTrack    = Color3.fromRGB(16, 18, 24),       -- Inset Groove Track
     sliderFill     = Color3.fromRGB(56, 139, 253),     -- Apple Vivid Blue Fill
     accent         = Color3.fromRGB(56, 139, 253),     -- Apple Vivid Blue Accent
 }
@@ -480,10 +561,13 @@ function DrawingUI:CreateWindow(config)
 
     self.drawings = {}
 
-    -- Main Window 12px Rounded Background & 1px Border Stroke (Layer 1)
+    -- Floating Ambient Neumorphic Cast Shadow (Layer 0)
+    self.windowShadow = createRoundedCard(0)
+
+    -- Main Window 12px Rounded Chassis with Specular Rim (Layer 1)
     self.windowCard = createRoundedCard(1)
 
-    -- Left Sidebar Surface & Divider Line (Layer 2)
+    -- Left Sidebar Debossed Cavity Surface (Layer 2)
     self.drawings.sidebarBg = safeDrawing("Square")
     if self.drawings.sidebarBg then
         self.drawings.sidebarBg.Filled = true
@@ -493,6 +577,7 @@ function DrawingUI:CreateWindow(config)
         pcall(function() self.drawings.sidebarBg.ZIndex = 2 end)
     end
 
+    -- Carved Dual-Line Vertical Seam (Layer 2)
     self.drawings.sidebarLine = safeDrawing("Line")
     if self.drawings.sidebarLine then
         self.drawings.sidebarLine.Thickness = 1
@@ -501,13 +586,57 @@ function DrawingUI:CreateWindow(config)
         pcall(function() self.drawings.sidebarLine.ZIndex = 2 end)
     end
 
-    -- Header Divider Line (Layer 10)
+    self.drawings.sidebarLineLight = safeDrawing("Line")
+    if self.drawings.sidebarLineLight then
+        self.drawings.sidebarLineLight.Thickness = 1
+        self.drawings.sidebarLineLight.Color = self.theme.dividerLight
+        self.drawings.sidebarLineLight.Visible = false
+        pcall(function() self.drawings.sidebarLineLight.ZIndex = 2 end)
+    end
+
+    -- Carved Dual-Line Header Trench (Layer 10)
     self.drawings.headerLine = safeDrawing("Line")
     if self.drawings.headerLine then
         self.drawings.headerLine.Thickness = 1
         self.drawings.headerLine.Color = self.theme.divider
         self.drawings.headerLine.Visible = false
         pcall(function() self.drawings.headerLine.ZIndex = 10 end)
+    end
+
+    self.drawings.headerLineLight = safeDrawing("Line")
+    if self.drawings.headerLineLight then
+        self.drawings.headerLineLight.Thickness = 1
+        self.drawings.headerLineLight.Color = self.theme.dividerLight
+        self.drawings.headerLineLight.Visible = false
+        pcall(function() self.drawings.headerLineLight.ZIndex = 10 end)
+    end
+
+    -- Traffic Lights Recessed Sockets (Neumorphic Inset Rings)
+    self.drawings.socketRed = safeDrawing("Circle")
+    if self.drawings.socketRed then
+        self.drawings.socketRed.Filled = true
+        self.drawings.socketRed.Color = self.theme.trafficSocket
+        self.drawings.socketRed.Radius = 7.5
+        self.drawings.socketRed.Visible = false
+        pcall(function() self.drawings.socketRed.ZIndex = 9 end)
+    end
+
+    self.drawings.socketYellow = safeDrawing("Circle")
+    if self.drawings.socketYellow then
+        self.drawings.socketYellow.Filled = true
+        self.drawings.socketYellow.Color = self.theme.trafficSocket
+        self.drawings.socketYellow.Radius = 7.5
+        self.drawings.socketYellow.Visible = false
+        pcall(function() self.drawings.socketYellow.ZIndex = 9 end)
+    end
+
+    self.drawings.socketGreen = safeDrawing("Circle")
+    if self.drawings.socketGreen then
+        self.drawings.socketGreen.Filled = true
+        self.drawings.socketGreen.Color = self.theme.trafficSocket
+        self.drawings.socketGreen.Radius = 7.5
+        self.drawings.socketGreen.Visible = false
+        pcall(function() self.drawings.socketGreen.ZIndex = 9 end)
     end
 
     -- Traffic Lights: Red (Close/Destroy) (Layer 10)
@@ -1549,12 +1678,17 @@ function DrawingUI:Render()
     local sideW = self.sidebarWidth
     local headH = self.headerHeight
 
-    -- 1. Main Window 12px Rounded Surface with 1px Border Stroke
-    if self.windowCard then
-        self.windowCard:Update(p, sz, 12, self.theme.bg, self.theme.border, true)
+    -- 0. Ambient Floating Neumorphic Drop Shadow
+    if self.windowShadow then
+        self.windowShadow:Update(p + Vector2.new(4, 6), sz, 14, self.theme.neuDropShadow, nil, true)
     end
 
-    -- 2. Left Sidebar Background & Vertical Divider
+    -- 1. Main Window 12px Rounded Chassis with Raised Specular Rim
+    if self.windowCard then
+        self.windowCard:Update(p, sz, 12, self.theme.bg, self.theme.border, true, "raised")
+    end
+
+    -- 2. Left Sidebar Debossed Cavity Surface & Dual-Line Carved Trench
     if self.drawings.sidebarBg then
         self.drawings.sidebarBg.Position = Vector2.new(p.X, p.Y + headH)
         self.drawings.sidebarBg.Size = Vector2.new(sideW, sz.Y - headH - 10)
@@ -1567,24 +1701,48 @@ function DrawingUI:Render()
         self.drawings.sidebarLine.Visible = true
     end
 
-    -- 3. Header Divider
+    if self.drawings.sidebarLineLight then
+        self.drawings.sidebarLineLight.From = Vector2.new(p.X + sideW + 1, p.Y + headH)
+        self.drawings.sidebarLineLight.To = Vector2.new(p.X + sideW + 1, p.Y + sz.Y - 2)
+        self.drawings.sidebarLineLight.Visible = true
+    end
+
+    -- 3. Header Divider (Carved Trench)
     if self.drawings.headerLine then
         self.drawings.headerLine.From = Vector2.new(p.X, p.Y + headH)
         self.drawings.headerLine.To = Vector2.new(p.X + sz.X, p.Y + headH)
         self.drawings.headerLine.Visible = true
     end
 
-    -- 4. Traffic Lights (1:1 macOS Position & Radius)
+    if self.drawings.headerLineLight then
+        self.drawings.headerLineLight.From = Vector2.new(p.X, p.Y + headH + 1)
+        self.drawings.headerLineLight.To = Vector2.new(p.X + sz.X, p.Y + headH + 1)
+        self.drawings.headerLineLight.Visible = true
+    end
+
+    -- 4. Traffic Lights with Recessed Sockets
+    if self.drawings.socketRed then
+        self.drawings.socketRed.Position = Vector2.new(p.X + 18, p.Y + 22)
+        self.drawings.socketRed.Visible = true
+    end
     if self.drawings.trafficRed then
         self.drawings.trafficRed.Position = Vector2.new(p.X + 18, p.Y + 22)
         self.drawings.trafficRed.Visible = true
     end
 
+    if self.drawings.socketYellow then
+        self.drawings.socketYellow.Position = Vector2.new(p.X + 36, p.Y + 22)
+        self.drawings.socketYellow.Visible = true
+    end
     if self.drawings.trafficYellow then
         self.drawings.trafficYellow.Position = Vector2.new(p.X + 36, p.Y + 22)
         self.drawings.trafficYellow.Visible = true
     end
 
+    if self.drawings.socketGreen then
+        self.drawings.socketGreen.Position = Vector2.new(p.X + 54, p.Y + 22)
+        self.drawings.socketGreen.Visible = true
+    end
     if self.drawings.trafficGreen then
         self.drawings.trafficGreen.Position = Vector2.new(p.X + 54, p.Y + 22)
         self.drawings.trafficGreen.Visible = true
@@ -1608,7 +1766,7 @@ function DrawingUI:Render()
     local badgeY = p.Y + 9
 
     if self.keyBadgeCard then
-        self.keyBadgeCard:Update(Vector2.new(badgeX, badgeY), Vector2.new(badgeW, badgeH), 6, self.theme.controlBg, self.theme.controlBorder, true)
+        self.keyBadgeCard:Update(Vector2.new(badgeX, badgeY), Vector2.new(badgeW, badgeH), 6, self.theme.controlBg, self.theme.controlBorder, true, "raised")
     end
 
     if self.drawings.hint then
@@ -1623,7 +1781,7 @@ function DrawingUI:Render()
     local cardW = sideW - 16
 
     if self.userCardPill then
-        self.userCardPill:Update(Vector2.new(cardX, cardY), Vector2.new(cardW, cardH), 8, self.theme.cardBg, self.theme.cardBorder, true)
+        self.userCardPill:Update(Vector2.new(cardX, cardY), Vector2.new(cardW, cardH), 8, self.theme.cardBg, self.theme.cardBorder, true, "raised")
     end
 
     if self.drawings.userDot then
@@ -1752,7 +1910,8 @@ function DrawingUI:Render()
                         radius,
                         self.theme.cardBg,
                         self.theme.cardBorder,
-                        true
+                        true,
+                        "raised"
                     )
                 elseif sec.card then
                     sec.card:Update(Vector2.zero, Vector2.zero, 0, Color3.new(), nil, false)
@@ -1875,12 +2034,14 @@ function DrawingUI:Render()
                         if item.track then
                             item.track.Position = Vector2.new(trackX, trackY)
                             item.track.Size = Vector2.new(trackW, trackH)
+                            item.track.Color = self.theme.sliderTrack
                             item.track.Visible = true
                         end
 
                         if item.fill then
                             item.fill.Position = Vector2.new(trackX, trackY)
                             item.fill.Size = Vector2.new(fillW, trackH)
+                            item.fill.Color = self.theme.sliderFill
                             item.fill.Visible = true
                         end
 
@@ -1897,7 +2058,7 @@ function DrawingUI:Render()
 
                         if item.buttonCard then
                             local btnBg = isHovered and Color3.fromRGB(48, 54, 72) or self.theme.controlBg
-                            item.buttonCard:Update(Vector2.new(btnX, btnY), Vector2.new(btnW, btnH), 6, btnBg, self.theme.controlBorder, true)
+                            item.buttonCard:Update(Vector2.new(btnX, btnY), Vector2.new(btnW, btnH), 6, btnBg, self.theme.controlBorder, true, "raised")
                         end
 
                         if item.label then
