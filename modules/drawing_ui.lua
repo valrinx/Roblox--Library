@@ -28,11 +28,12 @@ end
 local function sanitizeText(str)
     if type(str) ~= "string" then return tostring(str or "") end
     -- Strip 4-byte emojis and unsupported glyphs that break Drawing API
-    local clean = str:gsub("[ð-ô][-¿][-¿][-¿]", "")
-    clean = clean:gsub("[â][-][-¿]", "")
-    clean = clean:gsub("[â][­-¯][-¿]", "")
+    local clean = str:gsub("[ð-ô][€-¿][€-¿][€-¿]", "")
+    clean = clean:gsub("[â][š-Ÿ][€-¿]", "")
+    clean = clean:gsub("[â][­-¯][€-¿]", "")
     clean = clean:gsub("%s+", " ")
-    return clean:gsub("^%s+", ""):gsub("%s+$", "")
+    local res = clean:gsub("^%s+", ""):gsub("%s+$", "")
+    return res
 end
 
 local function setObjVisible(obj, visible)
