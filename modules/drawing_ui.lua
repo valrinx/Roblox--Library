@@ -476,7 +476,7 @@ function DrawingUI:CreateWindow(config)
     self.tabs = {}
     self.activeTabIndex = 1
     self.headerHeight = 44
-    self.sidebarWidth = 170
+    self.sidebarWidth = 190
 
     self.drawings = {}
 
@@ -605,9 +605,9 @@ function DrawingUI:CreateWindow(config)
 
     self.drawings.userStatus = createBoldText(4)
     if self.drawings.userStatus then
-        self.drawings.userStatus.Size = 12
+        self.drawings.userStatus.Size = 11
         self.drawings.userStatus.Color = self.theme.textMuted
-        self.drawings.userStatus.Text = "MacLib | 100% Drawing Safe"
+        self.drawings.userStatus.Text = "100% Drawing Safe"
         self.drawings.userStatus.Visible = false
     end
 
@@ -816,9 +816,8 @@ end
 function SectionMethods:CreateSlider(cfg)
     cfg = cfg or {}
     local tab = self.tab
-    local range = cfg.Range or {0, 100}
-    local minVal = tonumber(range[1]) or 0
-    local maxVal = tonumber(range[2]) or 100
+    local minVal = (cfg.Range and tonumber(cfg.Range[1])) or tonumber(cfg.Min) or 0
+    local maxVal = (cfg.Range and tonumber(cfg.Range[2])) or tonumber(cfg.Max) or 100
     local currentVal = tonumber(cfg.CurrentValue or cfg.Default or minVal) or minVal
 
     local item = {
@@ -1832,7 +1831,7 @@ function DrawingUI:Render()
                         end
 
                     elseif item.type == "slider" then
-                        local badgeW = 72
+                        local badgeW = 80
                         local badgeH = 22
                         local badgeX = contentLeft + contentWidth - badgeW - 16
                         local badgeY = rowY + 6
@@ -1907,7 +1906,7 @@ function DrawingUI:Render()
                         end
 
                     elseif item.type == "dropdown" then
-                        local badgeW = 140
+                        local badgeW = 150
                         local badgeH = 28
                         local badgeX = contentLeft + contentWidth - badgeW - 16
                         local badgeY = rowY + 8
@@ -1941,7 +1940,7 @@ function DrawingUI:Render()
                         end
 
                     elseif item.type == "keybind" then
-                        local badgeW = 84
+                        local badgeW = 96
                         local badgeH = 26
                         local badgeX = contentLeft + contentWidth - badgeW - 16
                         local badgeY = rowY + 9
@@ -2017,7 +2016,7 @@ function DrawingUI:Render()
                         end
 
                         if item.valText then
-                            item.valText.Position = Vector2.new(inX + 12, inY + 6)
+                            item.valText.Position = Vector2.new(inX + 12, inY + 7)
                             item.valText.Visible = true
                         end
                     end
