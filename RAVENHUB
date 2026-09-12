@@ -4,12 +4,61 @@
 -- ============================================================
 
 local Players     = game:GetService("Players")
-local VirtualUser = game:GetService("VirtualUser")
-local StarterGui  = game:GetService("StarterGui")
-local MarketplaceService = game:GetService("MarketplaceService")
+
+local hasDrawing = type(Drawing) == "table" and type(Drawing.new) == "function"
+
+local function isBacExperience()
+    local bacPlaceIds = {
+        114234929420007, 108194354348181, -- BloxStrike
+        70454767164205, 71683821699644, 72476829463897, 73708914208963, -- Basketball Zero
+        90346996348563, 91733245171139, 95656979989750, 98118902024430,
+        129230994638464, 130739873848552, 140469311035169
+    }
+    local bacGameIds = {
+        7633926880, -- BloxStrike
+        7028566528, -- Basketball Zero
+    }
+    local curPlace = game.PlaceId
+    local curGame = game.GameId
+    for _, p in ipairs(bacPlaceIds) do
+        if curPlace == p then return true end
+    end
+    for _, g in ipairs(bacGameIds) do
+        if curGame == g then return true end
+    end
+    local rf = game:GetService("ReplicatedFirst")
+    if rf and (rf:FindFirstChild("Sigma") or rf:FindFirstChild("Provider")) then
+        return true
+    end
+    if game.Name and string.find(game.Name, "BAC") then
+        return true
+    end
+    return false
+end
+
+local isBac = isBacExperience()
+
+local function safeHttpGet(url)
+    if type(request) == "function" then
+        local ok, res = pcall(request, {Url = url, Method = "GET"})
+        if ok and type(res) == "table" and type(res.Body) == "string" and #res.Body > 0 then
+            return res.Body
+        end
+    elseif type(http_request) == "function" then
+        local ok, res = pcall(http_request, {Url = url, Method = "GET"})
+        if ok and type(res) == "table" and type(res.Body) == "string" and #res.Body > 0 then
+            return res.Body
+        end
+    end
+    return game:HttpGet(url)
+end
 
 local function getExperienceName()
     local fallback = tostring(game.Name or "Roblox Experience")
+
+    if isBac then
+        return fallback
+    end
 
     -- A dungeon is a separate Place inside the same Roblox universe. Resolve
     -- the universe metadata first so Frozen Valley and the lobby share one
@@ -20,7 +69,7 @@ local function getExperienceName()
             return nil
         end
         local httpService = game:GetService("HttpService")
-        local response = game:HttpGet(
+        local response = safeHttpGet(
             "https://games.roblox.com/v1/games?universeIds=" .. tostring(universeId)
         )
         local decoded = httpService:JSONDecode(response)
@@ -34,7 +83,8 @@ local function getExperienceName()
     end
 
     local ok, info = pcall(function()
-        return MarketplaceService:GetProductInfo(game.PlaceId)
+        local ms = game:GetService("MarketplaceService")
+        return ms and ms:GetProductInfo(game.PlaceId)
     end)
     if ok and type(info) == "table" and type(info.Name) == "string" and info.Name ~= "" then
         return info.Name
@@ -63,6 +113,11 @@ local function sanitizeConfigSegment(value, fallback)
 end
 
 local function removeRetiredInterfaces()
+    if isBac then
+        -- In BAC games, never scan CoreGui or PlayerGui to avoid tripping anti-cheat sensors
+        return
+    end
+
     local roots = {}
     local seen = {}
     local function addRoot(root)
@@ -110,45 +165,21 @@ removeRetiredInterfaces()
 local function failBootstrap(message)
     local text = "RAVEN HUB failed: " .. tostring(message)
     warn(text)
-    pcall(function()
-        StarterGui:SetCore("SendNotification", {
-            Title = "RAVEN HUB - Startup error",
-            Text = text:sub(1, 220),
-            Duration = 12,
-        })
-    end)
+    if not isBac then
+        pcall(function()
+            local starterGui = game:GetService("StarterGui")
+            if starterGui then
+                starterGui:SetCore("SendNotification", {
+                    Title = "RAVEN HUB - Startup error",
+                    Text = text:sub(1, 220),
+                    Duration = 12,
+                })
+            end
+        end)
+    end
     error(text, 0)
 end
 
-local hasDrawing = type(Drawing) == "table" and type(Drawing.new) == "function"
-
-local function isBacExperience()
-    local bacPlaceIds = {
-        114234929420007, 108194354348181, -- BloxStrike
-        70454767164205, 71683821699644, 72476829463897, 73708914208963, -- Basketball Zero
-        90346996348563, 91733245171139, 95656979989750, 98118902024430,
-        129230994638464, 130739873848552, 140469311035169
-    }
-    local bacGameIds = {
-        7633926880, -- BloxStrike
-        7028566528, -- Basketball Zero
-    }
-    local curPlace = game.PlaceId
-    local curGame = game.GameId
-    for _, p in ipairs(bacPlaceIds) do
-        if curPlace == p then return true end
-    end
-    for _, g in ipairs(bacGameIds) do
-        if curGame == g then return true end
-    end
-    local rf = game:GetService("ReplicatedFirst")
-    if rf and (rf:FindFirstChild("Sigma") or rf:FindFirstChild("Provider")) then
-        return true
-    end
-    return false
-end
-
-local isBac = isBacExperience()
 local USE_DRAWING_UI = hasDrawing -- 100% Drawing API Primary Standard
 if isBac then
     USE_DRAWING_UI = true
@@ -166,7 +197,7 @@ if USE_DRAWING_UI then
                 if chunk then return chunk() end
             end
         end
-        local source = game:HttpGet(
+        local source = safeHttpGet(
             "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/drawing_ui.lua?_cb=" .. tostring(os.time())
         )
         assert(type(source) == "string" and #source > 1000, "DrawingUI download was empty")
@@ -665,11 +696,19 @@ local SCRIPTS = {
 --   ANTI AFK
 -- ============================================================
 
-player.Idled:Connect(function()
-    VirtualUser:Button2Down(Vector2.zero, camera.CFrame)
-    task.wait(1)
-    VirtualUser:Button2Up(Vector2.zero, camera.CFrame)
-end)
+if not isBac then
+    pcall(function()
+        local vu = game:GetService("VirtualUser")
+        local lp = Players.LocalPlayer
+        if lp and vu then
+            lp.Idled:Connect(function()
+                vu:Button2Down(Vector2.zero, workspace.CurrentCamera and workspace.CurrentCamera.CFrame or CFrame.identity)
+                task.wait(1)
+                vu:Button2Up(Vector2.zero, workspace.CurrentCamera and workspace.CurrentCamera.CFrame or CFrame.identity)
+            end)
+        end
+    end)
+end
 
 -- ============================================================
 --   WINDOW
@@ -883,7 +922,7 @@ local function loadScriptModule(scriptInfo)
         if not raw then
             local sep = scriptInfo.moduleUrl:find("%?") and "&" or "?"
             local fetchUrl = scriptInfo.moduleUrl .. sep .. "_cb=" .. tostring(os.time()) .. "_" .. tostring(math.random(1000, 9999))
-            raw = game:HttpGet(fetchUrl)
+            raw = safeHttpGet(fetchUrl)
             assert(type(raw) == "string" and #raw > 10,
                 "HttpGet empty URL: " .. scriptInfo.moduleUrl)
         end
@@ -930,7 +969,7 @@ for _, scriptInfo in ipairs(SCRIPTS) do
     if shouldLoadScript(scriptInfo) then
         matchedAnyScript = true
         loadScriptModule(scriptInfo)
-    elseif scriptInfo.detector then
+    elseif scriptInfo.detector and not isBac then
         task.spawn(function()
             for _ = 1, 30 do
                 task.wait(1)

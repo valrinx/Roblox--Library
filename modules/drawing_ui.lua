@@ -11,7 +11,6 @@ DrawingUI.Flags = {}
 
 local UserInputService = game:GetService("UserInputService")
 local RunService       = game:GetService("RunService")
-local StarterGui       = game:GetService("StarterGui")
 local Players          = game:GetService("Players")
 
 local hasDrawing = type(Drawing) == "table" and type(Drawing.new) == "function"
@@ -125,15 +124,7 @@ function DrawingUI.Notify(options)
     options = options or {}
     local title = sanitizeText(tostring(options.Title or "RAVEN HUB"))
     local content = sanitizeText(tostring(options.Content or options.Description or options.Text or ""))
-    local duration = tonumber(options.Duration or options.Lifetime) or 5
-
-    pcall(function()
-        StarterGui:SetCore("SendNotification", {
-            Title = title,
-            Text = content:sub(1, 150),
-            Duration = duration,
-        })
-    end)
+    print(string.format("[RAVEN HUB] %s: %s", title, content))
 end
 
 function DrawingUI:Notify(options)
@@ -1647,16 +1638,17 @@ function DrawingUI:Render()
             end
 
             -- Card Background enclosing this section
-            local cardH = (cursorY - cardContentStartY) + cardPadding
+            local cardH = math.max(0, (cursorY - cardContentStartY) + cardPadding)
+            local cardVisible = (cardContentStartY < (contentTop + contentMaxHeight) and (cardContentStartY + cardH) > contentTop)
             if sec.cardBg then
                 sec.cardBg.Position = Vector2.new(contentLeft, cardContentStartY - 4)
                 sec.cardBg.Size = Vector2.new(contentWidth, cardH)
-                sec.cardBg.Visible = inBounds
+                sec.cardBg.Visible = cardVisible
             end
             if sec.cardBorder then
                 sec.cardBorder.Position = Vector2.new(contentLeft, cardContentStartY - 4)
                 sec.cardBorder.Size = Vector2.new(contentWidth, cardH)
-                sec.cardBorder.Visible = inBounds
+                sec.cardBorder.Visible = cardVisible
             end
 
             cursorY = cursorY + 12

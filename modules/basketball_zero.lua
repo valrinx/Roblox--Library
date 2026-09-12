@@ -9,10 +9,9 @@ return function(Window, scriptInfo)
     local RunService = game:GetService("RunService")
     local ReplicatedStorage = game:GetService("ReplicatedStorage")
     local UserInputService = game:GetService("UserInputService")
-    local VirtualInputManager = game:GetService("VirtualInputManager")
 
     -- Clean up previous instance if running
-    local environment = getgenv and getgenv() or _G
+    local environment = _G
     if type(environment.__RAVEN_BASKETBALL_ZERO) == "table"
         and type(environment.__RAVEN_BASKETBALL_ZERO.Destroy) == "function" then
         pcall(environment.__RAVEN_BASKETBALL_ZERO.Destroy)
@@ -212,12 +211,30 @@ return function(Window, scriptInfo)
 
     local function getTargetRim(myPos)
         local now = os.clock()
-        if (now - lastRimScan) > 3 or #cachedRims == 0 then
+        if (now - lastRimScan) > 4 or #cachedRims == 0 then
             lastRimScan = now
             table.clear(cachedRims)
-            for _, d in ipairs(workspace:GetDescendants()) do
-                if (d.Name == "Rim" or d.Name == "CloseRim") and d:IsA("BasePart") then
-                    table.insert(cachedRims, d)
+            local searchRoots = {
+                workspace:FindFirstChild("Courts2"),
+                workspace:FindFirstChild("Courts"),
+                workspace:FindFirstChild("Map"),
+            }
+            local foundAny = false
+            for _, root in ipairs(searchRoots) do
+                if root then
+                    foundAny = true
+                    for _, d in ipairs(root:GetDescendants()) do
+                        if (d.Name == "Rim" or d.Name == "CloseRim") and d:IsA("BasePart") then
+                            table.insert(cachedRims, d)
+                        end
+                    end
+                end
+            end
+            if not foundAny or #cachedRims == 0 then
+                for _, d in ipairs(workspace:GetChildren()) do
+                    if (d.Name == "Rim" or d.Name == "CloseRim") and d:IsA("BasePart") then
+                        table.insert(cachedRims, d)
+                    end
                 end
             end
         end
@@ -294,7 +311,18 @@ return function(Window, scriptInfo)
             end
 
             -- Trigger instant release
-            VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+            if type(mouse1click) == "function" then
+                pcall(mouse1click)
+            elseif type(mouse1press) == "function" and type(mouse1release) == "function" then
+                pcall(mouse1release)
+            else
+                pcall(function()
+                    local vim = game:GetService("VirtualInputManager")
+                    if vim then
+                        vim:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+                    end
+                end)
+            end
         end
     end
 
@@ -535,6 +563,10 @@ return function(Window, scriptInfo)
     -- ============================================================
     connect(RunService.RenderStepped, function()
         if not running then return end
+
+        local hasActiveFeature = settings.autoGreen or settings.antiAnkleBreak or settings.alwaysRun 
+            or settings.autoSteal or settings.ballEsp or settings.rimEsp or settings.playerEsp
+        if not hasActiveFeature then return end
 
         local myChar = localPlayer.Character
         local myRoot = getRoot(myChar)
