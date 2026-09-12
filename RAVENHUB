@@ -167,7 +167,7 @@ if USE_DRAWING_UI then
             end
         end
         local source = game:HttpGet(
-            "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/drawing_ui.lua?_cb=" .. tostring(os.time())
+            "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/drawing_ui.lua?_cb=" .. tostring(os.time())
         )
         assert(type(source) == "string" and #source > 1000, "DrawingUI download was empty")
         local chunk, compileError = loadstring(source)
