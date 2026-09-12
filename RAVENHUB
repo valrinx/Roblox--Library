@@ -190,16 +190,24 @@ local HUB_BUILD = "drawing-ghost-1.1"
 
 if USE_DRAWING_UI then
     local ok, result = pcall(function()
-        if type(readfile) == "function" then
+        local source
+        local fetchOk, fetchRes = pcall(function()
+            return safeHttpGet(
+                "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/drawing_ui.lua?_cb=" .. tostring(os.time())
+            )
+        end)
+        if fetchOk and type(fetchRes) == "string" and #fetchRes > 1000 then
+            source = fetchRes
+            if type(writefile) == "function" then
+                pcall(writefile, "modules/drawing_ui.lua", source)
+            end
+        elseif type(readfile) == "function" then
             local okLocal, localSrc = pcall(readfile, "modules/drawing_ui.lua")
             if okLocal and type(localSrc) == "string" and #localSrc > 1000 then
-                local chunk = loadstring(localSrc)
-                if chunk then return chunk() end
+                source = localSrc
             end
         end
-        local source = safeHttpGet(
-            "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/drawing_ui.lua?_cb=" .. tostring(os.time())
-        )
+
         assert(type(source) == "string" and #source > 1000, "DrawingUI download was empty")
         local chunk, compileError = loadstring(source)
         assert(chunk, "DrawingUI compile error: " .. tostring(compileError))
