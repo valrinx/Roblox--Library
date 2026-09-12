@@ -18,6 +18,15 @@ files in subdirectories may add or override rules for their scope.
   - ก่อนจะยิง Remote ใดๆ ต้อง decompile หรือ inspect script ฝั่ง Client / ReplicatedFirst / ReplicatedStorage ให้ละเอียดก่อนเสมอ
   - ตรวจสอบชื่อ Remote ที่ต้องสงสัยว่าเป็น Honeypot / Trap ของผู้พัฒนา (เช่น `ResetCooldowns`, `AdminAction`, `SetCash`, `GrantItem`, `SetLevel` ฯลฯ) ซึ่งมักตั้งไว้ดักแบนหรือเตะผู้เล่น (`player:Kick("Exploiting")`) ทันที
   - ตรวจสอบระบบตรวจสอบของเกม (Client Anti-Cheat, Memory checks, Remote rate-limits, Server-authoritative checks) ให้ชัดเจนก่อนทำการทดสอบทุกครั้ง
+  - **กฎเหล็กเฉพาะแมพที่ใช้ BAC (Frog Anti-Cheat / fr0g เช่น Basketball: Current, Basketball: Zero, BloxStrike)**:
+    - **ตรวจพบ Signature**: `BAC - Frog Was Here <3`, `Discord : ._.fr0g.`, Kick message: `BAC - Alpha-3B` (Error Code: 267), สคริปต์ใน `ReplicatedFirst`: `LoadingScreen` (x2), `Sigma`, `Provider`
+    - **Honeypot Trap**: ห้ามยิงหรือวนลูป Remote สุ่มสี่สุ่มห้า (มี Remotes กับดัก เช่น `Sigma-Sigma-On The Wall`, `SkibidiChrollo\u0002...`, หรือ `Remotes.BAC` ที่ตั้งใจส่ง signal แบนทันที)
+    - **Hitbox Expander Trap (`ReplicatedFirst.Sigma`)**: มีการวนลูปสแกนขนาด BasePart ตัวละครทุก 5 วิ หากตรวจพบ `Size.X > 3` หรือ `Size.Y > 4.2` หรือ `Size.Z > 3` สคริปต์จะทำลาย Remote ใน ReplicatedStorage ทั้งหมดและสั่ง `Player:Kick()` ทันที **ห้ามขยาย Part ตัวละครเด็ดขาด** (ให้ใช้ Silent Aim / Raycast / Camera Lock แทน)
+    - **Integrity & Hook Detection (`BAC - Alpha-3B`)**:
+      - BAC ตรวจจับการ Hook ฟังก์ชันระดับ Core Lua (`task.spawn`, `task.defer`, `task.delay`, `pcall`, `bit32.bor`, `debug.info`) หากเวลาหรือการคืนค่าผิดเพี้ยน จะเตะด้วยโค้ด `Alpha-3B`
+      - BAC มีกับดัก Metamethod บน `game`: `pcall(function() return game:Kick("Sigma") end)` และ `pcall(function() return game:LoadAnimation() end)` ซึ่งใน Roblox ปกติต้อง Error (`success == false`) หากมีการ hook `__namecall` หรือ `game` จน pcall สำเร็จ จะถูกเตะทันที
+      - **ห้าม** ใช้ `hookfunction(game.HttpGet, ...)` หรือ hook metamethod ใดๆ บน `game` โดยเด็ดขาด
+    - **UI & ESP Strategy**: หลีกเลี่ยงการสร้าง `ScreenGui` ดิบๆ ลงใน `CoreGui` หรือ `PlayerGui` ให้ใช้ **Drawing API** ของ Executor เป็นหลักสำหรับฟังก์ชัน Visuals/ESP เพื่อเลี่ยงการตรวจจับ Object Injection
 - If multiple clients are connected, explicitly select or confirm the intended
   active client before executing code.
 - When the user asks to run or test a script, run the modified version locally on

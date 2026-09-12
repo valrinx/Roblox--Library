@@ -120,40 +120,109 @@ local function failBootstrap(message)
     error(text, 0)
 end
 
-local MacLib
-do
-    local ok, result = pcall(function()
-        local source = game:HttpGet("https://github.com/biggaboy212/Maclib/releases/latest/download/maclib.txt")
-        assert(type(source) == "string" and #source > 1000, "MacLib download was empty")
-        local chunk, compileError = loadstring(source)
-        assert(chunk, "MacLib compile error: " .. tostring(compileError))
-        local library = chunk()
-        assert(type(library) == "table", "MacLib returned " .. type(library))
-        return library
-    end)
-    if not ok then
-        failBootstrap(result)
+local hasDrawing = type(Drawing) == "table" and type(Drawing.new) == "function"
+
+local function isBacExperience()
+    local bacPlaceIds = {
+        114234929420007, 108194354348181, -- BloxStrike
+        70454767164205, 71683821699644, 72476829463897, 73708914208963, -- Basketball Zero
+        90346996348563, 91733245171139, 95656979989750, 98118902024430,
+        129230994638464, 130739873848552, 140469311035169
+    }
+    local bacGameIds = {
+        7633926880, -- BloxStrike
+        7028566528, -- Basketball Zero
+    }
+    local curPlace = game.PlaceId
+    local curGame = game.GameId
+    for _, p in ipairs(bacPlaceIds) do
+        if curPlace == p then return true end
     end
-    MacLib = result
+    for _, g in ipairs(bacGameIds) do
+        if curGame == g then return true end
+    end
+    local rf = game:GetService("ReplicatedFirst")
+    if rf and (rf:FindFirstChild("Sigma") or rf:FindFirstChild("Provider")) then
+        return true
+    end
+    return false
+end
+
+local isBac = isBacExperience()
+local USE_DRAWING_UI = hasDrawing -- 100% Drawing API Primary Standard
+if isBac then
+    USE_DRAWING_UI = true
 end
 
 local HubUI
-do
+local HUB_BUILD = "drawing-ghost-1.1"
+
+if USE_DRAWING_UI then
     local ok, result = pcall(function()
+        if type(readfile) == "function" then
+            local okLocal, localSrc = pcall(readfile, "modules/drawing_ui.lua")
+            if okLocal and type(localSrc) == "string" and #localSrc > 1000 then
+                local chunk = loadstring(localSrc)
+                if chunk then return chunk() end
+            end
+        end
         local source = game:HttpGet(
-            "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/maclib_adapter.lua?v=maclib-adapter-1.1.7"
+            "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/drawing_ui.lua?_cb=" .. tostring(os.time())
         )
-        assert(type(source) == "string" and #source > 1000, "MacLib adapter download was empty")
+        assert(type(source) == "string" and #source > 1000, "DrawingUI download was empty")
         local chunk, compileError = loadstring(source)
-        assert(chunk, "MacLib adapter compile error: " .. tostring(compileError))
-        local factory = chunk()
-        assert(type(factory) == "function", "MacLib adapter returned " .. type(factory))
-        return factory(MacLib)
+        assert(chunk, "DrawingUI compile error: " .. tostring(compileError))
+        local library = chunk()
+        assert(type(library) == "table", "DrawingUI returned " .. type(library))
+        return library
     end)
-    if not ok then
-        failBootstrap(result)
+    if ok then
+        HubUI = result
+        HUB_BUILD = "drawing-ghost-1.1"
+    else
+        if isBac then
+            failBootstrap("100% Drawing API is strictly required for Anti-Cheat bypass in this game: " .. tostring(result))
+        end
     end
-    HubUI = result
+end
+
+if not HubUI and not isBac then
+    -- Fallback to MacLib only for non-BAC games if Drawing API is unavailable
+    HUB_BUILD = "maclib-5"
+    local MacLib
+    do
+        local ok, result = pcall(function()
+            local source = game:HttpGet("https://github.com/biggaboy212/Maclib/releases/latest/download/maclib.txt")
+            assert(type(source) == "string" and #source > 1000, "MacLib download was empty")
+            local chunk, compileError = loadstring(source)
+            assert(chunk, "MacLib compile error: " .. tostring(compileError))
+            local library = chunk()
+            assert(type(library) == "table", "MacLib returned " .. type(library))
+            return library
+        end)
+        if not ok then
+            failBootstrap(result)
+        end
+        MacLib = result
+    end
+
+    do
+        local ok, result = pcall(function()
+            local source = game:HttpGet(
+                "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/maclib_adapter.lua?v=maclib-adapter-1.1.7"
+            )
+            assert(type(source) == "string" and #source > 1000, "MacLib adapter download was empty")
+            local chunk, compileError = loadstring(source)
+            assert(chunk, "MacLib adapter compile error: " .. tostring(compileError))
+            local factory = chunk()
+            assert(type(factory) == "function", "MacLib adapter returned " .. type(factory))
+            return factory(MacLib)
+        end)
+        if not ok then
+            failBootstrap(result)
+        end
+        HubUI = result
+    end
 end
 
 local player    = Players.LocalPlayer
@@ -175,7 +244,7 @@ if not character then
     if conn then pcall(function() conn:Disconnect() end) end
 end
 local camera    = game.Workspace.CurrentCamera
-local HUB_BUILD = "maclib-5"
+-- HUB_BUILD initialized during UI bootstrap
 
 -- ============================================================
 --   SCRIPT REGISTRY
@@ -221,6 +290,30 @@ local SCRIPTS = {
         gameIds     = {9051406594},
         version     = "v2.0.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/dueling_grounds.lua?v=dg-2.0.0",
+    },
+    {
+        name        = "Volleyball Legends 🏐",
+        description = "Ball ESP & Landing Prediction | Auto Hit / Receive | Auto Dive | Auto Serve | Safe Mode",
+        placeIds    = {74691681039273, 85395484560711},
+        gameIds     = {6931042565},
+        version     = "v1.0.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/volleyball_legends.lua",
+    },
+    {
+        name        = "Basketball: Zero 🏀",
+        description = "Auto Green Release | Auto Steal | Always Run | Anti-Ankle Break | Ball & Rim ESP",
+        placeIds    = {70454767164205, 71683821699644, 72476829463897, 73708914208963, 90346996348563, 91733245171139, 95656979989750, 98118902024430, 129230994638464, 130739873848552, 140469311035169},
+        gameIds     = {7028566528},
+        version     = "v1.0.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/basketball_zero.lua",
+    },
+    {
+        name        = "BloxStrike 🎯",
+        description = "ESP Visuals (Drawing API) | Match Telemetry | Player State | Performance Monitor",
+        placeIds    = {114234929420007, 108194354348181},
+        gameIds     = {7633926880},
+        version     = "v1.1.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/bloxstrike.lua",
     },
     {
         name        = "My Knife Farm",
@@ -651,6 +744,7 @@ local ModuleStatusLabel = HomeTab:CreateStatus({
 HomeTab:CreateLabel("PlaceId: " .. tostring(game.PlaceId))
 HomeTab:CreateLabel("Experience: " .. EXPERIENCE_NAME)
 HomeTab:CreateLabel("RAVEN HUB build: " .. HUB_BUILD)
+HomeTab:CreateLabel("Engine: " .. (HUB_BUILD:find("drawing") and "100% Drawing API (Zero-Instance Anti-Cheat Ghost Mode)" or "MacLib"))
 HomeTab:CreateLabel("Config folder: " .. CONFIG_FOLDER .. "/settings")
 HomeTab:CreateLabel("Config filename: " .. CONFIG_FILE_NAME .. ".json")
 HomeTab:CreateLabel("Active compatible module: " .. matchingScriptNames[1])
