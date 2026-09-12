@@ -735,6 +735,7 @@ end)
 if not windowOk then
     failBootstrap(Window)
 end
+_G.__RAVEN_WINDOW = Window
 
 -- ============================================================
 --   HOME TAB
