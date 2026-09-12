@@ -61,126 +61,19 @@ local function removeObj(obj)
 end
 
 -- ============================================================
---   TRUE BOLD VECTOR TYPOGRAPHY (Double-Strike 1:1 macOS Stamping)
+--   CRISP HIGH-CONTRAST TYPOGRAPHY (Native Drawing API Engine)
+--   Font 2 = IBM Plex Sans: Naturally bold, thick, zero blur
 -- ============================================================
 local function createBoldText(baseZIndex, isHeavy)
     baseZIndex = baseZIndex or 6
-    local t1 = safeDrawing("Text")
-    local t2 = safeDrawing("Text")
-    local t3 = isHeavy and safeDrawing("Text") or nil
-
-    if t1 then
-        t1.Font = 0
-        t1.Outline = false
-        pcall(function() t1.ZIndex = baseZIndex end)
+    local t = safeDrawing("Text")
+    if t then
+        t.Font = 2 -- IBM Plex Sans: Solid stem geometry, zero subpixel blur
+        t.Outline = false
+        t.Color = Color3.fromRGB(255, 255, 255)
+        pcall(function() t.ZIndex = baseZIndex end)
     end
-    if t2 then
-        t2.Font = 0
-        t2.Outline = false
-        pcall(function() t2.ZIndex = baseZIndex end)
-    end
-    if t3 then
-        t3.Font = 0
-        t3.Outline = false
-        pcall(function() t3.ZIndex = baseZIndex end)
-    end
-
-    local state = {
-        _t1 = t1,
-        _t2 = t2,
-        _t3 = t3,
-        _pos = Vector2.zero,
-        _visible = false,
-        _color = Color3.fromRGB(255, 255, 255),
-        _size = 15,
-        _text = "",
-        _center = false,
-        _zIndex = baseZIndex,
-    }
-
-    local proxy = {}
-    local mt = {
-        __index = function(_, key)
-            if key == "Position" then return state._pos
-            elseif key == "Visible" then return state._visible
-            elseif key == "Color" then return state._color
-            elseif key == "Size" then return state._size
-            elseif key == "Text" then return state._text
-            elseif key == "Center" then return state._center
-            elseif key == "ZIndex" then return state._zIndex
-            elseif key == "TextBounds" then
-                return state._t1 and state._t1.TextBounds or Vector2.zero
-            elseif key == "Remove" or key == "Destroy" then
-                return function()
-                    removeObj(state._t1)
-                    removeObj(state._t2)
-                    removeObj(state._t3)
-                end
-            end
-            if state._t1 then
-                local val = state._t1[key]
-                if type(val) == "function" then
-                    return function(_, ...)
-                        return val(state._t1, ...)
-                    end
-                end
-                return val
-            end
-            return nil
-        end,
-        __newindex = function(_, key, val)
-            if key == "Position" then
-                state._pos = val
-                if state._t1 then state._t1.Position = val end
-                if state._t2 then state._t2.Position = val + Vector2.new(1, 0) end
-                if state._t3 then state._t3.Position = val + Vector2.new(0, 1) end
-            elseif key == "Visible" then
-                state._visible = val
-                if state._t1 then state._t1.Visible = val end
-                if state._t2 then state._t2.Visible = val end
-                if state._t3 then state._t3.Visible = val end
-            elseif key == "Color" then
-                state._color = val
-                if state._t1 then state._t1.Color = val end
-                if state._t2 then state._t2.Color = val end
-                if state._t3 then state._t3.Color = val end
-            elseif key == "Size" then
-                state._size = val
-                if state._t1 then state._t1.Size = val end
-                if state._t2 then state._t2.Size = val end
-                if state._t3 then state._t3.Size = val end
-            elseif key == "Text" then
-                state._text = tostring(val or "")
-                if state._t1 then state._t1.Text = state._text end
-                if state._t2 then state._t2.Text = state._text end
-                if state._t3 then state._t3.Text = state._text end
-            elseif key == "Center" then
-                state._center = val
-                if state._t1 then state._t1.Center = val end
-                if state._t2 then state._t2.Center = val end
-                if state._t3 then state._t3.Center = val end
-            elseif key == "ZIndex" then
-                state._zIndex = val
-                if state._t1 then pcall(function() state._t1.ZIndex = val end) end
-                if state._t2 then pcall(function() state._t2.ZIndex = val end) end
-                if state._t3 then pcall(function() state._t3.ZIndex = val end) end
-            elseif key == "Font" then
-                if state._t1 then pcall(function() state._t1.Font = val end) end
-                if state._t2 then pcall(function() state._t2.Font = val end) end
-                if state._t3 then pcall(function() state._t3.Font = val end) end
-            elseif key == "Outline" then
-                if state._t1 then pcall(function() state._t1.Outline = val end) end
-                if state._t2 then pcall(function() state._t2.Outline = val end) end
-                if state._t3 then pcall(function() state._t3.Outline = val end) end
-            elseif key == "OutlineColor" then
-                if state._t1 then pcall(function() state._t1.OutlineColor = val end) end
-                if state._t2 then pcall(function() state._t2.OutlineColor = val end) end
-                if state._t3 then pcall(function() state._t3.OutlineColor = val end) end
-            end
-        end
-    }
-
-    return setmetatable(proxy, mt)
+    return t
 end
 
 -- ============================================================
