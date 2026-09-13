@@ -112,6 +112,18 @@ local function removeObj(obj)
     end)
 end
 
+local function removeItem(item)
+    if not item then return end
+    for _, v in pairs(item) do
+        if typeof(v) == "userdata" then
+            removeObj(v)
+        elseif type(v) == "table" and type(v.Remove) == "function" then
+            pcall(function() v:Remove() end)
+        end
+    end
+end
+
+
 -- ============================================================
 --   CRISP HIGH-CONTRAST TYPOGRAPHY (Native Drawing API Engine)
 --   Font 2 = IBM Plex Sans: Naturally bold, thick, zero blur
@@ -1833,10 +1845,33 @@ function TabMethods:InsertConfigSection(side)
     end
 end
 
+function TabMethods:Clear()
+    if self.sections then
+        for _, sec in ipairs(self.sections) do
+            removeObj(sec.accentBar)
+            removeObj(sec.titleDrawing)
+            if sec.card and sec.card.Remove then sec.card:Remove() end
+            if sec.items then
+                for _, item in ipairs(sec.items) do
+                    removeItem(item)
+                end
+                table.clear(sec.items)
+            end
+        end
+        table.clear(self.sections)
+    end
+    self._currentSection = nil
+    self.scrollOffset = 0
+    self.targetScroll = 0
+    self.maxScroll = 0
+end
+
 function TabMethods:Select()
     for idx, t in ipairs(self.window.tabs) do
         if t == self then
             self.window.activeTabIndex = idx
+            self.scrollOffset = 0
+            self.targetScroll = 0
             break
         end
     end
@@ -2764,6 +2799,8 @@ function DrawingUI:InitInputHandlers()
                 if tab.hitBox and pointInBox(mousePos, tab.hitBox.pos, tab.hitBox.size) then
                     self.openDropdown = nil
                     self.activeTabIndex = idx
+                    tab.scrollOffset = 0
+                    tab.targetScroll = 0
                     return
                 end
             end
@@ -2913,14 +2950,25 @@ function DrawingUI:InitInputHandlers()
             return
         end
 
-        -- Keybind Rebinding
-        if self.activeKeybindListener and input.UserInputType == Enum.UserInputType.Keyboard then
+        -- Keybind Rebinding (Keyboard & Mouse Button Support)
+        if self.activeKeybindListener then
             local listener = self.activeKeybindListener
-            self.activeKeybindListener = nil
-            if input.KeyCode ~= Enum.KeyCode.Escape then
-                listener:Set(input.KeyCode.Name)
-            else
-                listener:Set(listener.key)
+            if input.UserInputType == Enum.UserInputType.Keyboard then
+                self.activeKeybindListener = nil
+                if input.KeyCode ~= Enum.KeyCode.Escape then
+                    listener:Set(input.KeyCode.Name)
+                else
+                    listener:Set(listener.key)
+                end
+                return
+            elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+                self.activeKeybindListener = nil
+                listener:Set("MouseButton2")
+                return
+            elseif input.UserInputType == Enum.UserInputType.MouseButton3 then
+                self.activeKeybindListener = nil
+                listener:Set("MouseButton3")
+                return
             end
         end
     end)
