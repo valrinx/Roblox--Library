@@ -43,9 +43,9 @@ return function(Window, scriptInfo)
         -- Cooldown & Auto-Hit
         noCooldown = true,
         autoHit = true,
-        autoHitDistance = 18,
+        autoHitDistance = 22,
         autoSpike = true,
-        autoBump = true,
+        autoSet = true,
         autoDive = true,
         -- Power & Mobility
         alwaysMaxPower = true,
@@ -181,11 +181,30 @@ return function(Window, scriptInfo)
     -- Automation & Controller References
     local Orchestrator = nil
     local InputController = nil
+    local DoMoveBinding = nil
     pcall(function()
         local Knit = require(ReplicatedStorage.Packages.Knit)
         InputController = Knit.GetController("InputController")
         Orchestrator = require(ReplicatedFirst.Controllers.GameController.Actions.Move.DoMove.Orchestrator)
+        DoMoveBinding = require(ReplicatedFirst.Controllers.GameController.Actions.Binding.Registry.DoMove)
     end)
+
+    local function triggerMove(actionName, isAerial)
+        local ok = false
+        if InputController and type(InputController.PerformAction) == "function" then
+            ok = pcall(function() InputController:PerformAction(actionName) end)
+        end
+        if not ok and DoMoveBinding and type(DoMoveBinding.onMoveRequest) == "function" then
+            ok = pcall(function()
+                DoMoveBinding.onMoveRequest({
+                    ActionName = actionName,
+                    InputState = Enum.UserInputState.Begin,
+                    IsAerial = isAerial or false
+                })
+            end)
+        end
+        return ok
+    end
 
     local originalIsOnCooldown = nil
     local originalApplyCooldown = nil
@@ -426,28 +445,31 @@ return function(Window, scriptInfo)
     local function handleAutoHit(ballPart, myPos, myHum)
         pcall(function()
             if not settings.autoHit or not ballPart or not myHum or myHum.Health <= 0 then return end
-            if not InputController or not InputController.Actions then return end
 
             local now = os.clock()
-            if (now - lastAutoHit) < 0.22 then return end
+            if (now - lastAutoHit) < 0.18 then return end
 
             local ballPos = ballPart.Position
-            local dist = (ballPos - myPos).Magnitude
-            if dist > settings.autoHitDistance then return end
+            local delta = ballPos - myPos
+            local dist = delta.Magnitude
+            local hDist = Vector3.new(delta.X, 0, delta.Z).Magnitude
+
+            -- Trigger if 3D distance is within range OR horizontal distance is close enough
+            if dist > settings.autoHitDistance and hDist > (settings.autoHitDistance * 0.85) then return end
 
             local isAerial = (myHum.FloorMaterial == Enum.Material.Air)
-            if isAerial and settings.autoSpike and InputController.Actions.Spike then
+            if isAerial and settings.autoSpike then
                 lastAutoHit = now
-                pcall(InputController.Actions.Spike)
+                triggerMove("Spike", true)
             elseif not isAerial then
                 local floorY = getFloorY(ballPos)
                 local ballHeight = ballPos.Y - floorY
-                if settings.autoDive and ballHeight < 4.5 and dist > 7 and InputController.Actions.Dive then
+                if settings.autoDive and ballHeight < 4.5 and dist > 6 then
                     lastAutoHit = now
-                    pcall(InputController.Actions.Dive)
-                elseif settings.autoBump and InputController.Actions.Bump then
+                    triggerMove("Dive", false)
+                elseif settings.autoSet then
                     lastAutoHit = now
-                    pcall(InputController.Actions.Bump)
+                    triggerMove("Set", false)
                 end
             end
         end)
@@ -866,7 +888,7 @@ return function(Window, scriptInfo)
 
     CombatTab:CreateSlider({
         Name = "Trigger Distance",
-        Range = {6, 35},
+        Range = {6, 45},
         Increment = 1,
         Suffix = " studs",
         CurrentValue = settings.autoHitDistance,
@@ -886,11 +908,11 @@ return function(Window, scriptInfo)
     })
 
     CombatTab:CreateToggle({
-        Name = "Auto Bump (On Ground)",
-        CurrentValue = settings.autoBump,
-        Flag = "VB_AutoBump_v4",
+        Name = "Auto Set (On Ground)",
+        CurrentValue = settings.autoSet,
+        Flag = "VB_AutoSet_v4",
         Callback = function(value)
-            settings.autoBump = value
+            settings.autoSet = value
         end,
     })
 
