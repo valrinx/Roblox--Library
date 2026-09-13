@@ -44,9 +44,10 @@ return function(Window, scriptInfo)
         noCooldown = true,
         autoHit = true,
         autoHitDistance = 35,
-        autoHitMargin = 1.5,
+        autoHitMargin = 3.5,
+        autoHitDebounce = 0.50,
+        autoGroundMode = "Smart",
         autoSpike = true,
-        autoSet = true,
         autoDive = true,
         -- Power & Mobility
         alwaysMaxPower = true,
@@ -562,7 +563,8 @@ return function(Window, scriptInfo)
             if not settings.autoHit or not ballPart or not myHum or myHum.Health <= 0 or not myRoot then return end
 
             local now = os.clock()
-            if (now - lastAutoHit) < 0.15 then return end
+            local debounceTime = settings.autoHitDebounce or 0.50
+            if (now - lastAutoHit) < debounceTime then return end
 
             local ballPos = ballPart.Position
             local delta = ballPos - myRoot.Position
@@ -570,6 +572,11 @@ return function(Window, scriptInfo)
 
             -- Upper cap search distance
             if dist > (settings.autoHitDistance or 35) then return end
+
+            -- If ball was already struck and is moving away from player at speed, ignore it
+            local vel = ballVel or Vector3.zero
+            local isMovingAway = vel.Magnitude > 4.0 and (delta:Dot(vel) > 0)
+            if isMovingAway and dist > 3.5 then return end
 
             local isAerial = (myHum.FloorMaterial == Enum.Material.Air)
             local targetMove = nil
@@ -581,8 +588,17 @@ return function(Window, scriptInfo)
                 local ballHeight = ballPos.Y - floorY
                 if settings.autoDive and ballHeight < 4.5 and dist > 5.5 then
                     targetMove = "Dive"
-                elseif settings.autoSet then
+                elseif settings.autoGroundMode == "Set" then
                     targetMove = "Set"
+                elseif settings.autoGroundMode == "Bump" then
+                    targetMove = "Bump"
+                else -- "Smart"
+                    local myHeight = myRoot.Position.Y
+                    if ballPos.Y >= (myHeight + 0.5) then
+                        targetMove = "Set"
+                    else
+                        targetMove = "Bump"
+                    end
                 end
             end
 
@@ -597,15 +613,14 @@ return function(Window, scriptInfo)
             local halfY = hbSize.Y * 0.5
             local halfZ = hbSize.Z * 0.5
 
-            local margin = settings.autoHitMargin or 1.5
+            local margin = settings.autoHitMargin or 3.5
             local dx = math.max(0, math.abs(relPos.X) - halfX)
             local dy = math.max(0, math.abs(relPos.Y) - halfY)
             local dz = math.max(0, math.abs(relPos.Z) - halfZ)
             local distToHitbox = math.sqrt(dx * dx + dy * dy + dz * dz)
 
-            -- Velocity-forward prediction for high-speed balls (next 50ms)
-            local vel = ballVel or Vector3.zero
-            local nextBallPos = ballPos + vel * 0.05
+            -- Forward prediction for high-speed balls (100ms window)
+            local nextBallPos = ballPos + vel * 0.10
             local nextRelPos = hbCFrame:PointToObjectSpace(nextBallPos)
             local ndx = math.max(0, math.abs(nextRelPos.X) - halfX)
             local ndy = math.max(0, math.abs(nextRelPos.Y) - halfY)
@@ -1103,12 +1118,32 @@ return function(Window, scriptInfo)
         end,
     })
 
-    CombatTab:CreateToggle({
-        Name = "Auto Set (On Ground)",
-        CurrentValue = settings.autoSet,
-        Flag = "VB_AutoSet_v4",
+    CombatTab:CreateDropdown({
+        Name = "Ground Receive Mode",
+        Options = {"Smart (Auto Set/Bump)", "Set Only (Q)", "Bump Only (LeftClick)"},
+        CurrentOption = { settings.autoGroundMode == "Set" and "Set Only (Q)" or (settings.autoGroundMode == "Bump" and "Bump Only (LeftClick)" or "Smart (Auto Set/Bump)") },
+        Flag = "VB_AutoGroundMode_v4",
         Callback = function(value)
-            settings.autoSet = value
+            local opt = type(value) == "table" and value[1] or value
+            if string.find(opt, "Set Only") then
+                settings.autoGroundMode = "Set"
+            elseif string.find(opt, "Bump Only") then
+                settings.autoGroundMode = "Bump"
+            else
+                settings.autoGroundMode = "Smart"
+            end
+        end,
+    })
+
+    CombatTab:CreateSlider({
+        Name = "Hit Reaction Debounce",
+        Range = {0.3, 1.0},
+        Increment = 0.05,
+        Suffix = "s",
+        CurrentValue = settings.autoHitDebounce,
+        Flag = "VB_AutoHitDebounce_v4",
+        Callback = function(value)
+            settings.autoHitDebounce = value
         end,
     })
 
