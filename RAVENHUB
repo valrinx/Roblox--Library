@@ -372,7 +372,7 @@ local SCRIPTS = {
         description = "Auto Steal Eggs | Subterranean Flight (ดำดิน) | Best Egg Buff & Size | Ultra Speed | ESP",
         placeIds    = {99183404085821},
         gameIds     = {10718240577},
-        version     = "v1.8.0",
+        version     = "v1.9.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/steal_fish_eggs.lua",
     },
     {
@@ -715,7 +715,7 @@ local SCRIPTS = {
         description = "Auto Steal Best Eggs | Subterranean Flight (ดำดิน) | Best Egg Buff & Size | Ultra Speed | ESP",
         placeIds    = {99183404085821},
         gameIds     = {10718240577},
-        version     = "v1.8.0",
+        version     = "v1.9.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/steal_fish_eggs.lua",
     },
 

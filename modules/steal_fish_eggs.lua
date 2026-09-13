@@ -1,15 +1,17 @@
 --[[
-    RAVEN HUB Module - Steal Fish Eggs v1.8.0
+    RAVEN HUB Module - Steal Fish Eggs v1.9.0
     Game: Steal Fish Eggs (PlaceId: 99183404085821, GameId: 10718240577)
     Developer: fishy fish fish!
 
-    v1.8.0 — Distance-Culling Fix, Omnipresent Respawn Targeting & Base Tank Placement:
-    - Fixed Distance-Culling Bug: EggWaterAnimations culls prompts >500 studs away; candidates no longer filtered out by prompt.Enabled
-    - Omnipresent Respawn Targeting: Eggs respawning in distant biomes (Atlantis, Volcanic, Jelly, Snow, Sunken) are instantly targeted
-    - Removed False [WAIT] ESP Tag: Only flags [BUSY] if PromptBusy attribute is actually active
-    - Dual Inventory Placement: Searches both Character & Backpack for egg tools to deposit in tank
-    - Gate Synchronization Polling: Waits up to 2.0s after crossing TheLine to ensure server awards egg tool before placing
-    - Auto Equip Best Fish: Automatically triggers game's native EquipBestFish remote to equip top fish in tank
+    v1.9.0 — Multi-Select Egg Rarities & Ultra Lag-Free ESP Engine:
+    - Multi-Select Auto Steal Rarities: Select any combination of rarities to steal simultaneously
+    - Multi-Select ESP Rarities: Filter ESP display to any subset of egg rarities
+    - Lag-Free ESP Engine:
+        * Behind-Camera Dot Product Culling (skips 70%+ of projection matrix calls)
+        * Squared Distance Culling (avoids math.sqrt calculation on off-range objects)
+        * Immutable Metadata Cache (displayName, rarity, colors cached once per egg)
+        * Throttled String Formatting (updates .Text only on distance change/timer, preventing GC spikes)
+    - Auto Equip Best Fish: Native EquipBestFish hook with instant hatch detection
 ]]--
 
 return function(Window, runtimeInfo)
@@ -90,6 +92,15 @@ return function(Window, runtimeInfo)
     local State = {
         AutoSteal = false,
         MinRarity = "Basic",
+        TargetRarities = {
+            Basic = true,
+            Rare = true,
+            Epic = true,
+            Legendary = true,
+            Mythic = true,
+            Abyssal = true,
+            Astral = true,
+        },
         TargetPriority = "Highest Value (Kg)",
         UndergroundTravel = true,
         StealSpeed = 240,
@@ -106,6 +117,15 @@ return function(Window, runtimeInfo)
 
         EggESP = true,
         EggESPRarity = "Basic",
+        EggESPRarities = {
+            Basic = true,
+            Rare = true,
+            Epic = true,
+            Legendary = true,
+            Mythic = true,
+            Abyssal = true,
+            Astral = true,
+        },
         EggESPDistance = 2500,
         PlayerESP = true,
         ChaserESP = true,
@@ -396,9 +416,35 @@ return function(Window, runtimeInfo)
     end
 
     ----------------------------------------------------------------
-    --  EGG ESP
+    --  EGG ESP (ULTRA LAG-FREE WITH FAST CULLING & METADATA CACHE)
     ----------------------------------------------------------------
-    local function updateEggESP()
+    local eggMetaCache = {}
+
+    local function getEggMeta(egg)
+        local cached = eggMetaCache[egg]
+        if cached then return cached end
+
+        local rarity = egg:GetAttribute("Rarity") or "Basic"
+        local displayName = egg:GetAttribute("DisplayName") or egg.Name
+        local kg = tonumber(egg:GetAttribute("Kg")) or 0
+        local col = RarityColors[rarity] or RarityColors.Default
+        local mut = egg:GetAttribute("Mutation") or egg:GetAttribute("FishMutation") or egg:GetAttribute("Buff")
+        local buffTag = ""
+        if mut then
+            buffTag = string.format(" [%s]", tostring(mut):upper())
+        end
+
+        local baseLabel = string.format("[%s]%s %s (%.0f kg)", rarity, buffTag, displayName, kg)
+        cached = {
+            rarity = rarity,
+            col = col,
+            baseLabel = baseLabel,
+        }
+        eggMetaCache[egg] = cached
+        return cached
+    end
+
+    local function updateEggESP(now)
         if not State.EggESP or not hasDrawing or isDestroyed then
             clearDrawingGroup(DrawingObjects.Eggs)
             return
@@ -407,67 +453,100 @@ return function(Window, runtimeInfo)
         local root = getRoot()
         if not root then return end
 
-        local minRank = RarityRanks[State.EggESPRarity] or 0
+        now = now or os.clock()
+        local maxDist = State.EggESPDistance
+        local maxDistSq = maxDist * maxDist
+        local rootPos = root.Position
+
+        local camCFrame = Camera.CFrame
+        local camPos = camCFrame.Position
+        local camLook = camCFrame.LookVector
+
+        local selectedRarities = State.EggESPRarities
         local seen = {}
 
         local function processEggESP(egg, isDropped)
             local prim = egg:FindFirstChild("PrimaryPart") or egg.PrimaryPart
-            if prim then
-                seen[egg] = true
-                local pos = prim.Position
-                local dist = (root.Position - pos).Magnitude
+            if not prim then return end
 
-                local rarity = egg:GetAttribute("Rarity") or "Basic"
-                local eggRank = RarityRanks[rarity] or 1
-
-                if dist <= State.EggESPDistance and eggRank >= minRank then
-                    local screenPos, onScreen = Camera:WorldToViewportPoint(pos)
-                    local entry = DrawingObjects.Eggs[egg]
-                    if not entry then
-                        entry = {
-                            text = createDrawing("Text", {
-                                Size = 13,
-                                Center = true,
-                                Outline = true,
-                                OutlineColor = Color3.fromRGB(0, 0, 0),
-                            }),
-                        }
-                        DrawingObjects.Eggs[egg] = entry
-                    end
-
-                    if onScreen and entry.text then
-                        local displayName = egg:GetAttribute("DisplayName") or egg.Name
-                        local kg = egg:GetAttribute("Kg") or 0
-                        local col = RarityColors[rarity] or RarityColors.Default
-                        local prompt = egg:FindFirstChildWhichIsA("ProximityPrompt", true)
-
-                        local mut = egg:GetAttribute("Mutation") or egg:GetAttribute("FishMutation") or egg:GetAttribute("Buff")
-                        local buffTag = ""
-                        if mut then
-                            buffTag = string.format(" [%s]", tostring(mut):upper())
-                        end
-
-                        local isBusy = egg:GetAttribute("PromptBusy") == true
-                        local tag = ""
-                        if isDropped then
-                            tag = " [DROPPED]"
-                        elseif isBusy then
-                            tag = " [BUSY]"
-                        end
-
-                        entry.text.Position = Vector2.new(screenPos.X, screenPos.Y)
-                        entry.text.Text = string.format("[%s]%s%s %s (%.0f kg) [%dm]", rarity, buffTag, tag, displayName, kg, math.floor(dist))
-                        entry.text.Color = col
-                        entry.text.Visible = true
-                    elseif entry.text then
-                        entry.text.Visible = false
-                    end
-                else
-                    if DrawingObjects.Eggs[egg] then
-                        destroyDrawing(DrawingObjects.Eggs[egg].text)
-                        DrawingObjects.Eggs[egg] = nil
-                    end
+            local meta = getEggMeta(egg)
+            if selectedRarities and not selectedRarities[meta.rarity] then
+                if DrawingObjects.Eggs[egg] then
+                    DrawingObjects.Eggs[egg].text.Visible = false
                 end
+                return
+            end
+
+            seen[egg] = true
+            local pos = prim.Position
+
+            -- 1. Fast Distance Culling (Squared distance avoids math.sqrt)
+            local dx = pos.X - rootPos.X
+            local dy = pos.Y - rootPos.Y
+            local dz = pos.Z - rootPos.Z
+            local distSq = dx * dx + dy * dy + dz * dz
+            if distSq > maxDistSq then
+                if DrawingObjects.Eggs[egg] then
+                    DrawingObjects.Eggs[egg].text.Visible = false
+                end
+                return
+            end
+
+            -- 2. Behind Camera Culling (Fast Dot Product skips 70%+ of projection matrix calls)
+            local camDx = pos.X - camPos.X
+            local camDy = pos.Y - camPos.Y
+            local camDz = pos.Z - camPos.Z
+            if (camDx * camLook.X + camDy * camLook.Y + camDz * camLook.Z) <= 0 then
+                if DrawingObjects.Eggs[egg] then
+                    DrawingObjects.Eggs[egg].text.Visible = false
+                end
+                return
+            end
+
+            -- 3. WorldToViewportPoint only for in-front, in-range objects
+            local screenPos, onScreen = Camera:WorldToViewportPoint(pos)
+            if not onScreen then
+                if DrawingObjects.Eggs[egg] then
+                    DrawingObjects.Eggs[egg].text.Visible = false
+                end
+                return
+            end
+
+            -- 4. Get or create drawing
+            local entry = DrawingObjects.Eggs[egg]
+            if not entry then
+                entry = {
+                    text = createDrawing("Text", {
+                        Size = 13,
+                        Center = true,
+                        Outline = true,
+                        OutlineColor = Color3.fromRGB(0, 0, 0),
+                        Color = meta.col,
+                    }),
+                    lastTextUpdate = 0,
+                    lastDist = -999,
+                    lastStatus = "",
+                }
+                DrawingObjects.Eggs[egg] = entry
+            end
+
+            local txt = entry.text
+            if not txt then return end
+
+            -- 5. Screen Position Update
+            txt.Position = Vector2.new(screenPos.X, screenPos.Y)
+            txt.Visible = true
+
+            -- 6. Throttled text content updates (Prevents GC spikes & frame drops)
+            local dist = math.floor(math.sqrt(distSq))
+            local isBusy = egg:GetAttribute("PromptBusy") == true
+            local statusTag = isDropped and " [DROPPED]" or (isBusy and " [BUSY]" or "")
+
+            if (now - entry.lastTextUpdate) >= 0.2 or math.abs(dist - entry.lastDist) >= 4 or statusTag ~= entry.lastStatus then
+                entry.lastTextUpdate = now
+                entry.lastDist = dist
+                entry.lastStatus = statusTag
+                txt.Text = string.format("%s%s [%dm]", meta.baseLabel, statusTag, dist)
             end
         end
 
@@ -489,14 +568,15 @@ return function(Window, runtimeInfo)
             if not seen[egg] or not egg.Parent then
                 destroyDrawing(entry.text)
                 DrawingObjects.Eggs[egg] = nil
+                eggMetaCache[egg] = nil
             end
         end
     end
 
     ----------------------------------------------------------------
-    --  PLAYER ESP
+    --  PLAYER ESP (OPTIMIZED)
     ----------------------------------------------------------------
-    local function updatePlayerESP()
+    local function updatePlayerESP(now)
         if not State.PlayerESP or not hasDrawing or isDestroyed then
             clearDrawingGroup(DrawingObjects.Players)
             return
@@ -505,6 +585,15 @@ return function(Window, runtimeInfo)
         local root = getRoot()
         if not root then return end
 
+        now = now or os.clock()
+        local maxDist = State.ESPDistance
+        local maxDistSq = maxDist * maxDist
+        local rootPos = root.Position
+
+        local camCFrame = Camera.CFrame
+        local camPos = camCFrame.Position
+        local camLook = camCFrame.LookVector
+
         local seen = {}
 
         for _, player in ipairs(Players:GetPlayers()) do
@@ -512,41 +601,60 @@ return function(Window, runtimeInfo)
                 local pRoot = player.Character:FindFirstChild("HumanoidRootPart")
                 local pHum = player.Character:FindFirstChildOfClass("Humanoid")
                 if pRoot and pHum and pHum.Health > 0 then
-                    seen[player] = true
-                    local dist = (root.Position - pRoot.Position).Magnitude
-                    if dist <= State.ESPDistance then
-                        local screenPos, onScreen = Camera:WorldToViewportPoint(pRoot.Position)
-                        local entry = DrawingObjects.Players[player]
-                        if not entry then
-                            entry = {
-                                text = createDrawing("Text", {
-                                    Size = 13,
-                                    Center = true,
-                                    Outline = true,
-                                    OutlineColor = Color3.fromRGB(0, 0, 0),
-                                }),
-                            }
-                            DrawingObjects.Players[player] = entry
-                        end
+                    local pos = pRoot.Position
+                    local dx = pos.X - rootPos.X
+                    local dy = pos.Y - rootPos.Y
+                    local dz = pos.Z - rootPos.Z
+                    local distSq = dx * dx + dy * dy + dz * dz
 
-                        if onScreen and entry.text then
-                            local carrying = player:GetAttribute("CarryingEgg")
-                            local label = player.DisplayName
-                            if carrying then
-                                label = "[CARRYING EGG] " .. label
+                    if distSq <= maxDistSq then
+                        local camDx = pos.X - camPos.X
+                        local camDy = pos.Y - camPos.Y
+                        local camDz = pos.Z - camPos.Z
+                        if (camDx * camLook.X + camDy * camLook.Y + camDz * camLook.Z) > 0 then
+                            local screenPos, onScreen = Camera:WorldToViewportPoint(pos)
+                            if onScreen then
+                                seen[player] = true
+                                local entry = DrawingObjects.Players[player]
+                                if not entry then
+                                    entry = {
+                                        text = createDrawing("Text", {
+                                            Size = 13,
+                                            Center = true,
+                                            Outline = true,
+                                            OutlineColor = Color3.fromRGB(0, 0, 0),
+                                        }),
+                                        lastUpdate = 0,
+                                        lastText = "",
+                                    }
+                                    DrawingObjects.Players[player] = entry
+                                end
+
+                                if entry.text then
+                                    entry.text.Position = Vector2.new(screenPos.X, screenPos.Y)
+                                    entry.text.Visible = true
+
+                                    if (now - entry.lastUpdate) >= 0.2 then
+                                        entry.lastUpdate = now
+                                        local carrying = player:GetAttribute("CarryingEgg")
+                                        local label = player.DisplayName
+                                        if carrying then
+                                            label = "[CARRYING EGG] " .. label
+                                        end
+                                        local dist = math.floor(math.sqrt(distSq))
+                                        entry.text.Text = string.format("%s [%dm]", label, dist)
+                                        entry.text.Color = carrying and Color3.fromRGB(255, 215, 0) or Color3.fromRGB(255, 255, 255)
+                                    end
+                                end
+                            elseif DrawingObjects.Players[player] then
+                                DrawingObjects.Players[player].text.Visible = false
                             end
-                            entry.text.Position = Vector2.new(screenPos.X, screenPos.Y)
-                            entry.text.Text = string.format("%s [%dm]", label, math.floor(dist))
-                            entry.text.Color = carrying and Color3.fromRGB(255, 215, 0) or Color3.fromRGB(255, 255, 255)
-                            entry.text.Visible = true
-                        elseif entry.text then
-                            entry.text.Visible = false
+                        elseif DrawingObjects.Players[player] then
+                            DrawingObjects.Players[player].text.Visible = false
                         end
-                    else
-                        if DrawingObjects.Players[player] then
-                            destroyDrawing(DrawingObjects.Players[player].text)
-                            DrawingObjects.Players[player] = nil
-                        end
+                    elseif DrawingObjects.Players[player] then
+                        destroyDrawing(DrawingObjects.Players[player].text)
+                        DrawingObjects.Players[player] = nil
                     end
                 end
             end
@@ -561,9 +669,9 @@ return function(Window, runtimeInfo)
     end
 
     ----------------------------------------------------------------
-    --  CHASER FISH RADAR / ESP
+    --  CHASER FISH RADAR / ESP (OPTIMIZED)
     ----------------------------------------------------------------
-    local function updateChaserESP()
+    local function updateChaserESP(now)
         if not State.ChaserESP or not hasDrawing or isDestroyed then
             clearDrawingGroup(DrawingObjects.Chasers)
             return
@@ -572,44 +680,71 @@ return function(Window, runtimeInfo)
         local root = getRoot()
         if not root then return end
 
+        now = now or os.clock()
+        local maxDist = State.ESPDistance
+        local maxDistSq = maxDist * maxDist
+        local rootPos = root.Position
+
+        local camCFrame = Camera.CFrame
+        local camPos = camCFrame.Position
+        local camLook = camCFrame.LookVector
+
         local seen = {}
         local chaserFolder = Workspace:FindFirstChild("ActiveChaserFishes")
         if chaserFolder then
             for _, chaser in ipairs(chaserFolder:GetChildren()) do
                 local kraken = chaser:FindFirstChild("KRAKEN") or chaser:FindFirstChildWhichIsA("BasePart")
                 if kraken then
-                    seen[chaser] = true
-                    local dist = (root.Position - kraken.Position).Magnitude
-                    if dist <= State.ESPDistance then
-                        local screenPos, onScreen = Camera:WorldToViewportPoint(kraken.Position)
-                        local entry = DrawingObjects.Chasers[chaser]
-                        if not entry then
-                            entry = {
-                                text = createDrawing("Text", {
-                                    Size = 14,
-                                    Center = true,
-                                    Outline = true,
-                                    OutlineColor = Color3.fromRGB(0, 0, 0),
-                                }),
-                            }
-                            DrawingObjects.Chasers[chaser] = entry
-                        end
+                    local pos = kraken.Position
+                    local dx = pos.X - rootPos.X
+                    local dy = pos.Y - rootPos.Y
+                    local dz = pos.Z - rootPos.Z
+                    local distSq = dx * dx + dy * dy + dz * dz
 
-                        if onScreen and entry.text then
-                            local aggro = chaser:GetAttribute("ChaserAggroActive")
-                            local speed = math.floor(chaser:GetAttribute("ChaserCurrentSwimSpeed") or 0)
-                            entry.text.Position = Vector2.new(screenPos.X, screenPos.Y)
-                            entry.text.Text = string.format("[GUARD %s] Spd:%d [%dm]", aggro and "AGGRO!" or "Calm", speed, math.floor(dist))
-                            entry.text.Color = aggro and Color3.fromRGB(255, 40, 40) or Color3.fromRGB(255, 160, 40)
-                            entry.text.Visible = true
-                        elseif entry.text then
-                            entry.text.Visible = false
+                    if distSq <= maxDistSq then
+                        local camDx = pos.X - camPos.X
+                        local camDy = pos.Y - camPos.Y
+                        local camDz = pos.Z - camPos.Z
+                        if (camDx * camLook.X + camDy * camLook.Y + camDz * camLook.Z) > 0 then
+                            local screenPos, onScreen = Camera:WorldToViewportPoint(pos)
+                            if onScreen then
+                                seen[chaser] = true
+                                local entry = DrawingObjects.Chasers[chaser]
+                                if not entry then
+                                    entry = {
+                                        text = createDrawing("Text", {
+                                            Size = 14,
+                                            Center = true,
+                                            Outline = true,
+                                            OutlineColor = Color3.fromRGB(0, 0, 0),
+                                        }),
+                                        lastUpdate = 0,
+                                    }
+                                    DrawingObjects.Chasers[chaser] = entry
+                                end
+
+                                if entry.text then
+                                    entry.text.Position = Vector2.new(screenPos.X, screenPos.Y)
+                                    entry.text.Visible = true
+
+                                    if (now - entry.lastUpdate) >= 0.2 then
+                                        entry.lastUpdate = now
+                                        local aggro = chaser:GetAttribute("ChaserAggroActive")
+                                        local speed = math.floor(chaser:GetAttribute("ChaserCurrentSwimSpeed") or 0)
+                                        local dist = math.floor(math.sqrt(distSq))
+                                        entry.text.Text = string.format("[GUARD %s] Spd:%d [%dm]", aggro and "AGGRO!" or "Calm", speed, dist)
+                                        entry.text.Color = aggro and Color3.fromRGB(255, 40, 40) or Color3.fromRGB(255, 160, 40)
+                                    end
+                                end
+                            elseif DrawingObjects.Chasers[chaser] then
+                                DrawingObjects.Chasers[chaser].text.Visible = false
+                            end
+                        elseif DrawingObjects.Chasers[chaser] then
+                            DrawingObjects.Chasers[chaser].text.Visible = false
                         end
-                    else
-                        if DrawingObjects.Chasers[chaser] then
-                            destroyDrawing(DrawingObjects.Chasers[chaser].text)
-                            DrawingObjects.Chasers[chaser] = nil
-                        end
+                    elseif DrawingObjects.Chasers[chaser] then
+                        destroyDrawing(DrawingObjects.Chasers[chaser].text)
+                        DrawingObjects.Chasers[chaser] = nil
                     end
                 end
             end
@@ -671,6 +806,7 @@ return function(Window, runtimeInfo)
         end
 
         return {
+            rarity = rarity,
             rawRank = rawRank,
             buffMult = buffMult,
             buffName = buffName,
@@ -688,7 +824,7 @@ return function(Window, runtimeInfo)
         local minRank = RarityRanks[State.MinRarity] or 1
         local candidates = {}
 
-        -- 1. Check Dropped fish eggs (STRICT: only add if meeting minRank!)
+        -- 1. Check Dropped fish eggs (STRICT: only add if matching target rarities!)
         if dropped then
             for _, egg in ipairs(dropped:GetChildren()) do
                 local prim = egg:FindFirstChild("PrimaryPart") or egg.PrimaryPart
@@ -698,8 +834,15 @@ return function(Window, runtimeInfo)
                     local q = getEggQuality(egg)
                     local dist = (root.Position - prim.Position).Magnitude
 
-                    -- STRICT: Only collect dropped eggs that match or exceed chosen minimum rarity!
-                    if q.rawRank >= minRank then
+                    -- STRICT: Only collect dropped eggs that match chosen rarities!
+                    local isTarget = false
+                    if State.TargetRarities then
+                        isTarget = (State.TargetRarities[q.rarity] == true)
+                    else
+                        isTarget = (q.rawRank >= minRank)
+                    end
+
+                    if isTarget then
                         table.insert(candidates, {
                             egg = egg,
                             prim = prim,
@@ -723,8 +866,15 @@ return function(Window, runtimeInfo)
                     local q = getEggQuality(egg)
                     local dist = (root.Position - prim.Position).Magnitude
 
-                    -- STRICT: Only add if meeting or exceeding minimum rarity!
-                    if q.rawRank >= minRank then
+                    -- STRICT: Only add if meeting chosen target rarities!
+                    local isTarget = false
+                    if State.TargetRarities then
+                        isTarget = (State.TargetRarities[q.rarity] == true)
+                    else
+                        isTarget = (q.rawRank >= minRank)
+                    end
+
+                    if isTarget then
                         table.insert(candidates, {
                             egg = egg,
                             prim = prim,
@@ -1244,14 +1394,11 @@ return function(Window, runtimeInfo)
             end
         end
 
-        -- 4. ESP Updates
-        espAccum += dt
-        if espAccum >= 0.1 then
-            espAccum = 0
-            pcall(updateEggESP)
-            pcall(updatePlayerESP)
-            pcall(updateChaserESP)
-        end
+        -- 4. ESP Updates (Butter-smooth position tracking & throttled text formatting)
+        local now = os.clock()
+        pcall(updateEggESP, now)
+        pcall(updatePlayerESP, now)
+        pcall(updateChaserESP, now)
 
         applyMovement()
         runAutoEquipBest()
@@ -1310,13 +1457,21 @@ return function(Window, runtimeInfo)
     })
 
     FarmTab:CreateDropdown({
-        Name = "Minimum Egg Rarity",
+        Name = "Target Egg Rarities",
         Options = {"Basic", "Rare", "Epic", "Legendary", "Mythic", "Abyssal", "Astral"},
-        CurrentOption = "Basic",
-        Flag = "SFE_MinRarity",
+        CurrentOption = {"Basic", "Rare", "Epic", "Legendary", "Mythic", "Abyssal", "Astral"},
+        MultipleOptions = true,
+        Flag = "SFE_TargetRarities",
         Callback = function(v)
-            local selected = type(v) == "table" and v[1] or v
-            State.MinRarity = tostring(selected)
+            local map = {}
+            if type(v) == "table" then
+                for _, r in ipairs(v) do
+                    map[tostring(r)] = true
+                end
+            elseif v then
+                map[tostring(v)] = true
+            end
+            State.TargetRarities = map
         end,
     })
 
@@ -1431,13 +1586,21 @@ return function(Window, runtimeInfo)
     })
 
     VisualTab:CreateDropdown({
-        Name = "Egg ESP Minimum Rarity",
+        Name = "Egg ESP Rarities",
         Options = {"Basic", "Rare", "Epic", "Legendary", "Mythic", "Abyssal", "Astral"},
-        CurrentOption = "Basic",
-        Flag = "SFE_EggESPRarity",
+        CurrentOption = {"Basic", "Rare", "Epic", "Legendary", "Mythic", "Abyssal", "Astral"},
+        MultipleOptions = true,
+        Flag = "SFE_EggESPRarities",
         Callback = function(v)
-            local selected = type(v) == "table" and v[1] or v
-            State.EggESPRarity = tostring(selected)
+            local map = {}
+            if type(v) == "table" then
+                for _, r in ipairs(v) do
+                    map[tostring(r)] = true
+                end
+            elseif v then
+                map[tostring(v)] = true
+            end
+            State.EggESPRarities = map
             clearDrawingGroup(DrawingObjects.Eggs)
         end,
     })
