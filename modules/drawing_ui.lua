@@ -914,7 +914,6 @@ function DrawingUI:CreateWindow(config)
     self.defaultConfigFile = tostring(cfgSaving.FileName or "default")
     self.itemsByFlag = {}
     self.openDropdown = nil
-    self.dropdownPopupCard = createRoundedCard(25)
     self.dropdownOptionsPool = {}
 
     local vpSize = Vector2.new(1920, 1080)
@@ -3233,6 +3232,8 @@ function DrawingUI:Render()
         end
     end
 
+    local hoveredRowFound = false
+
     if curTab then
         curTab.targetScroll = curTab.targetScroll or curTab.scrollOffset or 0
         curTab.targetScroll = math.clamp(curTab.targetScroll, 0, curTab.maxScroll or 0)
@@ -3338,7 +3339,8 @@ function DrawingUI:Render()
                     end
 
                     -- Smooth Rounded Neumorphic Hover Pill
-                    if isHovered and item.type ~= "divider" and not hoveredRowFound then
+                    local canHover = not self.dragging and not self.draggingScroller and not self.openDropdown
+                    if isHovered and item.type ~= "divider" and not hoveredRowFound and canHover then
                         hoveredRowFound = true
                         if self.rowHoverCard then
                             self.rowHoverCard:Update(
@@ -3691,6 +3693,9 @@ function DrawingUI:Render()
         setObjVisible(self.drawings.scrollTrack, false)
         if self.scrollThumbPill then
             self.scrollThumbPill:Update(Vector2.zero, Vector2.zero, 0, Color3.new(), nil, false)
+        end
+        if self.rowHoverCard then
+            self.rowHoverCard:Update(Vector2.zero, Vector2.zero, 0, Color3.new(), nil, false)
         end
         self.scrollThumbHitBox = nil
         self.scrollTrackHitBox = nil
