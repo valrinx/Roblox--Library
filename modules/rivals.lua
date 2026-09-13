@@ -1,5 +1,5 @@
 -- ============================================================
---   RAVEN HUB  |  RIVALS Modular Suite v1.4.0
+--   RAVEN HUB  |  RIVALS Modular Suite v1.4.2
 --   Universal Native Drawing API ESP & Robust mousemoverel Aimbot
 --   PlaceId: 117398147513099 | UniverseId: 6035872082
 -- ============================================================
@@ -50,6 +50,30 @@ return function(Window, scriptInfo)
         fovTransparency = 0.75,
         isAiming = false,
         customKey = nil
+    }
+
+    local triggerbotSettings = {
+        enabled = false,
+        mode = "While Aiming (RMB)", -- "Always Active", "While Aiming (RMB)", "Hold Keybind", "Toggle Keybind"
+        activationKey = Enum.KeyCode.LeftAlt,
+        isActive = false,
+        delay = 0.02,
+        cooldown = 0.12,
+        crosshairTolerance = 14,
+        headOnly = false,
+        teamCheck = true,
+        targetDummies = true,
+        lastShot = 0,
+        isShooting = false
+    }
+
+    local movementSettings = {
+        bhopEnabled = false,
+        speedBoost = false,
+        speedMultiplier = 1.35,
+        slideBoost = false,
+        infiniteJump = false,
+        lastJump = 0
     }
 
     local function resolveKey(key)
@@ -292,6 +316,123 @@ return function(Window, scriptInfo)
     end
 
     -- ------------------------------------------------------------
+    -- Triggerbot Target Acquisition (Dual Precision Detection)
+    -- ------------------------------------------------------------
+    local function checkTriggerbotTarget(cam, center)
+        if not cam then return false end
+        
+        local myTeam = LocalPlayer:GetAttribute("TeamID")
+        local tolerance = triggerbotSettings.crosshairTolerance or 14
+        
+        -- Raycast Parameters excluding LocalPlayer, ViewModels, and Camera
+        local rayParams = RaycastParams.new()
+        rayParams.FilterType = Enum.RaycastFilterType.Exclude
+        local filter = { LocalPlayer.Character, cam }
+        local vms = Workspace:FindFirstChild("ViewModels")
+        if vms then table.insert(filter, vms) end
+        rayParams.FilterDescendantsInstances = filter
+        
+        -- 1. Center Viewport Raycast
+        local unitRay = cam:ViewportPointToRay(center.X, center.Y)
+        local hit = Workspace:Raycast(unitRay.Origin, unitRay.Direction * 1500, rayParams)
+        if hit and hit.Instance then
+            local inst = hit.Instance
+            local model = inst:FindFirstAncestorOfClass("Model")
+            if model and model:IsDescendantOf(Workspace) then
+                local hitPlr = Players:GetPlayerFromCharacter(model)
+                if hitPlr and hitPlr ~= LocalPlayer then
+                    local team = hitPlr:GetAttribute("TeamID")
+                    local isEnemy = (myTeam == nil or team == nil or team ~= myTeam)
+                    if isEnemy or not triggerbotSettings.teamCheck then
+                        local hum = model:FindFirstChildOfClass("Humanoid")
+                        if hum and hum.Health > 0 then
+                            if triggerbotSettings.headOnly then
+                                if inst.Name == "Head" or inst.Name == "HitboxHead" then
+                                    return true
+                                end
+                            else
+                                return true
+                            end
+                        end
+                    end
+                elseif triggerbotSettings.targetDummies and model.Parent and model.Parent.Name == "ShootingRangeEntities" then
+                    local hum = model:FindFirstChildOfClass("Humanoid") or model:FindFirstChild("EnemyHumanoid")
+                    if not hum or hum.Health > 0 then
+                        if triggerbotSettings.headOnly then
+                            if inst.Name == "Head" or inst.Name == "HitboxHead" then
+                                return true
+                            end
+                        else
+                            return true
+                        end
+                    end
+                end
+            end
+        end
+        
+        -- 2. Screen-Space Crosshair Proximity (Dual Check fallback)
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr ~= LocalPlayer and plr.Character and plr.Character:IsDescendantOf(Workspace) then
+                local team = plr:GetAttribute("TeamID")
+                local isEnemy = (myTeam == nil or team == nil or team ~= myTeam)
+                if isEnemy or not triggerbotSettings.teamCheck then
+                    local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+                    if hum and hum.Health > 0 then
+                        local targetPartName = triggerbotSettings.headOnly and "Head" or aimbotSettings.targetPart
+                        local part = plr.Character:FindFirstChild(targetPartName) or plr.Character:FindFirstChild("Head") or plr.Character:FindFirstChild("HitboxHead")
+                        if part and part:IsDescendantOf(Workspace) then
+                            local screenPos, onScreen = cam:WorldToViewportPoint(part.Position)
+                            if onScreen and screenPos.Z > 0 then
+                                local dist = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
+                                if dist <= tolerance then
+                                    local canSee = true
+                                    if aimbotSettings.wallCheck then
+                                        local rayOrigin = cam.CFrame.Position + (cam.CFrame.LookVector * 1.0)
+                                        local lineHit = Workspace:Raycast(rayOrigin, part.Position - rayOrigin, rayParams)
+                                        if lineHit and lineHit.Instance and lineHit.Instance.CanCollide and lineHit.Instance.Transparency < 0.8 then
+                                            canSee = false
+                                        end
+                                    end
+                                    if canSee then
+                                        return true
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        
+        -- Dummies Proximity Check
+        if triggerbotSettings.targetDummies then
+            local sEntities = Workspace:FindFirstChild("ShootingRangeEntities")
+            if sEntities then
+                for _, child in ipairs(sEntities:GetChildren()) do
+                    if child:IsA("Model") and child:IsDescendantOf(Workspace) then
+                        local hum = child:FindFirstChildOfClass("Humanoid") or child:FindFirstChild("EnemyHumanoid")
+                        if not hum or hum.Health > 0 then
+                            local targetPartName = triggerbotSettings.headOnly and "Head" or aimbotSettings.targetPart
+                            local part = child:FindFirstChild(targetPartName) or child:FindFirstChild("Head") or child:FindFirstChild("HitboxHead") or child:FindFirstChild("HumanoidRootPart")
+                            if part and part:IsDescendantOf(Workspace) then
+                                local screenPos, onScreen = cam:WorldToViewportPoint(part.Position)
+                                if onScreen and screenPos.Z > 0 then
+                                    local dist = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
+                                    if dist <= tolerance then
+                                        return true
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        
+        return false
+    end
+
+    -- ------------------------------------------------------------
     -- Main Update Loop
     -- ------------------------------------------------------------
     connect(RunService.RenderStepped, function()
@@ -350,6 +491,48 @@ return function(Window, scriptInfo)
                 fovCircle.Radius = effectiveFov
                 fovCircle.Color = (activeTarget ~= nil) and aimbotSettings.fovLockedColor or aimbotSettings.fovColor
                 fovCircle.Visible = aimbotSettings.enabled and aimbotSettings.drawFov
+            end
+        end)
+        
+        -- Triggerbot Execution (pcall protected)
+        pcall(function()
+            if triggerbotSettings.enabled and not triggerbotSettings.isShooting then
+                local shouldCheck = false
+                if triggerbotSettings.mode == "Always Active" then
+                    shouldCheck = true
+                elseif triggerbotSettings.mode == "While Aiming (RMB)" then
+                    shouldCheck = isAimKeyPressed
+                elseif triggerbotSettings.mode == "Hold Keybind" then
+                    local tKey = resolveKey(triggerbotSettings.activationKey)
+                    shouldCheck = isKeyPressed(tKey)
+                elseif triggerbotSettings.mode == "Toggle Keybind" then
+                    shouldCheck = triggerbotSettings.isActive
+                end
+                
+                if shouldCheck then
+                    local now = os.clock()
+                    if now - triggerbotSettings.lastShot >= triggerbotSettings.cooldown then
+                        local hasTarget = checkTriggerbotTarget(cam, center)
+                        if hasTarget then
+                            triggerbotSettings.lastShot = now
+                            triggerbotSettings.isShooting = true
+                            task.spawn(function()
+                                if triggerbotSettings.delay > 0 then
+                                    task.wait(triggerbotSettings.delay)
+                                end
+                                if type(mouse1click) == "function" then
+                                    mouse1click()
+                                elseif type(mouse1press) == "function" and type(mouse1release) == "function" then
+                                    mouse1press()
+                                    task.wait(0.02)
+                                    mouse1release()
+                                end
+                                task.wait(0.04)
+                                triggerbotSettings.isShooting = false
+                            end)
+                        end
+                    end
+                end
             end
         end)
         
@@ -569,6 +752,73 @@ return function(Window, scriptInfo)
     end)
 
     -- ------------------------------------------------------------
+    -- Movement Physics & Velocity Loop
+    -- ------------------------------------------------------------
+    connect(RunService.Heartbeat, function()
+        if not running then return end
+        
+        local char = LocalPlayer.Character
+        if not char or not char:IsDescendantOf(Workspace) then return end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hum or hum.Health <= 0 or not hrp then return end
+        
+        -- Auto Bunny Hop
+        pcall(function()
+            if movementSettings.bhopEnabled and UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+                if hum.FloorMaterial ~= Enum.Material.Air then
+                    hum:ChangeState(Enum.HumanoidStateType.Jumping)
+                end
+            end
+        end)
+        
+        -- Speed Boost (Velocity injection immune to controller reset)
+        pcall(function()
+            if movementSettings.speedBoost and movementSettings.speedMultiplier > 1.0 then
+                if hum.MoveDirection.Magnitude > 0.1 then
+                    local targetSpeed = 21.6 * movementSettings.speedMultiplier
+                    local moveDir = hum.MoveDirection.Unit
+                    local currentY = hrp.AssemblyLinearVelocity.Y
+                    hrp.AssemblyLinearVelocity = Vector3.new(
+                        moveDir.X * targetSpeed,
+                        currentY,
+                        moveDir.Z * targetSpeed
+                    )
+                end
+            end
+        end)
+        
+        -- Slide Boost / Infinite Slide
+        pcall(function()
+            if movementSettings.slideBoost then
+                local isCrouch = UserInputService:IsKeyDown(Enum.KeyCode.C) or UserInputService:IsKeyDown(Enum.KeyCode.LeftControl)
+                if isCrouch and hum.MoveDirection.Magnitude > 0.1 then
+                    local boostSpeed = 21.6 * math.max(movementSettings.speedMultiplier, 1.45)
+                    local forwardDir = hum.MoveDirection.Unit
+                    hrp.AssemblyLinearVelocity = Vector3.new(
+                        forwardDir.X * boostSpeed,
+                        hrp.AssemblyLinearVelocity.Y,
+                        forwardDir.Z * boostSpeed
+                    )
+                end
+            end
+        end)
+        
+        -- Infinite Jump
+        pcall(function()
+            if movementSettings.infiniteJump and UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+                local now = os.clock()
+                if now - movementSettings.lastJump > 0.28 then
+                    if hum.FloorMaterial == Enum.Material.Air then
+                        movementSettings.lastJump = now
+                        hum:ChangeState(Enum.HumanoidStateType.Jumping)
+                    end
+                end
+            end
+        end)
+    end)
+
+    -- ------------------------------------------------------------
     -- Keybind Listeners
     -- ------------------------------------------------------------
     connect(UserInputService.InputBegan, function(input, gpe)
@@ -589,6 +839,26 @@ return function(Window, scriptInfo)
                 aimbotSettings.isAiming = true
             end
         end
+        
+        -- Triggerbot Keybind
+        if triggerbotSettings.mode == "Toggle Keybind" or triggerbotSettings.mode == "Hold Keybind" then
+            local tKey = resolveKey(triggerbotSettings.activationKey)
+            local tMatches = false
+            if tKey == Enum.UserInputType.MouseButton1 or tKey == Enum.UserInputType.MouseButton2 or tKey == Enum.UserInputType.MouseButton3 then
+                tMatches = (input.UserInputType == tKey)
+            elseif typeof(tKey) == "EnumItem" and tKey.EnumType == Enum.KeyCode then
+                tMatches = (input.KeyCode == tKey)
+            end
+            if tMatches then
+                if triggerbotSettings.mode == "Toggle Keybind" then
+                    if not gpe then
+                        triggerbotSettings.isActive = not triggerbotSettings.isActive
+                    end
+                else
+                    triggerbotSettings.isActive = true
+                end
+            end
+        end
     end)
 
     connect(UserInputService.InputEnded, function(input)
@@ -602,6 +872,20 @@ return function(Window, scriptInfo)
         
         if not aimbotSettings.toggleMode and matches then
             aimbotSettings.isAiming = false
+        end
+        
+        -- Triggerbot Hold Keybind Release
+        if triggerbotSettings.mode == "Hold Keybind" then
+            local tKey = resolveKey(triggerbotSettings.activationKey)
+            local tMatches = false
+            if tKey == Enum.UserInputType.MouseButton1 or tKey == Enum.UserInputType.MouseButton2 or tKey == Enum.UserInputType.MouseButton3 then
+                tMatches = (input.UserInputType == tKey)
+            elseif typeof(tKey) == "EnumItem" and tKey.EnumType == Enum.KeyCode then
+                tMatches = (input.KeyCode == tKey)
+            end
+            if tMatches then
+                triggerbotSettings.isActive = false
+            end
         end
     end)
 
@@ -805,6 +1089,145 @@ return function(Window, scriptInfo)
             end
         })
 
+        AimTab:CreateSection("Triggerbot (Auto Shoot)")
+
+        AimTab:CreateToggle({
+            Name = "Enable Triggerbot",
+            CurrentValue = triggerbotSettings.enabled,
+            Flag = "RIVALS_Trigger_Master",
+            Callback = function(val)
+                triggerbotSettings.enabled = val
+            end
+        })
+
+        AimTab:CreateDropdown({
+            Name = "Activation Mode",
+            Options = {"While Aiming (RMB)", "Always Active", "Hold Keybind", "Toggle Keybind"},
+            CurrentOption = triggerbotSettings.mode,
+            Flag = "RIVALS_Trigger_Mode",
+            Callback = function(val)
+                triggerbotSettings.mode = val
+            end
+        })
+
+        AimTab:CreateKeybind({
+            Name = "Trigger Keybind",
+            CurrentKeybind = "LeftAlt",
+            Flag = "RIVALS_Trigger_Key",
+            Callback = function(keyName)
+                local resolved = resolveKey(keyName)
+                triggerbotSettings.activationKey = resolved
+            end
+        })
+
+        AimTab:CreateToggle({
+            Name = "Headshot Only",
+            CurrentValue = triggerbotSettings.headOnly,
+            Flag = "RIVALS_Trigger_HeadOnly",
+            Callback = function(val)
+                triggerbotSettings.headOnly = val
+            end
+        })
+
+        AimTab:CreateSlider({
+            Name = "Reaction Delay",
+            Range = {0, 150},
+            Increment = 5,
+            CurrentValue = math.floor(triggerbotSettings.delay * 1000),
+            Suffix = " ms",
+            Flag = "RIVALS_Trigger_Delay",
+            Callback = function(val)
+                triggerbotSettings.delay = val / 1000
+            end
+        })
+
+        AimTab:CreateSlider({
+            Name = "Crosshair Tolerance",
+            Range = {4, 30},
+            Increment = 1,
+            CurrentValue = triggerbotSettings.crosshairTolerance,
+            Suffix = " px",
+            Flag = "RIVALS_Trigger_Tolerance",
+            Callback = function(val)
+                triggerbotSettings.crosshairTolerance = val
+            end
+        })
+
+        AimTab:CreateToggle({
+            Name = "Team Check",
+            CurrentValue = triggerbotSettings.teamCheck,
+            Flag = "RIVALS_Trigger_TeamCheck",
+            Callback = function(val)
+                triggerbotSettings.teamCheck = val
+            end
+        })
+
+        AimTab:CreateToggle({
+            Name = "Target Dummies",
+            CurrentValue = triggerbotSettings.targetDummies,
+            Flag = "RIVALS_Trigger_Dummies",
+            Callback = function(val)
+                triggerbotSettings.targetDummies = val
+            end
+        })
+
+        -- Tab: Movement
+        local MoveTab = Window:CreateTab("Movement", "zap")
+        clearTab(MoveTab)
+        MoveTab:CreateSection("Bunny Hop & Air Strafe")
+
+        MoveTab:CreateToggle({
+            Name = "Auto Bunny Hop (BHop)",
+            CurrentValue = movementSettings.bhopEnabled,
+            Flag = "RIVALS_Move_BHop",
+            Callback = function(val)
+                movementSettings.bhopEnabled = val
+            end
+        })
+
+        MoveTab:CreateSection("Velocity & Speed Boost")
+
+        MoveTab:CreateToggle({
+            Name = "Enable Speed Boost",
+            CurrentValue = movementSettings.speedBoost,
+            Flag = "RIVALS_Move_SpeedBoost",
+            Callback = function(val)
+                movementSettings.speedBoost = val
+            end
+        })
+
+        MoveTab:CreateSlider({
+            Name = "Speed Multiplier",
+            Range = {1.0, 2.5},
+            Increment = 0.05,
+            CurrentValue = movementSettings.speedMultiplier,
+            Suffix = "x",
+            Flag = "RIVALS_Move_Multiplier",
+            Callback = function(val)
+                movementSettings.speedMultiplier = val
+            end
+        })
+
+        MoveTab:CreateSection("Slide & Jump Mechanics")
+
+        MoveTab:CreateToggle({
+            Name = "Slide Boost / Infinite Slide",
+            CurrentValue = movementSettings.slideBoost,
+            Flag = "RIVALS_Move_SlideBoost",
+            Callback = function(val)
+                movementSettings.slideBoost = val
+            end
+        })
+
+        MoveTab:CreateToggle({
+            Name = "Infinite Jump (Air Jump)",
+            CurrentValue = movementSettings.infiniteJump,
+            Flag = "RIVALS_Move_InfJump",
+            Callback = function(val)
+                movementSettings.infiniteJump = val
+            end
+        })
+
         -- Tab 2: Visuals / ESP
         local EspTab = Window:CreateTab("Visuals", "eye")
         clearTab(EspTab)
@@ -967,16 +1390,16 @@ return function(Window, scriptInfo)
         InfoTab:CreateSection("Session Telemetry")
         InfoTab:CreateParagraph({
             Title = "Game / Session",
-            Content = "RIVALS (Nosniy Games)\nPlaceId: 117398147513099\nEngine: Drawing Ghost Native v1.4.0"
+            Content = "RIVALS (Nosniy Games)\nPlaceId: 117398147513099\nEngine: Drawing Ghost Native v1.4.2"
         })
         InfoTab:CreateParagraph({
             Title = "Controls & Feedback",
-            Content = "Right Mouse Button: Hold to Lock & Track Aim\nFOV Indicator: Cyan (Scanning) / Green (Target Locked)\nTab Order: Overview > Combat > Visuals > Automation > Settings > Info"
+            Content = "Right Mouse Button: Hold to Lock & Track Aim\nFOV Indicator: Cyan (Scanning) / Green (Target Locked)\nTab Order: Overview > Combat > Movement > Visuals > Automation > Settings > Info"
         })
 
         pcall(function()
             if type(Window.SortTabs) == "function" then
-                Window:SortTabs({"Overview", "Combat", "Visuals", "Automation", "Settings", "Info"})
+                Window:SortTabs({"Overview", "Combat", "Movement", "Visuals", "Automation", "Settings", "Info"})
             end
         end)
     end

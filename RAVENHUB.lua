@@ -724,8 +724,8 @@ local SCRIPTS = {
         description = "Universal Native Drawing API ESP | Smooth mousemoverel Aimbot | Safe Claims",
         placeIds    = {117398147513099},
         gameIds     = {6035872082},
-        version     = "v1.4.0",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/rivals.lua?v=rivals-1.4.0",
+        version     = "v1.4.2",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/rivals.lua?v=vb-1.4.2",
     },
 
     --[[
