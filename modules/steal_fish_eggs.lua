@@ -1,15 +1,16 @@
 --[[
-    RAVEN HUB Module - Steal Fish Eggs v1.6.0
+    RAVEN HUB Module - Steal Fish Eggs v1.7.0
     Game: Steal Fish Eggs (PlaceId: 99183404085821, GameId: 10718240577)
     Developer: fishy fish fish!
 
-    v1.6.0 — Strict Egg Rarity Filtering & Target Priority Modes:
-    - Strict Minimum Rarity Filter: 100% adherence to chosen rarity (no trash egg fallback)
+    v1.7.0 — Subterranean Flight (ดำดิน), Ultra Speed & Smart Best Egg Prioritization:
+    - Smart Best Egg Selection: In the same rarity tier, prioritizes buffs (Rainbow > Silver > Gold), highest Kg, and largest Scale
+    - Subterranean Flight (ดำดิน @ Y=45): Complete underground evasion from ocean guards & players
+    - Smooth Resurface Corridor: Glides underground, resurfacing only right in front of the gate (Z=-60)
+    - Ultra Speed Engine (100-500 speed, default 240, 60fps tick rate)
+    - Strict Minimum Rarity Filter: 100% adherence to chosen rarity (zero trash egg fallback)
     - Filtered Dropped Egg Recovery: Dropped eggs must strictly satisfy minRank before inclusion
-    - Target Priority Modes: "Closest Distance" vs "Highest Value (Kg)"
-    - Enhanced Egg ESP: Live status indicators for [DROPPED], [WAIT], and ready states
-    - Non-intrusive Idle Farm: Trains in TreadPool until desired rarity becomes available
-    - Direct PlaceEgg Remote Activation: Calls PlaceEgg:FireServer(placementPoint) to actually place the egg in tank
+    - Direct PlaceEgg Remote Activation: Calls PlaceEgg:FireServer(placementPoint) to place egg in tank
 ]]--
 
 return function(Window, runtimeInfo)
@@ -90,8 +91,9 @@ return function(Window, runtimeInfo)
     local State = {
         AutoSteal = false,
         MinRarity = "Basic",
-        TargetPriority = "Closest Distance",
-        StealSpeed = 120,
+        TargetPriority = "Highest Value (Kg)",
+        UndergroundTravel = true,
+        StealSpeed = 240,
         AutoReturnBase = true,
         AutoTreadPool = false,
         IdleTreadPool = true,
@@ -236,22 +238,25 @@ return function(Window, runtimeInfo)
         end
 
         local startPos = root.Position
-        local dist = (startPos - targetPos).Magnitude
-        if dist < 2.0 then
+        local delta = (targetPos - startPos)
+        local dist = delta.Magnitude
+        if dist < 1.5 then
             root.CFrame = CFrame.new(targetPos)
             root.AssemblyLinearVelocity = Vector3.zero
             return true
         end
 
-        local speed = customSpeed or State.StealSpeed or 120
-        local dur = math.max(0.08, dist / speed)
+        local speed = customSpeed or State.StealSpeed or 240
+        local dur = math.max(0.04, dist / speed)
 
         local bv = Instance.new("BodyVelocity")
         bv.MaxForce = Vector3.new(1e6, 1e6, 1e6)
         bv.Velocity = Vector3.zero
         bv.Parent = root
 
+        local lookDir = dist > 0.1 and delta.Unit or Vector3.new(0, 0, -1)
         local t0 = os.clock()
+
         while (os.clock() - t0) < dur do
             if isCancelRequested and isCancelRequested() then
                 bv:Destroy()
@@ -265,9 +270,9 @@ return function(Window, runtimeInfo)
             local elapsed = os.clock() - t0
             local alpha = math.clamp(elapsed / dur, 0, 1)
             local cur = startPos:Lerp(targetPos, alpha)
-            root.CFrame = CFrame.lookAt(cur, targetPos)
+            root.CFrame = CFrame.lookAt(cur, cur + lookDir)
             root.AssemblyLinearVelocity = Vector3.zero
-            task.wait(0.03)
+            task.wait(0.015)
         end
 
         bv:Destroy()
@@ -437,6 +442,12 @@ return function(Window, runtimeInfo)
                         local col = RarityColors[rarity] or RarityColors.Default
                         local prompt = egg:FindFirstChildWhichIsA("ProximityPrompt", true)
 
+                        local mut = egg:GetAttribute("Mutation") or egg:GetAttribute("FishMutation") or egg:GetAttribute("Buff")
+                        local buffTag = ""
+                        if mut then
+                            buffTag = string.format(" [%s]", tostring(mut):upper())
+                        end
+
                         local tag = ""
                         if isDropped then
                             tag = " [DROPPED]"
@@ -445,7 +456,7 @@ return function(Window, runtimeInfo)
                         end
 
                         entry.text.Position = Vector2.new(screenPos.X, screenPos.Y)
-                        entry.text.Text = string.format("[%s]%s %s (%.0f kg) [%dm]", rarity, tag, displayName, kg, math.floor(dist))
+                        entry.text.Text = string.format("[%s]%s%s %s (%.0f kg) [%dm]", rarity, buffTag, tag, displayName, kg, math.floor(dist))
                         entry.text.Color = col
                         entry.text.Visible = true
                     elseif entry.text then
@@ -615,6 +626,59 @@ return function(Window, runtimeInfo)
     ----------------------------------------------------------------
     --  AUTO STEAL ENGINE (HIGH-SPEED & DIRECT PLACE REMOTE ACTIVATION)
     ----------------------------------------------------------------
+    local function getEggQuality(egg)
+        local rarity = egg:GetAttribute("Rarity") or "Basic"
+        local rawRank = RarityRanks[rarity] or 1
+        local kg = tonumber(egg:GetAttribute("Kg")) or 0
+        local scale = tonumber(egg:GetAttribute("Scale")) or 1.0
+
+        -- Detect Buff / Mutation on egg
+        local buffMult = 1.0
+        local buffName = ""
+        local mut = egg:GetAttribute("Mutation") or egg:GetAttribute("FishMutation") or egg:GetAttribute("Buff")
+        if mut then
+            local s = tostring(mut):lower()
+            if s:find("rainbow") then
+                buffMult = 4.0
+                buffName = "Rainbow"
+            elseif s:find("silver") then
+                buffMult = 3.0
+                buffName = "Silver"
+            elseif s:find("gold") then
+                buffMult = 1.3
+                buffName = "Gold"
+            else
+                buffMult = 2.0
+                buffName = tostring(mut)
+            end
+        else
+            for _, desc in ipairs(egg:GetChildren()) do
+                local n = desc.Name:lower()
+                if n:find("rainbow") then
+                    buffMult = 4.0
+                    buffName = "Rainbow"
+                    break
+                elseif n:find("silver") then
+                    buffMult = 3.0
+                    buffName = "Silver"
+                    break
+                elseif n:find("gold") then
+                    buffMult = 1.3
+                    buffName = "Gold"
+                    break
+                end
+            end
+        end
+
+        return {
+            rawRank = rawRank,
+            buffMult = buffMult,
+            buffName = buffName,
+            kg = kg,
+            scale = scale
+        }
+    end
+
     local function getBestEgg()
         local root = getRoot()
         local spawned = Workspace:FindFirstChild("SpawnedEggs")
@@ -631,19 +695,16 @@ return function(Window, runtimeInfo)
                 local prompt = egg:FindFirstChildWhichIsA("ProximityPrompt", true)
 
                 if prim and prompt and prompt.Enabled and not egg:GetAttribute("PromptBusy") then
-                    local rarity = egg:GetAttribute("Rarity") or "Basic"
-                    local rawRank = RarityRanks[rarity] or 1
-                    local kg = egg:GetAttribute("Kg") or 0
+                    local q = getEggQuality(egg)
                     local dist = (root.Position - prim.Position).Magnitude
 
                     -- STRICT: Only collect dropped eggs that match or exceed chosen minimum rarity!
-                    if rawRank >= minRank then
+                    if q.rawRank >= minRank then
                         table.insert(candidates, {
                             egg = egg,
                             prim = prim,
                             prompt = prompt,
-                            rawRank = rawRank,
-                            kg = kg,
+                            q = q,
                             dist = dist,
                             isDropped = true
                         })
@@ -660,19 +721,16 @@ return function(Window, runtimeInfo)
 
                 -- Must have prompt enabled and not busy
                 if prim and prompt and prompt.Enabled and not egg:GetAttribute("PromptBusy") then
-                    local rarity = egg:GetAttribute("Rarity") or "Basic"
-                    local rawRank = RarityRanks[rarity] or 1
-                    local kg = egg:GetAttribute("Kg") or 0
+                    local q = getEggQuality(egg)
                     local dist = (root.Position - prim.Position).Magnitude
 
                     -- STRICT: Only add if meeting or exceeding minimum rarity!
-                    if rawRank >= minRank then
+                    if q.rawRank >= minRank then
                         table.insert(candidates, {
                             egg = egg,
                             prim = prim,
                             prompt = prompt,
-                            rawRank = rawRank,
-                            kg = kg,
+                            q = q,
                             dist = dist,
                             isDropped = false
                         })
@@ -682,36 +740,46 @@ return function(Window, runtimeInfo)
         end
 
         -- ZERO FALLBACK: If no eggs match the chosen rarity, return nil immediately!
-        -- The bot will idle train in TreadPool until a matching egg becomes available.
         if #candidates == 0 then
             return nil
         end
 
-        -- Sort candidates based on priority and user preference
+        -- Smart Best Egg Sorting:
+        -- Within same rarity tier: Buff (Rainbow>Silver>Gold) -> Highest Kg -> Largest Scale -> Closest
         table.sort(candidates, function(a, b)
-            -- Priority 1: Recover dropped eggs of that tier first
+            -- Priority 1: Recover dropped eggs first if of high tier
             if a.isDropped ~= b.isDropped then
                 return a.isDropped
             end
 
             -- Priority 2: Higher tier first (e.g. Astral > Abyssal > Mythic)
-            if a.rawRank ~= b.rawRank then
-                return a.rawRank > b.rawRank
+            if a.q.rawRank ~= b.q.rawRank then
+                return a.q.rawRank > b.q.rawRank
             end
 
-            -- Priority 3: User Target Priority (Closest Distance vs Highest Value)
+            -- Priority 3: IN THE SAME RARITY TIER:
+            -- 3a. If one has Buff / Mutation, prioritize it!
+            if a.q.buffMult ~= b.q.buffMult then
+                return a.q.buffMult > b.q.buffMult
+            end
+
+            -- 3b. If user chose Highest Value (or default), prioritize highest weight/size
             if State.TargetPriority == "Highest Value (Kg)" then
-                if a.kg ~= b.kg then
-                    return a.kg > b.kg
+                if a.q.kg ~= b.q.kg then
+                    return a.q.kg > b.q.kg
+                elseif a.q.scale ~= b.q.scale then
+                    return a.q.scale > b.q.scale
                 else
                     return a.dist < b.dist
                 end
             else
-                -- Default: Closest Distance for maximum speed and prompt reliability
+                -- Closest Distance mode
                 if a.dist ~= b.dist then
                     return a.dist < b.dist
+                elseif a.q.kg ~= b.q.kg then
+                    return a.q.kg > b.q.kg
                 else
-                    return a.kg > b.kg
+                    return a.q.scale > b.q.scale
                 end
             end
         end)
@@ -746,6 +814,8 @@ return function(Window, runtimeInfo)
         return true
     end
 
+    local UNDERGROUND_Y = 45
+
     local function passThroughSafeGate(isCancel)
         local root = getRoot()
         local hum = getHumanoid()
@@ -760,22 +830,29 @@ return function(Window, runtimeInfo)
 
         -- If player is on ocean side (Z < -35), must cross Safe Zone gate cleanly to register safe return
         if rootPos.Z < -35 then
-            -- Approach outside gate area at safe altitude (Y = 152) up to Z = -75 to avoid Chaser Fishes
-            if rootPos.Z < -75 then
-                glideTo(Vector3.new(gateX, 152, -75), isCancel)
+            -- If still out in deep ocean (Z < -65):
+            if rootPos.Z < -65 then
+                if State.UndergroundTravel then
+                    glideTo(Vector3.new(gateX, UNDERGROUND_Y, -62), isCancel, State.StealSpeed)
+                    if isCancel and isCancel() then return false end
+                    -- Resurface smoothly right before the gate (ขึ้นมาก่อนถึงประตู)
+                    glideTo(Vector3.new(gateX, 119.2, -60), isCancel, 180)
+                    if isCancel and isCancel() then return false end
+                else
+                    glideTo(Vector3.new(gateX, 130, -65), isCancel, State.StealSpeed)
+                    if isCancel and isCancel() then return false end
+                    glideTo(Vector3.new(gateX, 119.2, -60), isCancel, 120)
+                    if isCancel and isCancel() then return false end
+                end
+            elseif rootPos.Y < 115 then
+                -- Resurface to floor level right before the red line
+                glideTo(Vector3.new(gateX, 119.2, -60), isCancel, 180)
                 if isCancel and isCancel() then return false end
             end
 
-            -- Stage 1: Pre-gate slowdown corridor (Z = -75 -> -62 in water, Y = 126)
-            glideTo(Vector3.new(gateX, 126, -62), isCancel, 60)
-            if isCancel and isCancel() then return false end
-
-            -- Stage 2: Descend feet onto floor right before the red line (Z = -60, Y = 119.2)
-            glideTo(Vector3.new(gateX, 119.2, -60), isCancel, 35)
-            if isCancel and isCancel() then return false end
             root.AssemblyLinearVelocity = Vector3.zero
 
-            -- Stage 3: HUMAN WALK across the gate!
+            -- HUMAN WALK across the gate!
             -- Native Humanoid walk across RedPart (Z = -55) and through TheLinePart (Z = -41.8) to Lobby (Z = -25)
             local safeLobbyTarget = Vector3.new(gateX, 119.2, -25)
             if hum then
@@ -785,18 +862,13 @@ return function(Window, runtimeInfo)
                 hum:ChangeState(Enum.HumanoidStateType.Running)
             end
 
-            -- Execute natural human walk (Physical body walks through TheLinePart naturally triggering .Touched)
             humanWalkTo(safeLobbyTarget, isCancel, 3.5)
             if isCancel and isCancel() then return false end
 
-            -- Stage 4: Hold briefly in lobby floor to let server process safe return
             task.wait(0.15)
         else
-            -- If heading out from base into ocean, glide into gate then into ocean water
-            glideTo(Vector3.new(gateX, 130, gateZ), isCancel)
-            if isCancel and isCancel() then return false end
-
-            glideTo(Vector3.new(gateX, 130, -55), isCancel)
+            -- If heading out from base into ocean, glide cleanly through gate to start of ocean
+            glideTo(Vector3.new(gateX, 119.2, -55), isCancel, State.StealSpeed)
             if isCancel and isCancel() then return false end
         end
         return true
@@ -906,20 +978,26 @@ return function(Window, runtimeInfo)
             safeCrossTheLine(isCancel)
             if isCancel() then return end
 
-            -- 4. Travel to egg submerged in ocean water (Y = 132)
+            -- 4. Travel to egg via Subterranean Flight (ดำดิน @ Y=45)
             local eggTargetPos = target.prim.Position + Vector3.new(0, 1.2, 0)
+            local curPos = root.Position
             local reached = false
 
-            if State.GuardSafeCorridor then
-                local travelY = 132
-                glideTo(Vector3.new(eggTargetPos.X, travelY, eggTargetPos.Z), isCancel)
+            if State.UndergroundTravel then
+                -- 4a. Plunge subterranean immediately (ดำดิน)
+                glideTo(Vector3.new(curPos.X, UNDERGROUND_Y, curPos.Z), isCancel, 320)
                 if isCancel() then return end
 
-                local approachPos = target.prim.Position + Vector3.new(0, 1.2, 2.6)
-                reached = glideTo(approachPos, isCancel, 40)
+                -- 4b. Fly underground directly under the target egg at full configured speed
+                glideTo(Vector3.new(eggTargetPos.X, UNDERGROUND_Y, eggTargetPos.Z), isCancel, State.StealSpeed)
+                if isCancel() then return end
+
+                -- 4c. Resurface straight up into the egg nest
+                local approachPos = target.prim.Position + Vector3.new(0, 1.2, 2.4)
+                reached = glideTo(approachPos, isCancel, 180)
             else
-                local approachPos = target.prim.Position + Vector3.new(0, 1.2, 2.6)
-                reached = glideTo(approachPos, isCancel, 40)
+                local approachPos = target.prim.Position + Vector3.new(0, 1.2, 2.4)
+                reached = glideTo(approachPos, isCancel, State.StealSpeed)
             end
 
             if not reached or isCancel() then return end
@@ -951,16 +1029,31 @@ return function(Window, runtimeInfo)
                 target.prompt:InputHoldEnd()
             end
 
-            -- 7. Immediate escape to ceiling corridor (Y = 155) and safe base deposit
+            -- 7. Subterranean Return Flight (ดำดิน @ Y=45) & Resurface before gate
             if LP:GetAttribute("CarryingEgg") and State.AutoReturnBase then
-                local curPos = root.Position
-                if curPos.Z < -75 then
-                    -- Ascend straight UP to safe ceiling altitude (Y = 155) at maximum burst speed (250 studs/s)
-                    glideTo(Vector3.new(curPos.X, 155, curPos.Z), isCancel, 250)
+                local holdPos = root.Position
+                local lineFolder = Workspace:FindFirstChild("TheLine")
+                local linePart = lineFolder and lineFolder:FindFirstChild("TheLinePart")
+                local gateX = linePart and linePart.Position.X or 27.7
+
+                if State.UndergroundTravel and holdPos.Z < -65 then
+                    -- 7a. Plunge subterranean immediately (ดำดิน) at high speed (350 studs/s)
+                    glideTo(Vector3.new(holdPos.X, UNDERGROUND_Y, holdPos.Z), isCancel, 350)
                     if isCancel() then return end
 
-                    -- Fly at ceiling corridor towards gate zone
-                    local safeX = math.clamp(curPos.X, -25, 25)
+                    -- 7b. Fly underground directly to pre-gate coordinate (Z = -62)
+                    glideTo(Vector3.new(gateX, UNDERGROUND_Y, -62), isCancel, State.StealSpeed)
+                    if isCancel() then return end
+
+                    -- 7c. Resurface smoothly right before the gate (ขึ้นมาก่อนถึงประตู) at Z = -60, Y = 119.2
+                    glideTo(Vector3.new(gateX, 119.2, -60), isCancel, 180)
+                    if isCancel() then return end
+                    root.AssemblyLinearVelocity = Vector3.zero
+                elseif holdPos.Z < -75 then
+                    -- Ceiling fallback if UndergroundTravel is disabled
+                    glideTo(Vector3.new(holdPos.X, 155, holdPos.Z), isCancel, 250)
+                    if isCancel() then return end
+                    local safeX = math.clamp(holdPos.X, -25, 25)
                     glideTo(Vector3.new(safeX, 155, -75), isCancel)
                     if isCancel() then return end
                 end
@@ -1164,8 +1257,8 @@ return function(Window, runtimeInfo)
 
     FarmTab:CreateDropdown({
         Name = "Target Priority Mode",
-        Options = {"Closest Distance", "Highest Value (Kg)"},
-        CurrentOption = "Closest Distance",
+        Options = {"Highest Value (Kg)", "Closest Distance"},
+        CurrentOption = "Highest Value (Kg)",
         Flag = "SFE_TargetPriority",
         Callback = function(v)
             local selected = type(v) == "table" and v[1] or v
@@ -1175,12 +1268,19 @@ return function(Window, runtimeInfo)
 
     FarmTab:CreateSlider({
         Name = "Flight Speed",
-        Range = {50, 300},
+        Range = {100, 500},
         Increment = 10,
         Suffix = " speed",
-        CurrentValue = 120,
+        CurrentValue = 240,
         Flag = "SFE_StealSpeed",
         Callback = function(v) State.StealSpeed = v end,
+    })
+
+    FarmTab:CreateToggle({
+        Name = "Subterranean Flight (ดำดิน @ Y=45)",
+        CurrentValue = true,
+        Flag = "SFE_UndergroundTravel",
+        Callback = function(v) State.UndergroundTravel = v end,
     })
 
     FarmTab:CreateToggle({

@@ -369,10 +369,10 @@ local SCRIPTS = {
     },
     {
         name        = "Steal Fish Eggs",
-        description = "Auto Steal Eggs | Strict Rarity Filter | Target Priority | AFK TreadPool | ESP",
+        description = "Auto Steal Eggs | Subterranean Flight (ดำดิน) | Best Egg Buff & Size | Ultra Speed | ESP",
         placeIds    = {99183404085821},
         gameIds     = {10718240577},
-        version     = "v1.6.0",
+        version     = "v1.7.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/steal_fish_eggs.lua",
     },
     {
@@ -712,10 +712,10 @@ local SCRIPTS = {
     },
     {
         name        = "Steal Fish Eggs",
-        description = "Auto Steal Best Eggs | Strict Rarity Filter | Target Priority | TreadPool AFK | Visual ESP",
+        description = "Auto Steal Best Eggs | Subterranean Flight (ดำดิน) | Best Egg Buff & Size | Ultra Speed | ESP",
         placeIds    = {99183404085821},
         gameIds     = {10718240577},
-        version     = "v1.6.0",
+        version     = "v1.7.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/steal_fish_eggs.lua",
     },
 
