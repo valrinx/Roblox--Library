@@ -1,14 +1,24 @@
 -- ============================================================
 --   RAVEN HUB  |  Racket Rivals (Starter & Ranked)
 --   High-Performance 100% Drawing API Engine (Zero Injection / Clean Architecture)
---   Multi-Layer Ball Acquisition, Approach-Filtered Auto Parry,
---   Movement & Infinite Stamina, Clean Auto Serve, Full Visuals
+--   Features:
+--     - Auto Hit (Parry / Swing with approach direction filter)
+--     - Auto Smash (Airborne spike on high balls)
+--     - Auto Dash (Smart ball interception)
+--     - Auto Jump (High ball interception)
+--     - Right Click Binding for Dash (Instant manual Q trigger)
+--     - Silent Aim (Smart court corner & weak spot deflection)
+--     - Auto Set (High arching lob using E key)
+--     - Auto Hinari (Automatic Overheat Ability 1 ignition)
+--     - 100% Drawing API Visuals (Ball ESP, Reach Circle, Silent Aim Target, Player ESP)
+--     - Infinite Stamina & Speed Multiplier
 -- ============================================================
 
 return function(Window, scriptInfo)
     local Players = game:GetService("Players")
     local RunService = game:GetService("RunService")
     local ReplicatedStorage = game:GetService("ReplicatedStorage")
+    local ReplicatedFirst = game:GetService("ReplicatedFirst")
     local UserInputService = game:GetService("UserInputService")
     local VirtualInputManager = game:GetService("VirtualInputManager")
     local Workspace = game:GetService("Workspace")
@@ -28,20 +38,46 @@ return function(Window, scriptInfo)
 
     -- Settings
     local settings = {
-        -- Tab 1: Combat (Auto Parry / Auto Swing)
-        autoParry = true,
+        -- Auto Hit / Auto Parry
+        autoHit = true,
         hitRadius = 24,
         cooldown = 0.35,
         approachFilter = true,
-        autoAimBall = false,
+        autoFaceBall = false,
 
-        -- Tab 2: Movement & Mobility
+        -- Auto Smash & Jump
+        autoSmash = true,
+        smashMinHeight = 4.0,
+        autoJump = true,
+        jumpHeightThreshold = 5.0,
+
+        -- Auto Dash & Right Click Dash
+        autoDash = false,
+        dashMinDist = 20,
+        dashMaxDist = 60,
+        dashCooldown = 1.2,
+        rightClickDash = true,
+        fastDash = false,
+
+        -- Silent Aim
+        silentAim = true,
+        silentAimMode = "Opponent Far Corner", -- "Opponent Far Corner", "Opponent Weak Side", "Court Baseline"
+        silentAimVisual = true,
+
+        -- Auto Set
+        autoSet = false,
+        setMode = "Always", -- "Always", "Low Ball Only"
+
+        -- Auto Hinari (Overheat Ability 1)
+        autoHinari = false,
+        hinariCooldown = 3.0,
+
+        -- Movement & Mobility
         speedBoost = false,
         speedMultiplier = 1.35,
         infiniteStamina = false,
-        fastDash = false,
 
-        -- Tab 3: Visuals & ESP (100% Drawing API)
+        -- Visuals & ESP (100% Drawing API)
         ballEsp = true,
         ballTracer = true,
         reachCircle = true,
@@ -51,7 +87,7 @@ return function(Window, scriptInfo)
         showTracers = false,
         maxDistance = 300,
 
-        -- Tab 4: Automation
+        -- Automation
         autoServe = false,
     }
 
@@ -142,19 +178,22 @@ return function(Window, scriptInfo)
             text = safeDrawing("Text"),
             tracer = safeDrawing("Line"),
             reachCircle = safeDrawing("Circle"),
+            aimCircle = safeDrawing("Circle"),
+            aimTracer = safeDrawing("Line"),
+            aimText = safeDrawing("Text"),
             visible = false,
         }
 
         if d.circle then
             d.circle.Thickness = 2
             d.circle.Filled = true
-            d.circle.Color = Color3.fromRGB(255, 50, 80)
-            d.circle.Radius = 7
+            d.circle.Radius = 6
+            d.circle.Color = Color3.fromRGB(0, 255, 170)
             d.circle.Visible = false
         end
 
         if d.text then
-            d.text.Size = 12
+            d.text.Size = 13
             d.text.Center = true
             d.text.Outline = true
             d.text.OutlineColor = Color3.fromRGB(0, 0, 0)
@@ -163,17 +202,41 @@ return function(Window, scriptInfo)
         end
 
         if d.tracer then
-            d.tracer.Thickness = 1.2
-            d.tracer.Color = Color3.fromRGB(255, 50, 80)
+            d.tracer.Thickness = 1.5
+            d.tracer.Color = Color3.fromRGB(0, 255, 170)
             d.tracer.Visible = false
         end
 
         if d.reachCircle then
             d.reachCircle.Thickness = 1.5
             d.reachCircle.Filled = false
-            d.reachCircle.Color = Color3.fromRGB(255, 220, 40)
-            d.reachCircle.NumSides = 36
+            d.reachCircle.NumSides = 48
+            d.reachCircle.Color = Color3.fromRGB(0, 255, 170)
             d.reachCircle.Visible = false
+        end
+
+        if d.aimCircle then
+            d.aimCircle.Thickness = 1.5
+            d.aimCircle.Filled = false
+            d.aimCircle.NumSides = 24
+            d.aimCircle.Radius = 8
+            d.aimCircle.Color = Color3.fromRGB(255, 180, 0)
+            d.aimCircle.Visible = false
+        end
+
+        if d.aimTracer then
+            d.aimTracer.Thickness = 1.5
+            d.aimTracer.Color = Color3.fromRGB(255, 180, 0)
+            d.aimTracer.Visible = false
+        end
+
+        if d.aimText then
+            d.aimText.Size = 11
+            d.aimText.Center = true
+            d.aimText.Outline = true
+            d.aimText.OutlineColor = Color3.fromRGB(0, 0, 0)
+            d.aimText.Color = Color3.fromRGB(255, 200, 50)
+            d.aimText.Visible = false
         end
 
         return d
@@ -182,21 +245,17 @@ return function(Window, scriptInfo)
     local ballDrawing = newBallDrawingSet()
 
     local function hideDrawingSet(d)
-        if not d or not d.visible then return end
+        if not d then return end
         d.visible = false
-        if d.boxOutline and d.boxOutline.Visible then d.boxOutline.Visible = false end
-        if d.box and d.box.Visible then d.box.Visible = false end
-        if d.name and d.name.Visible then d.name.Visible = false end
-        if d.dist and d.dist.Visible then d.dist.Visible = false end
-        if d.tracer and d.tracer.Visible then d.tracer.Visible = false end
-        if d.circle and d.circle.Visible then d.circle.Visible = false end
-        if d.text and d.text.Visible then d.text.Visible = false end
-        if d.reachCircle and d.reachCircle.Visible then d.reachCircle.Visible = false end
+        for _, obj in pairs(d) do
+            if type(obj) == "table" or type(obj) == "userdata" then
+                pcall(function() obj.Visible = false end)
+            end
+        end
     end
 
     local function removeDrawingSet(d)
         if not d then return end
-        d.visible = false
         for _, obj in pairs(d) do
             if type(obj) == "table" or type(obj) == "userdata" then
                 pcall(function()
@@ -215,6 +274,14 @@ return function(Window, scriptInfo)
         if cachedMovementHandler and cachedMovementHandler.Character == localPlayer.Character then
             return cachedMovementHandler
         end
+        pcall(function()
+            local pc = require(ReplicatedFirst.Classes.PlayerControl)
+            if pc and pc.Movement then
+                cachedMovementHandler = pc.Movement
+            end
+        end)
+        if cachedMovementHandler then return cachedMovementHandler end
+
         if type(getgc) == "function" then
             for _, obj in ipairs(getgc(true)) do
                 if type(obj) == "table" and rawget(obj, "Stamina") and rawget(obj, "MaxStamina") then
@@ -226,6 +293,21 @@ return function(Window, scriptInfo)
             end
         end
         return nil
+    end
+
+    -- ------------------------------------------------------------
+    -- MOUSE REPLICATOR (SILENT AIM INTERNAL ENGINE)
+    -- ------------------------------------------------------------
+    local cachedMouseReplicator = nil
+    local function getMouseReplicator()
+        if cachedMouseReplicator then return cachedMouseReplicator end
+        pcall(function()
+            local mrMod = require(ReplicatedFirst.Classes.MouseReplicator)
+            if mrMod and type(mrMod) == "table" then
+                cachedMouseReplicator = mrMod
+            end
+        end)
+        return cachedMouseReplicator
     end
 
     -- ------------------------------------------------------------
@@ -252,56 +334,6 @@ return function(Window, scriptInfo)
                 end
             end
         end
-        return nil
-    end
-
-    local function scanWorkspaceForBall()
-        -- 1. Scan direct children of Workspace (primary location created by lBall:CreateBody)
-        for _, child in ipairs(Workspace:GetChildren()) do
-            if child:IsA("BasePart") or child:IsA("Model") then
-                if child:FindFirstChild("DeflectParticles", true)
-                    or child:FindFirstChild("DeflectPerfect", true)
-                    or child:FindFirstChild("BoostVFX", true) then
-                    local part = child:IsA("BasePart") and child or child.PrimaryPart or child:FindFirstChildWhichIsA("BasePart")
-                    if part then return part end
-                end
-
-                if child:FindFirstChildOfClass("Highlight") then
-                    local part = child:IsA("BasePart") and child or child:FindFirstChildWhichIsA("BasePart")
-                    if part and part.CanCollide == false and (part.Name == "Default" or part.Name == "Normal" or part.Name:lower():find("ball")) then
-                        return part
-                    end
-                end
-            end
-        end
-
-        -- 2. Scan Workspace.FX
-        local fx = Workspace:FindFirstChild("FX")
-        if fx then
-            for _, child in ipairs(fx:GetChildren()) do
-                if child:IsA("BasePart") and not child.Name:find("Shadow") and not child.Name:find("Trail") then
-                    if child.Name == "Default" or child.Name:lower():find("ball") then
-                        return child
-                    end
-                end
-            end
-        end
-
-        -- 3. Scan Courts as fallback
-        local courts = Workspace:FindFirstChild("Courts")
-        if courts then
-            for _, court in ipairs(courts:GetChildren()) do
-                for _, desc in ipairs(court:GetDescendants()) do
-                    if (desc:IsA("BasePart") or desc:IsA("Model")) and not desc.Name:find("Balloon") and not desc.Name:find("Shadow") then
-                        if desc:FindFirstChild("DeflectParticles", true) or desc:FindFirstChild("DeflectPerfect", true) then
-                            local part = desc:IsA("BasePart") and desc or desc:FindFirstChildWhichIsA("BasePart")
-                            if part then return part end
-                        end
-                    end
-                end
-            end
-        end
-
         return nil
     end
 
@@ -342,15 +374,89 @@ return function(Window, scriptInfo)
     end
 
     -- ------------------------------------------------------------
-    -- COMBAT EXECUTION ENGINE (SWING SIMULATOR)
+    -- SMART SILENT AIM TARGET CALCULATOR
+    -- ------------------------------------------------------------
+    local function calculateSilentAimTarget(myPos, ballPos)
+        local opponentRoot = nil
+        local minOpponentDist = math.huge
+
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= localPlayer and p.Character then
+                local r = getRoot(p.Character)
+                if r then
+                    local d = (r.Position - myPos).Magnitude
+                    if d < minOpponentDist then
+                        minOpponentDist = d
+                        opponentRoot = r
+                    end
+                end
+            end
+        end
+
+        local courtForward = camera and camera.CFrame.LookVector or Vector3.new(0, 0, -1)
+        courtForward = Vector3.new(courtForward.X, 0, courtForward.Z).Unit
+        local courtRight = Vector3.new(-courtForward.Z, 0, courtForward.X).Unit
+
+        if opponentRoot then
+            local oppPos = opponentRoot.Position
+            local toOpp = oppPos - myPos
+            local oppLateral = toOpp:Dot(courtRight)
+            local oppDepth = toOpp:Dot(courtForward)
+
+            local targetSide = (oppLateral >= 0) and -1 or 1
+            local targetDistForward = math.clamp(oppDepth + 15, 35, 75)
+            local targetDistLateral = targetSide * 18
+
+            if settings.silentAimMode == "Opponent Weak Side" then
+                targetDistForward = math.clamp(oppDepth + 5, 30, 65)
+                targetDistLateral = targetSide * 22
+            elseif settings.silentAimMode == "Court Baseline" then
+                targetDistForward = 70
+                targetDistLateral = targetSide * 15
+            end
+
+            return myPos + (courtForward * targetDistForward) + (courtRight * targetDistLateral)
+        end
+
+        return myPos + (courtForward * 55) + (courtRight * 16)
+    end
+
+    -- ------------------------------------------------------------
+    -- COMBAT & MOBILITY ACTION EXECUTORS
     -- ------------------------------------------------------------
     local lastSwingTime = 0
     local lastServeTime = 0
+    local lastDashTime = 0
+    local lastHinariTime = 0
     local lastBallPos = nil
     local lastBallTime = 0
     local ballVelocity = Vector3.zero
+    local currentAimTarget = nil
 
-    local function triggerSwing(ballPos)
+    local function executeDash()
+        local moveHandler = getMovementHandler()
+        if moveHandler and type(moveHandler.Dash) == "function" then
+            pcall(function() moveHandler:Dash() end)
+        else
+            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Q, false, game)
+            task.delay(0.04, function()
+                VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Q, false, game)
+            end)
+        end
+    end
+
+    local function executeHinari()
+        local now = os.clock()
+        if (now - lastHinariTime) < settings.hinariCooldown then return end
+        lastHinariTime = now
+
+        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.One, false, game)
+        task.delay(0.04, function()
+            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.One, false, game)
+        end)
+    end
+
+    local function triggerHit(ballPos, isSmash, isSet)
         local now = os.clock()
         if (now - lastSwingTime) < settings.cooldown then return end
         lastSwingTime = now
@@ -358,8 +464,29 @@ return function(Window, scriptInfo)
         local char = localPlayer.Character
         local root = getRoot(char)
 
-        -- Smooth horizontal face ball (no camera snap / no screen twitch)
-        if settings.autoAimBall and ballPos and root then
+        -- 1. Auto Hinari trigger right before contact
+        if settings.autoHinari then
+            executeHinari()
+        end
+
+        -- 2. Silent Aim Calculation & Replicator Override
+        if settings.silentAim and root and ballPos then
+            currentAimTarget = calculateSilentAimTarget(root.Position, ballPos)
+            if currentAimTarget then
+                local mr = getMouseReplicator()
+                if mr then
+                    pcall(function()
+                        if type(mr.SetOverride) == "function" then
+                            mr:SetOverride(currentAimTarget)
+                        end
+                        mr.CurrentMouseLocation = currentAimTarget
+                    end)
+                end
+            end
+        end
+
+        -- 3. Smooth horizontal face ball (no camera snap / no screen twitch)
+        if settings.autoFaceBall and ballPos and root then
             local flatBall = Vector3.new(ballPos.X, root.Position.Y, ballPos.Z)
             pcall(function()
                 root.CFrame = CFrame.lookAt(root.Position, flatBall)
@@ -370,14 +497,33 @@ return function(Window, scriptInfo)
         local centerX = math.floor(vp.X / 2)
         local centerY = math.floor(vp.Y / 2)
 
-        -- Send Mouse Left Click + Press Key F for 100% actuation
-        VirtualInputManager:SendMouseButtonEvent(centerX, centerY, 0, true, game, 0)
-        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.F, false, game)
-        task.delay(0.04, function()
-            VirtualInputManager:SendMouseButtonEvent(centerX, centerY, 0, false, game, 0)
-            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.F, false, game)
-        end)
+        -- 4. Actuation
+        if isSet then
+            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+            task.delay(0.04, function()
+                VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+            end)
+        else
+            VirtualInputManager:SendMouseButtonEvent(centerX, centerY, 0, true, game, 0)
+            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.F, false, game)
+            task.delay(0.04, function()
+                VirtualInputManager:SendMouseButtonEvent(centerX, centerY, 0, false, game, 0)
+                VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.F, false, game)
+            end)
+        end
     end
+
+    -- ------------------------------------------------------------
+    -- USER INPUT: RIGHT CLICK BINDING FOR DASH
+    -- ------------------------------------------------------------
+    connect(UserInputService.InputBegan, function(input, gameProcessed)
+        if gameProcessed then return end
+        if settings.rightClickDash and input.UserInputType == Enum.UserInputType.MouseButton2 then
+            if not UserInputService:GetFocusedTextBox() then
+                executeDash()
+            end
+        end
+    end)
 
     -- ------------------------------------------------------------
     -- RUNTIME ENGINE LOOP
@@ -428,16 +574,16 @@ return function(Window, scriptInfo)
                         local vTable = require(values)
                         if vTable and vTable.PLAYER_SERVE_STATE and vTable.PLAYER_SERVE_STATE:Get() == true then
                             lastServeTime = now
-                            triggerSwing(nil)
+                            triggerHit(nil, false, false)
                         end
                     end
                 end)
             end
         end
 
-        -- 3. Ball Tracking & Auto Parry
-        local activeBall, lBallObj = findActiveBall()
-        if activeBall and root and myPos then
+        -- 3. Ball Tracking & Combat Automation
+        local activeBall = findActiveBall()
+        if activeBall and root and myPos and humanoid then
             local ballPos = activeBall.Position
             local now = os.clock()
             local dt = now - lastBallTime
@@ -451,17 +597,48 @@ return function(Window, scriptInfo)
             lastBallTime = now
 
             local dist = (ballPos - myPos).Magnitude
+            local horizontalDist = (Vector2.new(ballPos.X, ballPos.Z) - Vector2.new(myPos.X, myPos.Z)).Magnitude
+            local heightDiff = ballPos.Y - myPos.Y
             local toPlayer = (myPos - ballPos).Unit
-            -- Ball is moving toward or near player when dot product > -5
             local isApproaching = not settings.approachFilter or (ballVelocity:Dot(toPlayer) > -5)
 
-            -- Auto Parry Trigger
-            if settings.autoParry and dist <= settings.hitRadius and isApproaching then
-                triggerSwing(ballPos)
+            -- AUTO DASH (Intercept ball if outside reach but incoming fast)
+            if settings.autoDash and isApproaching and dist >= settings.dashMinDist and dist <= settings.dashMaxDist then
+                if (now - lastDashTime) >= settings.dashCooldown then
+                    lastDashTime = now
+                    pcall(function()
+                        root.CFrame = CFrame.lookAt(root.Position, Vector3.new(ballPos.X, root.Position.Y, ballPos.Z))
+                    end)
+                    executeDash()
+                end
             end
 
-            -- Visuals: Ball ESP & Reach Zone
-            if hasDrawing and (settings.ballEsp or settings.reachCircle) then
+            -- AUTO JUMP (Meet airborne high balls in time)
+            if settings.autoJump and isApproaching and heightDiff >= settings.jumpHeightThreshold and horizontalDist <= (settings.hitRadius + 6) then
+                if humanoid:GetState() ~= Enum.HumanoidStateType.Freefall and humanoid:GetState() ~= Enum.HumanoidStateType.Jumping then
+                    humanoid.Jump = true
+                end
+            end
+
+            -- AUTO SMASH / AUTO SET / AUTO HIT DECISION
+            local isSmashReady = settings.autoSmash and (heightDiff >= settings.smashMinHeight)
+            local isSetReady = settings.autoSet and (settings.setMode == "Always" or (settings.setMode == "Low Ball Only" and heightDiff < 2.0))
+
+            if settings.autoHit and dist <= settings.hitRadius and isApproaching then
+                if isSmashReady then
+                    if humanoid:GetState() ~= Enum.HumanoidStateType.Freefall and humanoid:GetState() ~= Enum.HumanoidStateType.Jumping then
+                        humanoid.Jump = true
+                    end
+                    triggerHit(ballPos, true, false)
+                elseif isSetReady then
+                    triggerHit(ballPos, false, true)
+                else
+                    triggerHit(ballPos, false, false)
+                end
+            end
+
+            -- VISUALS: Ball ESP, Reach Zone, & Silent Aim Target
+            if hasDrawing and (settings.ballEsp or settings.reachCircle or settings.silentAimVisual) then
                 local screenPos, onScreen = camera:WorldToViewportPoint(ballPos)
 
                 -- Racket Reach Zone circle
@@ -483,6 +660,7 @@ return function(Window, scriptInfo)
                 if settings.ballEsp and onScreen then
                     local isParryReady = dist <= settings.hitRadius
                     local speedKmH = math.floor(ballVelocity.Magnitude * 3.6 / 3.571)
+                    local statusTag = isSmashReady and " [SMASH]" or (isSetReady and " [SET]" or "")
 
                     if ballDrawing.circle then
                         ballDrawing.circle.Position = Vector2.new(screenPos.X, screenPos.Y)
@@ -492,7 +670,7 @@ return function(Window, scriptInfo)
 
                     if ballDrawing.text then
                         ballDrawing.text.Position = Vector2.new(screenPos.X, screenPos.Y - 22)
-                        ballDrawing.text.Text = string.format("[ BALL: %.1fm | %d km/h ]", dist, speedKmH)
+                        ballDrawing.text.Text = string.format("[ BALL: %.1fm | %d km/h%s ]", dist, speedKmH, statusTag)
                         ballDrawing.text.Color = isParryReady and Color3.fromRGB(255, 80, 80) or Color3.fromRGB(255, 255, 255)
                         ballDrawing.text.Visible = true
                     end
@@ -500,20 +678,42 @@ return function(Window, scriptInfo)
                     if settings.ballTracer and ballDrawing.tracer then
                         ballDrawing.tracer.From = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y)
                         ballDrawing.tracer.To = Vector2.new(screenPos.X, screenPos.Y)
-                        ballDrawing.tracer.Color = isParryReady and Color3.fromRGB(255, 40, 70) or Color3.fromRGB(0, 255, 170)
                         ballDrawing.tracer.Visible = true
                     elseif ballDrawing.tracer then
                         ballDrawing.tracer.Visible = false
                     end
-                    ballDrawing.visible = true
                 else
                     if ballDrawing.circle then ballDrawing.circle.Visible = false end
                     if ballDrawing.text then ballDrawing.text.Visible = false end
                     if ballDrawing.tracer then ballDrawing.tracer.Visible = false end
                 end
+
+                -- Silent Aim Target Visual
+                if settings.silentAim and settings.silentAimVisual and currentAimTarget then
+                    local aimScreen, aimOnScreen = camera:WorldToViewportPoint(currentAimTarget)
+                    if aimOnScreen and ballDrawing.aimCircle and ballDrawing.aimTracer and ballDrawing.aimText then
+                        ballDrawing.aimCircle.Position = Vector2.new(aimScreen.X, aimScreen.Y)
+                        ballDrawing.aimCircle.Visible = true
+
+                        ballDrawing.aimTracer.From = Vector2.new(screenPos.X, screenPos.Y)
+                        ballDrawing.aimTracer.To = Vector2.new(aimScreen.X, aimScreen.Y)
+                        ballDrawing.aimTracer.Visible = onScreen
+
+                        ballDrawing.aimText.Position = Vector2.new(aimScreen.X, aimScreen.Y + 12)
+                        ballDrawing.aimText.Text = "[ SILENT AIM TARGET ]"
+                        ballDrawing.aimText.Visible = true
+                    else
+                        if ballDrawing.aimCircle then ballDrawing.aimCircle.Visible = false end
+                        if ballDrawing.aimTracer then ballDrawing.aimTracer.Visible = false end
+                        if ballDrawing.aimText then ballDrawing.aimText.Visible = false end
+                    end
+                else
+                    if ballDrawing.aimCircle then ballDrawing.aimCircle.Visible = false end
+                    if ballDrawing.aimTracer then ballDrawing.aimTracer.Visible = false end
+                    if ballDrawing.aimText then ballDrawing.aimText.Visible = false end
+                end
             end
         else
-            lastBallPos = nil
             hideDrawingSet(ballDrawing)
         end
 
@@ -523,29 +723,26 @@ return function(Window, scriptInfo)
                 if player ~= localPlayer then
                     local pChar = player.Character
                     local pRoot = getRoot(pChar)
+                    local pHum = getHumanoid(pChar)
+
+                    if not espDrawings[player] then
+                        espDrawings[player] = newPlayerDrawingSet()
+                    end
                     local d = espDrawings[player]
 
-                    if not d then
-                        d = newPlayerDrawingSet()
-                        espDrawings[player] = d
-                    end
-
-                    if pRoot and myPos then
-                        local pPos = pRoot.Position
-                        local dist = (pPos - myPos).Magnitude
-
+                    if pChar and pRoot and pHum and pHum.Health > 0 then
+                        local dist = (pRoot.Position - myPos).Magnitude
                         if dist <= settings.maxDistance then
-                            local screenPos, onScreen = camera:WorldToViewportPoint(pPos)
+                            local screenPos, onScreen = camera:WorldToViewportPoint(pRoot.Position)
                             if onScreen then
-                                local head = pChar:FindFirstChild("Head")
-                                local headPos = head and head.Position or (pPos + Vector3.new(0, 2, 0))
-                                local topScreen = camera:WorldToViewportPoint(headPos + Vector3.new(0, 0.6, 0))
-                                local bottomScreen = camera:WorldToViewportPoint(pPos - Vector3.new(0, 3, 0))
+                                local headPos = pChar:FindFirstChild("Head") and pChar.Head.Position or (pRoot.Position + Vector3.new(0, 2, 0))
+                                local headScreen = camera:WorldToViewportPoint(headPos + Vector3.new(0, 0.5, 0))
+                                local legScreen = camera:WorldToViewportPoint(pRoot.Position - Vector3.new(0, 3, 0))
 
-                                local boxHeight = math.abs(bottomScreen.Y - topScreen.Y)
-                                local boxWidth = boxHeight * 0.65
+                                local boxHeight = math.abs(headScreen.Y - legScreen.Y)
+                                local boxWidth = math.max(boxHeight * 0.55, 8)
                                 local boxLeft = screenPos.X - (boxWidth / 2)
-                                local boxTop = topScreen.Y
+                                local boxTop = headScreen.Y
 
                                 if settings.showBoxes then
                                     if d.boxOutline then
@@ -617,14 +814,15 @@ return function(Window, scriptInfo)
     -- USER INTERFACE BUILD (RAVEN HUB Standard)
     -- ------------------------------------------------------------
     local CombatTab = Window:CreateTab("Combat", "crosshair")
-    CombatTab:CreateSection("Auto Parry & Swing")
+
+    CombatTab:CreateSection("Auto Hit & Parry")
 
     CombatTab:CreateToggle({
-        Name = "Auto Parry (Auto Swing)",
-        CurrentValue = settings.autoParry,
-        Flag = "RR_AutoParry",
+        Name = "Auto Hit (Auto Parry)",
+        CurrentValue = settings.autoHit,
+        Flag = "RR_AutoHit",
         Callback = function(value)
-            settings.autoParry = value
+            settings.autoHit = value
         end,
     })
 
@@ -651,7 +849,7 @@ return function(Window, scriptInfo)
 
     CombatTab:CreateSlider({
         Name = "Swing Cooldown Debounce",
-        Range = {0.2, 0.8},
+        Range = {0.15, 0.8},
         Increment = 0.05,
         Suffix = "s",
         CurrentValue = settings.cooldown,
@@ -663,25 +861,187 @@ return function(Window, scriptInfo)
 
     CombatTab:CreateToggle({
         Name = "Auto Face Ball On Strike",
-        CurrentValue = settings.autoAimBall,
-        Flag = "RR_AutoAim",
+        CurrentValue = settings.autoFaceBall,
+        Flag = "RR_AutoFace",
         Callback = function(value)
-            settings.autoAimBall = value
+            settings.autoFaceBall = value
         end,
     })
 
-    CombatTab:CreateSection("Automation")
+    CombatTab:CreateSection("Smash & Jump System")
 
     CombatTab:CreateToggle({
-        Name = "Auto Serve (Instant Release)",
-        CurrentValue = settings.autoServe,
-        Flag = "RR_AutoServe",
+        Name = "Auto Smash (Airborne Spike)",
+        CurrentValue = settings.autoSmash,
+        Flag = "RR_AutoSmash",
         Callback = function(value)
-            settings.autoServe = value
+            settings.autoSmash = value
+        end,
+    })
+
+    CombatTab:CreateSlider({
+        Name = "Smash Min Height",
+        Range = {2.5, 8.0},
+        Increment = 0.5,
+        Suffix = " studs",
+        CurrentValue = settings.smashMinHeight,
+        Flag = "RR_SmashHeight",
+        Callback = function(value)
+            settings.smashMinHeight = value
+        end,
+    })
+
+    CombatTab:CreateToggle({
+        Name = "Auto Jump (High Ball Intercept)",
+        CurrentValue = settings.autoJump,
+        Flag = "RR_AutoJump",
+        Callback = function(value)
+            settings.autoJump = value
+        end,
+    })
+
+    CombatTab:CreateSlider({
+        Name = "Jump Height Threshold",
+        Range = {3.5, 10.0},
+        Increment = 0.5,
+        Suffix = " studs",
+        CurrentValue = settings.jumpHeightThreshold,
+        Flag = "RR_JumpHeight",
+        Callback = function(value)
+            settings.jumpHeightThreshold = value
+        end,
+    })
+
+    CombatTab:CreateSection("Set & Ability Automation")
+
+    CombatTab:CreateToggle({
+        Name = "Auto Set (Lob / E Key)",
+        CurrentValue = settings.autoSet,
+        Flag = "RR_AutoSet",
+        Callback = function(value)
+            settings.autoSet = value
+        end,
+    })
+
+    CombatTab:CreateDropdown({
+        Name = "Set Trigger Condition",
+        Options = {"Always", "Low Ball Only"},
+        CurrentOption = {settings.setMode},
+        MultipleOptions = false,
+        Callback = function(option)
+            settings.setMode = type(option) == "table" and option[1] or option
+        end,
+    })
+
+    CombatTab:CreateToggle({
+        Name = "Auto Hinari (Overheat Ability 1)",
+        CurrentValue = settings.autoHinari,
+        Flag = "RR_AutoHinari",
+        Callback = function(value)
+            settings.autoHinari = value
+        end,
+    })
+
+    CombatTab:CreateSlider({
+        Name = "Hinari Ability Cooldown",
+        Range = {1.5, 6.0},
+        Increment = 0.5,
+        Suffix = "s",
+        CurrentValue = settings.hinariCooldown,
+        Flag = "RR_HinariCD",
+        Callback = function(value)
+            settings.hinariCooldown = value
+        end,
+    })
+
+    CombatTab:CreateSection("Silent Aim")
+
+    CombatTab:CreateToggle({
+        Name = "Silent Aim (Smart Court Deflection)",
+        CurrentValue = settings.silentAim,
+        Flag = "RR_SilentAim",
+        Callback = function(value)
+            settings.silentAim = value
+        end,
+    })
+
+    CombatTab:CreateDropdown({
+        Name = "Silent Aim Placement",
+        Options = {"Opponent Far Corner", "Opponent Weak Side", "Court Baseline"},
+        CurrentOption = {settings.silentAimMode},
+        MultipleOptions = false,
+        Callback = function(option)
+            settings.silentAimMode = type(option) == "table" and option[1] or option
         end,
     })
 
     local MoveTab = Window:CreateTab("Movement", "gauge")
+
+    MoveTab:CreateSection("Dash System")
+
+    MoveTab:CreateToggle({
+        Name = "Right Click Binding for Dash",
+        CurrentValue = settings.rightClickDash,
+        Flag = "RR_RightClickDash",
+        Callback = function(value)
+            settings.rightClickDash = value
+        end,
+    })
+
+    MoveTab:CreateToggle({
+        Name = "Auto Dash (Intercept Distant Ball)",
+        CurrentValue = settings.autoDash,
+        Flag = "RR_AutoDash",
+        Callback = function(value)
+            settings.autoDash = value
+        end,
+    })
+
+    MoveTab:CreateSlider({
+        Name = "Auto Dash Min Distance",
+        Range = {15, 35},
+        Increment = 1,
+        Suffix = " studs",
+        CurrentValue = settings.dashMinDist,
+        Flag = "RR_DashMinDist",
+        Callback = function(value)
+            settings.dashMinDist = value
+        end,
+    })
+
+    MoveTab:CreateSlider({
+        Name = "Auto Dash Max Distance",
+        Range = {36, 80},
+        Increment = 2,
+        Suffix = " studs",
+        CurrentValue = settings.dashMaxDist,
+        Flag = "RR_DashMaxDist",
+        Callback = function(value)
+            settings.dashMaxDist = value
+        end,
+    })
+
+    MoveTab:CreateSlider({
+        Name = "Auto Dash Cooldown",
+        Range = {0.5, 3.0},
+        Increment = 0.1,
+        Suffix = "s",
+        CurrentValue = settings.dashCooldown,
+        Flag = "RR_DashCD",
+        Callback = function(value)
+            settings.dashCooldown = value
+        end,
+    })
+
+    MoveTab:CreateToggle({
+        Name = "Fast Dash (No Cooldown)",
+        CurrentValue = settings.fastDash,
+        Flag = "RR_FastDash",
+        Callback = function(value)
+            settings.fastDash = value
+        end,
+    })
+
     MoveTab:CreateSection("Mobility Tweaks")
 
     MoveTab:CreateToggle({
@@ -722,17 +1082,8 @@ return function(Window, scriptInfo)
         end,
     })
 
-    MoveTab:CreateToggle({
-        Name = "Fast Dash (No Cooldown)",
-        CurrentValue = settings.fastDash,
-        Flag = "RR_FastDash",
-        Callback = function(value)
-            settings.fastDash = value
-        end,
-    })
-
     local VisualTab = Window:CreateTab("Visuals", "eye")
-    VisualTab:CreateSection("Ball Visuals")
+    VisualTab:CreateSection("Ball & Aim Visuals")
 
     VisualTab:CreateToggle({
         Name = "Ball ESP (Dot, Speed & Distance)",
@@ -758,6 +1109,15 @@ return function(Window, scriptInfo)
         Flag = "RR_ReachCircle",
         Callback = function(value)
             settings.reachCircle = value
+        end,
+    })
+
+    VisualTab:CreateToggle({
+        Name = "Silent Aim Target Marker",
+        CurrentValue = settings.silentAimVisual,
+        Flag = "RR_SilentAimVisual",
+        Callback = function(value)
+            settings.silentAimVisual = value
         end,
     })
 
@@ -808,6 +1168,28 @@ return function(Window, scriptInfo)
         Flag = "RR_MaxDist",
         Callback = function(value)
             settings.maxDistance = value
+        end,
+    })
+
+    local AutomationTab = Window:CreateTab("Automation", "bot")
+    AutomationTab:CreateSection("Match & Serve")
+
+    AutomationTab:CreateToggle({
+        Name = "Auto Serve (Instant Release)",
+        CurrentValue = settings.autoServe,
+        Flag = "RR_AutoServe",
+        Callback = function(value)
+            settings.autoServe = value
+        end,
+    })
+
+    AutomationTab:CreateButton({
+        Name = "Reset Ball Tracker State",
+        Callback = function()
+            lastBallPos = nil
+            ballVelocity = Vector3.zero
+            cachedLBallClass = nil
+            currentAimTarget = nil
         end,
     })
 
@@ -864,6 +1246,6 @@ return function(Window, scriptInfo)
     }
 
     if type(Window.SortTabs) == "function" then
-        Window:SortTabs({"Overview", "Combat", "Movement", "Visuals", "Settings"})
+        Window:SortTabs({"Overview", "Combat", "Movement", "Visuals", "Automation", "Settings"})
     end
 end

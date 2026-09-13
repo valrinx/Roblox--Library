@@ -715,8 +715,8 @@ local SCRIPTS = {
         description = "Auto Parry (Proximity Strike) | Ball & Player ESP (Drawing API) | Speed & Mobility | Auto Serve",
         placeIds    = {134933804107672, 90906407195271, 78912788107663},
         gameIds     = {7883776681},
-        version     = "v1.0.0",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/racket_rivals.lua?v=vb-1.0.0",
+        version     = "v1.0.2",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/racket_rivals.lua?v=vb-1.0.2",
     },
 
     --[[
