@@ -863,14 +863,6 @@ return function(Window, scriptInfo)
         end
     }
 
-    local SettingsTab = (type(Window.GetTab) == "function" and Window:GetTab("Settings"))
-    if not SettingsTab and type(Window.CreateTab) == "function" then
-        SettingsTab = Window:CreateTab("Settings", "settings")
-    end
-    if SettingsTab and type(SettingsTab.InsertConfigSection) == "function" then
-        SettingsTab:InsertConfigSection("Right")
-    end
-
     if type(Window.SortTabs) == "function" then
         Window:SortTabs({"Overview", "Combat", "Movement", "Visuals", "Settings"})
     end
