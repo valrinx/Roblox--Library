@@ -33,9 +33,12 @@ return function(Window, scriptInfo)
         markerColor = Color3.fromRGB(0, 255, 170),
         ballColor = Color3.fromRGB(255, 215, 0),
         playerColor = Color3.fromRGB(85, 170, 255),
-        -- Hitbox Expander
+        -- Hitbox Expander & Dimensions
         hitboxExpander = true,
-        hitboxMultiplier = 3.5,
+        hitboxMultiplier = 1.0,
+        hitboxWidthScale = 0.85,
+        hitboxHeightScale = 1.0,
+        hitboxDepthScale = 1.0,
         hitboxVisualizer = true,
         -- Cooldown & Auto-Hit
         noCooldown = true,
@@ -112,29 +115,42 @@ return function(Window, scriptInfo)
         ClientHitbox = require(ReplicatedFirst.Controllers.GameController.Actions.Move.DoMove.ClientHitbox)
     end)
 
-    local originalHitboxSizes = {}
-    local originalPartSizes = {}
+    -- True Vanilla Base Sizes (hardcoded to prevent multiplier compounding)
+    local TRUE_BASE_HITBOXES = {
+        Set = Vector3.new(9, 8.905414581298828, 7.821842193603516),
+        BumpServe = Vector3.new(9, 4.91381311416626, 7.803236961364746),
+        JumpSet = Vector3.new(9, 8.905414581298828, 7.821842193603516),
+        Bump = Vector3.new(9, 8.905414581298828, 7.803236961364746),
+        Serve = Vector3.new(9, 7.90541410446167, 8.803236961364746),
+        Dive = Vector3.new(7, 7, 10),
+        Block = Vector3.new(6.5, 9.904999732971191, 6.052999973297119),
+        Spike = Vector3.new(7.5, 8.904999732971191, 6.4710001945495605),
+        SteelBlock = Vector3.new(7.5, 9.904999732971191, 6.052999973297119),
+    }
 
     local function applyHitboxSettings()
         if GameConfig then
             GameConfig._DebugHitboxes = settings.hitboxVisualizer
         end
 
-        local mult = settings.hitboxExpander and settings.hitboxMultiplier or 1.0
+        local scale = settings.hitboxExpander and (settings.hitboxMultiplier or 1.0) or 1.0
+        local wScale = settings.hitboxExpander and (settings.hitboxWidthScale or 1.0) or 1.0
+        local hScale = settings.hitboxExpander and (settings.hitboxHeightScale or 1.0) or 1.0
+        local dScale = settings.hitboxExpander and (settings.hitboxDepthScale or 1.0) or 1.0
 
         -- 1. Modify Asset Part templates in ReplicatedStorage
         pcall(function()
-            local assetRoots = {
-                ReplicatedStorage.Assets.HitboxesNew.Default.Assemblies,
-                ReplicatedStorage.Assets.HitboxesNew.BySpecial
-            }
-            for _, root in ipairs(assetRoots) do
-                for _, item in ipairs(root:GetDescendants()) do
-                    if item:IsA("Part") and item.Name == "Part" then
-                        if not originalPartSizes[item] then
-                            originalPartSizes[item] = item.Size
-                        end
-                        item.Size = originalPartSizes[item] * mult
+            local assemblies = ReplicatedStorage.Assets.HitboxesNew.Default.Assemblies
+            for name, baseSize in pairs(TRUE_BASE_HITBOXES) do
+                local folder = assemblies:FindFirstChild(name)
+                if folder then
+                    local part = folder:FindFirstChild("Part")
+                    if part and part:IsA("BasePart") then
+                        part.Size = Vector3.new(
+                            baseSize.X * scale * wScale,
+                            baseSize.Y * scale * hScale,
+                            baseSize.Z * scale * dScale
+                        )
                     end
                 end
             end
@@ -142,16 +158,16 @@ return function(Window, scriptInfo)
 
         -- 2. Modify cached data in HitboxTool
         if HitboxTool then
-            local moves = {"Spike", "Bump", "Set", "JumpSet", "Block", "SteelBlock", "Dive", "Serve", "BumpServe"}
-            for _, moveName in ipairs(moves) do
+            for moveName, baseSize in pairs(TRUE_BASE_HITBOXES) do
                 local ok, hitboxData = pcall(function()
                     return HitboxTool.get({ MoveId = moveName })
                 end)
-                if ok and hitboxData and hitboxData.Size then
-                    if not originalHitboxSizes[moveName] then
-                        originalHitboxSizes[moveName] = hitboxData.Size
-                    end
-                    hitboxData.Size = originalHitboxSizes[moveName] * mult
+                if ok and hitboxData then
+                    hitboxData.Size = Vector3.new(
+                        baseSize.X * scale * wScale,
+                        baseSize.Y * scale * hScale,
+                        baseSize.Z * scale * dScale
+                    )
                 end
             end
         end
@@ -752,14 +768,59 @@ return function(Window, scriptInfo)
     })
 
     CombatTab:CreateSlider({
-        Name = "Hitbox Multiplier",
-        Range = {1.0, 6.0},
-        Increment = 0.1,
+        Name = "Overall Scale (ขนาดรวม)",
+        Range = {0.3, 3.0},
+        Increment = 0.05,
         Suffix = "x",
         CurrentValue = settings.hitboxMultiplier,
         Flag = "VB_HitboxMultiplier_v4",
         Callback = function(value)
             settings.hitboxMultiplier = value
+            if settings.hitboxExpander then
+                applyHitboxSettings()
+            end
+        end,
+    })
+
+    CombatTab:CreateSlider({
+        Name = "Width Scale (ความกว้าง ซ้าย-ขวา)",
+        Range = {0.3, 2.5},
+        Increment = 0.05,
+        Suffix = "x",
+        CurrentValue = settings.hitboxWidthScale,
+        Flag = "VB_HitboxWidth_v4",
+        Callback = function(value)
+            settings.hitboxWidthScale = value
+            if settings.hitboxExpander then
+                applyHitboxSettings()
+            end
+        end,
+    })
+
+    CombatTab:CreateSlider({
+        Name = "Height Scale (ความสูง แนวดิ่ง)",
+        Range = {0.5, 2.5},
+        Increment = 0.05,
+        Suffix = "x",
+        CurrentValue = settings.hitboxHeightScale,
+        Flag = "VB_HitboxHeight_v4",
+        Callback = function(value)
+            settings.hitboxHeightScale = value
+            if settings.hitboxExpander then
+                applyHitboxSettings()
+            end
+        end,
+    })
+
+    CombatTab:CreateSlider({
+        Name = "Forward Reach (ระยะเอื้อม หน้า-หลัง)",
+        Range = {0.5, 2.5},
+        Increment = 0.05,
+        Suffix = "x",
+        CurrentValue = settings.hitboxDepthScale,
+        Flag = "VB_HitboxDepth_v4",
+        Callback = function(value)
+            settings.hitboxDepthScale = value
             if settings.hitboxExpander then
                 applyHitboxSettings()
             end
@@ -1085,17 +1146,22 @@ return function(Window, scriptInfo)
             if GameConfig then
                 GameConfig._DebugHitboxes = false
             end
-            for part, originalSize in pairs(originalPartSizes) do
-                if part and part.Parent then
-                    part.Size = originalSize
+            local assemblies = ReplicatedStorage.Assets.HitboxesNew.Default.Assemblies
+            for name, baseSize in pairs(TRUE_BASE_HITBOXES) do
+                local folder = assemblies:FindFirstChild(name)
+                if folder then
+                    local part = folder:FindFirstChild("Part")
+                    if part and part:IsA("BasePart") then
+                        part.Size = baseSize
+                    end
                 end
-            end
-            for moveName, originalSize in pairs(originalHitboxSizes) do
-                local ok, hitboxData = pcall(function()
-                    return HitboxTool.get({ MoveId = moveName })
-                end)
-                if ok and hitboxData and hitboxData.Size then
-                    hitboxData.Size = originalSize
+                if HitboxTool then
+                    local ok, hitboxData = pcall(function()
+                        return HitboxTool.get({ MoveId = name })
+                    end)
+                    if ok and hitboxData then
+                        hitboxData.Size = baseSize
+                    end
                 end
             end
             if ClientHitbox and ClientHitbox._cachedHitbox then
