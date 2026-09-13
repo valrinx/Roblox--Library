@@ -96,7 +96,7 @@ return function(Window, runtimeInfo)
         AutoReturnBase = true,
         AutoTreadPool = false,
         IdleTreadPool = true,
-        AutoEquipBest = false,
+        AutoEquipBest = true,
 
         -- Guard Defense Suite
         GuardSafeCorridor = true,
@@ -1129,7 +1129,7 @@ return function(Window, runtimeInfo)
     local function runAutoEquipBest()
         if not State.AutoEquipBest or isDestroyed then return end
         local now = os.clock()
-        if now - lastBestFishCheck >= 10 then
+        if now - lastBestFishCheck >= 5 then
             lastBestFishCheck = now
             pcall(function()
                 local equipRemote = ReplicatedStorage.FishSystem:FindFirstChild("EquipBestFish")
@@ -1139,6 +1139,25 @@ return function(Window, runtimeInfo)
             end)
         end
     end
+
+    -- Instant hook: Whenever any fish hatches, auto equip best immediately
+    pcall(function()
+        local fishHatchReward = ReplicatedStorage:FindFirstChild("FishSystem") and ReplicatedStorage.FishSystem:FindFirstChild("FishHatchReward")
+        if fishHatchReward and fishHatchReward:IsA("RemoteEvent") then
+            connect(fishHatchReward.OnClientEvent, function()
+                if State.AutoEquipBest and not isDestroyed then
+                    task.delay(0.5, function()
+                        pcall(function()
+                            local equipRemote = ReplicatedStorage.FishSystem:FindFirstChild("EquipBestFish")
+                            if equipRemote then
+                                equipRemote:FireServer()
+                            end
+                        end)
+                    end)
+                end
+            end)
+        end
+    end)
 
     ----------------------------------------------------------------
     --  MOVEMENT & SPEED HOOK
@@ -1383,8 +1402,8 @@ return function(Window, runtimeInfo)
 
     FarmTab:CreateSection("Automations")
     FarmTab:CreateToggle({
-        Name = "Auto Equip Best Fish (Cash/s)",
-        CurrentValue = false,
+        Name = "Auto Equip Best Fish",
+        CurrentValue = true,
         Flag = "SFE_AutoEquipBest",
         Callback = function(v) State.AutoEquipBest = v end,
     })
