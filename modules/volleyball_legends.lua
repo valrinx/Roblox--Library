@@ -44,6 +44,13 @@ return function(Window, scriptInfo)
         autoSpike = true,
         autoBump = true,
         autoDive = true,
+        -- Power & Mobility
+        alwaysMaxPower = true,
+        customPowerValue = 1.0,
+        superDive = true,
+        diveSpeedMultiplier = 2.0,
+        speedBoost = false,
+        speedMultiplier = 1.3,
     }
 
     local function connect(signal, callback)
@@ -171,6 +178,56 @@ return function(Window, scriptInfo)
         else
             if originalIsOnCooldown then Orchestrator.isOnCooldown = originalIsOnCooldown end
             if originalApplyCooldown then Orchestrator._applyCooldown = originalApplyCooldown end
+        end
+    end
+
+    -- Power & Impact References
+    local DoMoveGame = nil
+    pcall(function()
+        DoMoveGame = require(ReplicatedFirst.Controllers.GameController.Actions.Move.DoMove.Game)
+    end)
+
+    local originalGetPowerAndReset = nil
+    if DoMoveGame then
+        originalGetPowerAndReset = DoMoveGame.getPowerAndReset
+    end
+
+    local originalPlayerAttributes = {
+        Multiplier_DiveSpeed = localPlayer:GetAttribute("Multiplier_DiveSpeed"),
+        Multiplier_Speed = localPlayer:GetAttribute("Multiplier_Speed"),
+    }
+
+    local function applyPowerSettings()
+        if not DoMoveGame then return end
+        if settings.alwaysMaxPower then
+            DoMoveGame.getPowerAndReset = function(...)
+                return settings.customPowerValue or 1.0
+            end
+        else
+            if originalGetPowerAndReset then
+                DoMoveGame.getPowerAndReset = originalGetPowerAndReset
+            end
+        end
+    end
+
+    local function applyMobilitySettings()
+        if not localPlayer then return end
+        if settings.superDive then
+            local base = originalPlayerAttributes.Multiplier_DiveSpeed or 1.4
+            localPlayer:SetAttribute("Multiplier_DiveSpeed", base * settings.diveSpeedMultiplier)
+        else
+            if originalPlayerAttributes.Multiplier_DiveSpeed then
+                localPlayer:SetAttribute("Multiplier_DiveSpeed", originalPlayerAttributes.Multiplier_DiveSpeed)
+            end
+        end
+
+        if settings.speedBoost then
+            local base = originalPlayerAttributes.Multiplier_Speed or 1.1
+            localPlayer:SetAttribute("Multiplier_Speed", base * settings.speedMultiplier)
+        else
+            if originalPlayerAttributes.Multiplier_Speed then
+                localPlayer:SetAttribute("Multiplier_Speed", originalPlayerAttributes.Multiplier_Speed)
+            end
         end
     end
 
@@ -657,9 +714,88 @@ return function(Window, scriptInfo)
         end,
     })
 
+    CombatTab:CreateSection("Power & Impact")
+
+    CombatTab:CreateToggle({
+        Name = "Always 100% Max Power",
+        CurrentValue = settings.alwaysMaxPower,
+        Flag = "VB_MaxPower_v4",
+        Callback = function(value)
+            settings.alwaysMaxPower = value
+            applyPowerSettings()
+        end,
+    })
+
+    CombatTab:CreateSlider({
+        Name = "Power Scale",
+        Range = {0.5, 3.0},
+        Increment = 0.1,
+        Suffix = "x",
+        CurrentValue = settings.customPowerValue,
+        Flag = "VB_PowerScale_v4",
+        Callback = function(value)
+            settings.customPowerValue = value
+            applyPowerSettings()
+        end,
+    })
+
+    CombatTab:CreateSection("Mobility Booster")
+
+    CombatTab:CreateToggle({
+        Name = "Super Dive (Long Range)",
+        CurrentValue = settings.superDive,
+        Flag = "VB_SuperDive_v4",
+        Callback = function(value)
+            settings.superDive = value
+            applyMobilitySettings()
+        end,
+    })
+
+    CombatTab:CreateSlider({
+        Name = "Dive Speed Multiplier",
+        Range = {1.0, 4.0},
+        Increment = 0.1,
+        Suffix = "x",
+        CurrentValue = settings.diveSpeedMultiplier,
+        Flag = "VB_DiveSpeed_v4",
+        Callback = function(value)
+            settings.diveSpeedMultiplier = value
+            if settings.superDive then
+                applyMobilitySettings()
+            end
+        end,
+    })
+
+    CombatTab:CreateToggle({
+        Name = "Movement Speed Booster",
+        CurrentValue = settings.speedBoost,
+        Flag = "VB_SpeedBoost_v4",
+        Callback = function(value)
+            settings.speedBoost = value
+            applyMobilitySettings()
+        end,
+    })
+
+    CombatTab:CreateSlider({
+        Name = "Speed Multiplier",
+        Range = {1.0, 3.0},
+        Increment = 0.1,
+        Suffix = "x",
+        CurrentValue = settings.speedMultiplier,
+        Flag = "VB_SpeedMult_v4",
+        Callback = function(value)
+            settings.speedMultiplier = value
+            if settings.speedBoost then
+                applyMobilitySettings()
+            end
+        end,
+    })
+
     -- Initial apply
     applyHitboxSettings()
     applyCooldownSettings()
+    applyPowerSettings()
+    applyMobilitySettings()
 
     -- ============================================================
     --   CLEANUP
@@ -667,6 +803,21 @@ return function(Window, scriptInfo)
     local function destroyScript()
         if not running then return end
         running = false
+
+        -- Restore power & mobility
+        pcall(function()
+            if DoMoveGame and originalGetPowerAndReset then
+                DoMoveGame.getPowerAndReset = originalGetPowerAndReset
+            end
+            if localPlayer then
+                if originalPlayerAttributes.Multiplier_DiveSpeed then
+                    localPlayer:SetAttribute("Multiplier_DiveSpeed", originalPlayerAttributes.Multiplier_DiveSpeed)
+                end
+                if originalPlayerAttributes.Multiplier_Speed then
+                    localPlayer:SetAttribute("Multiplier_Speed", originalPlayerAttributes.Multiplier_Speed)
+                end
+            end
+        end)
 
         -- Restore cooldown handlers
         pcall(function()
