@@ -297,6 +297,14 @@ local camera    = game.Workspace.CurrentCamera
 
 local SCRIPTS = {
     {
+        name        = "Anime Battlegrounds",
+        description = "Smooth Aimlock | Extended Reach | 100% Drawing ESP | Moveset Radar | Tactical TP",
+        placeIds    = {105692919293481, 108567435288296},
+        gameIds     = {10399136326},
+        version     = "v1.1.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/anime_battlegrounds.lua",
+    },
+    {
         name        = "Cordon",
         description = "Chams & Visuals | Player/Bandit/Mutant/Loot ESP | Infinite Stamina | Speed | No Recoil",
         placeIds    = {112318794071351},
