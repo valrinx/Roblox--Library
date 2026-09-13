@@ -711,12 +711,12 @@ local SCRIPTS = {
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/guess_the_person.lua?v=gtp-1.0.0",
     },
     {
-        name        = "Steal Fish Eggs",
-        description = "Auto Steal Best Eggs | Subterranean Flight (ดำดิน) | Best Egg Buff & Size | Ultra Speed | ESP",
-        placeIds    = {99183404085821},
-        gameIds     = {10718240577},
-        version     = "v1.9.0",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/steal_fish_eggs.lua",
+        name        = "Racket Rivals",
+        description = "Auto Parry (Proximity Strike) | Ball & Player ESP (Drawing API) | Speed & Mobility | Auto Serve",
+        placeIds    = {134933804107672, 90906407195271},
+        gameIds     = {7883776681},
+        version     = "v1.0.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/racket_rivals.lua?v=vb-1.0.0",
     },
 
     --[[
