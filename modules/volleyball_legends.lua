@@ -57,6 +57,12 @@ return function(Window, scriptInfo)
         airDoubleJump = true,
         antiStun = true,
         bypassBackRank = true,
+        -- Auto-Reposition & Assists
+        autoReposition = false,
+        autoRepositionDist = 28,
+        autoFaceBall = false,
+        -- Gacha & Misc
+        instantSpinSkip = true,
     }
 
     local function connect(signal, callback)
@@ -296,6 +302,37 @@ return function(Window, scriptInfo)
                 if originalIsStunnedGet then
                     GameControllerMod.IsStunned.get = originalIsStunnedGet
                 end
+            end
+        end
+    end
+
+    -- Gacha & Spin Skip References
+    local AbilityController = nil
+    local StyleController = nil
+    pcall(function()
+        AbilityController = require(ReplicatedFirst.Controllers.AbilityController)
+    end)
+    pcall(function()
+        StyleController = require(ReplicatedFirst.Controllers.StyleController)
+    end)
+
+    local origAbilityCanSkip = AbilityController and AbilityController.CanSkip and AbilityController.CanSkip.get or nil
+    local origStyleCanSkip = StyleController and StyleController.CanSkip and StyleController.CanSkip.get or nil
+
+    local function applyGachaSettings()
+        if settings.instantSpinSkip then
+            if AbilityController and AbilityController.CanSkip then
+                AbilityController.CanSkip.get = function(...) return true end
+            end
+            if StyleController and StyleController.CanSkip then
+                StyleController.CanSkip.get = function(...) return true end
+            end
+        else
+            if AbilityController and AbilityController.CanSkip and origAbilityCanSkip then
+                AbilityController.CanSkip.get = origAbilityCanSkip
+            end
+            if StyleController and StyleController.CanSkip and origStyleCanSkip then
+                StyleController.CanSkip.get = origStyleCanSkip
             end
         end
     end
@@ -561,6 +598,26 @@ return function(Window, scriptInfo)
                     landingText.Text = string.format("🎯 <b>Landing Spot</b>\n<font size='11' color='#00FFAA'>[%.2fs | %d studs]</font>", t, distToTarget)
                 else
                     landingBb.Enabled = false
+                end
+
+                -- Auto-Reposition & Auto-Face Assist
+                if myHum and myHum.Health > 0 and myRoot then
+                    local delta = Vector3.new(landingPos.X - myPos.X, 0, landingPos.Z - myPos.Z)
+                    local hDist = delta.Magnitude
+
+                    if settings.autoReposition and hDist > 2.2 and hDist <= settings.autoRepositionDist then
+                        if myHum.FloorMaterial ~= Enum.Material.Air then
+                            myHum:Move(delta.Unit, false)
+                        end
+                    end
+
+                    if settings.autoFaceBall and hDist <= 30 then
+                        local lookTarget = Vector3.new(ballPos.X, myRoot.Position.Y, ballPos.Z)
+                        if (lookTarget - myRoot.Position).Magnitude > 0.5 then
+                            local targetCF = CFrame.lookAt(myRoot.Position, lookTarget)
+                            myRoot.CFrame = myRoot.CFrame:Lerp(targetCF, 0.2)
+                        end
+                    end
                 end
             else
                 landingCylinder.CFrame = CFrame.new(0, -500, 0) * CFrame.Angles(0, 0, math.rad(90))
@@ -917,12 +974,57 @@ return function(Window, scriptInfo)
         end,
     })
 
+    CombatTab:CreateSection("Ball Magnet & Reposition Assist")
+
+    CombatTab:CreateToggle({
+        Name = "Auto-Reposition (Walk to Ball)",
+        CurrentValue = settings.autoReposition,
+        Flag = "VB_AutoReposition_v4",
+        Callback = function(value)
+            settings.autoReposition = value
+        end,
+    })
+
+    CombatTab:CreateSlider({
+        Name = "Reposition Distance",
+        Range = {10, 45},
+        Increment = 1,
+        Suffix = " studs",
+        CurrentValue = settings.autoRepositionDist,
+        Flag = "VB_AutoRepoDist_v4",
+        Callback = function(value)
+            settings.autoRepositionDist = value
+        end,
+    })
+
+    CombatTab:CreateToggle({
+        Name = "Auto Face Ball (Aim Assist)",
+        CurrentValue = settings.autoFaceBall,
+        Flag = "VB_AutoFaceBall_v4",
+        Callback = function(value)
+            settings.autoFaceBall = value
+        end,
+    })
+
+    CombatTab:CreateSection("Gacha & Spins")
+
+    CombatTab:CreateToggle({
+        Name = "Instant Spin / Skip Gacha Cutscene",
+        CurrentValue = settings.instantSpinSkip,
+        Flag = "VB_InstantSpinSkip_v4",
+        Callback = function(value)
+            settings.instantSpinSkip = value
+            applyGachaSettings()
+        end,
+    })
+
     -- Initial apply
     applyHitboxSettings()
     applyCooldownSettings()
     applyPowerSettings()
     applyMobilitySettings()
     applyAerialSettings()
+    applyGachaSettings()
 
     -- ============================================================
     --   CLEANUP
@@ -930,6 +1032,16 @@ return function(Window, scriptInfo)
     local function destroyScript()
         if not running then return end
         running = false
+
+        -- Restore gacha skip
+        pcall(function()
+            if AbilityController and AbilityController.CanSkip and origAbilityCanSkip then
+                AbilityController.CanSkip.get = origAbilityCanSkip
+            end
+            if StyleController and StyleController.CanSkip and origStyleCanSkip then
+                StyleController.CanSkip.get = origStyleCanSkip
+            end
+        end)
 
         -- Restore aerial & recovery
         pcall(function()
