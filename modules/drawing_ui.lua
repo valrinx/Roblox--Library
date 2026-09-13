@@ -1669,16 +1669,30 @@ function TabMethods:InsertConfigSection(side)
         end,
     })
 
-    -- Section 3: Hub Lifecycle (Clean Teardown)
-    local lifeSec = self:CreateSection("Lifecycle")
-    lifeSec:CreateButton({
-        Name = "Unload / Destroy Hub",
-        Callback = function()
-            if win and type(win.Destroy) == "function" then
-                win:Destroy()
+    -- Section 3: Hub Lifecycle (Clean Teardown - only if not already added)
+    local hasDestroy = false
+    for _, s in ipairs(self.sections) do
+        for _, it in ipairs(s.items) do
+            local nm = (it.name or ""):lower()
+            if nm:find("destroy") or nm:find("unload") then
+                hasDestroy = true
+                break
             end
-        end,
-    })
+        end
+        if hasDestroy then break end
+    end
+
+    if not hasDestroy then
+        local lifeSec = self:CreateSection("Lifecycle")
+        lifeSec:CreateButton({
+            Name = "Unload / Destroy Hub",
+            Callback = function()
+                if win and type(win.Destroy) == "function" then
+                    win:Destroy()
+                end
+            end,
+        })
+    end
 end
 
 function TabMethods:Select()
@@ -1979,12 +1993,35 @@ end
 function SectionMethods:CreateButton(cfg)
     cfg = cfg or {}
     local tab = self.tab
+    local btnName = sanitizeText(tostring(cfg.Name or "Button"))
+
+    -- Prevent duplicate Destroy Hub / Unload buttons within the same tab
+    local lowerName = btnName:lower()
+    if lowerName:find("destroy hub") or lowerName:find("unload / destroy") then
+        if tab and tab.sections then
+            for _, sec in ipairs(tab.sections) do
+                for _, it in ipairs(sec.items) do
+                    local itName = (it.name or ""):lower()
+                    if itName:find("destroy hub") or itName:find("unload / destroy") then
+                        if cfg.Callback then
+                            local oldCb = it.callback
+                            it.callback = function()
+                                pcall(oldCb)
+                                pcall(cfg.Callback)
+                            end
+                        end
+                        return it
+                    end
+                end
+            end
+        end
+    end
+
     local item = {
         type = "button",
-        name = sanitizeText(tostring(cfg.Name or "Button")),
+        name = btnName,
         callback = cfg.Callback or function() end,
         hoverBg = safeDrawing("Square"),
-        innerDivider = safeDrawing("Line"),
         buttonCard = createRoundedCard(5),
         label = createBoldText(6, true),
     }
