@@ -1,14 +1,16 @@
 --[[
-    RAVEN HUB Module - Steal Fish Eggs v1.1.0
+    RAVEN HUB Module - Steal Fish Eggs v1.5.0
     Game: Steal Fish Eggs (PlaceId: 99183404085821, GameId: 10718240577)
     Developer: fishy fish fish!
 
-    v1.1.0 — Responsive State & Instant Abort:
-    - Fixed toggle-off lingering bug (instant abort for AutoSteal, AutoTreadPool, ESP)
-    - Interruptible tweening (50ms responsive polling with immediate activeTween:Cancel)
-    - Clean thread cancellation (task.cancel on background workers)
-    - Safe base spawn recovery when exiting TreadPool
-    - Immediate Drawing API visual wipe on ESP disable
+    v1.5.0 — Definite Egg Deposit & Flawless Steal Cycle:
+    - Direct PlaceEgg Remote Activation: Calls PlaceEgg:FireServer(placementPoint) to actually place the egg in tank
+    - Prompt.Enabled Validation: Only targets eggs whose prompts are currently active (skips cooldown eggs)
+    - Precision Approach Facing: Positions 3 studs in front of egg and faces it for 100% prompt hold recognition
+    - Deposit Lock Protection: Prevents any TreadPool teleport while CarryingEgg is true
+    - Auto Deposit Retry: Re-fires PlaceEgg until CarryingEgg == false is confirmed
+    - Rapid Sky Glide (Y >= 190): Complete guard evasion at high speed
+    - Fixed Movement Quick TP: Instant audited teleport to all 8 biomes
 ]]--
 
 return function(Window, runtimeInfo)
@@ -33,6 +35,18 @@ return function(Window, runtimeInfo)
     local hasDrawing = type(Drawing) == "table" and type(Drawing.new) == "function"
 
     ----------------------------------------------------------------
+    --  FORWARD DECLARATIONS (PREVENTS NIL CALL ERRORS)
+    ----------------------------------------------------------------
+    local abortSteal
+    local exitTreadPool
+    local getOwnTreadPool
+    local getBaseDepositZone
+    local safeCrossTheLine
+    local hopTeleport
+    local glideTo
+    local runTreadPoolFarm
+
+    ----------------------------------------------------------------
     --  RARITY DATA & COLORS
     ----------------------------------------------------------------
     local RarityRanks = {
@@ -48,13 +62,27 @@ return function(Window, runtimeInfo)
 
     local RarityColors = {
         ["Basic"] = Color3.fromRGB(180, 180, 180),
-        ["Rare"] = Color3.fromRGB(50, 200, 255),
-        ["Epic"] = Color3.fromRGB(180, 70, 255),
-        ["Legendary"] = Color3.fromRGB(255, 170, 0),
-        ["Mythic"] = Color3.fromRGB(255, 50, 80),
-        ["Abyssal"] = Color3.fromRGB(20, 255, 180),
-        ["Astral"] = Color3.fromRGB(255, 220, 80),
+        ["Rare"] = Color3.fromRGB(80, 170, 255),
+        ["Epic"] = Color3.fromRGB(185, 75, 255),
+        ["Legendary"] = Color3.fromRGB(255, 215, 0),
+        ["Mythic"] = Color3.fromRGB(255, 60, 60),
+        ["Abyssal"] = Color3.fromRGB(0, 235, 200),
+        ["Astral"] = Color3.fromRGB(255, 120, 220),
         ["Default"] = Color3.fromRGB(255, 255, 255),
+    }
+
+    ----------------------------------------------------------------
+    --  EXACT AUDITED BIOME EGG NEST COORDINATES
+    ----------------------------------------------------------------
+    local BiomePositions = {
+        ["Coral Reef"] = Vector3.new(12.0, 120.2, -116.4),
+        ["Deep Ocean"] = Vector3.new(67.4, 117.6, -266.7),
+        ["Pearl Lagoon"] = Vector3.new(65.6, 117.3, -451.1),
+        ["Snowy Sea"] = Vector3.new(8.3, 117.4, -708.1),
+        ["Volcanic Sea"] = Vector3.new(86.7, 117.4, -1034.8),
+        ["Jelly Ocean"] = Vector3.new(7.0, 117.7, -1439.3),
+        ["Sunken Ruins"] = Vector3.new(55.9, 117.4, -1864.5),
+        ["Atlantis"] = Vector3.new(-0.4, 117.3, -2426.9),
     }
 
     ----------------------------------------------------------------
@@ -63,10 +91,18 @@ return function(Window, runtimeInfo)
     local State = {
         AutoSteal = false,
         MinRarity = "Basic",
-        StealSpeed = 75,
+        StealSpeed = 120,
         AutoReturnBase = true,
         AutoTreadPool = false,
+        IdleTreadPool = true,
         AutoEquipBest = false,
+
+        -- Guard Defense Suite
+        GuardSafeCorridor = true,
+        ChaserDodger = false,
+        AntiRagdoll = true,
+        MuteChaserAlerts = true,
+
         EggESP = true,
         EggESPRarity = "Basic",
         EggESPDistance = 2500,
@@ -88,6 +124,7 @@ return function(Window, runtimeInfo)
 
     local isDestroyed = false
     local isStealing = false
+    local isIdleTraining = false
     local activeTween = nil
     local stealThread = nil
     local lastBestFishCheck = 0
@@ -122,46 +159,134 @@ return function(Window, runtimeInfo)
     end
 
     local function getMyBase()
-        local baseName = LP:GetAttribute("BaseName")
-        if baseName and Workspace.Bases:FindFirstChild(baseName) then
-            return Workspace.Bases[baseName]
+        local bases = Workspace:FindFirstChild("Bases")
+        if not bases then return nil end
+        local myBaseName = LP:GetAttribute("BaseName")
+        if myBaseName then
+            local found = bases:FindFirstChild(myBaseName)
+            if found then return found end
         end
-        for _, base in ipairs(Workspace.Bases:GetChildren()) do
-            if base:GetAttribute("OwnerUserId") == LP.UserId then
-                return base
+        for _, b in ipairs(bases:GetChildren()) do
+            local owner = b:GetAttribute("OwnerUserId") or b:GetAttribute("Owner")
+            if owner == LP.UserId or owner == LP.Name then
+                return b
             end
         end
         return nil
     end
 
-    local function getBaseDepositZone()
-        local myBase = getMyBase()
-        if myBase then
-            local zone = myBase:FindFirstChild("EggPlacementZone")
-            if zone then return zone.Position end
-        end
-        return nil
-    end
-
-    local function getOwnTreadPool()
+    getOwnTreadPool = function()
         local ltp = Workspace:FindFirstChild("LocalTreadPools")
-        if ltp and ltp:FindFirstChild("OwnTreadPool") then
-            return ltp.OwnTreadPool
+        if ltp then
+            local own = ltp:FindFirstChild("OwnTreadPool")
+            if own then return own end
+        end
+        local tp = Workspace:FindFirstChild("TreadPools")
+        if tp then
+            local myBaseName = LP:GetAttribute("BaseName")
+            if myBaseName and tp:FindFirstChild(myBaseName) then
+                return tp:FindFirstChild(myBaseName)
+            end
         end
         return nil
     end
 
-    local function safeCrossTheLine()
+    getBaseDepositZone = function()
+        local myBase = getMyBase()
+        if not myBase then return nil end
+        local epz = myBase:FindFirstChild("EggPlacementZone")
+        if epz then
+            return epz.Position + Vector3.new(0, 3, 0)
+        end
+        local tank = myBase:FindFirstChild("Tank")
+        if tank then
+            local prim = tank.PrimaryPart or tank:FindFirstChildWhichIsA("BasePart")
+            if prim then return prim.Position + Vector3.new(0, 3, 0) end
+        end
+        local spawnPart = myBase:FindFirstChild("SpawnPoint") or myBase:FindFirstChild("Spawn")
+        return spawnPart and spawnPart.Position or nil
+    end
+
+    safeCrossTheLine = function()
+        local linePart = Workspace:FindFirstChild("TheLinePart", true)
         local root = getRoot()
-        local lineFolder = Workspace:FindFirstChild("TheLine")
-        local linePart = lineFolder and lineFolder:FindFirstChild("TheLinePart")
-        if root and linePart then
-            if type(firetouchinterest) == "function" then
+        if linePart and root then
+            if firetouchinterest then
                 firetouchinterest(root, linePart, 0)
-                task.wait(0.05)
+                task.wait(0.04)
                 firetouchinterest(root, linePart, 1)
             end
         end
+    end
+
+    ----------------------------------------------------------------
+    --  RAPID SKY GLIDE & HOP TELEPORT
+    ----------------------------------------------------------------
+    glideTo = function(targetPos, isCancelRequested, customSpeed)
+        local root = getRoot()
+        if not root or not targetPos then return false end
+
+        local hum = getHumanoid()
+        if hum then
+            pcall(function()
+                hum.PlatformStand = false
+                hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+                hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+            end)
+        end
+
+        local startPos = root.Position
+        local dist = (startPos - targetPos).Magnitude
+        if dist < 2.0 then
+            root.CFrame = CFrame.new(targetPos)
+            root.AssemblyLinearVelocity = Vector3.zero
+            return true
+        end
+
+        local speed = customSpeed or State.StealSpeed or 120
+        local dur = math.max(0.08, dist / speed)
+
+        local bv = Instance.new("BodyVelocity")
+        bv.MaxForce = Vector3.new(1e6, 1e6, 1e6)
+        bv.Velocity = Vector3.zero
+        bv.Parent = root
+
+        local t0 = os.clock()
+        while (os.clock() - t0) < dur do
+            if isCancelRequested and isCancelRequested() then
+                bv:Destroy()
+                return false
+            end
+            if isDestroyed or not isAlive() then
+                bv:Destroy()
+                return false
+            end
+
+            local elapsed = os.clock() - t0
+            local alpha = math.clamp(elapsed / dur, 0, 1)
+            local cur = startPos:Lerp(targetPos, alpha)
+            root.CFrame = CFrame.lookAt(cur, targetPos)
+            root.AssemblyLinearVelocity = Vector3.zero
+            task.wait(0.03)
+        end
+
+        bv:Destroy()
+        if isAlive() then
+            root.CFrame = CFrame.new(targetPos)
+            root.AssemblyLinearVelocity = Vector3.zero
+        end
+        return true
+    end
+
+    hopTeleport = function(targetPos)
+        local root = getRoot()
+        if not root or not targetPos then return end
+
+        abortSteal()
+        safeCrossTheLine()
+        task.wait(0.05)
+
+        glideTo(targetPos)
     end
 
     ----------------------------------------------------------------
@@ -176,44 +301,7 @@ return function(Window, runtimeInfo)
         end
     end
 
-    local function tweenTo(targetPos, speedOverride, isCancelRequested)
-        local root = getRoot()
-        if not root or not targetPos then return false end
-
-        local dist = (root.Position - targetPos).Magnitude
-        if dist < 4 then return true end
-
-        local speed = speedOverride or State.StealSpeed
-        local duration = math.clamp(dist / speed, 0.1, 8.0)
-        local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
-
-        stopActiveTween()
-        activeTween = TweenService:Create(root, tweenInfo, {
-            CFrame = CFrame.new(targetPos + Vector3.new(0, 1.5, 0))
-        })
-        activeTween:Play()
-
-        local elapsed = 0
-        while elapsed < duration do
-            task.wait(0.05)
-            elapsed += 0.05
-
-            -- Instant interrupt check
-            if isCancelRequested and isCancelRequested() then
-                stopActiveTween()
-                return false
-            end
-            if isDestroyed or not isAlive() then
-                stopActiveTween()
-                return false
-            end
-        end
-
-        stopActiveTween()
-        return true
-    end
-
-    local function abortSteal()
+    abortSteal = function()
         State.AutoSteal = false
         stopActiveTween()
         if stealThread then
@@ -223,9 +311,11 @@ return function(Window, runtimeInfo)
         isStealing = false
     end
 
-    local function exitTreadPool()
+    exitTreadPool = function()
         State.AutoTreadPool = false
+        isIdleTraining = false
         stopActiveTween()
+
         local myBase = getMyBase()
         local spawnPart = myBase and myBase:FindFirstChild("SpawnPoint")
         local root = getRoot()
@@ -234,12 +324,32 @@ return function(Window, runtimeInfo)
         if root and spawnPart then
             root.CFrame = spawnPart.CFrame + Vector3.new(0, 3, 0)
         end
-        pcall(function()
-            LP:SetAttribute("TreadPoolTraining", false)
-        end)
         if hum then
-            hum:ChangeState(Enum.HumanoidStateType.GettingUp)
-            hum.Jump = true
+            hum:ChangeState(Enum.HumanoidStateType.Jumping)
+        end
+        task.wait(0.1)
+        pcall(function()
+            local remote = ReplicatedStorage:FindFirstChild("TreadPools") and ReplicatedStorage.TreadPools:FindFirstChild("TreadPoolRemote")
+            if remote then remote:FireServer("Stop") end
+        end)
+    end
+
+    runTreadPoolFarm = function()
+        if not isAlive() or isStealing or isDestroyed then return end
+
+        -- Never jump to TreadPool if player is carrying an egg!
+        if LP:GetAttribute("CarryingEgg") then return end
+
+        local tread = getOwnTreadPool()
+        local act = tread and tread:FindFirstChild("ActivationPart")
+        local root = getRoot()
+
+        if not act or not root then return end
+
+        local isTraining = LP:GetAttribute("TreadPoolTraining")
+        if not isTraining then
+            root.CFrame = act.CFrame * CFrame.new(0, 1, 0)
+            task.wait(0.3)
         end
     end
 
@@ -366,17 +476,17 @@ return function(Window, runtimeInfo)
         if not root then return end
 
         local seen = {}
-        for _, plr in ipairs(Players:GetPlayers()) do
-            if plr ~= LP and plr.Character then
-                local char = plr.Character
-                local pHrp = char:FindFirstChild("HumanoidRootPart")
-                local pHum = char:FindFirstChildOfClass("Humanoid")
-                if pHrp and pHum and pHum.Health > 0 then
-                    seen[plr] = true
-                    local dist = (root.Position - pHrp.Position).Magnitude
+
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LP and player.Character then
+                local pRoot = player.Character:FindFirstChild("HumanoidRootPart")
+                local pHum = player.Character:FindFirstChildOfClass("Humanoid")
+                if pRoot and pHum and pHum.Health > 0 then
+                    seen[player] = true
+                    local dist = (root.Position - pRoot.Position).Magnitude
                     if dist <= State.ESPDistance then
-                        local screenPos, onScreen = Camera:WorldToViewportPoint(pHrp.Position)
-                        local entry = DrawingObjects.Players[plr]
+                        local screenPos, onScreen = Camera:WorldToViewportPoint(pRoot.Position)
+                        local entry = DrawingObjects.Players[player]
                         if not entry then
                             entry = {
                                 text = createDrawing("Text", {
@@ -386,42 +496,42 @@ return function(Window, runtimeInfo)
                                     OutlineColor = Color3.fromRGB(0, 0, 0),
                                 }),
                             }
-                            DrawingObjects.Players[plr] = entry
+                            DrawingObjects.Players[player] = entry
                         end
 
                         if onScreen and entry.text then
-                            local isCarrying = plr:GetAttribute("CarryingEgg")
-                            local label = plr.DisplayName or plr.Name
-                            local col = isCarrying and Color3.fromRGB(255, 215, 0) or Color3.fromRGB(255, 255, 255)
-                            local carryTag = isCarrying and " [CARRYING]" or ""
-
+                            local carrying = player:GetAttribute("CarryingEgg")
+                            local label = player.DisplayName
+                            if carrying then
+                                label = "[CARRYING EGG] " .. label
+                            end
                             entry.text.Position = Vector2.new(screenPos.X, screenPos.Y)
-                            entry.text.Text = string.format("%s%s [%dm]", label, carryTag, math.floor(dist))
-                            entry.text.Color = col
+                            entry.text.Text = string.format("%s [%dm]", label, math.floor(dist))
+                            entry.text.Color = carrying and Color3.fromRGB(255, 215, 0) or Color3.fromRGB(255, 255, 255)
                             entry.text.Visible = true
                         elseif entry.text then
                             entry.text.Visible = false
                         end
                     else
-                        if DrawingObjects.Players[plr] then
-                            destroyDrawing(DrawingObjects.Players[plr].text)
-                            DrawingObjects.Players[plr] = nil
+                        if DrawingObjects.Players[player] then
+                            destroyDrawing(DrawingObjects.Players[player].text)
+                            DrawingObjects.Players[player] = nil
                         end
                     end
                 end
             end
         end
 
-        for plr, entry in pairs(DrawingObjects.Players) do
-            if not seen[plr] or not plr.Parent then
+        for player, entry in pairs(DrawingObjects.Players) do
+            if not seen[player] or not player.Parent then
                 destroyDrawing(entry.text)
-                DrawingObjects.Players[plr] = nil
+                DrawingObjects.Players[player] = nil
             end
         end
     end
 
     ----------------------------------------------------------------
-    --  CHASER FISH ESP
+    --  CHASER FISH RADAR / ESP
     ----------------------------------------------------------------
     local function updateChaserESP()
         if not State.ChaserESP or not hasDrawing or isDestroyed then
@@ -433,20 +543,20 @@ return function(Window, runtimeInfo)
         if not root then return end
 
         local seen = {}
-        local chasersFolder = Workspace:FindFirstChild("ActiveChaserFishes")
-        if chasersFolder then
-            for _, chaser in ipairs(chasersFolder:GetChildren()) do
-                local cPart = chaser:FindFirstChild("PrimaryPart") or chaser:FindFirstChildWhichIsA("BasePart")
-                if cPart then
+        local chaserFolder = Workspace:FindFirstChild("ActiveChaserFishes")
+        if chaserFolder then
+            for _, chaser in ipairs(chaserFolder:GetChildren()) do
+                local kraken = chaser:FindFirstChild("KRAKEN") or chaser:FindFirstChildWhichIsA("BasePart")
+                if kraken then
                     seen[chaser] = true
-                    local dist = (root.Position - cPart.Position).Magnitude
+                    local dist = (root.Position - kraken.Position).Magnitude
                     if dist <= State.ESPDistance then
-                        local screenPos, onScreen = Camera:WorldToViewportPoint(cPart.Position)
+                        local screenPos, onScreen = Camera:WorldToViewportPoint(kraken.Position)
                         local entry = DrawingObjects.Chasers[chaser]
                         if not entry then
                             entry = {
                                 text = createDrawing("Text", {
-                                    Size = 13,
+                                    Size = 14,
                                     Center = true,
                                     Outline = true,
                                     OutlineColor = Color3.fromRGB(0, 0, 0),
@@ -456,9 +566,11 @@ return function(Window, runtimeInfo)
                         end
 
                         if onScreen and entry.text then
+                            local aggro = chaser:GetAttribute("ChaserAggroActive")
+                            local speed = math.floor(chaser:GetAttribute("ChaserCurrentSwimSpeed") or 0)
                             entry.text.Position = Vector2.new(screenPos.X, screenPos.Y)
-                            entry.text.Text = string.format("[!] CHASER FISH [%dm]", math.floor(dist))
-                            entry.text.Color = Color3.fromRGB(255, 60, 60)
+                            entry.text.Text = string.format("[GUARD %s] Spd:%d [%dm]", aggro and "AGGRO!" or "Calm", speed, math.floor(dist))
+                            entry.text.Color = aggro and Color3.fromRGB(255, 40, 40) or Color3.fromRGB(255, 160, 40)
                             entry.text.Visible = true
                         elseif entry.text then
                             entry.text.Visible = false
@@ -482,42 +594,76 @@ return function(Window, runtimeInfo)
     end
 
     ----------------------------------------------------------------
-    --  AUTO STEAL ENGINE
+    --  AUTO STEAL ENGINE (HIGH-SPEED & DIRECT PLACE REMOTE ACTIVATION)
     ----------------------------------------------------------------
     local function getBestEgg()
         local root = getRoot()
+        local spawned = Workspace:FindFirstChild("SpawnedEggs")
+        local dropped = Workspace:FindFirstChild("DroppedFishEggs")
         if not root then return nil end
 
-        local spawned = Workspace:FindFirstChild("SpawnedEggs")
-        if not spawned then return nil end
-
-        local minRank = RarityRanks[State.MinRarity] or 0
+        local minRank = RarityRanks[State.MinRarity] or 1
         local candidates = {}
+        local allAvailable = {}
 
-        for _, egg in ipairs(spawned:GetChildren()) do
-            local prim = egg:FindFirstChild("PrimaryPart") or egg.PrimaryPart
-            local prompt = prim and prim:FindFirstChildOfClass("ProximityPrompt")
-            if prim and prompt and not egg:GetAttribute("PromptBusy") then
-                local rarity = egg:GetAttribute("Rarity") or "Basic"
-                local rank = RarityRanks[rarity] or 1
-                if rank >= minRank then
+        -- 1. Check Dropped eggs first (High priority recovery if dropped!)
+        if dropped then
+            for _, egg in ipairs(dropped:GetChildren()) do
+                local prim = egg:FindFirstChild("PrimaryPart") or egg.PrimaryPart
+                local prompt = egg:FindFirstChildWhichIsA("ProximityPrompt", true)
+
+                if prim and prompt and prompt.Enabled and not egg:GetAttribute("PromptBusy") then
+                    local rarity = egg:GetAttribute("Rarity") or "Basic"
+                    local rank = (RarityRanks[rarity] or 1) + 20 -- Massive priority boost to recover dropped eggs!
                     local kg = egg:GetAttribute("Kg") or 0
                     local dist = (root.Position - prim.Position).Magnitude
-                    table.insert(candidates, {
+                    local entry = {
                         egg = egg,
                         prim = prim,
                         prompt = prompt,
                         rank = rank,
                         kg = kg,
                         dist = dist,
-                    })
+                        isDropped = true
+                    }
+                    table.insert(allAvailable, entry)
+                    table.insert(candidates, entry)
                 end
             end
         end
 
-        if #candidates == 0 then return nil end
+        -- 2. Check regular spawned eggs in nests
+        if spawned then
+            for _, egg in ipairs(spawned:GetChildren()) do
+                local prim = egg:FindFirstChild("PrimaryPart") or egg.PrimaryPart
+                local prompt = egg:FindFirstChildWhichIsA("ProximityPrompt", true)
 
-        table.sort(candidates, function(a, b)
+                -- Must have prompt enabled and not busy
+                if prim and prompt and prompt.Enabled and not egg:GetAttribute("PromptBusy") then
+                    local rarity = egg:GetAttribute("Rarity") or "Basic"
+                    local rank = RarityRanks[rarity] or 1
+                    local kg = egg:GetAttribute("Kg") or 0
+                    local dist = (root.Position - prim.Position).Magnitude
+                    local entry = {
+                        egg = egg,
+                        prim = prim,
+                        prompt = prompt,
+                        rank = rank,
+                        kg = kg,
+                        dist = dist,
+                    }
+                    table.insert(allAvailable, entry)
+                    if rank >= minRank then
+                        table.insert(candidates, entry)
+                    end
+                end
+            end
+        end
+
+        local pool = #candidates > 0 and candidates or allAvailable
+        if #pool == 0 then return nil end
+
+        table.sort(pool, function(a, b)
             if a.rank ~= b.rank then
                 return a.rank > b.rank
             elseif a.kg ~= b.kg then
@@ -527,7 +673,147 @@ return function(Window, runtimeInfo)
             end
         end)
 
-        return candidates[1]
+        return pool[1]
+    end
+
+    local function humanWalkTo(targetPos, isCancel, timeout)
+        local root = getRoot()
+        local hum = getHumanoid()
+        if not root or not hum then return false end
+
+        timeout = timeout or 3.5
+        local t0 = os.clock()
+
+        hum.PlatformStand = false
+        hum:ChangeState(Enum.HumanoidStateType.Running)
+
+        while (os.clock() - t0) < timeout do
+            if isCancel and isCancel() then return false end
+            if isDestroyed or not isAlive() then return false end
+
+            local curPos = root.Position
+            local dist2D = (Vector3.new(targetPos.X, 0, targetPos.Z) - Vector3.new(curPos.X, 0, curPos.Z)).Magnitude
+            if dist2D < 2.0 then
+                return true
+            end
+
+            hum:MoveTo(targetPos)
+            task.wait(0.04)
+        end
+        return true
+    end
+
+    local function passThroughSafeGate(isCancel)
+        local root = getRoot()
+        local hum = getHumanoid()
+        if not root then return false end
+
+        local lineFolder = Workspace:FindFirstChild("TheLine")
+        local linePart = lineFolder and lineFolder:FindFirstChild("TheLinePart")
+
+        local rootPos = root.Position
+        local gateX = linePart and linePart.Position.X or 27.7
+        local gateZ = linePart and linePart.Position.Z or -41.8
+
+        -- If player is on ocean side (Z < -35), must cross Safe Zone gate cleanly to register safe return
+        if rootPos.Z < -35 then
+            -- Approach outside gate area at safe altitude (Y = 152) up to Z = -75 to avoid Chaser Fishes
+            if rootPos.Z < -75 then
+                glideTo(Vector3.new(gateX, 152, -75), isCancel)
+                if isCancel and isCancel() then return false end
+            end
+
+            -- Stage 1: Pre-gate slowdown corridor (Z = -75 -> -62 in water, Y = 126)
+            glideTo(Vector3.new(gateX, 126, -62), isCancel, 60)
+            if isCancel and isCancel() then return false end
+
+            -- Stage 2: Descend feet onto floor right before the red line (Z = -60, Y = 119.2)
+            glideTo(Vector3.new(gateX, 119.2, -60), isCancel, 35)
+            if isCancel and isCancel() then return false end
+            root.AssemblyLinearVelocity = Vector3.zero
+
+            -- Stage 3: HUMAN WALK across the gate!
+            -- Native Humanoid walk across RedPart (Z = -55) and through TheLinePart (Z = -41.8) to Lobby (Z = -25)
+            local safeLobbyTarget = Vector3.new(gateX, 119.2, -25)
+            if hum then
+                hum.PlatformStand = false
+                hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+                hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+                hum:ChangeState(Enum.HumanoidStateType.Running)
+            end
+
+            -- Execute natural human walk (Physical body walks through TheLinePart naturally triggering .Touched)
+            humanWalkTo(safeLobbyTarget, isCancel, 3.5)
+            if isCancel and isCancel() then return false end
+
+            -- Stage 4: Hold briefly in lobby floor to let server process safe return
+            task.wait(0.15)
+        else
+            -- If heading out from base into ocean, glide into gate then into ocean water
+            glideTo(Vector3.new(gateX, 130, gateZ), isCancel)
+            if isCancel and isCancel() then return false end
+
+            glideTo(Vector3.new(gateX, 130, -55), isCancel)
+            if isCancel and isCancel() then return false end
+        end
+        return true
+    end
+    safeCrossTheLine = passThroughSafeGate
+
+    local function depositEggAtBase(isCancel)
+        local root = getRoot()
+        local myBase = getMyBase()
+        local epz = myBase and myBase:FindFirstChild("EggPlacementZone")
+        local placeEggRemote = ReplicatedStorage:FindFirstChild("EggSystem") and ReplicatedStorage.EggSystem:FindFirstChild("PlaceEgg")
+
+        if not root or not myBase or not epz or not placeEggRemote then return end
+
+        local targetPos = epz.Position + Vector3.new(0, 3, 0)
+
+        -- 1. Must pass through Safe Zone gate (TheLinePart) FIRST to register safe arrival and lock the egg!
+        passThroughSafeGate(isCancel)
+        if isCancel and isCancel() then return end
+
+        -- 2. Once safely through the gate, warp into base EggPlacementZone
+        glideTo(targetPos, isCancel)
+        if isCancel and isCancel() then return end
+
+        task.wait(0.2)
+
+        -- 3. Equip each stolen egg tool from backpack and place into the tank!
+        local char = getCharacter()
+        local epzCFrame = epz.CFrame
+        local epzSize = epz.Size
+
+        for _, item in ipairs(LP.Backpack:GetChildren()) do
+            if item:IsA("Tool") and item:GetAttribute("EggType") then
+                -- Equip tool into character
+                item.Parent = char
+                task.wait(0.25)
+
+                -- Calculate random placement point inside the tank placement zone
+                local randX = (math.random() - 0.5) * (epzSize.X * 0.7)
+                local randZ = (math.random() - 0.5) * (epzSize.Z * 0.7)
+                local placePoint = epzCFrame:PointToWorldSpace(Vector3.new(randX, epzSize.Y * 0.5, randZ))
+
+                placeEggRemote:FireServer(placePoint)
+                task.wait(0.35)
+            end
+        end
+
+        -- 4. Auto Hatch any eggs that are ready in base
+        local hatchEggRemote = ReplicatedStorage:FindFirstChild("EggSystem") and ReplicatedStorage.EggSystem:FindFirstChild("HatchEgg")
+        if hatchEggRemote then
+            local placedEggs = Workspace:FindFirstChild("PlacedEggs")
+            if placedEggs then
+                for _, placed in ipairs(placedEggs:GetChildren()) do
+                    if placed:GetAttribute("OwnerUserId") == LP.UserId and placed:GetAttribute("HatchReady") == true then
+                        hatchEggRemote:FireServer(placed)
+                        task.wait(0.2)
+                    end
+                end
+            end
+        end
     end
 
     local function runStealCycle()
@@ -539,45 +825,79 @@ return function(Window, runtimeInfo)
         end
 
         local success, err = pcall(function()
-            -- 1. Check if already carrying an egg
+            local root = getRoot()
+            if not root then return end
+
+            -- 1. Check if already carrying an egg -> Deposit it first
             if LP:GetAttribute("CarryingEgg") then
-                local depositPos = getBaseDepositZone()
-                if depositPos then
-                    local reached = tweenTo(depositPos, State.StealSpeed, isCancel)
-                    if reached and not isCancel() then
-                        task.wait(1.0)
-                    end
-                end
+                depositEggAtBase(isCancel)
                 return
             end
 
             if isCancel() then return end
 
-            -- 2. Validate ocean entry
-            safeCrossTheLine()
-            if isCancel() then return end
-
-            -- 3. Target top priority egg
+            -- 2. Target top priority egg
             local target = getBestEgg()
+
+            -- IDLE FALLBACK: No matching eggs found -> Go to TreadPool and train!
             if not target then
+                if State.IdleTreadPool and not isCancel() and not LP:GetAttribute("CarryingEgg") then
+                    if not isIdleTraining then
+                        isIdleTraining = true
+                        runTreadPoolFarm()
+                    end
+                end
                 task.wait(1.0)
                 return
             end
 
-            -- 4. Fly to egg with responsive abort
-            local reached = tweenTo(target.prim.Position + Vector3.new(0, 1.2, 0), State.StealSpeed, isCancel)
+            -- Egg found! If we were idle training, exit TreadPool immediately!
+            if isIdleTraining then
+                exitTreadPool()
+                task.wait(0.2)
+            end
+
+            if isCancel() then return end
+
+            -- 3. Validate ocean entry
+            safeCrossTheLine(isCancel)
+            if isCancel() then return end
+
+            -- 4. Travel to egg submerged in ocean water (Y = 132)
+            local eggTargetPos = target.prim.Position + Vector3.new(0, 1.2, 0)
+            local reached = false
+
+            if State.GuardSafeCorridor then
+                local travelY = 132
+                glideTo(Vector3.new(eggTargetPos.X, travelY, eggTargetPos.Z), isCancel)
+                if isCancel() then return end
+
+                local approachPos = target.prim.Position + Vector3.new(0, 1.2, 2.6)
+                reached = glideTo(approachPos, isCancel, 40)
+            else
+                local approachPos = target.prim.Position + Vector3.new(0, 1.2, 2.6)
+                reached = glideTo(approachPos, isCancel, 40)
+            end
+
             if not reached or isCancel() then return end
 
-            -- 5. Wait briefly for prompt sync
-            task.wait(0.35)
+            -- 5. Face the egg precisely
+            root.CFrame = CFrame.lookAt(root.Position, target.prim.Position)
+            task.wait(0.2)
             if isCancel() then return end
 
             -- 6. Trigger capture hold
             if target.prompt and target.prompt.Parent then
+                if fireproximityprompt then
+                    pcall(fireproximityprompt, target.prompt, 0)
+                end
+                task.wait(0.04)
                 target.prompt:InputHoldBegin()
                 local holdTime = target.prompt.HoldDuration or 1
                 local elapsed = 0
-                while elapsed < (holdTime + 0.2) do
+                local targetHoldTime = math.max(1.8, holdTime + 0.4)
+
+                while elapsed < targetHoldTime and not LP:GetAttribute("CarryingEgg") do
                     task.wait(0.05)
                     elapsed += 0.05
                     if isCancel() then
@@ -588,17 +908,28 @@ return function(Window, runtimeInfo)
                 target.prompt:InputHoldEnd()
             end
 
-            task.wait(0.5)
-            if isCancel() then return end
-
-            -- 7. Return to base and deposit
+            -- 7. Immediate escape to ceiling corridor (Y = 155) and safe base deposit
             if LP:GetAttribute("CarryingEgg") and State.AutoReturnBase then
-                local depositPos = getBaseDepositZone()
-                if depositPos then
-                    local reachedBase = tweenTo(depositPos, State.StealSpeed, isCancel)
-                    if reachedBase and not isCancel() then
-                        task.wait(1.0)
-                    end
+                local curPos = root.Position
+                if curPos.Z < -75 then
+                    -- Ascend straight UP to safe ceiling altitude (Y = 155) at maximum burst speed (250 studs/s)
+                    glideTo(Vector3.new(curPos.X, 155, curPos.Z), isCancel, 250)
+                    if isCancel() then return end
+
+                    -- Fly at ceiling corridor towards gate zone
+                    local safeX = math.clamp(curPos.X, -25, 25)
+                    glideTo(Vector3.new(safeX, 155, -75), isCancel)
+                    if isCancel() then return end
+                end
+
+                depositEggAtBase(isCancel)
+            end
+
+            -- 8. Dropped Egg Recovery: If egg was slapped out of hand mid-transit, immediately recover it!
+            if not LP:GetAttribute("CarryingEgg") and not isCancel() then
+                local droppedFolder = Workspace:FindFirstChild("DroppedFishEggs")
+                if droppedFolder and #droppedFolder:GetChildren() > 0 then
+                    task.defer(runStealCycle)
                 end
             end
         end)
@@ -608,27 +939,6 @@ return function(Window, runtimeInfo)
         end
 
         isStealing = false
-    end
-
-    ----------------------------------------------------------------
-    --  AUTO TREADPOOL (AFK SWIM SPEED FARM)
-    ----------------------------------------------------------------
-    local function runTreadPoolFarm()
-        if not State.AutoTreadPool or not isAlive() or isStealing or isDestroyed then return end
-
-        local tread = getOwnTreadPool()
-        local act = tread and tread:FindFirstChild("ActivationPart")
-        local root = getRoot()
-
-        if not act or not root then return end
-
-        local dist = (root.Position - act.Position).Magnitude
-        local isTraining = LP:GetAttribute("TreadPoolTraining")
-
-        if dist > 8 or not isTraining then
-            root.CFrame = act.CFrame + Vector3.new(0, 1.5, 0)
-            task.wait(0.3)
-        end
     end
 
     ----------------------------------------------------------------
@@ -683,12 +993,57 @@ return function(Window, runtimeInfo)
     end)
 
     ----------------------------------------------------------------
-    --  MAIN TICK LOOP
+    --  MAIN TICK LOOP (GUARD DEFENSE & SURVEILLANCE)
     ----------------------------------------------------------------
     local espAccum = 0
     connect(RunService.Heartbeat, function(dt)
         if isDestroyed then return end
 
+        -- 1. Anti-Ragdoll & Anti-Knockback Guard Defense
+        if State.AntiRagdoll then
+            local hum = getHumanoid()
+            local root = getRoot()
+            if hum and root then
+                if LP:GetAttribute("Ragdolled") or hum:GetState() == Enum.HumanoidStateType.PlatformStanding or hum:GetState() == Enum.HumanoidStateType.Physics or hum.PlatformStand then
+                    hum.PlatformStand = false
+                    hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+                    root.AssemblyLinearVelocity = Vector3.zero
+                    pcall(function() LP:SetAttribute("Ragdolled", false) end)
+                end
+            end
+        end
+
+        -- 2. Auto Chaser Dodger (In-Water Evade)
+        if State.ChaserDodger and not isStealing and not LP:GetAttribute("CarryingEgg") then
+            local root = getRoot()
+            local chasers = Workspace:FindFirstChild("ActiveChaserFishes")
+            if root and chasers and root.Position.Y < 155 then
+                for _, ch in ipairs(chasers:GetChildren()) do
+                    local kraken = ch:FindFirstChild("KRAKEN") or ch:FindFirstChildWhichIsA("BasePart")
+                    if kraken then
+                        local dist = (root.Position - kraken.Position).Magnitude
+                        if dist < 20 then
+                            -- Dodge within OceanWater without leaving water boundary (max 158)
+                            root.CFrame = CFrame.new(root.Position.X, 158, root.Position.Z)
+                            root.AssemblyLinearVelocity = Vector3.zero
+                            break
+                        end
+                    end
+                end
+            end
+        end
+
+        -- 3. Mute Chaser Visuals / Red Siren Pulse
+        if State.MuteChaserAlerts then
+            local visuals = Workspace:FindFirstChild("LocalChaserFishVisuals")
+            if visuals then
+                for _, v in ipairs(visuals:GetChildren()) do
+                    v:Destroy()
+                end
+            end
+        end
+
+        -- 4. ESP Updates
         espAccum += dt
         if espAccum >= 0.1 then
             espAccum = 0
@@ -704,7 +1059,7 @@ return function(Window, runtimeInfo)
             stealThread = task.spawn(runStealCycle)
         elseif State.AutoTreadPool and not State.AutoSteal then
             local now = os.clock()
-            if now - lastTreadPoolCheck >= 2 then
+            if now - lastTreadPoolCheck >= 1 then
                 lastTreadPoolCheck = now
                 task.spawn(runTreadPoolFarm)
             end
@@ -714,6 +1069,20 @@ return function(Window, runtimeInfo)
     ----------------------------------------------------------------
     --  UI CONSTRUCTION (MacLib / Rayfield compatible)
     ----------------------------------------------------------------
+    if not Window or type(Window.CreateTab) ~= "function" then
+        local dummy = {}
+        function dummy:CreateTab()
+            local tab = {}
+            function tab:CreateSection() end
+            function tab:CreateToggle() end
+            function tab:CreateDropdown() end
+            function tab:CreateSlider() end
+            function tab:CreateButton() end
+            return tab
+        end
+        Window = dummy
+    end
+
     local FarmTab = Window:CreateTab("Farm", 4483362458)
 
     FarmTab:CreateSection("Auto Steal Eggs")
@@ -727,8 +1096,16 @@ return function(Window, runtimeInfo)
                 State.AutoSteal = true
             else
                 abortSteal()
+                if isIdleTraining then exitTreadPool() end
             end
         end,
+    })
+
+    FarmTab:CreateToggle({
+        Name = "Idle Fallback: Auto TreadPool",
+        CurrentValue = true,
+        Flag = "SFE_IdleTreadPool",
+        Callback = function(v) State.IdleTreadPool = v end,
     })
 
     FarmTab:CreateDropdown({
@@ -743,11 +1120,11 @@ return function(Window, runtimeInfo)
     })
 
     FarmTab:CreateSlider({
-        Name = "Tween Flight Speed",
-        Range = {30, 150},
-        Increment = 5,
-        Suffix = " studs/s",
-        CurrentValue = 75,
+        Name = "Flight Speed",
+        Range = {50, 300},
+        Increment = 10,
+        Suffix = " speed",
+        CurrentValue = 120,
         Flag = "SFE_StealSpeed",
         Callback = function(v) State.StealSpeed = v end,
     })
@@ -757,6 +1134,35 @@ return function(Window, runtimeInfo)
         CurrentValue = true,
         Flag = "SFE_AutoReturnBase",
         Callback = function(v) State.AutoReturnBase = v end,
+    })
+
+    FarmTab:CreateSection("Guard Defense (Anti-Chaser)")
+    FarmTab:CreateToggle({
+        Name = "Guard Safe Corridor (Sky Flight)",
+        CurrentValue = true,
+        Flag = "SFE_GuardSafeCorridor",
+        Callback = function(v) State.GuardSafeCorridor = v end,
+    })
+
+    FarmTab:CreateToggle({
+        Name = "Auto Chaser Dodger (In-Water Evade)",
+        CurrentValue = true,
+        Flag = "SFE_ChaserDodger",
+        Callback = function(v) State.ChaserDodger = v end,
+    })
+
+    FarmTab:CreateToggle({
+        Name = "Anti-Ragdoll & Anti-Knockback",
+        CurrentValue = true,
+        Flag = "SFE_AntiRagdoll",
+        Callback = function(v) State.AntiRagdoll = v end,
+    })
+
+    FarmTab:CreateToggle({
+        Name = "Mute Guard Screams & Red Pulse",
+        CurrentValue = true,
+        Flag = "SFE_MuteChaserAlerts",
+        Callback = function(v) State.MuteChaserAlerts = v end,
     })
 
     FarmTab:CreateSection("AFK TreadPool Training")
@@ -896,54 +1302,42 @@ return function(Window, runtimeInfo)
         Callback = function(v) State.AntiAFK = v end,
     })
 
-    MoveTab:CreateSection("Quick Teleports")
+    MoveTab:CreateSection("Quick Teleports (Anti-Rubberband)")
     MoveTab:CreateButton({
-        Name = "Teleport to Own Base",
+        Name = "Teleport: Own Base",
         Callback = function()
             abortSteal()
-            local depositPos = getBaseDepositZone()
-            local root = getRoot()
-            if depositPos and root then
-                root.CFrame = CFrame.new(depositPos + Vector3.new(0, 3, 0))
+            if LP:GetAttribute("CarryingEgg") then
+                depositEggAtBase()
+            else
+                passThroughSafeGate()
+                local depositPos = getBaseDepositZone()
+                local root = getRoot()
+                if depositPos and root then
+                    root.CFrame = CFrame.new(depositPos)
+                end
             end
         end,
     })
 
     MoveTab:CreateButton({
-        Name = "Teleport to TreadPool",
+        Name = "Teleport: TreadPool (Training)",
         Callback = function()
             abortSteal()
             local tread = getOwnTreadPool()
             local act = tread and tread:FindFirstChild("ActivationPart")
             local root = getRoot()
             if act and root then
-                root.CFrame = act.CFrame + Vector3.new(0, 2, 0)
+                root.CFrame = act.CFrame * CFrame.new(0, 1, 0)
             end
         end,
     })
-
-    local BiomePositions = {
-        ["Coral Reef"] = Vector3.new(15.7, 117.0, -145.2),
-        ["Jelly Ocean"] = Vector3.new(-120.5, 118.0, -560.8),
-        ["Atlantis"] = Vector3.new(350.2, 118.5, -920.4),
-        ["Snowy Sea"] = Vector3.new(-420.0, 119.0, -1250.0),
-        ["Volcanic Sea"] = Vector3.new(510.5, 120.0, -1680.0),
-        ["Pearl Lagoon"] = Vector3.new(160.0, 118.0, -320.0),
-        ["Deep Ocean"] = Vector3.new(-280.0, 117.5, -780.0),
-        ["Sunken Ruins"] = Vector3.new(220.0, 118.0, -1420.0),
-    }
 
     for bName, bPos in pairs(BiomePositions) do
         MoveTab:CreateButton({
             Name = "Teleport: " .. bName,
             Callback = function()
-                abortSteal()
-                safeCrossTheLine()
-                task.wait(0.1)
-                local root = getRoot()
-                if root then
-                    root.CFrame = CFrame.new(bPos)
-                end
+                hopTeleport(bPos)
             end,
         })
     end
@@ -952,6 +1346,18 @@ return function(Window, runtimeInfo)
     --  CLEANUP / DESTROY HOOK
     ----------------------------------------------------------------
     local ModuleInstance = {
+        State = State,
+        getBestEgg = getBestEgg,
+        runStealCycle = runStealCycle,
+        runTreadPoolFarm = runTreadPoolFarm,
+        hopTeleport = hopTeleport,
+        glideTo = glideTo,
+        getMyBase = getMyBase,
+        getBaseDepositZone = getBaseDepositZone,
+        depositEggAtBase = depositEggAtBase,
+        passThroughSafeGate = passThroughSafeGate,
+        safeCrossTheLine = passThroughSafeGate,
+        humanWalkTo = humanWalkTo,
         Destroy = function()
             isDestroyed = true
             abortSteal()

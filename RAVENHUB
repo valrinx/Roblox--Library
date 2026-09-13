@@ -368,6 +368,14 @@ local SCRIPTS = {
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/My_knife_farm",
     },
     {
+        name        = "Steal Fish Eggs",
+        description = "Auto Steal Eggs | AFK TreadPool Speed Farm | Base Auto Deposit | Drawing ESP",
+        placeIds    = {99183404085821},
+        gameIds     = {10718240577},
+        version     = "v1.5.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/steal_fish_eggs.lua",
+    },
+    {
         name        = "Slime Seas ???????????????? Anime RPG",
         description = "Teleport | Auto Farm | Kill Aura | Infinite Stamina",
         placeIds    = {99046552174353},
@@ -701,6 +709,14 @@ local SCRIPTS = {
         gameIds     = {10637759898},
         version     = "v1.0.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/guess_the_person.lua?v=gtp-1.0.0",
+    },
+    {
+        name        = "Steal Fish Eggs",
+        description = "Auto Steal Best Eggs | Ceiling Safe Corridor | Gate Auto Transit | TreadPool AFK | Visual ESP",
+        placeIds    = {99183404085821},
+        gameIds     = {10718240577},
+        version     = "v1.5.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/steal_fish_eggs.lua",
     },
 
     --[[
