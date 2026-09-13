@@ -193,8 +193,71 @@ return function(Window, scriptInfo)
         DoMoveBinding = require(ReplicatedFirst.Controllers.GameController.Actions.Binding.Registry.DoMove)
     end)
 
+    local vim = game:GetService("VirtualInputManager")
     local function triggerMove(actionName, isAerial)
+        -- 1. Primary & safest: Native VirtualInputManager (runs in engine input thread, eliminates RobloxScript require errors)
+        if vim then
+            local binds = InputController and InputController.Keybinds and InputController.Keybinds[actionName]
+            local targetKeyCode = nil
+            local isMouse = false
+
+            if binds then
+                for _, b in ipairs(binds) do
+                    if typeof(b) == "EnumItem" then
+                        if b.EnumType == Enum.KeyCode then
+                            targetKeyCode = b
+                            break
+                        elseif b == Enum.UserInputType.MouseButton1 then
+                            isMouse = true
+                            break
+                        end
+                    end
+                end
+            end
+
+            -- Default fallbacks if keybinds not detected
+            if not targetKeyCode and not isMouse then
+                if actionName == "Set" then
+                    targetKeyCode = Enum.KeyCode.Q
+                elseif actionName == "Dive" then
+                    targetKeyCode = Enum.KeyCode.LeftControl
+                elseif actionName == "Spike" or actionName == "Bump" then
+                    isMouse = true
+                end
+            end
+
+            if isMouse then
+                local vp = camera and camera.ViewportSize or Vector2.new(800, 600)
+                vim:SendMouseButtonEvent(vp.X / 2, vp.Y / 2, 0, true, game, 0)
+                task.delay(0.05, function()
+                    pcall(function() vim:SendMouseButtonEvent(vp.X / 2, vp.Y / 2, 0, false, game, 0) end)
+                end)
+                return true
+            elseif targetKeyCode then
+                vim:SendKeyEvent(true, targetKeyCode, false, game)
+                task.delay(0.05, function()
+                    pcall(function() vim:SendKeyEvent(false, targetKeyCode, false, game) end)
+                end)
+                return true
+            end
+        end
+
+        -- 2. Fallback: UI Button activation via firesignal
+        local pgui = localPlayer:FindFirstChild("PlayerGui")
+        local actionsBar = pgui and pgui:FindFirstChild("Interface")
+            and pgui.Interface:FindFirstChild("Game")
+            and pgui.Interface.Game:FindFirstChild("InGameActionsBar")
+            and pgui.Interface.Game.InGameActionsBar:FindFirstChild("Actions")
+        local btn = actionsBar and actionsBar:FindFirstChild(actionName)
+        if btn and btn:IsA("GuiButton") and type(firesignal) == "function" then
+            firesignal(btn.Activated)
+            return true
+        end
+
+        -- 3. Last-resort fallback: Direct method call with identity 2
         local ok = false
+        local oldId = getthreadidentity and getthreadidentity()
+        if setthreadidentity then setthreadidentity(2) end
         if InputController and type(InputController.PerformAction) == "function" then
             ok = pcall(function() InputController:PerformAction(actionName) end)
         end
@@ -207,6 +270,7 @@ return function(Window, scriptInfo)
                 })
             end)
         end
+        if setthreadidentity and oldId then setthreadidentity(oldId) end
         return ok
     end
 

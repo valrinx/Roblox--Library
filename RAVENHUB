@@ -341,8 +341,8 @@ local SCRIPTS = {
         description = "Ball ESP & Landing Prediction | Auto Hit / Receive | Auto Dive | Auto Serve | Safe Mode",
         placeIds    = {74691681039273, 85395484560711},
         gameIds     = {6931042565},
-        version     = "v1.4.0",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/volleyball_legends.lua?v=vb-1.4.0",
+        version     = "v1.4.1",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/volleyball_legends.lua?v=vb-1.4.1",
     },
     {
         name        = "Basketball: Zero",
