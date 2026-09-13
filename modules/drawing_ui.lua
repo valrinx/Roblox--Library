@@ -8,6 +8,8 @@
 local DrawingUI = {}
 DrawingUI.__index = DrawingUI
 DrawingUI.Flags = {}
+DrawingUI._allDrawings = {}
+DrawingUI._activeWindows = {}
 
 local UserInputService = game:GetService("UserInputService")
 local RunService       = game:GetService("RunService")
@@ -18,7 +20,11 @@ local hasDrawing = type(Drawing) == "table" and type(Drawing.new) == "function"
 local function safeDrawing(drawingType)
     if not hasDrawing then return nil end
     local ok, obj = pcall(Drawing.new, drawingType)
-    return (ok and obj) or nil
+    if ok and obj then
+        table.insert(DrawingUI._allDrawings, obj)
+        return obj
+    end
+    return nil
 end
 
 local function pointInBox(pt, boxPos, boxSize)
@@ -84,14 +90,17 @@ local function wrapText(str, maxChars)
 end
 
 local function removeObj(obj)
-    if obj and (type(obj) == "userdata" or type(obj) == "table") then
-        pcall(function()
-            obj.Visible = false
-            if type(obj.Remove) == "function" then
-                obj:Remove()
-            end
-        end)
-    end
+    if not obj then return end
+    pcall(function()
+        obj.Visible = false
+    end)
+    pcall(function()
+        if type(obj.Remove) == "function" then
+            obj:Remove()
+        elseif type(obj.Destroy) == "function" then
+            obj:Destroy()
+        end
+    end)
 end
 
 -- ============================================================
@@ -884,6 +893,8 @@ function DrawingUI:CreateWindow(config)
     if env then
         env.__RAVEN_DRAWING_WINDOW = self
     end
+    DrawingUI._activeWindows = DrawingUI._activeWindows or {}
+    table.insert(DrawingUI._activeWindows, self)
 
     self.title = sanitizeText(tostring(config.Title or config.Name or "RAVEN HUB"))
     self.subtitle = sanitizeText(tostring(config.Subtitle or config.SubTitle or "MacLib macOS Edition"))
@@ -1364,11 +1375,12 @@ local function resolveIconType(name, icon)
     return "overview"
 end
 
-local function createVectorIcon(iconType, baseZIndex)
+local function createVectorIcon(iconType, baseZIndex, window)
     baseZIndex = baseZIndex or 5
     local icon = {
         type = iconType,
         drawings = {},
+        window = window,
     }
 
     local function line()
@@ -1378,6 +1390,9 @@ local function createVectorIcon(iconType, baseZIndex)
             l.Visible = false
             pcall(function() l.ZIndex = baseZIndex end)
             table.insert(icon.drawings, l)
+            if window and window._trackedDrawings then
+                table.insert(window._trackedDrawings, l)
+            end
         end
         return l
     end
@@ -1391,6 +1406,9 @@ local function createVectorIcon(iconType, baseZIndex)
             c.Visible = false
             pcall(function() c.ZIndex = baseZIndex end)
             table.insert(icon.drawings, c)
+            if window and window._trackedDrawings then
+                table.insert(window._trackedDrawings, c)
+            end
         end
         return c
     end
@@ -1403,6 +1421,9 @@ local function createVectorIcon(iconType, baseZIndex)
             s.Visible = false
             pcall(function() s.ZIndex = baseZIndex end)
             table.insert(icon.drawings, s)
+            if window and window._trackedDrawings then
+                table.insert(window._trackedDrawings, s)
+            end
         end
         return s
     end
@@ -1456,8 +1477,13 @@ local function createVectorIcon(iconType, baseZIndex)
 
     function icon:Update(center, color, visible)
         if not visible then
-            for _, d in ipairs(self.drawings) do
-                setObjVisible(d, false)
+            for _, d in ipairs(self.drawings or {}) do
+                pcall(function() d.Visible = false end)
+            end
+            for k, v in pairs(self) do
+                if k ~= "drawings" and k ~= "window" and type(v) ~= "function" then
+                    pcall(function() v.Visible = false end)
+                end
             end
             return
         end
@@ -1510,9 +1536,15 @@ local function createVectorIcon(iconType, baseZIndex)
     end
 
     function icon:Remove()
-        for _, d in ipairs(self.drawings) do
+        for _, d in ipairs(self.drawings or {}) do
             removeObj(d)
         end
+        for k, v in pairs(self) do
+            if k ~= "drawings" and k ~= "window" and type(v) ~= "function" then
+                removeObj(v)
+            end
+        end
+        table.clear(self.drawings or {})
     end
 
     return icon
@@ -1715,7 +1747,7 @@ function DrawingUI:CreateTab(name, icon)
         name = sanitizeText(tostring(name or "Tab")),
         icon = icon,
         iconType = resolvedIcon,
-        iconObject = createVectorIcon(resolvedIcon, 5),
+        iconObject = createVectorIcon(resolvedIcon, 5, self),
         sections = {},
         window = self,
         scrollOffset = 0,
@@ -2763,7 +2795,11 @@ function DrawingUI:Toggle()
 
         for _, tab in ipairs(self.tabs) do
             setObjVisible(tab.tabText, false)
+            if tab.iconObject and type(tab.iconObject.Update) == "function" then
+                tab.iconObject:Update(Vector2.zero, Color3.new(), false)
+            end
             for _, sec in ipairs(tab.sections) do
+                setObjVisible(sec.accentBar, false)
                 setObjVisible(sec.titleDrawing, false)
                 if sec.card then sec.card:Update(Vector2.zero, Vector2.zero, 0, Color3.new(), nil, false) end
                 for _, item in ipairs(sec.items) do
@@ -3439,6 +3475,31 @@ end
 --   CLEANUP & UNLOAD HANDLERS
 -- ============================================================
 function DrawingUI:Destroy()
+    -- 1. Support static / module-level invocation (e.g. HubUI:Destroy())
+    if self == DrawingUI or not self.tabs then
+        if DrawingUI._activeWindows then
+            for _, win in ipairs(DrawingUI._activeWindows) do
+                if win and type(win.Destroy) == "function" and win ~= self then
+                    pcall(function() win:Destroy() end)
+                end
+            end
+            table.clear(DrawingUI._activeWindows)
+        end
+        local env = (type(getgenv) == "function" and getgenv()) or _G
+        if env and env.__RAVEN_DRAWING_WINDOW and type(env.__RAVEN_DRAWING_WINDOW.Destroy) == "function" then
+            pcall(function() env.__RAVEN_DRAWING_WINDOW:Destroy() end)
+            env.__RAVEN_DRAWING_WINDOW = nil
+        end
+        if DrawingUI._allDrawings then
+            for _, d in ipairs(DrawingUI._allDrawings) do
+                removeObj(d)
+            end
+            table.clear(DrawingUI._allDrawings)
+        end
+        return
+    end
+
+    -- 2. Instance-level destruction
     self.running = false
     self.visible = false
 
@@ -3447,22 +3508,28 @@ function DrawingUI:Destroy()
         env.__RAVEN_DRAWING_WINDOW = nil
     end
 
-    for _, cb in ipairs(self._unloadCallbacks) do
-        pcall(cb)
-    end
-    table.clear(self._unloadCallbacks)
-
-    for _, conn in ipairs(self.connections) do
-        if conn and conn.Disconnect then
-            pcall(function() conn:Disconnect() end)
+    if self._unloadCallbacks then
+        for _, cb in ipairs(self._unloadCallbacks) do
+            pcall(cb)
         end
+        table.clear(self._unloadCallbacks)
     end
-    table.clear(self.connections)
 
-    for _, d in pairs(self.drawings) do
-        removeObj(d)
+    if self.connections then
+        for _, conn in ipairs(self.connections) do
+            if conn and conn.Disconnect then
+                pcall(function() conn:Disconnect() end)
+            end
+        end
+        table.clear(self.connections)
     end
-    table.clear(self.drawings)
+
+    if self.drawings then
+        for _, d in pairs(self.drawings) do
+            removeObj(d)
+        end
+        table.clear(self.drawings)
+    end
 
     if self.windowCard then self.windowCard:Remove() end
     if self.keyBadgeCard then self.keyBadgeCard:Remove() end
@@ -3472,27 +3539,54 @@ function DrawingUI:Destroy()
     if self.rowHoverCard then self.rowHoverCard:Remove() end
     if self.scrollThumbPill then self.scrollThumbPill:Remove() end
 
-    for _, tab in ipairs(self.tabs) do
-        removeObj(tab.tabText)
-        if tab.iconObject and type(tab.iconObject.Remove) == "function" then
-            pcall(function() tab.iconObject:Remove() end)
-        end
-        for _, sec in ipairs(tab.sections) do
-            removeObj(sec.accentBar)
-            removeObj(sec.titleDrawing)
-            if sec.card then sec.card:Remove() end
-            for _, item in ipairs(sec.items) do
-                removeItem(item)
+    if self.tabs then
+        for _, tab in ipairs(self.tabs) do
+            removeObj(tab.tabText)
+            if tab.iconObject then
+                pcall(function()
+                    if type(tab.iconObject.Remove) == "function" then
+                        tab.iconObject:Remove()
+                    end
+                end)
             end
-            table.clear(sec.items)
+            if tab.sections then
+                for _, sec in ipairs(tab.sections) do
+                    removeObj(sec.accentBar)
+                    removeObj(sec.titleDrawing)
+                    if sec.card then sec.card:Remove() end
+                    if sec.items then
+                        for _, item in ipairs(sec.items) do
+                            removeItem(item)
+                        end
+                        table.clear(sec.items)
+                    end
+                end
+                table.clear(tab.sections)
+            end
         end
-        table.clear(tab.sections)
+        table.clear(self.tabs)
     end
-    table.clear(self.tabs)
 
     if self.itemsByFlag then
         table.clear(self.itemsByFlag)
         self.itemsByFlag = nil
+    end
+
+    -- 3. Comprehensive sweep: eliminate 100% of residual drawings
+    if DrawingUI._allDrawings then
+        for _, d in ipairs(DrawingUI._allDrawings) do
+            removeObj(d)
+        end
+        table.clear(DrawingUI._allDrawings)
+    end
+
+    if DrawingUI._activeWindows then
+        for idx, win in ipairs(DrawingUI._activeWindows) do
+            if win == self then
+                table.remove(DrawingUI._activeWindows, idx)
+                break
+            end
+        end
     end
 end
 

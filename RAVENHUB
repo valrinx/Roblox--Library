@@ -834,14 +834,6 @@ end
 
 Window:OnUnload(cleanupHubScripts)
 
-HubSettingsTab:CreateButton({
-    Name = "Destroy Hub",
-    Callback = function()
-        cleanupHubScripts()
-        HubUI:Destroy()
-    end,
-})
-
 HubSettingsTab:InsertConfigSection("Right")
 
 -- ============================================================
