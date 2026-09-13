@@ -424,31 +424,33 @@ return function(Window, scriptInfo)
 
     local lastAutoHit = 0
     local function handleAutoHit(ballPart, myPos, myHum)
-        if not settings.autoHit or not ballPart or not myHum or myHum.Health <= 0 then return end
-        if not InputController or not InputController.Actions then return end
+        pcall(function()
+            if not settings.autoHit or not ballPart or not myHum or myHum.Health <= 0 then return end
+            if not InputController or not InputController.Actions then return end
 
-        local now = os.clock()
-        if (now - lastAutoHit) < 0.22 then return end
+            local now = os.clock()
+            if (now - lastAutoHit) < 0.22 then return end
 
-        local ballPos = ballPart.Position
-        local dist = (ballPos - myPos).Magnitude
-        if dist > settings.autoHitDistance then return end
+            local ballPos = ballPart.Position
+            local dist = (ballPos - myPos).Magnitude
+            if dist > settings.autoHitDistance then return end
 
-        local isAerial = (myHum.FloorMaterial == Enum.Material.Air)
-        if isAerial and settings.autoSpike and InputController.Actions.Spike then
-            lastAutoHit = now
-            pcall(InputController.Actions.Spike)
-        elseif not isAerial then
-            local floorY = getFloorY(ballPos)
-            local ballHeight = ballPos.Y - floorY
-            if settings.autoDive and ballHeight < 4.5 and dist > 7 and InputController.Actions.Dive then
+            local isAerial = (myHum.FloorMaterial == Enum.Material.Air)
+            if isAerial and settings.autoSpike and InputController.Actions.Spike then
                 lastAutoHit = now
-                pcall(InputController.Actions.Dive)
-            elseif settings.autoBump and InputController.Actions.Bump then
-                lastAutoHit = now
-                pcall(InputController.Actions.Bump)
+                pcall(InputController.Actions.Spike)
+            elseif not isAerial then
+                local floorY = getFloorY(ballPos)
+                local ballHeight = ballPos.Y - floorY
+                if settings.autoDive and ballHeight < 4.5 and dist > 7 and InputController.Actions.Dive then
+                    lastAutoHit = now
+                    pcall(InputController.Actions.Dive)
+                elseif settings.autoBump and InputController.Actions.Bump then
+                    lastAutoHit = now
+                    pcall(InputController.Actions.Bump)
+                end
             end
-        end
+        end)
     end
 
     -- Visual Landing Elements (Cylinder + AlwaysOnTop BillboardGui)
