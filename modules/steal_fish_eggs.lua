@@ -1,16 +1,15 @@
 --[[
-    RAVEN HUB Module - Steal Fish Eggs v1.5.0
+    RAVEN HUB Module - Steal Fish Eggs v1.6.0
     Game: Steal Fish Eggs (PlaceId: 99183404085821, GameId: 10718240577)
     Developer: fishy fish fish!
 
-    v1.5.0 — Definite Egg Deposit & Flawless Steal Cycle:
+    v1.6.0 — Strict Egg Rarity Filtering & Target Priority Modes:
+    - Strict Minimum Rarity Filter: 100% adherence to chosen rarity (no trash egg fallback)
+    - Filtered Dropped Egg Recovery: Dropped eggs must strictly satisfy minRank before inclusion
+    - Target Priority Modes: "Closest Distance" vs "Highest Value (Kg)"
+    - Enhanced Egg ESP: Live status indicators for [DROPPED], [WAIT], and ready states
+    - Non-intrusive Idle Farm: Trains in TreadPool until desired rarity becomes available
     - Direct PlaceEgg Remote Activation: Calls PlaceEgg:FireServer(placementPoint) to actually place the egg in tank
-    - Prompt.Enabled Validation: Only targets eggs whose prompts are currently active (skips cooldown eggs)
-    - Precision Approach Facing: Positions 3 studs in front of egg and faces it for 100% prompt hold recognition
-    - Deposit Lock Protection: Prevents any TreadPool teleport while CarryingEgg is true
-    - Auto Deposit Retry: Re-fires PlaceEgg until CarryingEgg == false is confirmed
-    - Rapid Sky Glide (Y >= 190): Complete guard evasion at high speed
-    - Fixed Movement Quick TP: Instant audited teleport to all 8 biomes
 ]]--
 
 return function(Window, runtimeInfo)
@@ -91,6 +90,7 @@ return function(Window, runtimeInfo)
     local State = {
         AutoSteal = false,
         MinRarity = "Basic",
+        TargetPriority = "Closest Distance",
         StealSpeed = 120,
         AutoReturnBase = true,
         AutoTreadPool = false,
@@ -406,52 +406,71 @@ return function(Window, runtimeInfo)
         local minRank = RarityRanks[State.EggESPRarity] or 0
         local seen = {}
 
+        local function processEggESP(egg, isDropped)
+            local prim = egg:FindFirstChild("PrimaryPart") or egg.PrimaryPart
+            if prim then
+                seen[egg] = true
+                local pos = prim.Position
+                local dist = (root.Position - pos).Magnitude
+
+                local rarity = egg:GetAttribute("Rarity") or "Basic"
+                local eggRank = RarityRanks[rarity] or 1
+
+                if dist <= State.EggESPDistance and eggRank >= minRank then
+                    local screenPos, onScreen = Camera:WorldToViewportPoint(pos)
+                    local entry = DrawingObjects.Eggs[egg]
+                    if not entry then
+                        entry = {
+                            text = createDrawing("Text", {
+                                Size = 13,
+                                Center = true,
+                                Outline = true,
+                                OutlineColor = Color3.fromRGB(0, 0, 0),
+                            }),
+                        }
+                        DrawingObjects.Eggs[egg] = entry
+                    end
+
+                    if onScreen and entry.text then
+                        local displayName = egg:GetAttribute("DisplayName") or egg.Name
+                        local kg = egg:GetAttribute("Kg") or 0
+                        local col = RarityColors[rarity] or RarityColors.Default
+                        local prompt = egg:FindFirstChildWhichIsA("ProximityPrompt", true)
+
+                        local tag = ""
+                        if isDropped then
+                            tag = " [DROPPED]"
+                        elseif prompt and not prompt.Enabled then
+                            tag = " [WAIT]"
+                        end
+
+                        entry.text.Position = Vector2.new(screenPos.X, screenPos.Y)
+                        entry.text.Text = string.format("[%s]%s %s (%.0f kg) [%dm]", rarity, tag, displayName, kg, math.floor(dist))
+                        entry.text.Color = col
+                        entry.text.Visible = true
+                    elseif entry.text then
+                        entry.text.Visible = false
+                    end
+                else
+                    if DrawingObjects.Eggs[egg] then
+                        destroyDrawing(DrawingObjects.Eggs[egg].text)
+                        DrawingObjects.Eggs[egg] = nil
+                    end
+                end
+            end
+        end
+
         local spawned = Workspace:FindFirstChild("SpawnedEggs")
         if spawned then
             for _, egg in ipairs(spawned:GetChildren()) do
-                local prim = egg:FindFirstChild("PrimaryPart") or egg.PrimaryPart
-                if prim then
-                    seen[egg] = true
-                    local pos = prim.Position
-                    local dist = (root.Position - pos).Magnitude
+                processEggESP(egg, false)
+            end
+        end
 
-                    local rarity = egg:GetAttribute("Rarity") or "Basic"
-                    local eggRank = RarityRanks[rarity] or 1
-
-                    if dist <= State.EggESPDistance and eggRank >= minRank then
-                        local screenPos, onScreen = Camera:WorldToViewportPoint(pos)
-                        local entry = DrawingObjects.Eggs[egg]
-                        if not entry then
-                            entry = {
-                                text = createDrawing("Text", {
-                                    Size = 13,
-                                    Center = true,
-                                    Outline = true,
-                                    OutlineColor = Color3.fromRGB(0, 0, 0),
-                                }),
-                            }
-                            DrawingObjects.Eggs[egg] = entry
-                        end
-
-                        if onScreen and entry.text then
-                            local displayName = egg:GetAttribute("DisplayName") or egg.Name
-                            local kg = egg:GetAttribute("Kg") or 0
-                            local col = RarityColors[rarity] or RarityColors.Default
-
-                            entry.text.Position = Vector2.new(screenPos.X, screenPos.Y)
-                            entry.text.Text = string.format("[%s] %s (%.0f kg) [%dm]", rarity, displayName, kg, math.floor(dist))
-                            entry.text.Color = col
-                            entry.text.Visible = true
-                        elseif entry.text then
-                            entry.text.Visible = false
-                        end
-                    else
-                        if DrawingObjects.Eggs[egg] then
-                            destroyDrawing(DrawingObjects.Eggs[egg].text)
-                            DrawingObjects.Eggs[egg] = nil
-                        end
-                    end
-                end
+        local dropped = Workspace:FindFirstChild("DroppedFishEggs")
+        if dropped then
+            for _, egg in ipairs(dropped:GetChildren()) do
+                processEggESP(egg, true)
             end
         end
 
@@ -604,9 +623,8 @@ return function(Window, runtimeInfo)
 
         local minRank = RarityRanks[State.MinRarity] or 1
         local candidates = {}
-        local allAvailable = {}
 
-        -- 1. Check Dropped eggs first (High priority recovery if dropped!)
+        -- 1. Check Dropped fish eggs (STRICT: only add if meeting minRank!)
         if dropped then
             for _, egg in ipairs(dropped:GetChildren()) do
                 local prim = egg:FindFirstChild("PrimaryPart") or egg.PrimaryPart
@@ -614,20 +632,22 @@ return function(Window, runtimeInfo)
 
                 if prim and prompt and prompt.Enabled and not egg:GetAttribute("PromptBusy") then
                     local rarity = egg:GetAttribute("Rarity") or "Basic"
-                    local rank = (RarityRanks[rarity] or 1) + 20 -- Massive priority boost to recover dropped eggs!
+                    local rawRank = RarityRanks[rarity] or 1
                     local kg = egg:GetAttribute("Kg") or 0
                     local dist = (root.Position - prim.Position).Magnitude
-                    local entry = {
-                        egg = egg,
-                        prim = prim,
-                        prompt = prompt,
-                        rank = rank,
-                        kg = kg,
-                        dist = dist,
-                        isDropped = true
-                    }
-                    table.insert(allAvailable, entry)
-                    table.insert(candidates, entry)
+
+                    -- STRICT: Only collect dropped eggs that match or exceed chosen minimum rarity!
+                    if rawRank >= minRank then
+                        table.insert(candidates, {
+                            egg = egg,
+                            prim = prim,
+                            prompt = prompt,
+                            rawRank = rawRank,
+                            kg = kg,
+                            dist = dist,
+                            isDropped = true
+                        })
+                    end
                 end
             end
         end
@@ -641,39 +661,62 @@ return function(Window, runtimeInfo)
                 -- Must have prompt enabled and not busy
                 if prim and prompt and prompt.Enabled and not egg:GetAttribute("PromptBusy") then
                     local rarity = egg:GetAttribute("Rarity") or "Basic"
-                    local rank = RarityRanks[rarity] or 1
+                    local rawRank = RarityRanks[rarity] or 1
                     local kg = egg:GetAttribute("Kg") or 0
                     local dist = (root.Position - prim.Position).Magnitude
-                    local entry = {
-                        egg = egg,
-                        prim = prim,
-                        prompt = prompt,
-                        rank = rank,
-                        kg = kg,
-                        dist = dist,
-                    }
-                    table.insert(allAvailable, entry)
-                    if rank >= minRank then
-                        table.insert(candidates, entry)
+
+                    -- STRICT: Only add if meeting or exceeding minimum rarity!
+                    if rawRank >= minRank then
+                        table.insert(candidates, {
+                            egg = egg,
+                            prim = prim,
+                            prompt = prompt,
+                            rawRank = rawRank,
+                            kg = kg,
+                            dist = dist,
+                            isDropped = false
+                        })
                     end
                 end
             end
         end
 
-        local pool = #candidates > 0 and candidates or allAvailable
-        if #pool == 0 then return nil end
+        -- ZERO FALLBACK: If no eggs match the chosen rarity, return nil immediately!
+        -- The bot will idle train in TreadPool until a matching egg becomes available.
+        if #candidates == 0 then
+            return nil
+        end
 
-        table.sort(pool, function(a, b)
-            if a.rank ~= b.rank then
-                return a.rank > b.rank
-            elseif a.kg ~= b.kg then
-                return a.kg > b.kg
+        -- Sort candidates based on priority and user preference
+        table.sort(candidates, function(a, b)
+            -- Priority 1: Recover dropped eggs of that tier first
+            if a.isDropped ~= b.isDropped then
+                return a.isDropped
+            end
+
+            -- Priority 2: Higher tier first (e.g. Astral > Abyssal > Mythic)
+            if a.rawRank ~= b.rawRank then
+                return a.rawRank > b.rawRank
+            end
+
+            -- Priority 3: User Target Priority (Closest Distance vs Highest Value)
+            if State.TargetPriority == "Highest Value (Kg)" then
+                if a.kg ~= b.kg then
+                    return a.kg > b.kg
+                else
+                    return a.dist < b.dist
+                end
             else
-                return a.dist < b.dist
+                -- Default: Closest Distance for maximum speed and prompt reliability
+                if a.dist ~= b.dist then
+                    return a.dist < b.dist
+                else
+                    return a.kg > b.kg
+                end
             end
         end)
 
-        return pool[1]
+        return candidates[1]
     end
 
     local function humanWalkTo(targetPos, isCancel, timeout)
@@ -1116,6 +1159,17 @@ return function(Window, runtimeInfo)
         Callback = function(v)
             local selected = type(v) == "table" and v[1] or v
             State.MinRarity = tostring(selected)
+        end,
+    })
+
+    FarmTab:CreateDropdown({
+        Name = "Target Priority Mode",
+        Options = {"Closest Distance", "Highest Value (Kg)"},
+        CurrentOption = "Closest Distance",
+        Flag = "SFE_TargetPriority",
+        Callback = function(v)
+            local selected = type(v) == "table" and v[1] or v
+            State.TargetPriority = tostring(selected)
         end,
     })
 
