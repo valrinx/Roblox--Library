@@ -192,6 +192,12 @@ if USE_DRAWING_UI then
     local ok, result = pcall(function()
         local source
         local fetchOk, fetchRes = pcall(function()
+            local devOk, devRes = pcall(function()
+                return game:HttpGet("http://localhost:8999/modules/drawing_ui.lua?_cb=" .. tostring(os.time()))
+            end)
+            if devOk and type(devRes) == "string" and #devRes > 1000 then
+                return devRes
+            end
             return safeHttpGet(
                 "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/drawing_ui.lua?_cb=" .. tostring(os.time())
             )
@@ -775,8 +781,7 @@ end
 local matchingScriptNames = {}
 for _, scriptInfo in ipairs(SCRIPTS) do
     if isManifestCompatible(scriptInfo) then
-        table.insert(matchingScriptNames,
-            scriptInfo.name .. "  [" .. scriptInfo.version .. "]  |  " .. scriptInfo.description)
+        table.insert(matchingScriptNames, scriptInfo.name .. "  [" .. scriptInfo.version .. "]")
     end
 end
 if #matchingScriptNames == 0 then

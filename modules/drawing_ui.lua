@@ -47,6 +47,15 @@ local function sanitizeText(str)
     return res
 end
 
+local function truncateText(str, maxChars)
+    local s = sanitizeText(tostring(str or ""))
+    maxChars = maxChars or 32
+    if #s > maxChars then
+        return s:sub(1, math.max(1, maxChars - 3)) .. "..."
+    end
+    return s
+end
+
 local function setObjVisible(obj, visible)
     if obj and (type(obj) == "userdata" or type(obj) == "table") then
         pcall(function()
@@ -900,8 +909,13 @@ function DrawingUI:CreateWindow(config)
     self.subtitle = sanitizeText(tostring(config.Subtitle or config.SubTitle or "MacLib macOS Edition"))
     self.size = config.Size or Vector2.new(680, 480)
     self.toggleKey = config.Keybind or config.ToggleKey or Enum.KeyCode.RightShift
-    self.folder = tostring(config.Folder or DrawingUI.Folder or "RAVENHUB")
+    local cfgSaving = (type(config.ConfigurationSaving) == "table" and config.ConfigurationSaving) or (type(config.ConfigSaving) == "table" and config.ConfigSaving) or {}
+    self.folder = tostring(cfgSaving.FolderName or config.Folder or DrawingUI.Folder or "RAVENHUB")
+    self.defaultConfigFile = tostring(cfgSaving.FileName or "default")
     self.itemsByFlag = {}
+    self.openDropdown = nil
+    self.dropdownPopupCard = createRoundedCard(25)
+    self.dropdownOptionsPool = {}
 
     local vpSize = Vector2.new(1920, 1080)
     pcall(function()
@@ -1118,6 +1132,9 @@ function DrawingUI:CreateWindow(config)
         pcall(function() self.drawings.scrollTrack.ZIndex = 8 end)
     end
     self.scrollThumbPill = createRoundedCard(9)
+    self.dropdownPopupCard = createRoundedCard(25)
+    self.dropdownOptionsPool = {}
+    self.openDropdown = nil
     self.draggingScroller = false
     self.scrollerDragStartY = 0
     self.scrollerStartOffset = 0
@@ -1144,17 +1161,33 @@ end
 
 DrawingUI.Folder = "RAVENHUB"
 
+local function resolveTargetWindow(target)
+    if target and target ~= DrawingUI and target.tabs then
+        return target
+    end
+    if DrawingUI._activeWindows and #DrawingUI._activeWindows > 0 then
+        return DrawingUI._activeWindows[#DrawingUI._activeWindows]
+    end
+    local env = (type(getgenv) == "function" and getgenv()) or _G
+    if env and env.__RAVEN_DRAWING_WINDOW then
+        return env.__RAVEN_DRAWING_WINDOW
+    end
+    return target
+end
+
 function DrawingUI:SetFolder(folder)
-    self.folder = tostring(folder or "RAVENHUB")
-    local settingsFolder = self.folder .. "/settings"
+    local target = resolveTargetWindow(self)
+    target.folder = tostring(folder or "RAVENHUB")
+    local settingsFolder = target.folder .. "/settings"
     if type(isfolder) == "function" and type(makefolder) == "function" then
-        if not isfolder(self.folder) then pcall(makefolder, self.folder) end
+        if not isfolder(target.folder) then pcall(makefolder, target.folder) end
         if not isfolder(settingsFolder) then pcall(makefolder, settingsFolder) end
     end
 end
 
 function DrawingUI:RefreshConfigList()
-    local folder = self.folder or DrawingUI.Folder or "RAVENHUB"
+    local target = resolveTargetWindow(self)
+    local folder = target.folder or DrawingUI.Folder or "RAVENHUB"
     local settingsFolder = folder .. "/settings"
 
     if type(isfolder) == "function" and type(makefolder) == "function" then
@@ -1163,30 +1196,41 @@ function DrawingUI:RefreshConfigList()
     end
 
     local configs = {}
-    if type(listfiles) == "function" and type(isfolder) == "function" and isfolder(settingsFolder) then
-        local ok, files = pcall(listfiles, settingsFolder)
-        if ok and type(files) == "table" then
-            for _, f in ipairs(files) do
-                local name = tostring(f):match("([^/\\]+)%.json$")
-                if name then
-                    table.insert(configs, name)
+    local seen = {}
+
+    local function scanDir(dir)
+        if type(listfiles) == "function" and type(isfolder) == "function" and isfolder(dir) then
+            local ok, files = pcall(listfiles, dir)
+            if ok and type(files) == "table" then
+                for _, f in ipairs(files) do
+                    local name = tostring(f):match("([^/\\]+)%.json$")
+                    if name and not seen[name] then
+                        seen[name] = true
+                        table.insert(configs, name)
+                    end
                 end
             end
         end
     end
 
+    scanDir(settingsFolder)
+    if #configs == 0 and settingsFolder ~= "RAVENHUB/settings" then
+        scanDir("RAVENHUB/settings")
+    end
+
     if #configs == 0 then
-        table.insert(configs, "default")
+        table.insert(configs, target.defaultConfigFile or "default")
     end
     table.sort(configs)
     return configs
 end
 
 function DrawingUI:SaveConfig(configName)
+    local target = resolveTargetWindow(self)
     if type(configName) ~= "string" or configName:gsub("%s+", "") == "" then
         return false, "Config name cannot be empty."
     end
-    local folder = self.folder or DrawingUI.Folder or "RAVENHUB"
+    local folder = target.folder or DrawingUI.Folder or "RAVENHUB"
     local settingsFolder = folder .. "/settings"
 
     if type(isfolder) == "function" and type(makefolder) == "function" then
@@ -1201,16 +1245,29 @@ function DrawingUI:SaveConfig(configName)
         timestamp = os.time()
     }
 
-    for flag, item in pairs(self.itemsByFlag or {}) do
+    for flag, item in pairs(target.itemsByFlag or {}) do
         local val = nil
-        if item.type == "toggle" then val = item.value
-        elseif item.type == "slider" then val = item.value
-        elseif item.type == "dropdown" then val = item.current
-        elseif item.type == "keybind" then val = item.key
-        elseif item.type == "input" then val = item.text
+        local entry = nil
+        if item.type == "toggle" then
+            val = item.value
+            entry = { type = "Toggle", flag = tostring(flag), state = item.value }
+        elseif item.type == "slider" then
+            val = item.value
+            entry = { type = "Slider", flag = tostring(flag), value = tostring(item.value) }
+        elseif item.type == "dropdown" then
+            val = item.multiple and (item.selectedOptions or {}) or item.current
+            entry = { type = "Dropdown", flag = tostring(flag), value = val }
+        elseif item.type == "keybind" then
+            val = item.key
+            entry = { type = "Keybind", flag = tostring(flag), bind = tostring(item.key) }
+        elseif item.type == "input" then
+            val = item.text
+            entry = { type = "Input", flag = tostring(flag), text = tostring(item.text) }
         end
-        saveTable.objects[flag] = { type = item.type, value = val }
-        saveTable.flags[flag] = val
+        if entry then
+            table.insert(saveTable.objects, entry)
+        end
+        saveTable.flags[tostring(flag)] = val
     end
 
     for flag, val in pairs(DrawingUI.Flags or {}) do
@@ -1240,12 +1297,17 @@ function DrawingUI:SaveConfig(configName)
 end
 
 function DrawingUI:LoadConfig(configName)
+    local target = resolveTargetWindow(self)
     if type(configName) ~= "string" or configName:gsub("%s+", "") == "" then
         return false, "Config name cannot be empty."
     end
-    local folder = self.folder or DrawingUI.Folder or "RAVENHUB"
+    local folder = target.folder or DrawingUI.Folder or "RAVENHUB"
     local settingsFolder = folder .. "/settings"
     local filePath = settingsFolder .. "/" .. configName .. ".json"
+
+    if (type(isfile) ~= "function" or not isfile(filePath)) and isfile("RAVENHUB/settings/" .. configName .. ".json") then
+        filePath = "RAVENHUB/settings/" .. configName .. ".json"
+    end
 
     if type(isfile) ~= "function" or not isfile(filePath) then
         return false, "Config file does not exist: " .. tostring(configName)
@@ -1268,18 +1330,50 @@ function DrawingUI:LoadConfig(configName)
         return false, "Invalid JSON data in config file."
     end
 
-    local flagsData = data.flags or {}
-    if data.objects and type(data.objects) == "table" then
-        for flag, obj in pairs(data.objects) do
-            if type(obj) == "table" and obj.value ~= nil then
-                flagsData[flag] = obj.value
+    local flagsData = {}
+
+    -- 1. Parse MacLib / DrawingUI objects table (both array and dictionary format)
+    if type(data.objects) == "table" then
+        for key, entry in pairs(data.objects) do
+            if type(entry) == "table" then
+                local flag = entry.flag or key
+                local entryType = tostring(entry.type or ""):lower()
+                local val = nil
+                if entryType == "toggle" then
+                    val = (entry.state ~= nil) and entry.state or entry.value
+                elseif entryType == "slider" then
+                    val = tonumber(entry.value) or entry.value
+                elseif entryType == "keybind" then
+                    val = entry.bind or entry.value or entry.key
+                elseif entryType == "input" then
+                    val = entry.text or entry.value
+                elseif entryType == "dropdown" then
+                    val = (entry.value ~= nil) and entry.value or entry.current
+                else
+                    val = (entry.value ~= nil) and entry.value or entry.state
+                end
+                if flag and val ~= nil then
+                    flagsData[tostring(flag)] = val
+                end
+            elseif entry ~= nil and type(key) == "string" then
+                flagsData[key] = entry
             end
         end
     end
 
+    -- 2. Parse flags dictionary
+    if type(data.flags) == "table" then
+        for k, v in pairs(data.flags) do
+            if flagsData[tostring(k)] == nil then
+                flagsData[tostring(k)] = v
+            end
+        end
+    end
+
+    -- Apply loaded flags
     for flag, val in pairs(flagsData) do
         DrawingUI.Flags[flag] = val
-        local item = self.itemsByFlag and self.itemsByFlag[flag]
+        local item = target.itemsByFlag and target.itemsByFlag[flag]
         if item and type(item.Set) == "function" then
             pcall(function() item:Set(val) end)
         end
@@ -1289,7 +1383,8 @@ function DrawingUI:LoadConfig(configName)
 end
 
 function DrawingUI:SetAutoLoad(configName)
-    local folder = self.folder or DrawingUI.Folder or "RAVENHUB"
+    local target = resolveTargetWindow(self)
+    local folder = target.folder or DrawingUI.Folder or "RAVENHUB"
     local settingsFolder = folder .. "/settings"
     if type(isfolder) == "function" and type(makefolder) == "function" then
         if not isfolder(folder) then pcall(makefolder, folder) end
@@ -1303,7 +1398,8 @@ function DrawingUI:SetAutoLoad(configName)
 end
 
 function DrawingUI:GetAutoLoad()
-    local folder = self.folder or DrawingUI.Folder or "RAVENHUB"
+    local target = resolveTargetWindow(self)
+    local folder = target.folder or DrawingUI.Folder or "RAVENHUB"
     local settingsFolder = folder .. "/settings"
     local path = settingsFolder .. "/autoload.txt"
     if type(isfile) == "function" and isfile(path) and type(readfile) == "function" then
@@ -1312,15 +1408,26 @@ function DrawingUI:GetAutoLoad()
             return val
         end
     end
+    if type(isfile) == "function" and isfile("RAVENHUB/settings/autoload.txt") and type(readfile) == "function" then
+        local ok, val = pcall(readfile, "RAVENHUB/settings/autoload.txt")
+        if ok and val and #val > 0 then
+            return val
+        end
+    end
     return nil
 end
 
 function DrawingUI:LoadAutoLoadConfig()
-    local auto = self:GetAutoLoad()
+    local target = resolveTargetWindow(self)
+    local auto = target:GetAutoLoad()
     if auto and auto ~= "" then
-        return self:LoadConfig(auto)
+        return target:LoadConfig(auto)
     end
-    return false
+    if target.defaultConfigFile and target.defaultConfigFile ~= "" then
+        local ok = target:LoadConfig(target.defaultConfigFile)
+        if ok then return ok end
+    end
+    return false, "No autoload config found."
 end
 
 function DrawingUI:SetToggleKey(newKey)
@@ -2112,8 +2219,8 @@ function SectionMethods:CreateLabel(cfg)
         pcall(function() item.innerDivider.ZIndex = 4 end)
     end
 
-    local maxLabelChars = 48
-    local disp = (#text > maxLabelChars) and (text:sub(1, maxLabelChars - 3) .. "...") or text
+    local maxLabelChars = 52
+    local disp = truncateText(text, maxLabelChars)
 
     if item.label then
         item.label.Size = 13
@@ -2124,7 +2231,7 @@ function SectionMethods:CreateLabel(cfg)
 
     function item:Set(newText)
         item.text = sanitizeText(tostring(type(newText) == "table" and (newText.Text or newText.Name) or newText or ""))
-        local newDisp = (#item.text > maxLabelChars) and (item.text:sub(1, maxLabelChars - 3) .. "...") or item.text
+        local newDisp = truncateText(item.text, maxLabelChars)
         if item.label then
             item.label.Text = newDisp
         end
@@ -2239,28 +2346,47 @@ function SectionMethods:CreateDropdown(cfg)
     end
     if #options == 0 then table.insert(options, "Default") end
 
-    local defaultVal = cfg.CurrentOption or cfg.Default or options[1] or ""
-    if type(defaultVal) == "table" then
-        defaultVal = defaultVal[1] or options[1] or ""
+    local isMultiple = (cfg.MultipleOptions == true or cfg.Multiple == true)
+    local selectedMap = {}
+    local selectedList = {}
+
+    local defaultVal = cfg.CurrentOption or cfg.Default or (options[1] or "")
+    if isMultiple then
+        if type(defaultVal) == "table" then
+            for _, o in ipairs(defaultVal) do
+                local s = tostring(o)
+                selectedMap[s] = true
+                table.insert(selectedList, s)
+            end
+        elseif defaultVal and tostring(defaultVal) ~= "" then
+            local s = tostring(defaultVal)
+            selectedMap[s] = true
+            table.insert(selectedList, s)
+        end
+    else
+        if type(defaultVal) == "table" then
+            defaultVal = defaultVal[1] or options[1] or ""
+        end
+        defaultVal = tostring(defaultVal)
     end
-    defaultVal = tostring(defaultVal)
 
     local item = {
         type = "dropdown",
         name = sanitizeText(tostring(cfg.Name or "Dropdown")),
         options = options,
+        multiple = isMultiple,
+        selectedMap = selectedMap,
+        selectedOptions = selectedList,
         current = defaultVal,
         callback = cfg.Callback or function() end,
         flag = cfg.Flag,
         hoverBg = safeDrawing("Square"),
         innerDivider = safeDrawing("Line"),
-        badgeBg = safeDrawing("Square"),
-        badgeBorder = safeDrawing("Square"),
-        badgeCapsule = createPillInput(5),
         badgeCapsule = createPillInput(5),
         label = createBoldText(6, true),
         valText = createBoldText(6, true),
         arrow = createBoldText(6),
+        tab = tab,
     }
 
     if item.hoverBg then
@@ -2276,22 +2402,6 @@ function SectionMethods:CreateDropdown(cfg)
         pcall(function() item.innerDivider.ZIndex = 4 end)
     end
 
-    if item.badgeBg then
-        item.badgeBg.Filled = true
-        item.badgeBg.Color = tab.window.theme.controlBg
-        item.badgeBg.Thickness = 1
-        item.badgeBg.Visible = false
-        pcall(function() item.badgeBg.ZIndex = 5 end)
-    end
-
-    if item.badgeBorder then
-        item.badgeBorder.Filled = false
-        item.badgeBorder.Color = tab.window.theme.controlBorder
-        item.badgeBorder.Thickness = 1
-        item.badgeBorder.Visible = false
-        pcall(function() item.badgeBorder.ZIndex = 5 end)
-    end
-
     if item.label then
         item.label.Size = 13
         item.label.Color = tab.window.theme.text
@@ -2302,7 +2412,6 @@ function SectionMethods:CreateDropdown(cfg)
     if item.valText then
         item.valText.Size = 13
         item.valText.Color = tab.window.theme.accent
-        item.valText.Text = item.current
         item.valText.Visible = false
     end
 
@@ -2313,57 +2422,118 @@ function SectionMethods:CreateDropdown(cfg)
         item.arrow.Visible = false
     end
 
-    function item:Set(val)
-        if type(val) == "table" then val = val[1] end
-        item.current = tostring(val or "")
-        if item.valText then
-            item.valText.Text = item.current
-        end
-        if item.flag then
-            DrawingUI.Flags[item.flag] = item.current
-        end
-        pcall(item.callback, item.current)
-    end
-
-    function item:CycleNext()
-        local nextIdx = 1
-        for i, opt in ipairs(item.options) do
-            if tostring(opt) == item.current then
-                nextIdx = (i % #item.options) + 1
-                break
+    function item:GetDisplayValue()
+        if self.multiple then
+            if #self.selectedOptions == 0 then
+                return "None"
+            elseif #self.selectedOptions == 1 then
+                return self.selectedOptions[1]
+            else
+                return string.format("%d Selected", #self.selectedOptions)
             end
+        else
+            return tostring(self.current or "")
         end
-        local nextVal = item.options[nextIdx] or item.current
-        item:Set(nextVal)
     end
 
-    function item:SetOptions(newOptions)
+    function item:IsSelected(opt)
+        local s = tostring(opt)
+        if self.multiple then
+            return self.selectedMap[s] == true
+        else
+            return tostring(self.current) == s
+        end
+    end
+
+    function item:Set(val)
+        if self.multiple then
+            table.clear(self.selectedOptions)
+            table.clear(self.selectedMap)
+            if type(val) == "table" then
+                for _, opt in ipairs(val) do
+                    local s = tostring(opt)
+                    self.selectedMap[s] = true
+                    table.insert(self.selectedOptions, s)
+                end
+            elseif val ~= nil and tostring(val) ~= "" then
+                local s = tostring(val)
+                self.selectedMap[s] = true
+                table.insert(self.selectedOptions, s)
+            end
+            if self.flag then
+                DrawingUI.Flags[self.flag] = self.selectedOptions
+            end
+            pcall(self.callback, self.selectedOptions)
+        else
+            if type(val) == "table" then val = val[1] end
+            self.current = tostring(val or "")
+            if self.flag then
+                DrawingUI.Flags[self.flag] = self.current
+            end
+            pcall(self.callback, self.current)
+        end
+    end
+
+    function item:ToggleOption(opt)
+        if not self.multiple then
+            self:Set(opt)
+            return
+        end
+        local s = tostring(opt)
+        if self.selectedMap[s] then
+            self.selectedMap[s] = nil
+            for idx, v in ipairs(self.selectedOptions) do
+                if v == s then
+                    table.remove(self.selectedOptions, idx)
+                    break
+                end
+            end
+        else
+            self.selectedMap[s] = true
+            table.insert(self.selectedOptions, s)
+        end
+        if self.flag then
+            DrawingUI.Flags[self.flag] = self.selectedOptions
+        end
+        pcall(self.callback, self.selectedOptions)
+    end
+
+    function item:SetOptions(newOptions, keepSelection)
         local opts = {}
         for _, opt in ipairs(newOptions or {}) do
             table.insert(opts, tostring(opt))
         end
         if #opts == 0 then table.insert(opts, "default") end
-        item.options = opts
-        if not table.find(item.options, item.current) then
-            item:Set(item.options[1] or "default")
+        self.options = opts
+
+        if not keepSelection then
+            if self.multiple then
+                table.clear(self.selectedOptions)
+                table.clear(self.selectedMap)
+            else
+                self:Set(self.options[1] or "default")
+            end
+        else
+            if not self.multiple and not table.find(self.options, self.current) then
+                self:Set(self.options[1] or "default")
+            end
         end
+    end
+
+    function item:Refresh(newOptions, keepSelection)
+        self:SetOptions(newOptions, keepSelection)
     end
 
     function item:ClearOptions()
-        item.options = {}
-    end
-
-    function item:InsertOptions(newOptions)
-        for _, opt in ipairs(newOptions or {}) do
-            table.insert(item.options, tostring(opt))
-        end
-        if not table.find(item.options, item.current) then
-            item:Set(item.options[1] or "default")
+        self.options = {}
+        if self.multiple then
+            table.clear(self.selectedOptions)
+            table.clear(self.selectedMap)
         end
     end
 
     if item.flag then
-        DrawingUI.Flags[item.flag] = item.current
+        DrawingUI.Flags[item.flag] = item.multiple and item.selectedOptions or item.current
         if tab and tab.window and tab.window.itemsByFlag then
             tab.window.itemsByFlag[item.flag] = item
         end
@@ -2593,6 +2763,7 @@ function DrawingUI:InitInputHandlers()
             -- 3. Sidebar Tab Selection
             for idx, tab in ipairs(self.tabs) do
                 if tab.hitBox and pointInBox(mousePos, tab.hitBox.pos, tab.hitBox.size) then
+                    self.openDropdown = nil
                     self.activeTabIndex = idx
                     return
                 end
@@ -2600,12 +2771,14 @@ function DrawingUI:InitInputHandlers()
 
             -- 3.5. Scroller Thumb & Track Dragging / Clicking
             if self.scrollThumbHitBox and pointInBox(mousePos, self.scrollThumbHitBox.pos, self.scrollThumbHitBox.size) then
+                self.openDropdown = nil
                 self.draggingScroller = true
                 self.scrollerDragStartY = mousePos.Y
                 local curTab = self.tabs[self.activeTabIndex]
                 self.scrollerStartOffset = curTab and (curTab.targetScroll or curTab.scrollOffset) or 0
                 return
             elseif self.scrollTrackHitBox and pointInBox(mousePos, self.scrollTrackHitBox.pos, self.scrollTrackHitBox.size) then
+                self.openDropdown = nil
                 local curTab = self.tabs[self.activeTabIndex]
                 if curTab and curTab.maxScroll > 0 then
                     local rel = math.clamp((mousePos.Y - self.scrollTrackHitBox.pos.Y) / self.scrollTrackHitBox.size.Y, 0, 1)
@@ -2614,11 +2787,36 @@ function DrawingUI:InitInputHandlers()
                 return
             end
 
+            -- 3.8. Active Dropdown Popup Selection (Highest priority overlay)
+            if self.openDropdown and self.openDropdown.popupHitBox then
+                local popBox = self.openDropdown.popupHitBox
+                if pointInBox(mousePos, popBox.pos, popBox.size) then
+                    local dd = self.openDropdown
+                    local optH = 26
+                    local optIndex = math.floor((mousePos.Y - popBox.pos.Y - 5) / optH) + 1
+                    if optIndex >= 1 and optIndex <= #dd.options then
+                        local chosenOpt = dd.options[optIndex]
+                        if dd.multiple then
+                            dd:ToggleOption(chosenOpt)
+                        else
+                            dd:Set(chosenOpt)
+                            self.openDropdown = nil
+                        end
+                    end
+                    return
+                else
+                    local hitOwnBadge = self.openDropdown.badgeHitBox and pointInBox(mousePos, self.openDropdown.badgeHitBox.pos, self.openDropdown.badgeHitBox.size)
+                    if not hitOwnBadge then
+                        self.openDropdown = nil
+                    end
+                end
+            end
+
             -- 4. Content Item Interactions
             local curTab = self.tabs[self.activeTabIndex]
             if curTab then
                 local hoveredRowFound = false
-        for _, sec in ipairs(curTab.sections) do
+                for _, sec in ipairs(curTab.sections) do
                     for _, item in ipairs(sec.items) do
                         if item.hitBox and pointInBox(mousePos, item.hitBox.pos, item.hitBox.size) then
                             if item.type == "toggle" then
@@ -2628,7 +2826,11 @@ function DrawingUI:InitInputHandlers()
                                 item:Click()
                                 return
                             elseif item.type == "dropdown" then
-                                item:CycleNext()
+                                if self.openDropdown == item then
+                                    self.openDropdown = nil
+                                else
+                                    self.openDropdown = item
+                                end
                                 return
                             elseif item.type == "slider" then
                                 self.activeSlider = item
@@ -2780,6 +2982,15 @@ end
 function DrawingUI:Toggle()
     self.visible = not self.visible
     if not self.visible then
+        self.openDropdown = nil
+        if self.dropdownPopupCard then self.dropdownPopupCard:Update(Vector2.zero, Vector2.zero, 0, Color3.new(), nil, false) end
+        if self.dropdownOptionsPool then
+            for _, r in ipairs(self.dropdownOptionsPool) do
+                setObjVisible(r.hover, false)
+                setObjVisible(r.check, false)
+                setObjVisible(r.text, false)
+            end
+        end
         if self.windowCard then self.windowCard:Update(Vector2.zero, Vector2.zero, 0, Color3.new(), nil, false) end
         if self.keyBadgeCard then self.keyBadgeCard:Update(Vector2.zero, Vector2.zero, 0, Color3.new(), nil, false) end
 
@@ -3257,32 +3468,48 @@ function DrawingUI:Render()
                         end
 
                     elseif item.type == "dropdown" then
-                        local badgeW = 150
+                        local badgeW = 160
                         local badgeH = 28
                         local badgeX = contentLeft + contentWidth - badgeW - 16
                         local badgeY = rowY + 8
 
+                        item.badgeX = badgeX
+                        item.badgeY = badgeY
+                        item.badgeW = badgeW
+                        item.badgeH = badgeH
+                        item.badgeHitBox = {
+                            pos = Vector2.new(badgeX, badgeY),
+                            size = Vector2.new(badgeW, badgeH)
+                        }
+
                         if item.label then
+                            local maxLabelLen = math.max(10, math.floor((contentWidth - badgeW - 38) / 7.5))
                             item.label.Position = Vector2.new(contentLeft + 16, rowY + 14)
+                            item.label.Text = truncateText(item.name, maxLabelLen)
                             item.label.Visible = true
                         end
 
                         if item.badgeBg then item.badgeBg.Visible = false end
                         if item.badgeBorder then item.badgeBorder.Visible = false end
 
+                        local isOpen = (self.openDropdown == item)
                         if item.badgeCapsule then
-                            item.badgeCapsule:Update(Vector2.new(badgeX, badgeY), Vector2.new(badgeW, badgeH), false, true)
+                            item.badgeCapsule:Update(Vector2.new(badgeX, badgeY), Vector2.new(badgeW, badgeH), isOpen, true)
                         end
 
                         if item.valText then
+                            local maxPillChars = math.max(8, math.floor((badgeW - 38) / 7.5))
+                            local dispVal = item:GetDisplayValue()
                             item.valText.Position = Vector2.new(badgeX + 16, badgeY + math.floor((badgeH - 12) / 2))
-                            item.valText.Text = tostring(item.current)
-                            item.valText.Color = Color3.fromRGB(255, 255, 255)
+                            item.valText.Text = truncateText(dispVal, maxPillChars)
+                            item.valText.Color = isOpen and self.theme.accent or Color3.fromRGB(255, 255, 255)
                             item.valText.Visible = true
                         end
 
                         if item.arrow then
                             item.arrow.Position = Vector2.new(badgeX + badgeW - 18, badgeY + math.floor((badgeH - 12) / 2))
+                            item.arrow.Text = isOpen and "^" or "v"
+                            item.arrow.Color = isOpen and self.theme.accent or self.theme.textMuted
                             item.arrow.Visible = true
                         end
 
@@ -3469,6 +3696,117 @@ function DrawingUI:Render()
         self.scrollTrackHitBox = nil
         self.scrollerTravel = 0
     end
+
+    -- 11. Render Active Dropdown Popup Floating Menu (Layer 25 - highest z-index)
+    if self.openDropdown and self.openDropdown.tab == curTab and self.openDropdown.badgeHitBox then
+        local dd = self.openDropdown
+        local badgeX = dd.badgeX or (contentLeft + contentWidth - 176)
+        local badgeY = dd.badgeY or contentTop
+        local badgeW = dd.badgeW or 160
+        local badgeH = dd.badgeH or 28
+
+        local popW = math.max(badgeW, 180)
+        local optH = 26
+        local maxVisibleOpts = 8
+        local numOpts = math.min(#dd.options, maxVisibleOpts)
+        local popH = numOpts * optH + 10
+        local popX = math.clamp(badgeX + badgeW - popW, contentLeft, p.X + sz.X - popW - 10)
+        local popY = badgeY + badgeH + 4
+
+        if popY + popH > (p.Y + sz.Y - 10) then
+            popY = badgeY - popH - 4
+        end
+
+        dd.popupHitBox = {
+            pos = Vector2.new(popX, popY),
+            size = Vector2.new(popW, popH)
+        }
+
+        if not self.dropdownPopupCard then
+            self.dropdownPopupCard = createRoundedCard(25)
+        end
+        if not self.dropdownOptionsPool then
+            self.dropdownOptionsPool = {}
+        end
+        self.dropdownPopupCard:Update(
+            Vector2.new(popX, popY),
+            Vector2.new(popW, popH),
+            8,
+            Color3.fromRGB(24, 28, 38),
+            Color3.fromRGB(56, 68, 96),
+            true,
+            "raised"
+        )
+
+        local mousePos = UserInputService:GetMouseLocation()
+        for i = 1, numOpts do
+            local opt = dd.options[i]
+            local oY = popY + 5 + (i - 1) * optH
+            local isSelected = dd:IsSelected(opt)
+            local isHover = pointInBox(mousePos, Vector2.new(popX + 4, oY), Vector2.new(popW - 8, optH))
+
+            local row = self.dropdownOptionsPool[i]
+            if not row then
+                row = {
+                    hover = safeDrawing("Square"),
+                    check = createBoldText(26),
+                    text = createBoldText(26),
+                }
+                if row.hover then
+                    row.hover.Filled = true
+                    row.hover.Thickness = 1
+                    pcall(function() row.hover.ZIndex = 25 end)
+                end
+                self.dropdownOptionsPool[i] = row
+            end
+
+            if isHover or isSelected then
+                row.hover.Position = Vector2.new(popX + 4, oY)
+                row.hover.Size = Vector2.new(popW - 8, optH)
+                row.hover.Color = isSelected and Color3.fromRGB(42, 54, 78) or Color3.fromRGB(32, 38, 52)
+                row.hover.Visible = true
+            else
+                row.hover.Visible = false
+            end
+
+            if isSelected then
+                row.check.Position = Vector2.new(popX + 8, oY + 5)
+                row.check.Text = "✓"
+                row.check.Color = self.theme.accent
+                row.check.Size = 13
+                row.check.Visible = true
+            else
+                row.check.Visible = false
+            end
+
+            local maxOptChars = math.max(12, math.floor((popW - 36) / 7.5))
+            row.text.Position = Vector2.new(popX + 24, oY + 5)
+            row.text.Text = truncateText(tostring(opt), maxOptChars)
+            row.text.Color = isSelected and Color3.fromRGB(255, 255, 255) or self.theme.textMuted
+            row.text.Size = 13
+            row.text.Visible = true
+        end
+
+        for j = numOpts + 1, #self.dropdownOptionsPool do
+            local r = self.dropdownOptionsPool[j]
+            if r then
+                setObjVisible(r.hover, false)
+                setObjVisible(r.check, false)
+                setObjVisible(r.text, false)
+            end
+        end
+    else
+        if self.dropdownPopupCard then
+            self.dropdownPopupCard:Update(Vector2.zero, Vector2.zero, 0, Color3.new(), nil, false)
+        end
+        if self.dropdownOptionsPool then
+            for _, r in ipairs(self.dropdownOptionsPool) do
+                setObjVisible(r.hover, false)
+                setObjVisible(r.check, false)
+                setObjVisible(r.text, false)
+            end
+        end
+    end
 end
 
 -- ============================================================
@@ -3538,6 +3876,16 @@ function DrawingUI:Destroy()
     if self.userCardPill then self.userCardPill:Remove() end
     if self.rowHoverCard then self.rowHoverCard:Remove() end
     if self.scrollThumbPill then self.scrollThumbPill:Remove() end
+    if self.dropdownPopupCard then self.dropdownPopupCard:Remove() end
+    if self.dropdownOptionsPool then
+        for _, r in ipairs(self.dropdownOptionsPool) do
+            removeObj(r.hover)
+            removeObj(r.check)
+            removeObj(r.text)
+        end
+        table.clear(self.dropdownOptionsPool)
+    end
+    self.openDropdown = nil
 
     if self.tabs then
         for _, tab in ipairs(self.tabs) do
