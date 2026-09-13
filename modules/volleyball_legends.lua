@@ -43,7 +43,8 @@ return function(Window, scriptInfo)
         -- Cooldown & Auto-Hit
         noCooldown = true,
         autoHit = true,
-        autoHitDistance = 22,
+        autoHitDistance = 35,
+        autoHitMargin = 1.5,
         autoSpike = true,
         autoSet = true,
         autoDive = true,
@@ -467,36 +468,90 @@ return function(Window, scriptInfo)
         return nil, nil
     end
 
+    local function getMoveHitbox(moveName)
+        if HitboxTool then
+            local ok, data = pcall(function() return HitboxTool.get({ MoveId = moveName }) end)
+            if ok and data and data.Size then
+                return data.Size, (data.Offset or CFrame.identity)
+            end
+        end
+        local assemblies = ReplicatedStorage:FindFirstChild("Assets")
+            and ReplicatedStorage.Assets:FindFirstChild("HitboxesNew")
+            and ReplicatedStorage.Assets.HitboxesNew.Default.Assemblies
+        local folder = assemblies and assemblies:FindFirstChild(moveName)
+        local part = folder and folder:FindFirstChild("Part")
+        if part and part:IsA("BasePart") then
+            return part.Size, part.CFrame
+        end
+
+        local base = TRUE_BASE_HITBOXES[moveName] or Vector3.new(8, 8, 8)
+        local scale = settings.hitboxExpander and (settings.hitboxMultiplier or 1.0) or 1.0
+        local wScale = settings.hitboxExpander and (settings.hitboxWidthScale or 1.0) or 1.0
+        local hScale = settings.hitboxExpander and (settings.hitboxHeightScale or 1.0) or 1.0
+        local dScale = settings.hitboxExpander and (settings.hitboxDepthScale or 1.0) or 1.0
+        return Vector3.new(base.X * scale * wScale, base.Y * scale * hScale, base.Z * scale * dScale), CFrame.identity
+    end
+
     local lastAutoHit = 0
-    local function handleAutoHit(ballPart, myPos, myHum)
+    local function handleAutoHit(ballPart, ballVel, myRoot, myHum)
         pcall(function()
-            if not settings.autoHit or not ballPart or not myHum or myHum.Health <= 0 then return end
+            if not settings.autoHit or not ballPart or not myHum or myHum.Health <= 0 or not myRoot then return end
 
             local now = os.clock()
-            if (now - lastAutoHit) < 0.18 then return end
+            if (now - lastAutoHit) < 0.15 then return end
 
             local ballPos = ballPart.Position
-            local delta = ballPos - myPos
+            local delta = ballPos - myRoot.Position
             local dist = delta.Magnitude
-            local hDist = Vector3.new(delta.X, 0, delta.Z).Magnitude
 
-            -- Trigger if 3D distance is within range OR horizontal distance is close enough
-            if dist > settings.autoHitDistance and hDist > (settings.autoHitDistance * 0.85) then return end
+            -- Upper cap search distance
+            if dist > (settings.autoHitDistance or 35) then return end
 
             local isAerial = (myHum.FloorMaterial == Enum.Material.Air)
+            local targetMove = nil
+
             if isAerial and settings.autoSpike then
-                lastAutoHit = now
-                triggerMove("Spike", true)
+                targetMove = "Spike"
             elseif not isAerial then
                 local floorY = getFloorY(ballPos)
                 local ballHeight = ballPos.Y - floorY
-                if settings.autoDive and ballHeight < 4.5 and dist > 6 then
-                    lastAutoHit = now
-                    triggerMove("Dive", false)
+                if settings.autoDive and ballHeight < 4.5 and dist > 5.5 then
+                    targetMove = "Dive"
                 elseif settings.autoSet then
-                    lastAutoHit = now
-                    triggerMove("Set", false)
+                    targetMove = "Set"
                 end
+            end
+
+            if not targetMove then return end
+
+            -- Dynamic Hitbox Checking: Calculate distance from ball to actual Hitbox boundary
+            local hbSize, hbOffset = getMoveHitbox(targetMove)
+            local hbCFrame = myRoot.CFrame * hbOffset
+            local relPos = hbCFrame:PointToObjectSpace(ballPos)
+
+            local halfX = hbSize.X * 0.5
+            local halfY = hbSize.Y * 0.5
+            local halfZ = hbSize.Z * 0.5
+
+            local margin = settings.autoHitMargin or 1.5
+            local dx = math.max(0, math.abs(relPos.X) - halfX)
+            local dy = math.max(0, math.abs(relPos.Y) - halfY)
+            local dz = math.max(0, math.abs(relPos.Z) - halfZ)
+            local distToHitbox = math.sqrt(dx * dx + dy * dy + dz * dz)
+
+            -- Velocity-forward prediction for high-speed balls (next 50ms)
+            local vel = ballVel or Vector3.zero
+            local nextBallPos = ballPos + vel * 0.05
+            local nextRelPos = hbCFrame:PointToObjectSpace(nextBallPos)
+            local ndx = math.max(0, math.abs(nextRelPos.X) - halfX)
+            local ndy = math.max(0, math.abs(nextRelPos.Y) - halfY)
+            local ndz = math.max(0, math.abs(nextRelPos.Z) - halfZ)
+            local nextDistToHitbox = math.sqrt(ndx * ndx + ndy * ndy + ndz * ndz)
+
+            -- Hit only if ball is contacting/inside hitbox bounds or about to enter
+            if distToHitbox <= margin or nextDistToHitbox <= margin then
+                lastAutoHit = now
+                triggerMove(targetMove, isAerial)
             end
         end)
     end
@@ -622,19 +677,22 @@ return function(Window, scriptInfo)
 
         local ballObj, ballPart = getActiveBall()
 
-        -- Smart Auto-Hit / Reaction
-        if ballPart and myHum and myRoot then
-            handleAutoHit(ballPart, myPos, myHum)
-        end
-
-        -- 1. Ball ESP & Out of Bounds check
+        -- 1. Ball Tracking & Predictions
         local ballPos = ballPart and ballPart.Position
         local ballVel = ballPart and ((ballObj and ballObj.Velocity) or ballPart.AssemblyLinearVelocity or Vector3.zero) or Vector3.zero
         local floorY = ballPos and getFloorY(ballPos) or -23.658
-        local landingPos, t = (ballPos and getPredictedLanding(ballPos, ballVel, floorY))
+        local landingPos, t = nil, 0
+        if ballPos then
+            landingPos, t = getPredictedLanding(ballPos, ballVel, floorY)
+        end
         local isLandingInCourt = true
         if landingPos and settings.courtOutCheck then
             isLandingInCourt = isInsideCourt(landingPos, settings.repositionMargin or 2.5)
+        end
+
+        -- Smart Auto-Hit / Reaction (Checks Hitbox Bounds Directly)
+        if ballPart and myHum and myRoot then
+            handleAutoHit(ballPart, ballVel, myRoot, myHum)
         end
 
         if settings.ballEsp and ballPart then
@@ -668,7 +726,7 @@ return function(Window, scriptInfo)
             local targetFloorY = getFloorY(landingPos)
             local distToTarget = math.floor((landingPos - myPos).Magnitude)
 
-            if t > 0.03 and t < 6.0 and (ballPos.Y - targetFloorY) > 1.0 then
+            if t and t > 0.03 and t < 6.0 and (ballPos.Y - targetFloorY) > 1.0 then
                 landingCylinder.CFrame = CFrame.new(landingPos.X, targetFloorY + 0.25, landingPos.Z) * CFrame.Angles(0, 0, math.rad(90))
                 landingCylinder.Transparency = isLandingInCourt and 0.3 or 0.65
                 landingCylinder.Color = isLandingInCourt and settings.markerColor or Color3.fromRGB(255, 60, 60)
@@ -949,9 +1007,21 @@ return function(Window, scriptInfo)
     })
 
     CombatTab:CreateSlider({
-        Name = "Trigger Distance",
-        Range = {6, 45},
-        Increment = 1,
+        Name = "Hitbox Trigger Reach (Margin)",
+        Range = {0, 8},
+        Increment = 0.5,
+        Suffix = " studs",
+        CurrentValue = settings.autoHitMargin,
+        Flag = "VB_AutoHitMargin_v4",
+        Callback = function(value)
+            settings.autoHitMargin = value
+        end,
+    })
+
+    CombatTab:CreateSlider({
+        Name = "Max Search Distance",
+        Range = {10, 60},
+        Increment = 2,
         Suffix = " studs",
         CurrentValue = settings.autoHitDistance,
         Flag = "VB_AutoHitDist_v4",
