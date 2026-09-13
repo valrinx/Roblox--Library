@@ -10,6 +10,7 @@ return function(Window, scriptInfo)
     local UserInputService = game:GetService("UserInputService")
     local Workspace = game:GetService("Workspace")
     local VirtualInputManager = game:GetService("VirtualInputManager")
+    local Debris = game:GetService("Debris")
 
     local localPlayer = Players.LocalPlayer
     local camera = Workspace.CurrentCamera
@@ -58,13 +59,16 @@ return function(Window, scriptInfo)
         infiniteJump = false,
         antiRagdoll = false,
 
-        -- Teleport
+        -- Backstab Dash (Legit Movement)
         backstabKey = Enum.KeyCode.V,
         backstabDistance = 2.5,
         backstabMaxRange = 250,
+        backstabDashSpeed = 120,
         backstabAutoFace = true,
         backstabAutoAttack = true,
         backstabAlignCam = true,
+        backstabPlaySound = true,
+        backstabPlayAnim = true,
     }
 
     local isAiming = false
@@ -200,10 +204,12 @@ return function(Window, scriptInfo)
     local origInReach = nil
     local origOccluded = nil
     local combatConfig = nil
+    local ImpulseUtil = nil
 
     pcall(function()
         hitUtil = require(ReplicatedStorage.Shared.Util.HitboxUtil)
         combatConfig = require(ReplicatedStorage.Shared.Config)
+        ImpulseUtil = require(ReplicatedStorage.Shared.Util.ImpulseUtil)
         origQueryFront = hitUtil.QueryFront
         origInReach = hitUtil.InReach
         origOccluded = hitUtil.Occluded
@@ -285,41 +291,128 @@ return function(Window, scriptInfo)
 
     setupHitboxHooks()
 
-    -- [[ TACTICAL BACKSTAB ]]
+    -- [[ TACTICAL BACKSTAB DASH ]]
+    local isBackstabDashing = false
+
+    local function playDashVfx(root, hum)
+        if settings.backstabPlaySound and root then
+            pcall(function()
+                local dashFolder = ReplicatedStorage.Assets.Sounds:FindFirstChild("Dash")
+                if dashFolder then
+                    local sounds = dashFolder:GetChildren()
+                    if #sounds > 0 then
+                        local s = sounds[math.random(1, #sounds)]:Clone()
+                        s.Parent = root
+                        s:Play()
+                        Debris:AddItem(s, 1.2)
+                    end
+                end
+            end)
+        end
+        if settings.backstabPlayAnim and hum then
+            pcall(function()
+                local anim = ReplicatedStorage.Assets.Animations.DefaultMovement:FindFirstChild("DashFront")
+                if anim then
+                    local animator = hum:FindFirstChildOfClass("Animator") or hum
+                    local track = animator:LoadAnimation(anim)
+                    track.Priority = Enum.AnimationPriority.Action
+                    track:Play(0.02, 1, 1.8)
+                end
+            end)
+        end
+    end
+
     local function executeBackstab()
+        if isBackstabDashing then return false end
+
         local target = getClosestEnemy(settings.backstabMaxRange, false)
         local myRoot = getLocalRoot()
-        if target and target.Character and myRoot then
-            local enemyRoot = target.Character:FindFirstChild("HumanoidRootPart")
-            if enemyRoot then
-                local enemyLook = enemyRoot.CFrame.LookVector
-                local flatEnemyLook = Vector3.new(enemyLook.X, 0, enemyLook.Z)
-                if flatEnemyLook.Magnitude > 0.001 then
-                    flatEnemyLook = flatEnemyLook.Unit
-                else
-                    flatEnemyLook = Vector3.new(0, 0, -1)
-                end
+        local myHum = getLocalHumanoid()
+        if not (target and target.Character and myRoot and myHum and myHum.Health > 0) then
+            notify("Backstab Dash", "No target found within " .. tostring(settings.backstabMaxRange) .. " studs!")
+            return false
+        end
 
-                -- Position behind enemy
-                local behindPos = enemyRoot.Position - (flatEnemyLook * settings.backstabDistance)
-                
-                -- Face directly towards the enemy's back
+        local enemyRoot = target.Character:FindFirstChild("HumanoidRootPart")
+        local enemyHum = target.Character:FindFirstChildOfClass("Humanoid")
+        if not (enemyRoot and enemyHum and enemyHum.Health > 0) then
+            notify("Backstab Dash", "Target is invalid or defeated!")
+            return false
+        end
+
+        isBackstabDashing = true
+
+        local startPos = myRoot.Position
+        local enemyLook = enemyRoot.CFrame.LookVector
+        local flatEnemyLook = Vector3.new(enemyLook.X, 0, enemyLook.Z)
+        flatEnemyLook = (flatEnemyLook.Magnitude > 0.001) and flatEnemyLook.Unit or Vector3.new(0, 0, -1)
+
+        local targetBehindPos = enemyRoot.Position - (flatEnemyLook * settings.backstabDistance)
+        targetBehindPos = Vector3.new(targetBehindPos.X, enemyRoot.Position.Y, targetBehindPos.Z)
+
+        local travelVec = targetBehindPos - startPos
+        local initialDist = travelVec.Magnitude
+
+        -- Sound & animation feedback
+        playDashVfx(myRoot, myHum)
+
+        -- Native impulse dash
+        local dashSpeed = settings.backstabDashSpeed or 120
+        local duration = math.clamp(initialDist / dashSpeed, 0.08, 0.22)
+
+        if ImpulseUtil and typeof(ImpulseUtil.Dash) == "function" and initialDist > 0.5 then
+            pcall(function()
+                ImpulseUtil.Dash(myRoot, travelVec.Unit, initialDist / duration, duration)
+            end)
+        end
+
+        -- Dynamic trajectory glide with sine ease-out
+        local t0 = os.clock()
+        local dashConnection
+        dashConnection = RunService.Heartbeat:Connect(function()
+            if not running or not isTargetAlive(target) or not myRoot or not myHum or myHum.Health <= 0 then
+                if dashConnection then dashConnection:Disconnect() end
+                dashConnection = nil
+                isBackstabDashing = false
+                return
+            end
+
+            local elapsed = os.clock() - t0
+            local alpha = math.clamp(elapsed / duration, 0, 1)
+            local ease = math.sin(alpha * (math.pi * 0.5))
+
+            local curLook = enemyRoot.CFrame.LookVector
+            local curFlat = Vector3.new(curLook.X, 0, curLook.Z)
+            curFlat = (curFlat.Magnitude > 0.001) and curFlat.Unit or Vector3.new(0, 0, -1)
+            local currentBehind = enemyRoot.Position - (curFlat * settings.backstabDistance)
+            currentBehind = Vector3.new(currentBehind.X, enemyRoot.Position.Y, currentBehind.Z)
+
+            local currentPos = startPos:Lerp(currentBehind, ease)
+
+            if alpha < 1 then
+                -- Orient towards dash trajectory while moving
+                myRoot.CFrame = CFrame.lookAt(currentPos, currentBehind + (curFlat * 4))
+            else
+                dashConnection:Disconnect()
+                dashConnection = nil
+
+                -- Arrival: Lock orientation behind enemy
                 if settings.backstabAutoFace then
-                    myRoot.CFrame = CFrame.lookAt(behindPos, enemyRoot.Position)
+                    myRoot.CFrame = CFrame.lookAt(currentBehind, enemyRoot.Position)
                 else
-                    myRoot.CFrame = CFrame.new(behindPos) * (enemyRoot.CFrame - enemyRoot.Position)
+                    myRoot.CFrame = CFrame.new(currentBehind) * (enemyRoot.CFrame - enemyRoot.Position)
                 end
                 myRoot.AssemblyLinearVelocity = Vector3.zero
 
-                -- Align camera directly at target for seamless combat control
+                -- Align camera directly at enemy
                 if settings.backstabAlignCam and camera then
                     camera.CFrame = CFrame.lookAt(camera.CFrame.Position, enemyRoot.Position)
                 end
 
-                -- Auto M1 immediately after teleporting behind
+                -- Auto M1 strike immediately on arrival
                 if settings.backstabAutoAttack then
                     task.spawn(function()
-                        task.wait(0.04)
+                        task.wait(0.03)
                         pcall(function()
                             VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 0)
                             task.wait(0.02)
@@ -328,12 +421,15 @@ return function(Window, scriptInfo)
                     end)
                 end
 
-                notify("Backstab TP", "Locked behind " .. target.DisplayName .. " (" .. tostring(settings.backstabDistance) .. " studs) 🗡️⚡")
-                return true
+                notify("Backstab Dash", "Dashed behind " .. target.DisplayName .. " (" .. string.format("%.1f", initialDist) .. " studs) 🗡️💨")
+
+                task.delay(0.08, function()
+                    isBackstabDashing = false
+                end)
             end
-        end
-        notify("Backstab TP", "No target found within " .. tostring(settings.backstabMaxRange) .. " studs!")
-        return false
+        end)
+
+        return true
     end
 
     -- [[ INPUT HANDLING ]]
@@ -772,7 +868,7 @@ return function(Window, scriptInfo)
 
     -- Tab 4: Teleport
     local TeleportTab = Window:CreateTab("Teleport", 4483362458)
-    TeleportTab:CreateSection("Tactical Backstab Teleport")
+    TeleportTab:CreateSection("🗡️ Tactical Backstab Dash (Legit Movement)")
 
     TeleportTab:CreateKeybind({
         Name = "🗡️ Backstab Hotkey",
@@ -782,7 +878,7 @@ return function(Window, scriptInfo)
         Callback = function(key)
             if typeof(key) == "EnumItem" then
                 settings.backstabKey = key
-                notify("Backstab TP", "Hotkey bound to [" .. tostring(key.Name) .. "]")
+                notify("Backstab Dash", "Hotkey bound to [" .. tostring(key.Name) .. "]")
             end
         end,
     })
@@ -792,10 +888,22 @@ return function(Window, scriptInfo)
         Range = {1, 10},
         Increment = 0.5,
         Suffix = " Studs Behind",
-        CurrentValue = 3,
+        CurrentValue = 2.5,
         Flag = "AB_BackstabDist",
         Callback = function(v)
             settings.backstabDistance = v
+        end,
+    })
+
+    TeleportTab:CreateSlider({
+        Name = "Dash Glide Speed",
+        Range = {60, 250},
+        Increment = 10,
+        Suffix = " Studs/s",
+        CurrentValue = 120,
+        Flag = "AB_BackstabSpeed",
+        Callback = function(v)
+            settings.backstabDashSpeed = v
         end,
     })
 
@@ -808,6 +916,24 @@ return function(Window, scriptInfo)
         Flag = "AB_BackstabRange",
         Callback = function(v)
             settings.backstabMaxRange = v
+        end,
+    })
+
+    TeleportTab:CreateToggle({
+        Name = "🔊 Dash Audio VFX",
+        CurrentValue = true,
+        Flag = "AB_BackstabAudio",
+        Callback = function(v)
+            settings.backstabPlaySound = v
+        end,
+    })
+
+    TeleportTab:CreateToggle({
+        Name = "🏃 Dash Character Anim",
+        CurrentValue = true,
+        Flag = "AB_BackstabAnim",
+        Callback = function(v)
+            settings.backstabPlayAnim = v
         end,
     })
 
@@ -839,7 +965,7 @@ return function(Window, scriptInfo)
     })
 
     TeleportTab:CreateButton({
-        Name = "🚀 Execute Backstab Teleport",
+        Name = "⚡ Execute Backstab Dash",
         Callback = function()
             executeBackstab()
         end,
