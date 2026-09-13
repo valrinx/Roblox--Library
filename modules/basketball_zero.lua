@@ -1,7 +1,7 @@
 -- ============================================================
 --   RAVEN HUB  |  Basketball: Zero (BAC / Frog Compliant)
---   100% Drawing API ESP Engine (Zero Instance Injection)
---   Auto Green Release, Auto Steal, Always Run, Anti-Ankle Break
+--   High-Performance 100% Drawing API Engine (Zero Lag / Zero Injection)
+--   Auto Green Release, Dual Ball ESP, Complete Anti-Ankle Break, Auto Steal
 -- ============================================================
 
 return function(Window, scriptInfo)
@@ -23,7 +23,7 @@ return function(Window, scriptInfo)
     local running = true
     local connections = {}
 
-    -- Settings (All defaults disabled for 100% passive startup / zero BAC flags)
+    -- Settings
     local settings = {
         -- Tab 1: Shooting
         autoGreen = false,
@@ -32,17 +32,19 @@ return function(Window, scriptInfo)
 
         -- Tab 2: Defense & Mobility
         autoSteal = false,
-        stealReach = 11,
+        stealReach = 7,
         antiAnkleBreak = false,
         alwaysRun = false,
 
-        -- Tab 3: Visuals & ESP (100% Drawing API)
+        -- Tab 3: Visuals & ESP (100% Drawing API - Zero Lag)
         ballEsp = false,
+        ballTracer = false,
         rimEsp = false,
         playerEsp = false,
-        espDistance = false,
+        espDistance = true,
         showBoxes = false,
         showTracers = false,
+        maxDistance = 250,
 
         -- Tab 4: Safety
         safeModeGuard = true,
@@ -66,8 +68,8 @@ return function(Window, scriptInfo)
         return model:FindFirstChildOfClass("Humanoid")
     end
 
-    -- Lazy Game Controllers Resolution (Only resolved on-demand when user activates features)
-    local BallController, ShootingController, DefenseController, MovementController, Network
+    -- Lazy Game Controllers Resolution (Only safe controllers, NEVER require AbilityController)
+    local BallController, DefenseController, MovementController, Network
     local controllersResolved = false
 
     local function resolveControllers()
@@ -78,9 +80,6 @@ return function(Window, scriptInfo)
         pcall(function()
             if not BallController and controllers:FindFirstChild("BallController") then
                 BallController = require(controllers.BallController)
-            end
-            if not ShootingController and controllers:FindFirstChild("ShootingController") then
-                ShootingController = require(controllers.ShootingController)
             end
             if not DefenseController and controllers:FindFirstChild("DefenseController") then
                 DefenseController = require(controllers.DefenseController)
@@ -102,7 +101,7 @@ return function(Window, scriptInfo)
     end
 
     -- ------------------------------------------------------------
-    -- 100% DRAWING API ESP ENGINE (Zero Object Injection / BAC Safe)
+    -- 100% ZERO-LAG DRAWING API ESP ENGINE
     -- ------------------------------------------------------------
     local hasDrawing = type(Drawing) == "table" and type(Drawing.new) == "function"
     local espDrawings = {}
@@ -114,16 +113,22 @@ return function(Window, scriptInfo)
     end
 
     local function newPlayerDrawingSet()
-        local d = {}
-        d.boxOutline = safeDrawing("Square")
+        local d = {
+            boxOutline = safeDrawing("Square"),
+            box = safeDrawing("Square"),
+            name = safeDrawing("Text"),
+            dist = safeDrawing("Text"),
+            tracer = safeDrawing("Line"),
+            visible = false,
+        }
+
         if d.boxOutline then
-            d.boxOutline.Thickness = 3
+            d.boxOutline.Thickness = 2.5
             d.boxOutline.Filled = false
             d.boxOutline.Color = Color3.fromRGB(0, 0, 0)
             d.boxOutline.Visible = false
         end
 
-        d.box = safeDrawing("Square")
         if d.box then
             d.box.Thickness = 1
             d.box.Filled = false
@@ -131,7 +136,6 @@ return function(Window, scriptInfo)
             d.box.Visible = false
         end
 
-        d.name = safeDrawing("Text")
         if d.name then
             d.name.Size = 13
             d.name.Center = true
@@ -141,7 +145,6 @@ return function(Window, scriptInfo)
             d.name.Visible = false
         end
 
-        d.dist = safeDrawing("Text")
         if d.dist then
             d.dist.Size = 11
             d.dist.Center = true
@@ -151,7 +154,6 @@ return function(Window, scriptInfo)
             d.dist.Visible = false
         end
 
-        d.tracer = safeDrawing("Line")
         if d.tracer then
             d.tracer.Thickness = 1
             d.tracer.Visible = false
@@ -161,8 +163,13 @@ return function(Window, scriptInfo)
     end
 
     local function newPointDrawingSet(defaultColor)
-        local d = {}
-        d.circle = safeDrawing("Circle")
+        local d = {
+            circle = safeDrawing("Circle"),
+            text = safeDrawing("Text"),
+            tracer = safeDrawing("Line"),
+            visible = false,
+        }
+
         if d.circle then
             d.circle.Thickness = 1.5
             d.circle.Filled = false
@@ -171,7 +178,6 @@ return function(Window, scriptInfo)
             d.circle.Visible = false
         end
 
-        d.text = safeDrawing("Text")
         if d.text then
             d.text.Size = 12
             d.text.Center = true
@@ -181,22 +187,32 @@ return function(Window, scriptInfo)
             d.text.Visible = false
         end
 
+        if d.tracer then
+            d.tracer.Thickness = 1.2
+            d.tracer.Color = defaultColor or Color3.fromRGB(255, 140, 0)
+            d.tracer.Visible = false
+        end
+
         return d
     end
 
     local function hideDrawingSet(d)
-        if not d then return end
-        for _, obj in pairs(d) do
-            if obj and obj.Visible then
-                pcall(function() obj.Visible = false end)
-            end
-        end
+        if not d or not d.visible then return end
+        d.visible = false
+        if d.boxOutline and d.boxOutline.Visible then d.boxOutline.Visible = false end
+        if d.box and d.box.Visible then d.box.Visible = false end
+        if d.name and d.name.Visible then d.name.Visible = false end
+        if d.dist and d.dist.Visible then d.dist.Visible = false end
+        if d.tracer and d.tracer.Visible then d.tracer.Visible = false end
+        if d.circle and d.circle.Visible then d.circle.Visible = false end
+        if d.text and d.text.Visible then d.text.Visible = false end
     end
 
     local function removeDrawingSet(d)
         if not d then return end
-        for _, obj in pairs(d) do
-            if obj then
+        d.visible = false
+        for k, obj in pairs(d) do
+            if type(obj) == "table" or type(obj) == "userdata" then
                 pcall(function()
                     obj.Visible = false
                     obj:Remove()
@@ -205,13 +221,13 @@ return function(Window, scriptInfo)
         end
     end
 
-    -- Find Target Rim (Cached search to prevent high-frequency workspace scanning)
+    -- Find Target Rim (Cached search every 5s)
     local cachedRims = {}
     local lastRimScan = 0
 
     local function getTargetRim(myPos)
         local now = os.clock()
-        if (now - lastRimScan) > 4 or #cachedRims == 0 then
+        if (now - lastRimScan) > 5 or #cachedRims == 0 then
             lastRimScan = now
             table.clear(cachedRims)
             local searchRoots = {
@@ -244,7 +260,7 @@ return function(Window, scriptInfo)
         for _, rim in ipairs(cachedRims) do
             if rim and rim.Parent then
                 local dist = (rim.Position - myPos).Magnitude
-                if dist < 220 and dist > 8 and dist < minDist then
+                if dist < 250 and dist > 4 and dist < minDist then
                     minDist = dist
                     bestRim = rim
                 end
@@ -255,25 +271,112 @@ return function(Window, scriptInfo)
     end
 
     -- ============================================================
-    --   AUTO GREEN RELEASE ENGINE
+    --   DUAL-MODE BALL LOCATOR (Free Ball & Ball Carrier Tracking)
+    -- ============================================================
+    local function getAccurateBallData()
+        ensureControllers()
+
+        -- 1. Check if a player possesses the ball
+        local possPlayer = nil
+        local possChar = nil
+
+        if BallController and type(BallController.GetCharacterPossessingBall) == "function" then
+            pcall(function()
+                possChar = BallController:GetCharacterPossessingBall()
+                possPlayer = BallController:GetPlayerPossessingBall()
+            end)
+        end
+
+        -- Fallback possession check: scan player characters for visible PlrBall
+        if not possChar then
+            for _, p in ipairs(Players:GetPlayers()) do
+                local c = p.Character
+                if c then
+                    local pb = c:FindFirstChild("PlrBall")
+                    local animB = pb and pb:FindFirstChild("Anims") and pb.Anims:FindFirstChild("BALL")
+                    if animB and animB.Transparency < 0.5 then
+                        possPlayer = p
+                        possChar = c
+                        break
+                    end
+                end
+            end
+        end
+
+        if possChar then
+            local pb = possChar:FindFirstChild("PlrBall")
+            local animB = pb and pb:FindFirstChild("Anims") and pb.Anims:FindFirstChild("BALL")
+            local hrp = possChar:FindFirstChild("HumanoidRootPart")
+            local ballPos = (animB and animB.Position) or (hrp and hrp.Position)
+            local carrierName = (possPlayer and (possPlayer.DisplayName or possPlayer.Name)) or possChar.Name
+            local isLocal = (possPlayer == localPlayer or possChar == localPlayer.Character)
+            local isTeammate = (possPlayer and possPlayer.Team ~= nil and localPlayer.Team ~= nil and possPlayer.Team == localPlayer.Team)
+
+            return ballPos, carrierName, true, isLocal, isTeammate
+        end
+
+        -- 2. Free Ball (Loose Ball / In Flight / On Floor)
+        -- Primary: Server ball position from BallController
+        if BallController and type(BallController.GetServerBallPosition) == "function" then
+            local ok, sPos = pcall(BallController.GetServerBallPosition, BallController)
+            if ok and typeof(sPos) == "Vector3" and sPos.Magnitude > 1 then
+                return sPos, "Free Ball", false, false, false
+            end
+        end
+
+        -- Secondary: Workspace.Basketball or ReplicatedStorage.Basketball.Value
+        local ballVal = ReplicatedStorage:FindFirstChild("Basketball")
+        local ballPart = (ballVal and ballVal.Value) or workspace:FindFirstChild("Basketball")
+        if ballPart and ballPart:IsA("BasePart") then
+            return ballPart.Position, "Free Ball", false, false, false
+        end
+
+        return nil, nil, false, false, false
+    end
+
+    -- ============================================================
+    --   AUTO GREEN RELEASE ENGINE (Native Input Release)
     -- ============================================================
     local hasReleasedThisShot = false
+    local cachedShotMeter = nil
 
     local function getShotMeterGui()
+        if cachedShotMeter and cachedShotMeter.Parent then
+            return cachedShotMeter
+        end
         local pg = localPlayer:FindFirstChildOfClass("PlayerGui")
-        return pg and pg:FindFirstChild("ShotMeter")
+        cachedShotMeter = pg and pg:FindFirstChild("ShotMeter")
+        return cachedShotMeter
+    end
+
+    local function triggerShotRelease()
+        if type(mouse1release) == "function" then
+            pcall(mouse1release)
+        elseif type(mouse1click) == "function" then
+            pcall(mouse1click)
+        else
+            pcall(function()
+                local vim = game:GetService("VirtualInputManager")
+                if vim then
+                    vim:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+                end
+            end)
+        end
     end
 
     local function updateAutoGreen()
         if not settings.autoGreen then return end
 
         local shotMeterGui = getShotMeterGui()
-        if not shotMeterGui then return end
+        if not shotMeterGui or not shotMeterGui.Enabled then
+            hasReleasedThisShot = false
+            return
+        end
 
         local bg = shotMeterGui:FindFirstChild("BG")
         if not bg then return end
 
-        local isShooting = bg.GroupTransparency < 0.6 and shotMeterGui.Enabled
+        local isShooting = (bg.GroupTransparency < 0.6)
         if not isShooting then
             hasReleasedThisShot = false
             return
@@ -289,10 +392,10 @@ return function(Window, scriptInfo)
         local greenPos = green.Position.Y.Scale
         local greenSize = green.Size.Y.Scale
 
-        local greenCenter = greenPos + (greenSize / 2) + settings.greenOffset
+        local greenCenter = greenPos + (greenSize * 0.5) + settings.greenOffset
         local distance = math.abs(barPos - greenCenter)
 
-        if distance <= (greenSize * 0.45) then
+        if distance <= (greenSize * 0.46) then
             hasReleasedThisShot = true
 
             -- Face Rim if enabled
@@ -310,24 +413,12 @@ return function(Window, scriptInfo)
                 end
             end
 
-            -- Trigger instant release
-            if type(mouse1click) == "function" then
-                pcall(mouse1click)
-            elseif type(mouse1press) == "function" and type(mouse1release) == "function" then
-                pcall(mouse1release)
-            else
-                pcall(function()
-                    local vim = game:GetService("VirtualInputManager")
-                    if vim then
-                        vim:SendMouseButtonEvent(0, 0, 0, false, game, 0)
-                    end
-                end)
-            end
+            triggerShotRelease()
         end
     end
 
     -- ============================================================
-    --   AUTO STEAL & DEFENSE LOGIC
+    --   AUTO STEAL & COMPLETE ANTI-ANKLE BREAK
     -- ============================================================
     local lastStealAttempt = 0
 
@@ -339,11 +430,14 @@ return function(Window, scriptInfo)
         ensureControllers()
         local now = os.clock()
 
-        -- 1. Anti-Ankle Break
-        if settings.antiAnkleBreak then
-            if MovementController and MovementController.States and MovementController.States.Stunned then
-                MovementController.States.Stunned = false
-            end
+        -- 1. Complete Anti-Ankle Break (Clears Stun, Kneel, and NoWalk)
+        if settings.antiAnkleBreak and MovementController and MovementController.States then
+            local s = MovementController.States
+            if s.Stunned then s.Stunned = false end
+            if s.Kneeling then s.Kneeling = false end
+            if s.NoWalk then s.NoWalk = false end
+            if s.AfterStun then s.AfterStun = false end
+
             if Network and Network.CharValues and Network.CharValues.Stunned then
                 Network.CharValues.Stunned = false
             end
@@ -354,10 +448,13 @@ return function(Window, scriptInfo)
             if MovementController.AlwaysRun == false then
                 MovementController.AlwaysRun = true
             end
+            if MovementController.States and MovementController.States.ActualRunning == false then
+                MovementController.States.ActualRunning = true
+            end
         end
 
-        -- 3. Auto Steal
-        if settings.autoSteal and DefenseController and (now - lastStealAttempt) > 0.6 then
+        -- 3. Auto Steal (Guarded Distance & Debounce)
+        if settings.autoSteal and DefenseController and (now - lastStealAttempt) > 0.65 then
             local enemy = nil
             if BallController and type(BallController.GetEnemyWithBallWithinDistance) == "function" then
                 pcall(function()
@@ -375,7 +472,7 @@ return function(Window, scriptInfo)
     end
 
     -- ============================================================
-    --   VISUALS & 100% DRAWING API ESP (Zero-Object Safe)
+    --   HIGH-PERFORMANCE ZERO-LAG VISUALS (100% Drawing API)
     -- ============================================================
     local function updateVisuals(myPos)
         if not hasDrawing then return end
@@ -397,16 +494,13 @@ return function(Window, scriptInfo)
 
         local activeKeys = {}
         local viewportSize = camera.ViewportSize
+        local maxDist = settings.maxDistance
 
-        -- 1. Ball Drawing ESP
+        -- 1. Dual-Mode Basketball ESP
         if settings.ballEsp then
-            local ballVal = ReplicatedStorage:FindFirstChild("Basketball")
-            local ballPart = ballVal and ballVal.Value
-            if not ballPart or not ballPart.Parent then
-                ballPart = workspace:FindFirstChild("Basketball")
-            end
+            local ballPos, ballCarrier, isPossessed, isLocal, isTeammate = getAccurateBallData()
 
-            if ballPart and ballPart:IsA("BasePart") then
+            if ballPos then
                 local bKey = "BALL"
                 activeKeys[bKey] = true
                 if not espDrawings[bKey] then
@@ -414,30 +508,61 @@ return function(Window, scriptInfo)
                 end
                 local d = espDrawings[bKey]
 
-                local screenPos, onScreen = camera:WorldToViewportPoint(ballPart.Position)
+                local screenPos, onScreen = camera:WorldToViewportPoint(ballPos)
                 if onScreen and screenPos.Z > 0 then
-                    local dist = math.floor((ballPart.Position - myPos).Magnitude)
-                    local possessor = "Free Ball"
-                    if BallController and type(BallController.GetPlayerPossessingBall) == "function" then
-                        pcall(function()
-                            local p = BallController:GetPlayerPossessingBall()
-                            if p then possessor = p.DisplayName or p.Name end
-                        end)
+                    d.visible = true
+                    local distStuds = (ballPos - myPos).Magnitude
+                    local distMeters = math.floor(distStuds * 0.28)
+
+                    -- Color distinction: Orange for free ball, Green for you, Blue for team, Red for enemy
+                    local ballColor = Color3.fromRGB(255, 150, 0)
+                    local textHeader = "🏀 Free Ball"
+
+                    if isPossessed then
+                        if isLocal then
+                            ballColor = Color3.fromRGB(50, 255, 120)
+                            textHeader = "🏀 Ball (YOU)"
+                        elseif isTeammate then
+                            ballColor = Color3.fromRGB(80, 180, 255)
+                            textHeader = string.format("🏀 Ball [%s]", ballCarrier)
+                        else
+                            ballColor = Color3.fromRGB(255, 60, 60)
+                            textHeader = string.format("🏀 Ball [%s]", ballCarrier)
+                        end
                     end
 
-                    d.circle.Position = Vector2.new(screenPos.X, screenPos.Y)
-                    d.circle.Visible = true
+                    if d.circle then
+                        d.circle.Position = Vector2.new(screenPos.X, screenPos.Y)
+                        d.circle.Color = ballColor
+                        d.circle.Visible = true
+                    end
 
-                    d.text.Position = Vector2.new(screenPos.X, screenPos.Y - 20)
-                    d.text.Text = string.format("🏀 Basketball [%s | %dm]", possessor, math.floor(dist * 0.28))
-                    d.text.Visible = true
+                    if d.text then
+                        d.text.Position = Vector2.new(screenPos.X, screenPos.Y - 20)
+                        d.text.Color = ballColor
+                        d.text.Text = string.format("%s [%dm]", textHeader, distMeters)
+                        d.text.Visible = true
+                    end
+
+                    if settings.ballTracer and d.tracer then
+                        d.tracer.From = Vector2.new(viewportSize.X / 2, viewportSize.Y)
+                        d.tracer.To = Vector2.new(screenPos.X, screenPos.Y)
+                        d.tracer.Color = ballColor
+                        d.tracer.Visible = true
+                    elseif d.tracer and d.tracer.Visible then
+                        d.tracer.Visible = false
+                    end
                 else
                     hideDrawingSet(d)
+                end
+            else
+                if espDrawings["BALL"] then
+                    hideDrawingSet(espDrawings["BALL"])
                 end
             end
         end
 
-        -- 2. Rim Drawing ESP
+        -- 2. Rim ESP
         if settings.rimEsp then
             local rim, dist = getTargetRim(myPos)
             if rim then
@@ -450,6 +575,7 @@ return function(Window, scriptInfo)
 
                 local screenPos, onScreen = camera:WorldToViewportPoint(rim.Position)
                 if onScreen and screenPos.Z > 0 then
+                    d.visible = true
                     d.circle.Position = Vector2.new(screenPos.X, screenPos.Y)
                     d.circle.Visible = true
 
@@ -462,87 +588,93 @@ return function(Window, scriptInfo)
             end
         end
 
-        -- 3. Player Drawing ESP
+        -- 3. Optimized Player Drawing ESP (Zero-Stutter)
         if settings.playerEsp then
             for _, p in ipairs(Players:GetPlayers()) do
                 if p ~= localPlayer and p.Character then
                     local pChar = p.Character
                     local pRoot = getRoot(pChar)
-                    local pHum = getHumanoid(pChar)
 
-                    if pRoot and pHum and pHum.Health > 0 then
-                        local pKey = "PLR_" .. p.Name
-                        activeKeys[pKey] = true
-                        if not espDrawings[pKey] then
-                            espDrawings[pKey] = newPlayerDrawingSet()
-                        end
-                        local d = espDrawings[pKey]
+                    if pRoot then
+                        local dist = (pRoot.Position - myPos).Magnitude
+                        if dist <= maxDist then
+                            local pHum = getHumanoid(pChar)
+                            if pHum and pHum.Health > 0 then
+                                local pKey = "PLR_" .. p.Name
+                                activeKeys[pKey] = true
+                                if not espDrawings[pKey] then
+                                    espDrawings[pKey] = newPlayerDrawingSet()
+                                end
+                                local d = espDrawings[pKey]
 
-                        local rootScreen, onScreen = camera:WorldToViewportPoint(pRoot.Position)
-                        if onScreen and rootScreen.Z > 0 then
-                            local head = pChar:FindFirstChild("Head")
-                            local headPos = head and head.Position or (pRoot.Position + Vector3.new(0, 1.5, 0))
+                                local rootScreen, onScreen = camera:WorldToViewportPoint(pRoot.Position)
+                                if onScreen and rootScreen.Z > 0 then
+                                    d.visible = true
 
-                            local topScreen = camera:WorldToViewportPoint(headPos + Vector3.new(0, 0.7, 0))
-                            local bottomScreen = camera:WorldToViewportPoint(pRoot.Position - Vector3.new(0, 2.7, 0))
+                                    -- Fast bounding box calculation
+                                    local headOffset = Vector3.new(0, 2.2, 0)
+                                    local footOffset = Vector3.new(0, -2.8, 0)
+                                    local topScreen = camera:WorldToViewportPoint(pRoot.Position + headOffset)
+                                    local botScreen = camera:WorldToViewportPoint(pRoot.Position + footOffset)
 
-                            local boxHeight = math.abs(bottomScreen.Y - topScreen.Y)
-                            if boxHeight >= 4 then
-                                local boxWidth = math.floor(boxHeight * 0.58)
-                                local boxX = math.floor(rootScreen.X - boxWidth / 2)
-                                local boxY = math.floor(topScreen.Y)
+                                    local boxHeight = math.abs(botScreen.Y - topScreen.Y)
+                                    if boxHeight >= 6 then
+                                        local boxWidth = math.floor(boxHeight * 0.58)
+                                        local boxX = math.floor(rootScreen.X - boxWidth / 2)
+                                        local boxY = math.floor(topScreen.Y)
 
-                                local isTeammate = (p.Team ~= nil and localPlayer.Team ~= nil and p.Team == localPlayer.Team)
-                                local tagColor = isTeammate and Color3.fromRGB(75, 160, 255) or Color3.fromRGB(255, 75, 75)
+                                        local isTeammate = (p.Team ~= nil and localPlayer.Team ~= nil and p.Team == localPlayer.Team)
+                                        local tagColor = isTeammate and Color3.fromRGB(75, 160, 255) or Color3.fromRGB(255, 75, 75)
 
-                                -- Bounding Box
-                                if settings.showBoxes and d.box then
-                                    if d.boxOutline then
-                                        d.boxOutline.Size = Vector2.new(boxWidth + 2, boxHeight + 2)
-                                        d.boxOutline.Position = Vector2.new(boxX - 1, boxY - 1)
-                                        d.boxOutline.Visible = true
+                                        -- Bounding Box
+                                        if settings.showBoxes and d.box then
+                                            if d.boxOutline then
+                                                d.boxOutline.Size = Vector2.new(boxWidth + 2, boxHeight + 2)
+                                                d.boxOutline.Position = Vector2.new(boxX - 1, boxY - 1)
+                                                if not d.boxOutline.Visible then d.boxOutline.Visible = true end
+                                            end
+                                            d.box.Size = Vector2.new(boxWidth, boxHeight)
+                                            d.box.Position = Vector2.new(boxX, boxY)
+                                            d.box.Color = tagColor
+                                            if not d.box.Visible then d.box.Visible = true end
+                                        else
+                                            if d.box and d.box.Visible then d.box.Visible = false end
+                                            if d.boxOutline and d.boxOutline.Visible then d.boxOutline.Visible = false end
+                                        end
+
+                                        -- Player Name
+                                        if d.name then
+                                            d.name.Text = p.DisplayName or p.Name
+                                            d.name.Position = Vector2.new(boxX + boxWidth / 2, boxY - 16)
+                                            d.name.Color = tagColor
+                                            if not d.name.Visible then d.name.Visible = true end
+                                        end
+
+                                        -- Distance
+                                        if settings.espDistance and d.dist then
+                                            d.dist.Text = string.format("[%dm]", math.floor(dist * 0.28))
+                                            d.dist.Position = Vector2.new(boxX + boxWidth / 2, boxY + boxHeight + 2)
+                                            if not d.dist.Visible then d.dist.Visible = true end
+                                        else
+                                            if d.dist and d.dist.Visible then d.dist.Visible = false end
+                                        end
+
+                                        -- Tracers
+                                        if settings.showTracers and d.tracer then
+                                            d.tracer.From = Vector2.new(viewportSize.X / 2, viewportSize.Y)
+                                            d.tracer.To = Vector2.new(boxX + boxWidth / 2, boxY + boxHeight)
+                                            d.tracer.Color = tagColor
+                                            if not d.tracer.Visible then d.tracer.Visible = true end
+                                        else
+                                            if d.tracer and d.tracer.Visible then d.tracer.Visible = false end
+                                        end
+                                    else
+                                        hideDrawingSet(d)
                                     end
-                                    d.box.Size = Vector2.new(boxWidth, boxHeight)
-                                    d.box.Position = Vector2.new(boxX, boxY)
-                                    d.box.Color = tagColor
-                                    d.box.Visible = true
                                 else
-                                    if d.box then d.box.Visible = false end
-                                    if d.boxOutline then d.boxOutline.Visible = false end
+                                    hideDrawingSet(d)
                                 end
-
-                                -- Player Name
-                                if d.name then
-                                    d.name.Text = p.DisplayName or p.Name
-                                    d.name.Position = Vector2.new(boxX + boxWidth / 2, boxY - 16)
-                                    d.name.Color = tagColor
-                                    d.name.Visible = true
-                                end
-
-                                -- Distance
-                                if settings.espDistance and d.dist then
-                                    local pDist = math.floor((pRoot.Position - myPos).Magnitude * 0.28)
-                                    d.dist.Text = string.format("[%dm]", pDist)
-                                    d.dist.Position = Vector2.new(boxX + boxWidth / 2, boxY + boxHeight + 2)
-                                    d.dist.Visible = true
-                                else
-                                    if d.dist then d.dist.Visible = false end
-                                end
-
-                                -- Tracers
-                                if settings.showTracers and d.tracer then
-                                    d.tracer.From = Vector2.new(viewportSize.X / 2, viewportSize.Y)
-                                    d.tracer.To = Vector2.new(boxX + boxWidth / 2, boxY + boxHeight)
-                                    d.tracer.Color = tagColor
-                                    d.tracer.Visible = true
-                                else
-                                    if d.tracer then d.tracer.Visible = false end
-                                end
-                            else
-                                hideDrawingSet(d)
                             end
-                        else
-                            hideDrawingSet(d)
                         end
                     end
                 end
@@ -581,7 +713,7 @@ return function(Window, scriptInfo)
     --   USER INTERFACE (Ghost DrawingUI or MacLib Compatible)
     -- ============================================================
 
-    -- Tab 0: Overview (Ensure hub-level tab exists)
+    -- Tab 0: Overview
     local HomeTab = (type(Window.GetTab) == "function" and Window:GetTab("Overview"))
     if not HomeTab and type(Window.CreateTab) == "function" then
         HomeTab = Window:CreateTab("Overview", "overview")
@@ -590,12 +722,12 @@ return function(Window, scriptInfo)
         HomeTab:CreateLabel("PlaceId: " .. tostring(game.PlaceId))
         HomeTab:CreateLabel("Anti-Cheat: BAC (Frog Anti-Cheat) Active")
         HomeTab:CreateLabel("Engine: 100% Drawing Safe (Zero Object Injection)")
-        HomeTab:CreateLabel("Active Module: Basketball: Zero [v1.0.0]")
+        HomeTab:CreateLabel("Active Module: Basketball: Zero [v1.1.0]")
         HomeTab:CreateLabel("Status: Active & Guarded")
         HomeTab:CreateSection("Tactical Overview")
         HomeTab:CreateParagraph({
             Title = "Active Features",
-            Content = "Auto Green Release, Auto Steal, Anti-Ankle Break, and 100% Drawing Safe ESP.",
+            Content = "Auto Green Release, Dual-Mode Ball ESP, Complete Anti-Ankle Break, Auto Steal, and Zero-Lag Drawing ESP.",
         })
     end
 
@@ -633,15 +765,6 @@ return function(Window, scriptInfo)
         end,
     })
 
-    ShootTab:CreateInput({
-        Name = "Custom Shot Delay",
-        CurrentValue = "0",
-        PlaceholderText = "Enter ms delay...",
-        Flag = "BZ_CustomDelay",
-        Callback = function(value)
-        end,
-    })
-
     -- Tab 2: Defense & Mobility
     local DefTab = Window:CreateTab("Defense", "movement")
     DefTab:CreateSection("Ball Defense")
@@ -659,8 +782,8 @@ return function(Window, scriptInfo)
     })
 
     DefTab:CreateSlider({
-        Name = "Steal Reach Distance",
-        Range = {6, 18},
+        Name = "Safe Steal Distance",
+        Range = {5, 10},
         Increment = 1,
         Suffix = " studs",
         CurrentValue = settings.stealReach,
@@ -673,7 +796,7 @@ return function(Window, scriptInfo)
     DefTab:CreateSection("Mobility & Guard")
 
     DefTab:CreateToggle({
-        Name = "Anti-Ankle Break (No Stumble)",
+        Name = "Anti-Ankle Break (Immune to Stumble)",
         CurrentValue = settings.antiAnkleBreak,
         Flag = "BZ_AntiAnkleBreak",
         Callback = function(value)
@@ -701,14 +824,23 @@ return function(Window, scriptInfo)
 
     -- Tab 3: Visuals & ESP (100% Drawing API)
     local VisualTab = Window:CreateTab("Visuals", "esp")
-    VisualTab:CreateSection("Drawing ESP (Zero-Object Safe)")
+    VisualTab:CreateSection("Basketball & Rim ESP")
 
     VisualTab:CreateToggle({
-        Name = "Basketball ESP & Possessor",
+        Name = "Basketball ESP (Carrier & Free Ball)",
         CurrentValue = settings.ballEsp,
         Flag = "BZ_BallEsp",
         Callback = function(value)
             settings.ballEsp = value
+        end,
+    })
+
+    VisualTab:CreateToggle({
+        Name = "Ball Snapline Tracer",
+        CurrentValue = settings.ballTracer,
+        Flag = "BZ_BallTracer",
+        Callback = function(value)
+            settings.ballTracer = value
         end,
     })
 
@@ -721,6 +853,8 @@ return function(Window, scriptInfo)
         end,
     })
 
+    VisualTab:CreateSection("Player ESP (Zero Lag)")
+
     VisualTab:CreateToggle({
         Name = "Player Bounding Boxes",
         CurrentValue = settings.showBoxes,
@@ -731,7 +865,7 @@ return function(Window, scriptInfo)
     })
 
     VisualTab:CreateToggle({
-        Name = "Player Names & Distance",
+        Name = "Player Names",
         CurrentValue = settings.playerEsp,
         Flag = "BZ_PlayerEsp",
         Callback = function(value)
@@ -740,7 +874,16 @@ return function(Window, scriptInfo)
     })
 
     VisualTab:CreateToggle({
-        Name = "Snaplines / Tracers",
+        Name = "Player Distance",
+        CurrentValue = settings.espDistance,
+        Flag = "BZ_PlayerDist",
+        Callback = function(value)
+            settings.espDistance = value
+        end,
+    })
+
+    VisualTab:CreateToggle({
+        Name = "Player Tracers",
         CurrentValue = settings.showTracers,
         Flag = "BZ_Tracers",
         Callback = function(value)
@@ -748,12 +891,24 @@ return function(Window, scriptInfo)
         end,
     })
 
+    VisualTab:CreateSlider({
+        Name = "Max ESP Distance",
+        Range = {100, 500},
+        Increment = 25,
+        Suffix = " studs",
+        CurrentValue = settings.maxDistance,
+        Flag = "BZ_MaxDistance",
+        Callback = function(value)
+            settings.maxDistance = value
+        end,
+    })
+
     -- Tab 4: Safety & Info
     local SafeTab = Window:CreateTab("Safety", "tools")
-    SafeTab:CreateSection("Anti-Cheat Shield")
+    SafeTab:CreateSection("Anti-Cheat Guard")
 
     SafeTab:CreateToggle({
-        Name = "Honeypot Shield (550+ Traps Blocked)",
+        Name = "Honeypot Shield (BAC Active)",
         CurrentValue = settings.safeModeGuard,
         Flag = "BZ_SafeShield",
         Callback = function(value)
@@ -763,13 +918,12 @@ return function(Window, scriptInfo)
     SafeTab:CreateLabel("Guards against BAC Honeypot Traps & Fake Remotes.")
 
     -- ============================================================
-    --   CLEANUP & TEARDOWN (100% Comprehensive & Leak-Free)
+    --   CLEANUP & TEARDOWN
     -- ============================================================
     local function destroyScript()
         if not running then return end
         running = false
 
-        -- 1. Disconnect all listeners & RenderStepped hooks
         for _, conn in ipairs(connections) do
             if conn and conn.Disconnect then
                 pcall(function() conn:Disconnect() end)
@@ -777,18 +931,15 @@ return function(Window, scriptInfo)
         end
         table.clear(connections)
 
-        -- 2. Cleanly wipe all 100% Drawing API objects
         for _, d in pairs(espDrawings) do
             removeDrawingSet(d)
         end
         table.clear(espDrawings)
 
-        -- 3. Reset game controllers & player mobility modifications
         if MovementController then
             pcall(function() MovementController.AlwaysRun = false end)
         end
 
-        -- 4. Reset all feature state flags to prevent background execution
         settings.autoGreen = false
         settings.greenOffset = 0.0
         settings.autoFaceRim = false
@@ -796,6 +947,7 @@ return function(Window, scriptInfo)
         settings.antiAnkleBreak = false
         settings.alwaysRun = false
         settings.ballEsp = false
+        settings.ballTracer = false
         settings.rimEsp = false
         settings.playerEsp = false
         settings.espDistance = false
@@ -805,13 +957,11 @@ return function(Window, scriptInfo)
         lastStealAttempt = 0
         table.clear(cachedRims)
 
-        -- 5. Clear global singleton environment pointer
         if environment and environment.__RAVEN_BASKETBALL_ZERO then
             environment.__RAVEN_BASKETBALL_ZERO = nil
         end
     end
 
-    -- Hook unload with Window lifecycle so Unload / Destroy Hub shuts down everything
     if Window and type(Window.OnUnload) == "function" then
         Window:OnUnload(destroyScript)
     end
@@ -829,7 +979,7 @@ return function(Window, scriptInfo)
         end
     }
 
-    -- Tab 5: Settings (MacLib Standard Configuration & Teardown)
+    -- Tab 5: Settings
     local SettingsTab = (type(Window.GetTab) == "function" and Window:GetTab("Settings"))
     if not SettingsTab and type(Window.CreateTab) == "function" then
         SettingsTab = Window:CreateTab("Settings", "settings")

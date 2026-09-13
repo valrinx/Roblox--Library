@@ -1,7 +1,6 @@
 -- ============================================================
---   RAVEN HUB  |  Volleyball Legends (ESP & Visuals Only)
---   Pure Visual ESP: Ball ESP, Landing Marker, Player ESP
---   Zero input hooks, Zero automation, 100% safe native controls
+--   RAVEN HUB  |  Volleyball Legends (Combat & Visuals)
+--   Hitbox Expander, 3D Visualizer, Ball ESP & Landing Marker
 -- ============================================================
 
 return function(Window, scriptInfo)
@@ -24,7 +23,7 @@ return function(Window, scriptInfo)
     local connections = {}
     local espObjects = {}
 
-    -- Settings (ESP Only)
+    -- Settings (ESP & Combat)
     local settings = {
         ballEsp = true,
         landingMarker = true,
@@ -34,6 +33,10 @@ return function(Window, scriptInfo)
         markerColor = Color3.fromRGB(0, 255, 170),
         ballColor = Color3.fromRGB(255, 215, 0),
         playerColor = Color3.fromRGB(85, 170, 255),
+        -- Hitbox Expander
+        hitboxExpander = true,
+        hitboxMultiplier = 3.5,
+        hitboxVisualizer = true,
     }
 
     local function connect(signal, callback)
@@ -72,6 +75,66 @@ return function(Window, scriptInfo)
     pcall(function()
         PhysicsModule = require(ReplicatedStorage.Common.Physics)
     end)
+
+    -- Hitbox References & Management
+    local HitboxTool = nil
+    local GameConfig = nil
+    local ClientHitbox = nil
+    pcall(function()
+        HitboxTool = require(ReplicatedStorage.Tools.Hitbox)
+        GameConfig = require(ReplicatedStorage.Configuration.Game)
+        ClientHitbox = require(ReplicatedFirst.Controllers.GameController.Actions.Move.DoMove.ClientHitbox)
+    end)
+
+    local originalHitboxSizes = {}
+    local originalPartSizes = {}
+
+    local function applyHitboxSettings()
+        if GameConfig then
+            GameConfig._DebugHitboxes = settings.hitboxVisualizer
+        end
+
+        local mult = settings.hitboxExpander and settings.hitboxMultiplier or 1.0
+
+        -- 1. Modify Asset Part templates in ReplicatedStorage
+        pcall(function()
+            local assetRoots = {
+                ReplicatedStorage.Assets.HitboxesNew.Default.Assemblies,
+                ReplicatedStorage.Assets.HitboxesNew.BySpecial
+            }
+            for _, root in ipairs(assetRoots) do
+                for _, item in ipairs(root:GetDescendants()) do
+                    if item:IsA("Part") and item.Name == "Part" then
+                        if not originalPartSizes[item] then
+                            originalPartSizes[item] = item.Size
+                        end
+                        item.Size = originalPartSizes[item] * mult
+                    end
+                end
+            end
+        end)
+
+        -- 2. Modify cached data in HitboxTool
+        if HitboxTool then
+            local moves = {"Spike", "Bump", "Set", "JumpSet", "Block", "SteelBlock", "Dive", "Serve", "BumpServe"}
+            for _, moveName in ipairs(moves) do
+                local ok, hitboxData = pcall(function()
+                    return HitboxTool.get({ MoveId = moveName })
+                end)
+                if ok and hitboxData and hitboxData.Size then
+                    if not originalHitboxSizes[moveName] then
+                        originalHitboxSizes[moveName] = hitboxData.Size
+                    end
+                    hitboxData.Size = originalHitboxSizes[moveName] * mult
+                end
+            end
+        end
+
+        -- 3. Flush ClientHitbox cached instance
+        if ClientHitbox and ClientHitbox._cachedHitbox then
+            ClientHitbox._cachedHitbox = nil
+        end
+    end
 
     local function getActiveBall()
         if BallModule and BallModule.All then
@@ -410,11 +473,80 @@ return function(Window, scriptInfo)
     })
 
     -- ============================================================
+    --   UI: Combat & Hitbox Tab
+    -- ============================================================
+    local CombatTab = Window:CreateTab("Combat & Hitbox", 4483362458)
+    CombatTab:CreateSection("Hitbox Expansion")
+
+    CombatTab:CreateToggle({
+        Name = "Hitbox Expander",
+        CurrentValue = settings.hitboxExpander,
+        Flag = "VB_HitboxExpander_v4",
+        Callback = function(value)
+            settings.hitboxExpander = value
+            applyHitboxSettings()
+        end,
+    })
+
+    CombatTab:CreateSlider({
+        Name = "Hitbox Multiplier",
+        Range = {1.0, 6.0},
+        Increment = 0.1,
+        Suffix = "x",
+        CurrentValue = settings.hitboxMultiplier,
+        Flag = "VB_HitboxMultiplier_v4",
+        Callback = function(value)
+            settings.hitboxMultiplier = value
+            if settings.hitboxExpander then
+                applyHitboxSettings()
+            end
+        end,
+    })
+
+    CombatTab:CreateToggle({
+        Name = "Show 3D Hitbox Visualizer",
+        CurrentValue = settings.hitboxVisualizer,
+        Flag = "VB_HitboxVisualizer_v4",
+        Callback = function(value)
+            settings.hitboxVisualizer = value
+            if GameConfig then
+                GameConfig._DebugHitboxes = value
+            end
+        end,
+    })
+
+    -- Initial apply
+    applyHitboxSettings()
+
+    -- ============================================================
     --   CLEANUP
     -- ============================================================
     local function destroyScript()
         if not running then return end
         running = false
+
+        -- Restore original hitboxes & visualizer
+        pcall(function()
+            if GameConfig then
+                GameConfig._DebugHitboxes = false
+            end
+            for part, originalSize in pairs(originalPartSizes) do
+                if part and part.Parent then
+                    part.Size = originalSize
+                end
+            end
+            for moveName, originalSize in pairs(originalHitboxSizes) do
+                local ok, hitboxData = pcall(function()
+                    return HitboxTool.get({ MoveId = moveName })
+                end)
+                if ok and hitboxData and hitboxData.Size then
+                    hitboxData.Size = originalSize
+                end
+            end
+            if ClientHitbox and ClientHitbox._cachedHitbox then
+                ClientHitbox._cachedHitbox = nil
+            end
+        end)
 
         for _, conn in ipairs(connections) do
             pcall(function() conn:Disconnect() end)
