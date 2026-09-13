@@ -64,6 +64,9 @@ return function(Window, scriptInfo)
         autoReposition = false,
         autoRepositionDist = 28,
         autoFaceBall = false,
+        courtOutCheck = true,
+        repositionHumanized = true,
+        repositionMargin = 2.5,
         -- Gacha & Misc
         instantSpinSkip = true,
     }
@@ -372,6 +375,29 @@ return function(Window, scriptInfo)
         end
     end
 
+    -- Court Boundary Detection
+    local cachedCourt = nil
+    local function getCourtPart()
+        if cachedCourt and cachedCourt.Parent then return cachedCourt end
+        local map = workspace:FindFirstChild("Map")
+        local c = map and map:FindFirstChild("Court")
+        if c and c:IsA("BasePart") then
+            cachedCourt = c
+            return c
+        end
+        return nil
+    end
+
+    local function isInsideCourt(worldPos, margin)
+        local court = getCourtPart()
+        if not court then return true end -- fallback if court not found
+        margin = margin or 0
+        local rel = court.CFrame:PointToObjectSpace(worldPos)
+        local halfX = (court.Size.X / 2) + margin
+        local halfZ = (court.Size.Z / 2) + margin
+        return math.abs(rel.X) <= halfX and math.abs(rel.Z) <= halfZ
+    end
+
     -- Accurate Floor Height Function
     local function getFloorY(pos)
         if PhysicsModule and type(PhysicsModule.calculateFloorHeight) == "function" then
@@ -601,41 +627,59 @@ return function(Window, scriptInfo)
             handleAutoHit(ballPart, myPos, myHum)
         end
 
-        -- 1. Ball ESP
+        -- 1. Ball ESP & Out of Bounds check
+        local ballPos = ballPart and ballPart.Position
+        local ballVel = ballPart and ((ballObj and ballObj.Velocity) or ballPart.AssemblyLinearVelocity or Vector3.zero) or Vector3.zero
+        local floorY = ballPos and getFloorY(ballPos) or -23.658
+        local landingPos, t = (ballPos and getPredictedLanding(ballPos, ballVel, floorY))
+        local isLandingInCourt = true
+        if landingPos and settings.courtOutCheck then
+            isLandingInCourt = isInsideCourt(landingPos, settings.repositionMargin or 2.5)
+        end
+
         if settings.ballEsp and ballPart then
             local dist = math.floor((ballPart.Position - myPos).Magnitude)
             local id = "Ball_Main"
-            local vel = (ballObj and ballObj.Velocity) or ballPart.AssemblyLinearVelocity or Vector3.zero
-            local speed = math.floor(vel.Magnitude)
+            local speed = math.floor(ballVel.Magnitude)
+
+            local statusTag = ""
+            if settings.courtOutCheck and t and t > 0.1 then
+                if isLandingInCourt then
+                    statusTag = " <font color='#00FF88'>[IN]</font>"
+                else
+                    statusTag = " <font color='#FF4444'>[OUT]</font>"
+                end
+            end
 
             if not espObjects[id] then
                 local bb, lbl = createBillboard(id, ballPart, settings.ballColor, "🏐 Ball", Vector3.new(0, 2.5, 0))
                 local hl = createHighlight(ballPart, settings.ballColor, Color3.fromRGB(255, 255, 255))
                 espObjects[id] = { billboard = bb, label = lbl, highlight = hl }
             else
-                espObjects[id].label.Text = string.format("🏐 <b>Ball</b>\n<font size='11' color='#FFFFFF'>[%d studs | %d spd]</font>", dist, speed)
+                espObjects[id].label.Text = string.format("🏐 <b>Ball</b>%s\n<font size='11' color='#FFFFFF'>[%d studs | %d spd]</font>", statusTag, dist, speed)
             end
         else
             clearEspEntry("Ball_Main")
         end
 
         -- 2. Landing Prediction Marker
-        if settings.landingMarker and ballPart and landingCylinder then
-            local ballPos = ballPart.Position
-            local ballVel = (ballObj and ballObj.Velocity) or ballPart.AssemblyLinearVelocity or Vector3.zero
-            local floorY = getFloorY(ballPos)
-            local landingPos, t = getPredictedLanding(ballPos, ballVel, floorY)
-
+        if settings.landingMarker and ballPart and landingCylinder and landingPos then
             -- Keep landing floor accurate at target point
             local targetFloorY = getFloorY(landingPos)
             local distToTarget = math.floor((landingPos - myPos).Magnitude)
 
             if t > 0.03 and t < 6.0 and (ballPos.Y - targetFloorY) > 1.0 then
                 landingCylinder.CFrame = CFrame.new(landingPos.X, targetFloorY + 0.25, landingPos.Z) * CFrame.Angles(0, 0, math.rad(90))
-                landingCylinder.Transparency = 0.3
+                landingCylinder.Transparency = isLandingInCourt and 0.3 or 0.65
+                landingCylinder.Color = isLandingInCourt and settings.markerColor or Color3.fromRGB(255, 60, 60)
+
                 if settings.landingLabel then
                     landingBb.Enabled = true
-                    landingText.Text = string.format("🎯 <b>Landing Spot</b>\n<font size='11' color='#00FFAA'>[%.2fs | %d studs]</font>", t, distToTarget)
+                    if isLandingInCourt then
+                        landingText.Text = string.format("🎯 <b>Landing Spot</b> <font color='#00FFAA'>[IN]</font>\n<font size='11' color='#00FFAA'>[%.2fs | %d studs]</font>", t, distToTarget)
+                    else
+                        landingText.Text = string.format("🚫 <b>OUT OF BOUNDS</b> <font color='#FF4444'>[OUT]</font>\n<font size='11' color='#FF8888'>[%.2fs | %d studs]</font>", t, distToTarget)
+                    end
                 else
                     landingBb.Enabled = false
                 end
@@ -645,17 +689,35 @@ return function(Window, scriptInfo)
                     local delta = Vector3.new(landingPos.X - myPos.X, 0, landingPos.Z - myPos.Z)
                     local hDist = delta.Magnitude
 
-                    if settings.autoReposition and hDist > 2.2 and hDist <= settings.autoRepositionDist then
+                    -- Only reposition if ball is landing IN COURT (or court check disabled)
+                    local shouldTrack = settings.autoReposition
+                    if settings.courtOutCheck and not isLandingInCourt then
+                        shouldTrack = false
+                    end
+
+                    if shouldTrack and hDist > 2.0 and hDist <= settings.autoRepositionDist then
                         if myHum.FloorMaterial ~= Enum.Material.Air then
-                            myHum:Move(delta.Unit, false)
+                            if settings.repositionHumanized then
+                                -- Humanized speed scaling: sprint when far, decelerate smoothly when nearing landing spot
+                                local moveDir = delta.Unit
+                                if hDist < 6.0 then
+                                    local approachFactor = math.clamp(hDist / 6.0, 0.45, 1.0)
+                                    myHum:Move(moveDir * approachFactor, false)
+                                else
+                                    myHum:Move(moveDir, false)
+                                end
+                            else
+                                myHum:Move(delta.Unit, false)
+                            end
                         end
                     end
 
-                    if settings.autoFaceBall and hDist <= 30 then
+                    if settings.autoFaceBall and hDist <= 32 then
                         local lookTarget = Vector3.new(ballPos.X, myRoot.Position.Y, ballPos.Z)
                         if (lookTarget - myRoot.Position).Magnitude > 0.5 then
                             local targetCF = CFrame.lookAt(myRoot.Position, lookTarget)
-                            myRoot.CFrame = myRoot.CFrame:Lerp(targetCF, 0.2)
+                            -- Humanized smooth turn rate (0.16)
+                            myRoot.CFrame = myRoot.CFrame:Lerp(targetCF, 0.16)
                         end
                     end
                 end
@@ -1088,6 +1150,24 @@ return function(Window, scriptInfo)
         Flag = "VB_AutoFaceBall_v4",
         Callback = function(value)
             settings.autoFaceBall = value
+        end,
+    })
+
+    CombatTab:CreateToggle({
+        Name = "Ignore Out-of-Bounds (ไม่ตามบอลออก)",
+        CurrentValue = settings.courtOutCheck,
+        Flag = "VB_CourtOutCheck_v4",
+        Callback = function(value)
+            settings.courtOutCheck = value
+        end,
+    })
+
+    CombatTab:CreateToggle({
+        Name = "Humanized Movement (เดินเนียนแบบคน)",
+        CurrentValue = settings.repositionHumanized,
+        Flag = "VB_HumanizedRepo_v4",
+        Callback = function(value)
+            settings.repositionHumanized = value
         end,
     })
 
