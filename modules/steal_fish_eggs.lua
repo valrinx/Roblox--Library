@@ -9,8 +9,7 @@
     - Removed False [WAIT] ESP Tag: Only flags [BUSY] if PromptBusy attribute is actually active
     - Dual Inventory Placement: Searches both Character & Backpack for egg tools to deposit in tank
     - Gate Synchronization Polling: Waits up to 2.0s after crossing TheLine to ensure server awards egg tool before placing
-    - Direct Tank Placement: Places eggs accurately onto EggPlacementZone via PlaceEgg:FireServer
-    - Auto Place Hatched Fish: Automatically places hatched fish from inventory into BaseWater to earn cash/sec
+    - Auto Equip Best Fish: Automatically triggers game's native EquipBestFish remote to equip top fish in tank
 ]]--
 
 return function(Window, runtimeInfo)
@@ -959,42 +958,12 @@ return function(Window, runtimeInfo)
             end
         end
 
-        -- 6. Auto Place Hatched Fish: If player has hatched fish tools in backpack/hands, place them in base water!
-        local placeFishRemote = ReplicatedStorage:FindFirstChild("FishSystem") and ReplicatedStorage.FishSystem:FindFirstChild("PlaceFish")
-        local baseWater = myBase:FindFirstChild("BaseWater", true)
-        if placeFishRemote and baseWater then
-            local waterPos = baseWater.CFrame:PointToWorldSpace(Vector3.new(0, 0, 0))
-            local function getFishTools()
-                local fList = {}
-                local ch = getCharacter()
-                if ch then
-                    for _, it in ipairs(ch:GetChildren()) do
-                        if it:IsA("Tool") and it:GetAttribute("FishName") and it:GetAttribute("FishId") then
-                            table.insert(fList, { item = it, inChar = true })
-                        end
-                    end
-                end
-                for _, it in ipairs(LP.Backpack:GetChildren()) do
-                    if it:IsA("Tool") and it:GetAttribute("FishName") and it:GetAttribute("FishId") then
-                        table.insert(fList, { item = it, inChar = false })
-                    end
-                end
-                return fList
-            end
-
-            local fishTools = getFishTools()
-            for _, fEntry in ipairs(fishTools) do
-                if isCancel and isCancel() then return end
-                local it = fEntry.item
-                if it and it.Parent then
-                    if not fEntry.inChar then
-                        it.Parent = char
-                        task.wait(0.15)
-                    end
-                    placeFishRemote:FireServer(it, waterPos)
-                    task.wait(0.25)
-                end
-            end
+        -- 6. Auto Equip Best Fish: Uses game's native EquipBestFish remote to equip highest CPS fish into tank!
+        local equipBestRemote = ReplicatedStorage:FindFirstChild("FishSystem") and ReplicatedStorage.FishSystem:FindFirstChild("EquipBestFish")
+        if equipBestRemote then
+            pcall(function()
+                equipBestRemote:FireServer()
+            end)
         end
     end
 
