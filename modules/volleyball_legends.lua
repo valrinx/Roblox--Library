@@ -37,6 +37,13 @@ return function(Window, scriptInfo)
         hitboxExpander = true,
         hitboxMultiplier = 3.5,
         hitboxVisualizer = true,
+        -- Cooldown & Auto-Hit
+        noCooldown = true,
+        autoHit = true,
+        autoHitDistance = 18,
+        autoSpike = true,
+        autoBump = true,
+        autoDive = true,
     }
 
     local function connect(signal, callback)
@@ -133,6 +140,66 @@ return function(Window, scriptInfo)
         -- 3. Flush ClientHitbox cached instance
         if ClientHitbox and ClientHitbox._cachedHitbox then
             ClientHitbox._cachedHitbox = nil
+        end
+    end
+
+    -- Automation & Controller References
+    local Orchestrator = nil
+    local InputController = nil
+    pcall(function()
+        local Knit = require(ReplicatedStorage.Packages.Knit)
+        InputController = Knit.GetController("InputController")
+        Orchestrator = require(ReplicatedFirst.Controllers.GameController.Actions.Move.DoMove.Orchestrator)
+    end)
+
+    local originalIsOnCooldown = nil
+    local originalApplyCooldown = nil
+    if Orchestrator then
+        originalIsOnCooldown = Orchestrator.isOnCooldown
+        originalApplyCooldown = Orchestrator._applyCooldown
+    end
+
+    local function applyCooldownSettings()
+        if not Orchestrator then return end
+        if settings.noCooldown then
+            Orchestrator.isOnCooldown = function() return false end
+            Orchestrator._applyCooldown = function() Orchestrator._cooldownExpiryTime = 0 end
+            Orchestrator._cooldownExpiryTime = 0
+            if Orchestrator.clearBusyState then
+                pcall(Orchestrator.clearBusyState)
+            end
+        else
+            if originalIsOnCooldown then Orchestrator.isOnCooldown = originalIsOnCooldown end
+            if originalApplyCooldown then Orchestrator._applyCooldown = originalApplyCooldown end
+        end
+    end
+
+    local lastAutoHit = 0
+    local function handleAutoHit(ballPart, myPos, myHum)
+        if not settings.autoHit or not ballPart or not myHum or myHum.Health <= 0 then return end
+        if not InputController or not InputController.Actions then return end
+
+        local now = os.clock()
+        if (now - lastAutoHit) < 0.22 then return end
+
+        local ballPos = ballPart.Position
+        local dist = (ballPos - myPos).Magnitude
+        if dist > settings.autoHitDistance then return end
+
+        local isAerial = (myHum.FloorMaterial == Enum.Material.Air)
+        if isAerial and settings.autoSpike and InputController.Actions.Spike then
+            lastAutoHit = now
+            pcall(InputController.Actions.Spike)
+        elseif not isAerial then
+            local floorY = getFloorY(ballPos)
+            local ballHeight = ballPos.Y - floorY
+            if settings.autoDive and ballHeight < 4.5 and dist > 7 and InputController.Actions.Dive then
+                lastAutoHit = now
+                pcall(InputController.Actions.Dive)
+            elseif settings.autoBump and InputController.Actions.Bump then
+                lastAutoHit = now
+                pcall(InputController.Actions.Bump)
+            end
         end
     end
 
@@ -316,7 +383,20 @@ return function(Window, scriptInfo)
             end
         end
 
+        -- Cooldown & State Maintenance
+        if settings.noCooldown and Orchestrator then
+            Orchestrator._cooldownExpiryTime = 0
+            if Orchestrator.clearBusyState then
+                pcall(Orchestrator.clearBusyState)
+            end
+        end
+
         local ballObj, ballPart = getActiveBall()
+
+        -- Smart Auto-Hit / Reaction
+        if ballPart and myHum and myRoot then
+            handleAutoHit(ballPart, myPos, myHum)
+        end
 
         -- 1. Ball ESP
         if settings.ballEsp and ballPart then
@@ -515,8 +595,71 @@ return function(Window, scriptInfo)
         end,
     })
 
+    CombatTab:CreateSection("Cooldown Bypass")
+
+    CombatTab:CreateToggle({
+        Name = "No Move Cooldown (Instant Spam)",
+        CurrentValue = settings.noCooldown,
+        Flag = "VB_NoCooldown_v4",
+        Callback = function(value)
+            settings.noCooldown = value
+            applyCooldownSettings()
+        end,
+    })
+
+    CombatTab:CreateSection("Smart Auto-Hit (Auto Reaction)")
+
+    CombatTab:CreateToggle({
+        Name = "Auto-Hit / Reaction",
+        CurrentValue = settings.autoHit,
+        Flag = "VB_AutoHit_v4",
+        Callback = function(value)
+            settings.autoHit = value
+        end,
+    })
+
+    CombatTab:CreateSlider({
+        Name = "Trigger Distance",
+        Range = {6, 35},
+        Increment = 1,
+        Suffix = " studs",
+        CurrentValue = settings.autoHitDistance,
+        Flag = "VB_AutoHitDist_v4",
+        Callback = function(value)
+            settings.autoHitDistance = value
+        end,
+    })
+
+    CombatTab:CreateToggle({
+        Name = "Auto Spike (In Air)",
+        CurrentValue = settings.autoSpike,
+        Flag = "VB_AutoSpike_v4",
+        Callback = function(value)
+            settings.autoSpike = value
+        end,
+    })
+
+    CombatTab:CreateToggle({
+        Name = "Auto Bump (On Ground)",
+        CurrentValue = settings.autoBump,
+        Flag = "VB_AutoBump_v4",
+        Callback = function(value)
+            settings.autoBump = value
+        end,
+    })
+
+    CombatTab:CreateToggle({
+        Name = "Auto Dive (Low Ball)",
+        CurrentValue = settings.autoDive,
+        Flag = "VB_AutoDive_v4",
+        Callback = function(value)
+            settings.autoDive = value
+        end,
+    })
+
     -- Initial apply
     applyHitboxSettings()
+    applyCooldownSettings()
 
     -- ============================================================
     --   CLEANUP
@@ -524,6 +667,14 @@ return function(Window, scriptInfo)
     local function destroyScript()
         if not running then return end
         running = false
+
+        -- Restore cooldown handlers
+        pcall(function()
+            if Orchestrator then
+                if originalIsOnCooldown then Orchestrator.isOnCooldown = originalIsOnCooldown end
+                if originalApplyCooldown then Orchestrator._applyCooldown = originalApplyCooldown end
+            end
+        end)
 
         -- Restore original hitboxes & visualizer
         pcall(function()
