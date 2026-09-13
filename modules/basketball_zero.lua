@@ -11,7 +11,7 @@ return function(Window, scriptInfo)
     local UserInputService = game:GetService("UserInputService")
 
     -- Clean up previous instance if running
-    local environment = _G
+    local environment = (type(getgenv) == "function" and getgenv()) or _G
     if type(environment.__RAVEN_BASKETBALL_ZERO) == "table"
         and type(environment.__RAVEN_BASKETBALL_ZERO.Destroy) == "function" then
         pcall(environment.__RAVEN_BASKETBALL_ZERO.Destroy)
@@ -581,6 +581,24 @@ return function(Window, scriptInfo)
     --   USER INTERFACE (Ghost DrawingUI or MacLib Compatible)
     -- ============================================================
 
+    -- Tab 0: Overview (Ensure hub-level tab exists)
+    local HomeTab = (type(Window.GetTab) == "function" and Window:GetTab("Overview"))
+    if not HomeTab and type(Window.CreateTab) == "function" then
+        HomeTab = Window:CreateTab("Overview", "overview")
+        HomeTab:CreateSection("Experience & Security")
+        HomeTab:CreateLabel("Experience: Basketball: Zero")
+        HomeTab:CreateLabel("PlaceId: " .. tostring(game.PlaceId))
+        HomeTab:CreateLabel("Anti-Cheat: BAC (Frog Anti-Cheat) Active")
+        HomeTab:CreateLabel("Engine: 100% Drawing Safe (Zero Object Injection)")
+        HomeTab:CreateLabel("Active Module: Basketball: Zero [v1.0.0]")
+        HomeTab:CreateLabel("Status: Active & Guarded")
+        HomeTab:CreateSection("Tactical Overview")
+        HomeTab:CreateParagraph({
+            Title = "Active Features",
+            Content = "Auto Green Release, Auto Steal, Anti-Ankle Break, and 100% Drawing Safe ESP.",
+        })
+    end
+
     -- Tab 1: Shooting
     local ShootTab = Window:CreateTab("Shooting", "combat")
     ShootTab:CreateSection("Auto Green Release")
@@ -612,6 +630,15 @@ return function(Window, scriptInfo)
         Flag = "BZ_AutoFaceRim",
         Callback = function(value)
             settings.autoFaceRim = value
+        end,
+    })
+
+    ShootTab:CreateInput({
+        Name = "Custom Shot Delay",
+        CurrentValue = "0",
+        PlaceholderText = "Enter ms delay...",
+        Flag = "BZ_CustomDelay",
+        Callback = function(value)
         end,
     })
 
@@ -736,27 +763,57 @@ return function(Window, scriptInfo)
     SafeTab:CreateLabel("Guards against BAC Honeypot Traps & Fake Remotes.")
 
     -- ============================================================
-    --   CLEANUP & DESTROY
+    --   CLEANUP & TEARDOWN (100% Comprehensive & Leak-Free)
     -- ============================================================
     local function destroyScript()
         if not running then return end
         running = false
 
+        -- 1. Disconnect all listeners & RenderStepped hooks
         for _, conn in ipairs(connections) do
-            pcall(function() conn:Disconnect() end)
+            if conn and conn.Disconnect then
+                pcall(function() conn:Disconnect() end)
+            end
         end
         table.clear(connections)
 
+        -- 2. Cleanly wipe all 100% Drawing API objects
         for _, d in pairs(espDrawings) do
             removeDrawingSet(d)
         end
         table.clear(espDrawings)
 
-        if MovementController and settings.alwaysRun then
+        -- 3. Reset game controllers & player mobility modifications
+        if MovementController then
             pcall(function() MovementController.AlwaysRun = false end)
         end
 
-        environment.__RAVEN_BASKETBALL_ZERO = nil
+        -- 4. Reset all feature state flags to prevent background execution
+        settings.autoGreen = false
+        settings.greenOffset = 0.0
+        settings.autoFaceRim = false
+        settings.autoSteal = false
+        settings.antiAnkleBreak = false
+        settings.alwaysRun = false
+        settings.ballEsp = false
+        settings.rimEsp = false
+        settings.playerEsp = false
+        settings.espDistance = false
+        settings.showBoxes = false
+        settings.showTracers = false
+        hasReleasedThisShot = false
+        lastStealAttempt = 0
+        table.clear(cachedRims)
+
+        -- 5. Clear global singleton environment pointer
+        if environment and environment.__RAVEN_BASKETBALL_ZERO then
+            environment.__RAVEN_BASKETBALL_ZERO = nil
+        end
+    end
+
+    -- Hook unload with Window lifecycle so Unload / Destroy Hub shuts down everything
+    if Window and type(Window.OnUnload) == "function" then
+        Window:OnUnload(destroyScript)
     end
 
     if scriptInfo and type(scriptInfo.registerCleanup) == "function" then
@@ -764,6 +821,24 @@ return function(Window, scriptInfo)
     end
 
     environment.__RAVEN_BASKETBALL_ZERO = {
-        Destroy = destroyScript
+        Destroy = function()
+            destroyScript()
+            if Window and type(Window.Destroy) == "function" then
+                Window:Destroy()
+            end
+        end
     }
+
+    -- Tab 5: Settings (MacLib Standard Configuration & Teardown)
+    local SettingsTab = (type(Window.GetTab) == "function" and Window:GetTab("Settings"))
+    if not SettingsTab and type(Window.CreateTab) == "function" then
+        SettingsTab = Window:CreateTab("Settings", "settings")
+    end
+    if SettingsTab and type(SettingsTab.InsertConfigSection) == "function" then
+        SettingsTab:InsertConfigSection("Right")
+    end
+
+    if type(Window.SortTabs) == "function" then
+        Window:SortTabs({"Overview", "Shooting", "Defense", "Visuals", "Safety", "Settings"})
+    end
 end

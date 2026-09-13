@@ -1002,7 +1002,7 @@ end
 
 pcall(function()
     if type(Window.SortTabs) == "function" then
-        Window:SortTabs({"Overview", "Match Info", "Visuals", "Combat", "Main", "Dungeon", "ESP", "Defense", "Shooting", "Misc", "Settings"})
+        Window:SortTabs({"Overview", "Shooting", "Defense", "Visuals", "Safety", "Settings", "Match Info", "Combat", "Main", "Dungeon", "ESP", "Misc"})
     end
 end)
 
