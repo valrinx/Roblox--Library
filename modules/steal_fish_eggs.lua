@@ -1,16 +1,16 @@
 --[[
-    RAVEN HUB Module - Steal Fish Eggs v1.7.0
+    RAVEN HUB Module - Steal Fish Eggs v1.8.0
     Game: Steal Fish Eggs (PlaceId: 99183404085821, GameId: 10718240577)
     Developer: fishy fish fish!
 
-    v1.7.0 — Subterranean Flight (ดำดิน), Ultra Speed & Smart Best Egg Prioritization:
-    - Smart Best Egg Selection: In the same rarity tier, prioritizes buffs (Rainbow > Silver > Gold), highest Kg, and largest Scale
-    - Subterranean Flight (ดำดิน @ Y=45): Complete underground evasion from ocean guards & players
-    - Smooth Resurface Corridor: Glides underground, resurfacing only right in front of the gate (Z=-60)
-    - Ultra Speed Engine (100-500 speed, default 240, 60fps tick rate)
-    - Strict Minimum Rarity Filter: 100% adherence to chosen rarity (zero trash egg fallback)
-    - Filtered Dropped Egg Recovery: Dropped eggs must strictly satisfy minRank before inclusion
-    - Direct PlaceEgg Remote Activation: Calls PlaceEgg:FireServer(placementPoint) to place egg in tank
+    v1.8.0 — Distance-Culling Fix, Omnipresent Respawn Targeting & Base Tank Placement:
+    - Fixed Distance-Culling Bug: EggWaterAnimations culls prompts >500 studs away; candidates no longer filtered out by prompt.Enabled
+    - Omnipresent Respawn Targeting: Eggs respawning in distant biomes (Atlantis, Volcanic, Jelly, Snow, Sunken) are instantly targeted
+    - Removed False [WAIT] ESP Tag: Only flags [BUSY] if PromptBusy attribute is actually active
+    - Dual Inventory Placement: Searches both Character & Backpack for egg tools to deposit in tank
+    - Gate Synchronization Polling: Waits up to 2.0s after crossing TheLine to ensure server awards egg tool before placing
+    - Direct Tank Placement: Places eggs accurately onto EggPlacementZone via PlaceEgg:FireServer
+    - Auto Place Hatched Fish: Automatically places hatched fish from inventory into BaseWater to earn cash/sec
 ]]--
 
 return function(Window, runtimeInfo)
@@ -448,11 +448,12 @@ return function(Window, runtimeInfo)
                             buffTag = string.format(" [%s]", tostring(mut):upper())
                         end
 
+                        local isBusy = egg:GetAttribute("PromptBusy") == true
                         local tag = ""
                         if isDropped then
                             tag = " [DROPPED]"
-                        elseif prompt and not prompt.Enabled then
-                            tag = " [WAIT]"
+                        elseif isBusy then
+                            tag = " [BUSY]"
                         end
 
                         entry.text.Position = Vector2.new(screenPos.X, screenPos.Y)
@@ -692,9 +693,9 @@ return function(Window, runtimeInfo)
         if dropped then
             for _, egg in ipairs(dropped:GetChildren()) do
                 local prim = egg:FindFirstChild("PrimaryPart") or egg.PrimaryPart
-                local prompt = egg:FindFirstChildWhichIsA("ProximityPrompt", true)
-
-                if prim and prompt and prompt.Enabled and not egg:GetAttribute("PromptBusy") then
+                -- Note: Do NOT require prompt.Enabled here because EggWaterAnimations disables prompts when >500 studs away!
+                if prim and not egg:GetAttribute("PromptBusy") then
+                    local prompt = egg:FindFirstChildWhichIsA("ProximityPrompt", true)
                     local q = getEggQuality(egg)
                     local dist = (root.Position - prim.Position).Magnitude
 
@@ -717,10 +718,9 @@ return function(Window, runtimeInfo)
         if spawned then
             for _, egg in ipairs(spawned:GetChildren()) do
                 local prim = egg:FindFirstChild("PrimaryPart") or egg.PrimaryPart
-                local prompt = egg:FindFirstChildWhichIsA("ProximityPrompt", true)
-
-                -- Must have prompt enabled and not busy
-                if prim and prompt and prompt.Enabled and not egg:GetAttribute("PromptBusy") then
+                -- Note: Do NOT require prompt.Enabled here because EggWaterAnimations disables prompts when >500 studs away!
+                if prim and not egg:GetAttribute("PromptBusy") then
+                    local prompt = egg:FindFirstChildWhichIsA("ProximityPrompt", true)
                     local q = getEggQuality(egg)
                     local dist = (root.Position - prim.Position).Magnitude
 
@@ -875,6 +875,24 @@ return function(Window, runtimeInfo)
     end
     safeCrossTheLine = passThroughSafeGate
 
+    local function getEggTools()
+        local tools = {}
+        local char = getCharacter()
+        if char then
+            for _, item in ipairs(char:GetChildren()) do
+                if item:IsA("Tool") and (item:GetAttribute("EggType") ~= nil or (item:GetAttribute("Scale") ~= nil and item:GetAttribute("Kg") ~= nil) or item.Name:lower():find("egg")) then
+                    table.insert(tools, { item = item, inChar = true })
+                end
+            end
+        end
+        for _, item in ipairs(LP.Backpack:GetChildren()) do
+            if item:IsA("Tool") and (item:GetAttribute("EggType") ~= nil or (item:GetAttribute("Scale") ~= nil and item:GetAttribute("Kg") ~= nil) or item.Name:lower():find("egg")) then
+                table.insert(tools, { item = item, inChar = false })
+            end
+        end
+        return tools
+    end
+
     local function depositEggAtBase(isCancel)
         local root = getRoot()
         local myBase = getMyBase()
@@ -893,20 +911,31 @@ return function(Window, runtimeInfo)
         glideTo(targetPos, isCancel)
         if isCancel and isCancel() then return end
 
-        task.wait(0.2)
-
-        -- 3. Equip each stolen egg tool from backpack and place into the tank!
+        -- 3. Wait briefly (up to 2.0s) for the server to grant/register the Egg Tool after crossing TheLine
         local char = getCharacter()
         local epzCFrame = epz.CFrame
         local epzSize = epz.Size
 
-        for _, item in ipairs(LP.Backpack:GetChildren()) do
-            if item:IsA("Tool") and item:GetAttribute("EggType") then
-                -- Equip tool into character
-                item.Parent = char
-                task.wait(0.25)
+        local tWait = os.clock()
+        while (os.clock() - tWait) < 2.0 do
+            if isCancel and isCancel() then return end
+            local currentTools = getEggTools()
+            if #currentTools > 0 then break end
+            task.wait(0.15)
+        end
 
-                -- Calculate random placement point inside the tank placement zone
+        -- 4. Equip each stolen egg tool from backpack or character and place into the tank!
+        local eggTools = getEggTools()
+        for _, entry in ipairs(eggTools) do
+            if isCancel and isCancel() then return end
+            local item = entry.item
+            if item and item.Parent then
+                if not entry.inChar then
+                    item.Parent = char
+                    task.wait(0.2)
+                end
+
+                -- Calculate safe placement point on EggPlacementZone top surface
                 local randX = (math.random() - 0.5) * (epzSize.X * 0.7)
                 local randZ = (math.random() - 0.5) * (epzSize.Z * 0.7)
                 local placePoint = epzCFrame:PointToWorldSpace(Vector3.new(randX, epzSize.Y * 0.5, randZ))
@@ -916,7 +945,7 @@ return function(Window, runtimeInfo)
             end
         end
 
-        -- 4. Auto Hatch any eggs that are ready in base
+        -- 5. Auto Hatch any eggs that are ready in base
         local hatchEggRemote = ReplicatedStorage:FindFirstChild("EggSystem") and ReplicatedStorage.EggSystem:FindFirstChild("HatchEgg")
         if hatchEggRemote then
             local placedEggs = Workspace:FindFirstChild("PlacedEggs")
@@ -926,6 +955,44 @@ return function(Window, runtimeInfo)
                         hatchEggRemote:FireServer(placed)
                         task.wait(0.2)
                     end
+                end
+            end
+        end
+
+        -- 6. Auto Place Hatched Fish: If player has hatched fish tools in backpack/hands, place them in base water!
+        local placeFishRemote = ReplicatedStorage:FindFirstChild("FishSystem") and ReplicatedStorage.FishSystem:FindFirstChild("PlaceFish")
+        local baseWater = myBase:FindFirstChild("BaseWater", true)
+        if placeFishRemote and baseWater then
+            local waterPos = baseWater.CFrame:PointToWorldSpace(Vector3.new(0, 0, 0))
+            local function getFishTools()
+                local fList = {}
+                local ch = getCharacter()
+                if ch then
+                    for _, it in ipairs(ch:GetChildren()) do
+                        if it:IsA("Tool") and it:GetAttribute("FishName") and it:GetAttribute("FishId") then
+                            table.insert(fList, { item = it, inChar = true })
+                        end
+                    end
+                end
+                for _, it in ipairs(LP.Backpack:GetChildren()) do
+                    if it:IsA("Tool") and it:GetAttribute("FishName") and it:GetAttribute("FishId") then
+                        table.insert(fList, { item = it, inChar = false })
+                    end
+                end
+                return fList
+            end
+
+            local fishTools = getFishTools()
+            for _, fEntry in ipairs(fishTools) do
+                if isCancel and isCancel() then return end
+                local it = fEntry.item
+                if it and it.Parent then
+                    if not fEntry.inChar then
+                        it.Parent = char
+                        task.wait(0.15)
+                    end
+                    placeFishRemote:FireServer(it, waterPos)
+                    task.wait(0.25)
                 end
             end
         end
@@ -1008,13 +1075,23 @@ return function(Window, runtimeInfo)
             if isCancel() then return end
 
             -- 6. Trigger capture hold
-            if target.prompt and target.prompt.Parent then
+            local prompt = target.prompt
+            if not prompt or not prompt.Parent or not prompt.Enabled then
+                prompt = target.egg:FindFirstChildWhichIsA("ProximityPrompt", true)
+            end
+            if not prompt or not prompt.Enabled then
+                -- Wait a split second for client distance un-culling to re-enable prompt
+                task.wait(0.2)
+                prompt = target.egg:FindFirstChildWhichIsA("ProximityPrompt", true)
+            end
+
+            if prompt and prompt.Parent then
                 if fireproximityprompt then
-                    pcall(fireproximityprompt, target.prompt, 0)
+                    pcall(fireproximityprompt, prompt, 0)
                 end
                 task.wait(0.04)
-                target.prompt:InputHoldBegin()
-                local holdTime = target.prompt.HoldDuration or 1
+                prompt:InputHoldBegin()
+                local holdTime = prompt.HoldDuration or 1
                 local elapsed = 0
                 local targetHoldTime = math.max(1.8, holdTime + 0.4)
 
@@ -1022,11 +1099,11 @@ return function(Window, runtimeInfo)
                     task.wait(0.05)
                     elapsed += 0.05
                     if isCancel() then
-                        target.prompt:InputHoldEnd()
+                        prompt:InputHoldEnd()
                         return
                     end
                 end
-                target.prompt:InputHoldEnd()
+                prompt:InputHoldEnd()
             end
 
             -- 7. Subterranean Return Flight (ดำดิน @ Y=45) & Resurface before gate
