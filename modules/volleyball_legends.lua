@@ -51,6 +51,12 @@ return function(Window, scriptInfo)
         diveSpeedMultiplier = 2.0,
         speedBoost = false,
         speedMultiplier = 1.3,
+        -- Aerial & Recovery
+        superJump = false,
+        jumpMultiplier = 1.4,
+        airDoubleJump = true,
+        antiStun = true,
+        bypassBackRank = true,
     }
 
     local function connect(signal, callback)
@@ -227,6 +233,69 @@ return function(Window, scriptInfo)
         else
             if originalPlayerAttributes.Multiplier_Speed then
                 localPlayer:SetAttribute("Multiplier_Speed", originalPlayerAttributes.Multiplier_Speed)
+            end
+        end
+    end
+
+    -- Aerial & Recovery References
+    local JumpValidation = nil
+    local JumpPhysics = nil
+    local GameControllerMod = nil
+    pcall(function()
+        JumpValidation = require(ReplicatedFirst.Controllers.GameController.Actions.Move.Jump.Validation)
+    end)
+    pcall(function()
+        JumpPhysics = require(ReplicatedFirst.Controllers.GameController.Actions.Move.Jump.Physics)
+    end)
+    pcall(function()
+        GameControllerMod = require(ReplicatedFirst.Controllers.GameController)
+    end)
+
+    local originalLaunchSpeed = JumpPhysics and JumpPhysics.LaunchSpeed or 30
+    local originalCanDoubleJump = JumpValidation and JumpValidation.canDoubleJump or nil
+    local originalIsBackRank = JumpValidation and JumpValidation._isBackRank or nil
+    local originalIsStunnedGet = (GameControllerMod and GameControllerMod.IsStunned) and GameControllerMod.IsStunned.get or nil
+
+    local function applyAerialSettings()
+        if JumpPhysics then
+            if settings.superJump then
+                JumpPhysics.LaunchSpeed = originalLaunchSpeed * (settings.jumpMultiplier or 1.0)
+            else
+                JumpPhysics.LaunchSpeed = originalLaunchSpeed
+            end
+        end
+
+        if JumpValidation then
+            if settings.airDoubleJump then
+                JumpValidation.canDoubleJump = function(...)
+                    return true
+                end
+            else
+                if originalCanDoubleJump then
+                    JumpValidation.canDoubleJump = originalCanDoubleJump
+                end
+            end
+
+            if settings.bypassBackRank then
+                JumpValidation._isBackRank = function(...)
+                    return false
+                end
+            else
+                if originalIsBackRank then
+                    JumpValidation._isBackRank = originalIsBackRank
+                end
+            end
+        end
+
+        if GameControllerMod and GameControllerMod.IsStunned then
+            if settings.antiStun then
+                GameControllerMod.IsStunned.get = function(...)
+                    return false
+                end
+            else
+                if originalIsStunnedGet then
+                    GameControllerMod.IsStunned.get = originalIsStunnedGet
+                end
             end
         end
     end
@@ -791,11 +860,69 @@ return function(Window, scriptInfo)
         end,
     })
 
+    CombatTab:CreateSection("Aerial & Recovery")
+
+    CombatTab:CreateToggle({
+        Name = "Super Jump (High Spike)",
+        CurrentValue = settings.superJump,
+        Flag = "VB_SuperJump_v4",
+        Callback = function(value)
+            settings.superJump = value
+            applyAerialSettings()
+        end,
+    })
+
+    CombatTab:CreateSlider({
+        Name = "Jump Multiplier",
+        Range = {1.0, 3.0},
+        Increment = 0.1,
+        Suffix = "x",
+        CurrentValue = settings.jumpMultiplier,
+        Flag = "VB_JumpMult_v4",
+        Callback = function(value)
+            settings.jumpMultiplier = value
+            if settings.superJump then
+                applyAerialSettings()
+            end
+        end,
+    })
+
+    CombatTab:CreateToggle({
+        Name = "Infinite / Air Double Jump",
+        CurrentValue = settings.airDoubleJump,
+        Flag = "VB_DoubleJump_v4",
+        Callback = function(value)
+            settings.airDoubleJump = value
+            applyAerialSettings()
+        end,
+    })
+
+    CombatTab:CreateToggle({
+        Name = "Anti-Stun / Instant Recovery",
+        CurrentValue = settings.antiStun,
+        Flag = "VB_AntiStun_v4",
+        Callback = function(value)
+            settings.antiStun = value
+            applyAerialSettings()
+        end,
+    })
+
+    CombatTab:CreateToggle({
+        Name = "Bypass Back-Rank Attack Limit",
+        CurrentValue = settings.bypassBackRank,
+        Flag = "VB_BypassBackRank_v4",
+        Callback = function(value)
+            settings.bypassBackRank = value
+            applyAerialSettings()
+        end,
+    })
+
     -- Initial apply
     applyHitboxSettings()
     applyCooldownSettings()
     applyPowerSettings()
     applyMobilitySettings()
+    applyAerialSettings()
 
     -- ============================================================
     --   CLEANUP
@@ -803,6 +930,20 @@ return function(Window, scriptInfo)
     local function destroyScript()
         if not running then return end
         running = false
+
+        -- Restore aerial & recovery
+        pcall(function()
+            if JumpPhysics and originalLaunchSpeed then
+                JumpPhysics.LaunchSpeed = originalLaunchSpeed
+            end
+            if JumpValidation then
+                if originalCanDoubleJump then JumpValidation.canDoubleJump = originalCanDoubleJump end
+                if originalIsBackRank then JumpValidation._isBackRank = originalIsBackRank end
+            end
+            if GameControllerMod and GameControllerMod.IsStunned and originalIsStunnedGet then
+                GameControllerMod.IsStunned.get = originalIsStunnedGet
+            end
+        end)
 
         -- Restore power & mobility
         pcall(function()
