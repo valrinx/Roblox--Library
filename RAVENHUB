@@ -624,6 +624,14 @@ local SCRIPTS = {
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/steal_an_egg.lua",
     },
     {
+        name        = "Steal Fish Eggs",
+        description = "Auto Steal Eggs | Auto Base Return | AFK TreadPool Speed Farm | Best Fish | 100% Drawing ESP",
+        placeIds    = {99183404085821},
+        gameIds     = {10718240577},
+        version     = "v1.0.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/steal_fish_eggs.lua",
+    },
+    {
         name        = "Attack on Titan Revolution - Family Roll",
         description = "Selectable Family target | UI Auto Roll | Auto Stop on match",
         placeIds    = {13379208636},
@@ -922,6 +930,17 @@ local function loadScriptModule(scriptInfo)
                 local okRead, localSrc = pcall(readfile, modFile)
                 if okRead and type(localSrc) == "string" and #localSrc > 100 then
                     raw = localSrc
+                end
+            end
+        end
+        if not raw then
+            local modFile = scriptInfo.moduleUrl:match("modules/[%w_%.%-%%]+")
+            if modFile then
+                local devOk, devRes = pcall(function()
+                    return game:HttpGet("http://localhost:8999/" .. modFile .. "?_cb=" .. tostring(os.time()))
+                end)
+                if devOk and type(devRes) == "string" and #devRes > 100 then
+                    raw = devRes
                 end
             end
         end
