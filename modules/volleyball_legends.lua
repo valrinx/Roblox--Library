@@ -337,58 +337,6 @@ return function(Window, scriptInfo)
         end
     end
 
-    local lastAutoHit = 0
-    local function handleAutoHit(ballPart, myPos, myHum)
-        if not settings.autoHit or not ballPart or not myHum or myHum.Health <= 0 then return end
-        if not InputController or not InputController.Actions then return end
-
-        local now = os.clock()
-        if (now - lastAutoHit) < 0.22 then return end
-
-        local ballPos = ballPart.Position
-        local dist = (ballPos - myPos).Magnitude
-        if dist > settings.autoHitDistance then return end
-
-        local isAerial = (myHum.FloorMaterial == Enum.Material.Air)
-        if isAerial and settings.autoSpike and InputController.Actions.Spike then
-            lastAutoHit = now
-            pcall(InputController.Actions.Spike)
-        elseif not isAerial then
-            local floorY = getFloorY(ballPos)
-            local ballHeight = ballPos.Y - floorY
-            if settings.autoDive and ballHeight < 4.5 and dist > 7 and InputController.Actions.Dive then
-                lastAutoHit = now
-                pcall(InputController.Actions.Dive)
-            elseif settings.autoBump and InputController.Actions.Bump then
-                lastAutoHit = now
-                pcall(InputController.Actions.Bump)
-            end
-        end
-    end
-
-    local function getActiveBall()
-        if BallModule and BallModule.All then
-            for _, ballObj in pairs(BallModule.All) do
-                local ballPart = ballObj.Ball and (ballObj.Ball.PrimaryPart or ballObj.Ball:FindFirstChildWhichIsA("BasePart"))
-                if ballPart and ballPart.Parent then
-                    return ballObj, ballPart
-                end
-            end
-        end
-
-        -- Fallback: Look for CLIENT_BALL_ in workspace
-        for _, child in ipairs(workspace:GetChildren()) do
-            if string.sub(child.Name, 1, 12) == "CLIENT_BALL_" then
-                local bPart = child.PrimaryPart or child:FindFirstChildWhichIsA("BasePart")
-                if bPart then
-                    return nil, bPart
-                end
-            end
-        end
-
-        return nil, nil
-    end
-
     -- Accurate Floor Height Function
     local function getFloorY(pos)
         if PhysicsModule and type(PhysicsModule.calculateFloorHeight) == "function" then
@@ -433,6 +381,58 @@ return function(Window, scriptInfo)
             pos.Z + vel.Z * t
         )
         return landingPos, t
+    end
+
+    local function getActiveBall()
+        if BallModule and BallModule.All then
+            for _, ballObj in pairs(BallModule.All) do
+                local ballPart = ballObj.Ball and (ballObj.Ball.PrimaryPart or ballObj.Ball:FindFirstChildWhichIsA("BasePart"))
+                if ballPart and ballPart.Parent then
+                    return ballObj, ballPart
+                end
+            end
+        end
+
+        -- Fallback: Look for CLIENT_BALL_ in workspace
+        for _, child in ipairs(workspace:GetChildren()) do
+            if string.sub(child.Name, 1, 12) == "CLIENT_BALL_" then
+                local bPart = child.PrimaryPart or child:FindFirstChildWhichIsA("BasePart")
+                if bPart then
+                    return nil, bPart
+                end
+            end
+        end
+
+        return nil, nil
+    end
+
+    local lastAutoHit = 0
+    local function handleAutoHit(ballPart, myPos, myHum)
+        if not settings.autoHit or not ballPart or not myHum or myHum.Health <= 0 then return end
+        if not InputController or not InputController.Actions then return end
+
+        local now = os.clock()
+        if (now - lastAutoHit) < 0.22 then return end
+
+        local ballPos = ballPart.Position
+        local dist = (ballPos - myPos).Magnitude
+        if dist > settings.autoHitDistance then return end
+
+        local isAerial = (myHum.FloorMaterial == Enum.Material.Air)
+        if isAerial and settings.autoSpike and InputController.Actions.Spike then
+            lastAutoHit = now
+            pcall(InputController.Actions.Spike)
+        elseif not isAerial then
+            local floorY = getFloorY(ballPos)
+            local ballHeight = ballPos.Y - floorY
+            if settings.autoDive and ballHeight < 4.5 and dist > 7 and InputController.Actions.Dive then
+                lastAutoHit = now
+                pcall(InputController.Actions.Dive)
+            elseif settings.autoBump and InputController.Actions.Bump then
+                lastAutoHit = now
+                pcall(InputController.Actions.Bump)
+            end
+        end
     end
 
     -- Visual Landing Elements (Cylinder + AlwaysOnTop BillboardGui)
