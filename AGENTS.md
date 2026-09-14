@@ -43,6 +43,12 @@ files in subdirectories may add or override rules for their scope.
   - **จัดเรียงแท็บ (Tab Sorting) ให้เป็นระเบียบ**: ต้องกำหนดลำดับแท็บผ่าน `Window:SortTabs` ให้ชัดเจน เช่น `{"Overview", "Combat", ..., "Settings"}` เสมอ ตรวจสอบชื่อ `t.name` ให้ตรง และเลือกเปิดหน้าแท็บที่ผู้ใช้ต้องการทดสอบเป็นหลักโดยอัตโนมัติ
   - **ป้องกัน Cache เก่าค้าง (`readfile` vs Dev Server)**: เมื่อแก้ไขเมนูในไฟล์โมดูล ต้องมั่นใจว่าลำดับการโหลดจะดึงจาก Local Dev Server (`localhost:8999`) เป็นอันดับแรกก่อน `readfile` เก่าใน executor workspace เพื่อไม่ให้รันโค้ดเมนูเวอร์ชันเก่าที่ยังไม่มีการอัปเดต
   - **ตรวจสอบด้วย Screenshot ทุกครั้งหลังแก้ UI**: หลังเพิ่ม/แก้เมนู ต้องถ่ายภาพหน้าจอ (`screenshot_window`) ตรวจสอบความถูกต้องว่าไม่มีเมนูเบิ้ล, ไม่มี ghost text, และองค์ประกอบอยู่ในตำแหน่งที่ถูกต้องจริง
+- **CRITICAL / MANDATORY: Dual Entrypoint Sync (`RAVENHUB` & `RAVENHUB.lua`) และ CDN Cache Control**:
+  - **ต้อง Sync ไฟล์คู่เสมอ (100% Match)**: ใน repository นี้มี entrypoint 2 ไฟล์คู่กัน คือ `RAVENHUB` (ไม่มีนามสกุล) และ `RAVENHUB.lua` หากมีการแก้ไขไฟล์ใดไฟล์หนึ่ง (เช่น เพิ่ม/แก้ไขโมดูลในตาราง `SCRIPTS` หรือ Core UI) **ต้องคัดลอกและ Sync ให้เนื้อหาทั้งสองไฟล์ตรงกัน 100% ทุกครั้งก่อน Commit & Push** มิฉะนั้นผู้ใช้ที่รันสคริปต์ผ่าน URL แบบไม่มีนามสกุลจะโหลดไม่เจอโมดูลเกม ("No matching module for PlaceId...")
+  - **ระวัง Fastly Edge CDN Cache ของ GitHub Raw**:
+    - URL รูปแบบ `https://raw.githubusercontent.com/.../refs/heads/main/...` มีการแคชบน Fastly Edge นาน 5-10 นาที แม้จะ push โค้ดใหม่แล้วก็ตาม
+    - แนะนำให้ใช้ URL สั้นรูปแบบ `https://raw.githubusercontent.com/valrinx/Roblox--Library/main/RAVENHUB` (ใช้ `/main/` แทน `/refs/heads/main/`) หรือเติม Cache-busting query string เช่น `?v=" .. tostring(os.time())` เสมอ
+    - หลัง push ทุกครั้ง ให้ตรวจสอบผ่าน `game:HttpGet` หรือเทียบ hash ให้มั่นใจว่าฝั่ง CDN อัปเดตจริงก่อนส่งมอบงานให้ผู้ใช้
 
 ## Evidence-driven troubleshooting
 
