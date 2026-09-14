@@ -113,6 +113,16 @@ local function sanitizeConfigSegment(value, fallback)
 end
 
 local function removeRetiredInterfaces()
+    local env = (type(getgenv) == "function" and getgenv()) or _G
+    if env.__RAVEN_WINDOW and type(env.__RAVEN_WINDOW.Destroy) == "function" then
+        pcall(function() env.__RAVEN_WINDOW:Destroy() end)
+        env.__RAVEN_WINDOW = nil
+    end
+    if _G.__RAVEN_WINDOW and type(_G.__RAVEN_WINDOW.Destroy) == "function" then
+        pcall(function() _G.__RAVEN_WINDOW:Destroy() end)
+        _G.__RAVEN_WINDOW = nil
+    end
+
     if isBac then
         -- In BAC games, never scan CoreGui or PlayerGui to avoid tripping anti-cheat sensors
         return
@@ -296,6 +306,14 @@ local camera    = game.Workspace.CurrentCamera
 -- ============================================================
 
 local SCRIPTS = {
+    {
+        name        = "Fishing Chef",
+        description = "Auto Fish | Instant Reel | Auto Sell | Restaurant Farm | Island TP | Utility",
+        placeIds    = {88599461076137},
+        gameIds     = {8955905923},
+        version     = "v1.0.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/fishing_chef.lua",
+    },
     {
         name        = "Anime Battlegrounds",
         description = "Smooth Aimlock | Extended Reach | 100% Drawing ESP | Moveset Radar | Tactical TP",
@@ -735,6 +753,14 @@ local SCRIPTS = {
         version     = "v1.4.2",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/rivals.lua?v=vb-1.4.2",
     },
+    {
+        name        = "Fight, Fight, Fight!",
+        description = "Kill Aura | Auto Parry | Army Air-Drop & Rush Nuke | Satellite Volley | Drawing ESP",
+        placeIds    = {92949164250558, 101770480176177},
+        gameIds     = {10258991999},
+        version     = "v1.1.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/fight_fight_fight.lua",
+    },
 
     --[[
     {
@@ -967,24 +993,22 @@ local function loadScriptModule(scriptInfo)
 
     local ok, result = pcall(function()
         local raw
-        if type(readfile) == "function" then
-            local modFile = scriptInfo.moduleUrl:match("modules/[%w_%.%-%%]+")
-            if modFile then
-                local okRead, localSrc = pcall(readfile, modFile)
-                if okRead and type(localSrc) == "string" and #localSrc > 100 then
-                    raw = localSrc
+        local modFile = scriptInfo.moduleUrl:match("modules/[%w_%.%-%%]+")
+        if modFile then
+            local devOk, devRes = pcall(function()
+                return game:HttpGet("http://localhost:8999/" .. modFile .. "?_cb=" .. tostring(os.time()))
+            end)
+            if devOk and type(devRes) == "string" and #devRes > 100 then
+                raw = devRes
+                if type(writefile) == "function" then
+                    pcall(writefile, modFile, raw)
                 end
             end
         end
-        if not raw then
-            local modFile = scriptInfo.moduleUrl:match("modules/[%w_%.%-%%]+")
-            if modFile then
-                local devOk, devRes = pcall(function()
-                    return game:HttpGet("http://localhost:8999/" .. modFile .. "?_cb=" .. tostring(os.time()))
-                end)
-                if devOk and type(devRes) == "string" and #devRes > 100 then
-                    raw = devRes
-                end
+        if not raw and type(readfile) == "function" and modFile then
+            local okRead, localSrc = pcall(readfile, modFile)
+            if okRead and type(localSrc) == "string" and #localSrc > 100 then
+                raw = localSrc
             end
         end
         if not raw then
