@@ -30,20 +30,26 @@ return function(Window, scriptInfo)
     local settings = {
         allInOneFarm = false,
         farmMode = "Chef & Restaurant Loop", -- "Chef & Restaurant Loop" or "Instant Sell Farm"
+        targetFishCount = 5, -- Custom target fish count before returning to restaurant
         autoFish = false,
         instantReel = true,
         autoSell = false,
         sellThreshold = 5,
-        autoDepositStock = true,
+        autoDepositStock = false,
         autoServeCustomers = true,
         autoCollectEarnings = true,
         autoClaimDaily = false,
+        autoInstantCook = true, -- Auto-solve minigames with 100% Perfect quality instantly
         walkSpeed = 16,
         jumpPower = 50,
         infiniteJump = false,
         noclip = false,
         antiAfk = true,
     }
+
+    local liveFarmState = "OFF"
+    local liveFarmStatus = "[OFF] Idle"
+    local sessionFishCaught = 0
 
     -- Controllers & Services
     local controllers = player:WaitForChild("PlayerScripts"):WaitForChild("Client"):WaitForChild("Controllers")
@@ -327,6 +333,7 @@ return function(Window, scriptInfo)
                     local hasPlate = equipPlateForDish(order)
                     if not hasPlate then
                         -- Cook dish from fish
+                        liveFarmStatus = string.format("[COOKING] Cooking %s...", tostring(order))
                         local cooked = cookDish(order)
                         if cooked then
                             hasPlate = equipPlateForDish(order)
@@ -335,6 +342,7 @@ return function(Window, scriptInfo)
 
                     if hasPlate then
                         -- Teleport to customer
+                        liveFarmStatus = string.format("[SERVE] Delivering %s...", tostring(order))
                         local model = findCustomerModel(c)
                         local loc = model and model:GetPivot().Position or (c:FindFirstChild("Location") and c.Location.Value and c.Location.Value.Position)
                         if loc then
@@ -424,6 +432,8 @@ return function(Window, scriptInfo)
                 if hrp then
                     if settings.farmMode == "Instant Sell Farm" then
                         -- FAST SELL MODE: Pier -> Native AutoFish -> Instant Reel -> Auto Sell
+                        liveFarmState = "FAST_SELL"
+                        liveFarmStatus = string.format("[FAST SELL] Fish: %d / %d", getFishCount(), settings.targetFishCount)
                         local spot = PIER_SPOT
                         if (hrp.Position - spot.pos).Magnitude > 10 then
                             teleportTo(CFrame.lookAt(spot.pos, spot.look))
@@ -439,77 +449,95 @@ return function(Window, scriptInfo)
                             task.wait(0.4)
                         end
 
-                        if getFishCount() >= settings.sellThreshold then
+                        if getFishCount() >= settings.targetFishCount then
                             pcall(function() fishingCtrl:SetAutoFishEnabled(false) end)
                             sellAllFish()
                             task.wait(0.4)
                         end
 
                     elseif settings.farmMode == "Chef & Restaurant Loop" then
-                        -- COMPLETE RESTAURANT CYCLE (Cook -> Serve -> Fish Stockpile)
-                        local activeOrders = getActiveCustomerOrders()
-                        local waitingCount = 0
-                        for _, o in ipairs(activeOrders) do
-                            if o.waiting then waitingCount = waitingCount + 1 end
-                        end
-
                         local fishCount = getFishCount()
                         local platesCount = 0
                         local okP, dataP = pcall(function() return dataCtrl:GetData() end)
                         if okP and dataP and dataP.Plates then platesCount = #dataP.Plates end
 
-                        if waitingCount > 0 then
-                            if fishCount == 0 and platesCount == 0 then
-                                -- Need fish to cook for waiting customers! Go fish
-                                state = "FISH"
-                            else
-                                -- Have fish or plates, serve customers immediately!
-                                state = "SERVE"
-                            end
-                        else
-                            -- No customers waiting right now
-                            if fishCount < settings.sellThreshold then
-                                state = "FISH"
-                            else
-                                state = "WAIT_CUSTOMERS"
-                            end
-                        end
-
+                        -- 1. FISH STATE: Catch fish at pier until targetFishCount is reached
                         if state == "FISH" then
-                            local spot = PIER_SPOT
-                            if (hrp.Position - spot.pos).Magnitude > 10 then
-                                teleportTo(CFrame.lookAt(spot.pos, spot.look))
-                                task.wait(0.5)
+                            if fishCount >= settings.targetFishCount then
+                                pcall(function() fishingCtrl:SetAutoFishEnabled(false) end)
+                                state = "GO_RESTAURANT"
+                                liveFarmState = "GO_RESTAURANT"
+                                liveFarmStatus = string.format("[WAIT ORDER] Target reached (%d/%d). Returning to Restaurant...", fishCount, settings.targetFishCount)
+                            else
+                                liveFarmState = "FISH"
+                                liveFarmStatus = string.format("[FISHING] Caught: %d / %d", fishCount, settings.targetFishCount)
+                                local spot = PIER_SPOT
+                                if (hrp.Position - spot.pos).Magnitude > 10 then
+                                    teleportTo(CFrame.lookAt(spot.pos, spot.look))
+                                    task.wait(0.5)
+                                end
+
+                                equipRod()
+                                pcall(function() fishingCtrl:SetAutoFishEnabled(true) end)
+
+                                if biteMinigame.InProgress then
+                                    biteMinigame.ProgressValue = 1
+                                    pcall(function() biteMinigame:End(true) end)
+                                    task.wait(0.4)
+                                end
                             end
 
-                            equipRod()
-                            pcall(function() fishingCtrl:SetAutoFishEnabled(true) end)
-
-                            if biteMinigame.InProgress then
-                                biteMinigame.ProgressValue = 1
-                                pcall(function() biteMinigame:End(true) end)
-                                task.wait(0.4)
-                            end
-
-                        elseif state == "SERVE" then
+                        -- 2. GO_RESTAURANT STATE: Travel back to restaurant
+                        elseif state == "GO_RESTAURANT" then
                             pcall(function() fishingCtrl:SetAutoFishEnabled(false) end)
-                            local served = serveWaitingCustomers()
-                            if served > 0 then
-                                collectEarnings()
-                            end
-                            task.wait(0.5)
-
-                        elseif state == "WAIT_CUSTOMERS" then
-                            pcall(function() fishingCtrl:SetAutoFishEnabled(false) end)
+                            liveFarmState = "GO_RESTAURANT"
+                            liveFarmStatus = string.format("[WAIT ORDER] Returning to Restaurant (%d fish)...", fishCount)
                             local stallCf = getRestaurantCFrame()
-                            if (hrp.Position - stallCf.Position).Magnitude > 15 then
-                                teleportTo(stallCf)
+                            teleportTo(stallCf)
+                            task.wait(0.6)
+                            state = "SERVE_UNTIL_EMPTY"
+
+                        -- 3. SERVE_UNTIL_EMPTY STATE: Wait order -> Cook dish -> Serve until bag is empty
+                        elseif state == "SERVE_UNTIL_EMPTY" then
+                            pcall(function() fishingCtrl:SetAutoFishEnabled(false) end)
+
+                            if fishCount <= 0 and platesCount <= 0 then
+                                liveFarmState = "FISH"
+                                liveFarmStatus = "[FISHING] Fish depleted! Returning to pier to catch more..."
+                                notify("Auto Farm", "Fish depleted! Returning to Pier to fish...")
+                                state = "FISH"
+                                task.wait(0.5)
+                            else
+                                local activeOrders = getActiveCustomerOrders()
+                                local waitingCount = 0
+                                for _, o in ipairs(activeOrders) do
+                                    if o.waiting then waitingCount = waitingCount + 1 end
+                                end
+
+                                if waitingCount > 0 then
+                                    liveFarmState = "COOK_AND_SERVE"
+                                    local served = serveWaitingCustomers()
+                                    if served > 0 then
+                                        collectEarnings()
+                                    end
+                                    task.wait(0.5)
+                                else
+                                    liveFarmState = "WAIT_ORDER"
+                                    liveFarmStatus = string.format("[WAIT ORDER] Standing by at stall... (%d fish remaining)", fishCount)
+                                    local stallCf = getRestaurantCFrame()
+                                    if (hrp.Position - stallCf.Position).Magnitude > 15 then
+                                        teleportTo(stallCf)
+                                    end
+                                    collectEarnings()
+                                    task.wait(1)
+                                end
                             end
-                            task.wait(1)
                         end
                     end
                 end
             else
+                liveFarmState = "OFF"
+                liveFarmStatus = "[OFF] Idle"
                 -- When AllInOne is toggled off, ensure native auto fish is disabled
                 if not settings.autoFish then
                     pcall(function() fishingCtrl:SetAutoFishEnabled(false) end)
@@ -518,10 +546,11 @@ return function(Window, scriptInfo)
         end
     end)
 
-    -- Separate Regular Auto Fish Loop (if AllInOne is not enabled)
+    -- Separate Standalone Auto Fish Loop (PURE FISHING ONLY - NO RESTAURANT / NO COOK / NO SELL)
     task.spawn(function()
+        local lastFishCount = getFishCount()
         while running do
-            task.wait(0.3)
+            task.wait(0.25)
             if settings.autoFish and not settings.allInOneFarm then
                 local char = player.Character
                 local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -534,16 +563,18 @@ return function(Window, scriptInfo)
                         if settings.instantReel then
                             biteMinigame.ProgressValue = 1
                             pcall(function() biteMinigame:End(true) end)
-                            task.wait(0.4)
+                            task.wait(0.3)
                         else
                             biteMinigame:SetAutoClickEnabled(true)
                         end
                     end
 
-                    if settings.autoSell and getFishCount() >= settings.sellThreshold then
-                        sellAllFish()
-                        task.wait(0.5)
+                    -- Track session catches purely for display
+                    local currentCount = getFishCount()
+                    if currentCount > lastFishCount then
+                        sessionFishCaught = sessionFishCaught + (currentCount - lastFishCount)
                     end
+                    lastFishCount = currentCount
                 end
             elseif not settings.allInOneFarm then
                 pcall(function() fishingCtrl:SetAutoFishEnabled(false) end)
@@ -564,6 +595,39 @@ return function(Window, scriptInfo)
             if settings.autoClaimDaily and now - lastDailyAt >= 60 then
                 lastDailyAt = now
                 claimDaily()
+            end
+        end
+    end)
+
+    -- Auto Instant Perfect Minigames (Cutting & Cooking)
+    task.spawn(function()
+        local vim = game:GetService("VirtualInputManager")
+        while running do
+            task.wait(0.1)
+            if settings.autoInstantCook then
+                -- 1. Keep fast cooking active to skip stove/cooking minigames instantly
+                pcall(function()
+                    player:SetAttribute("FastCookingUntil", workspace:GetServerTimeNow() + 86400)
+                end)
+
+                -- 2. If CutMinigame GUI is visible, auto-hit 100% Perfect
+                pcall(function()
+                    local cm = player.PlayerGui:FindFirstChild("Main") and player.PlayerGui.Main:FindFirstChild("Frames") and player.PlayerGui.Main.Frames:FindFirstChild("CutMinigame")
+                    if cm and cm.Visible then
+                        local bar = cm:FindFirstChild("Bar")
+                        local cursor = bar and bar:FindFirstChild("Cursor")
+                        local innerBar = bar and bar:FindFirstChild("Bar")
+                        local fade = innerBar and innerBar:FindFirstChild("Fade")
+                        if cursor and fade then
+                            cursor.Position = fade.Position
+                            task.wait(0.04)
+                            vim:SendMouseButtonEvent(0, 0, 0, true, game, 0)
+                            task.wait(0.04)
+                            vim:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+                            task.wait(0.12)
+                        end
+                    end
+                end)
             end
         end
     end)
@@ -615,6 +679,7 @@ return function(Window, scriptInfo)
         Callback = function(val)
             settings.allInOneFarm = val
             if val then
+                settings.autoFish = false
                 notify("Auto Farm", "All-In-One Money Machine Started! Mode: " .. settings.farmMode)
             else
                 notify("Auto Farm", "Stopped.")
@@ -634,13 +699,14 @@ return function(Window, scriptInfo)
     })
 
     FarmTab:CreateSlider({
-        Name = "Fish Per Batch (Cycle Size)",
-        Range = {1, 20},
+        Name = "Target Fish Count (Fish to Catch)",
+        Range = {1, 50},
         Increment = 1,
-        CurrentValue = 4,
+        CurrentValue = 5,
         Suffix = " fish",
-        Flag = "FC_BatchSize",
+        Flag = "FC_TargetFish",
         Callback = function(val)
+            settings.targetFishCount = val
             settings.sellThreshold = val
         end
     })
@@ -672,24 +738,28 @@ return function(Window, scriptInfo)
         end
     })
 
-    FarmTab:CreateSection("Active Restaurant Orders")
-    local ordersLabel = FarmTab:CreateLabel("Scanning orders...")
+    FarmTab:CreateSection("Workflow Status & Active Orders")
+    local statusLabel = FarmTab:CreateLabel("Workflow: [OFF] Idle")
+    local ordersLabel = FarmTab:CreateLabel("Active Orders: Scanning...")
 
     task.spawn(function()
         while running do
-            task.wait(2)
+            task.wait(1)
             pcall(function()
+                if statusLabel and type(statusLabel.Set) == "function" then
+                    statusLabel:Set("Workflow: " .. liveFarmStatus)
+                end
                 if ordersLabel and type(ordersLabel.Set) == "function" then
                     local orders = getActiveCustomerOrders()
                     if #orders == 0 then
-                        ordersLabel:Set("No customers seated currently.")
+                        ordersLabel:Set("Active Orders: No customers seated.")
                     else
                         local lines = {}
                         for i, o in ipairs(orders) do
-                            local status = o.waiting and "⏳ Waiting" or (o.delivered and "✅ Served" or "Ordering")
-                            table.insert(lines, string.format("#%d: %s [%s] ($%s)", i, o.orderText, status, tostring(o.reward)))
+                            local st = o.waiting and "Waiting" or (o.delivered and "Served" or "Ordering")
+                            table.insert(lines, string.format("#%d: %s [%s] ($%s)", i, o.orderText, st, tostring(o.reward)))
                         end
-                        ordersLabel:Set(table.concat(lines, "\n"))
+                        ordersLabel:Set("Active Orders:\n" .. table.concat(lines, "\n"))
                     end
                 end
             end)
@@ -698,17 +768,37 @@ return function(Window, scriptInfo)
 
     -- TAB 2: 🎣 Standalone Fishing
     local FishTab = Window:CreateTab("🎣 Fishing", "fish")
-    FishTab:CreateSection("Manual Fishing Controls")
+    FishTab:CreateSection("Live Fish Inventory")
+    local fishStatusLabel = FishTab:CreateLabel("Fish in Bag: Checking...")
+
+    task.spawn(function()
+        while running do
+            task.wait(1)
+            pcall(function()
+                if fishStatusLabel and type(fishStatusLabel.Set) == "function" then
+                    local count = getFishCount()
+                    fishStatusLabel:Set(string.format("Fish in Bag: %d items | Session Caught: %d", count, sessionFishCaught))
+                end
+            end)
+        end
+    end)
+
+    FishTab:CreateSection("Standalone Fishing Controls")
 
     FishTab:CreateToggle({
-        Name = "Auto Fish",
+        Name = "Auto Fish (Continuous)",
         CurrentValue = false,
         Flag = "FC_AutoFish",
         Callback = function(val)
             settings.autoFish = val
             if val then
+                settings.allInOneFarm = false
                 equipRod()
-                notify("Auto Fish", "Activated! Aiming towards water.")
+                pcall(function() fishingCtrl:SetAutoFishEnabled(true) end)
+                notify("Fishing", "Standalone Auto Fish started! Fishing continuously.")
+            else
+                pcall(function() fishingCtrl:SetAutoFishEnabled(false) end)
+                notify("Fishing", "Auto Fish stopped.")
             end
         end
     })
@@ -739,32 +829,93 @@ return function(Window, scriptInfo)
 
     -- TAB 3: 🍳 Kitchen & Cooking
     local CookTab = Window:CreateTab("🍳 Kitchen", "coffee")
-    CookTab:CreateSection("Cooking Shortcuts")
+    CookTab:CreateSection("Auto Minigame Solvers")
+
+    CookTab:CreateToggle({
+        Name = "Auto Perfect Cooking (Minigames)",
+        CurrentValue = true,
+        Flag = "FC_AutoPerfectCook",
+        Callback = function(val)
+            settings.autoInstantCook = val
+            if val then
+                notify("Kitchen", "Auto Perfect minigame solver enabled!")
+            else
+                notify("Kitchen", "Auto Perfect minigame solver disabled.")
+            end
+        end
+    })
+
+    CookTab:CreateSection("Instant Recipe Cooking")
 
     CookTab:CreateButton({
-        Name = "Cook Nigiri (Quick)",
+        Name = "Cook Nigiri (Instant Perfect) 🍣",
         Callback = function()
-            pcall(function()
-                fishingCtrl.Server:Cook("Nigiri"):expect()
-            end)
-            notify("Cooking", "Nigiri prepared!")
+            local ok, err = cookDish("Nigiri")
+            if ok then
+                notify("Kitchen", "Cooked Nigiri (Perfect Quality)!")
+            else
+                notify("Kitchen", "Cook failed: " .. tostring(err or "No fish"))
+            end
         end
     })
 
     CookTab:CreateButton({
-        Name = "Cook Sashimi (Quick)",
+        Name = "Cook Sashimi (Instant Perfect) 🐟",
         Callback = function()
-            pcall(function()
-                fishingCtrl.Server:Cook("Sashimi"):expect()
-            end)
-            notify("Cooking", "Sashimi prepared!")
+            local ok, err = cookDish("Sashimi")
+            if ok then
+                notify("Kitchen", "Cooked Sashimi (Perfect Quality)!")
+            else
+                notify("Kitchen", "Cook failed: " .. tostring(err or "No fish"))
+            end
         end
     })
+
+    CookTab:CreateButton({
+        Name = "Cook Sushi (Instant Perfect) 🍱",
+        Callback = function()
+            local ok, err = cookDish("Sushi")
+            if ok then
+                notify("Kitchen", "Cooked Sushi (Perfect Quality)!")
+            else
+                notify("Kitchen", "Cook failed: " .. tostring(err or "No fish"))
+            end
+        end
+    })
+
+    CookTab:CreateButton({
+        Name = "Cook All Fish into Dishes (Batch) ⚡",
+        Callback = function()
+            local initialCount = getFishCount()
+            if initialCount <= 0 then
+                notify("Kitchen", "No fish in bag to cook!")
+                return
+            end
+            notify("Kitchen", string.format("Cooking %d fish into dishes...", initialCount))
+            local cooked = 0
+            while getFishCount() > 0 do
+                local ok = cookDish("Sashimi")
+                if not ok then
+                    ok = cookDish("Nigiri")
+                end
+                if ok then
+                    cooked = cooked + 1
+                    task.wait(0.2)
+                else
+                    break
+                end
+            end
+            notify("Kitchen", string.format("Successfully cooked %d dishes!", cooked))
+        end
+    })
+
+    CookTab:CreateSection("Stall & Restaurant")
 
     CookTab:CreateButton({
         Name = "TP to My Restaurant",
         Callback = function()
-            teleportTo(CFrame.lookAt(RESTAURANT_SPOT.pos, RESTAURANT_SPOT.look))
+            local stallCf = getRestaurantCFrame()
+            teleportTo(stallCf)
             notify("Travel", "Arrived at Restaurant!")
         end
     })
