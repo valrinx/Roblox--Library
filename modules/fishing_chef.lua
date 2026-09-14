@@ -101,21 +101,58 @@ return function(Window, scriptInfo)
         if hrp then hrp.CFrame = cframe end
     end
 
+    local function isRodTool(tool)
+        if not (tool and tool:IsA("Tool")) then return false end
+        if tool:GetAttribute("IsRod") == true then return true end
+        if tool.Name:find("Rod") then return true end
+        local ok, data = pcall(function() return dataCtrl:GetData() end)
+        if ok and data and data.Equipped and data.Equipped.Rod == tool.Name then return true end
+        if ok and data and data.Rods then
+            for _, r in ipairs(data.Rods) do
+                if r.Name == tool.Name then return true end
+            end
+        end
+        return false
+    end
+
     local function equipRod()
         local char = getCharacter()
-        local hum = char:FindFirstChildOfClass("Humanoid")
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
         if not hum then return false end
 
+        -- 1. Check if rod is ALREADY equipped in character
         for _, tool in ipairs(char:GetChildren()) do
-            if tool:IsA("Tool") and tool.Name:find("Rod") then return true end
+            if isRodTool(tool) then return true end
         end
 
-        for _, tool in ipairs(player.Backpack:GetChildren()) do
-            if tool:IsA("Tool") and tool.Name:find("Rod") then
-                hum:EquipTool(tool)
-                task.wait(0.2)
-                return true
+        -- 2. Unequip any non-rod tools (e.g. food plates, knives, cages)
+        hum:UnequipTools()
+        task.wait(0.15)
+
+        -- 3. Search backpack for equipped rod from player data first
+        local ok, data = pcall(function() return dataCtrl:GetData() end)
+        local preferredRodName = ok and data and data.Equipped and data.Equipped.Rod
+
+        local targetRod = nil
+        if preferredRodName then
+            targetRod = player.Backpack:FindFirstChild(preferredRodName)
+        end
+
+        -- 4. Fallback to any rod tool in backpack
+        if not targetRod then
+            for _, tool in ipairs(player.Backpack:GetChildren()) do
+                if isRodTool(tool) then
+                    targetRod = tool
+                    break
+                end
             end
+        end
+
+        if targetRod then
+            hum:EquipTool(targetRod)
+            task.wait(0.2)
+            pcall(function() fishingCtrl:RestoreAutoFish() end)
+            return true
         end
         return false
     end
@@ -478,7 +515,12 @@ return function(Window, scriptInfo)
                                 end
 
                                 equipRod()
-                                pcall(function() fishingCtrl:SetAutoFishEnabled(true) end)
+                                pcall(function()
+                                    if not fishingCtrl:IsAutoFishEnabled() then
+                                        fishingCtrl:RestoreAutoFish()
+                                        fishingCtrl:SetAutoFishEnabled(true)
+                                    end
+                                end)
 
                                 if biteMinigame.InProgress then
                                     biteMinigame.ProgressValue = 1
@@ -505,8 +547,16 @@ return function(Window, scriptInfo)
                                 liveFarmState = "FISH"
                                 liveFarmStatus = "[FISHING] Fish depleted! Returning to pier to catch more..."
                                 notify("Auto Farm", "Fish depleted! Returning to Pier to fish...")
+                                local spot = PIER_SPOT
+                                teleportTo(CFrame.lookAt(spot.pos, spot.look))
+                                task.wait(0.6)
+                                equipRod()
+                                pcall(function()
+                                    fishingCtrl:RestoreAutoFish()
+                                    fishingCtrl:SetAutoFishEnabled(true)
+                                end)
                                 state = "FISH"
-                                task.wait(0.5)
+                                task.wait(0.4)
                             else
                                 local activeOrders = getActiveCustomerOrders()
                                 local waitingCount = 0
@@ -557,7 +607,12 @@ return function(Window, scriptInfo)
 
                 if hrp then
                     equipRod()
-                    pcall(function() fishingCtrl:SetAutoFishEnabled(true) end)
+                    pcall(function()
+                        if not fishingCtrl:IsAutoFishEnabled() then
+                            fishingCtrl:RestoreAutoFish()
+                            fishingCtrl:SetAutoFishEnabled(true)
+                        end
+                    end)
 
                     if biteMinigame.InProgress then
                         if settings.instantReel then
