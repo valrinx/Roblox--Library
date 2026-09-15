@@ -1018,7 +1018,9 @@ local function loadScriptModule(scriptInfo)
         if not raw and type(readfile) == "function" and modFile then
             local okRead, localSrc = pcall(readfile, modFile)
             if okRead and type(localSrc) == "string" and #localSrc > 100 then
-                raw = localSrc
+                if not scriptInfo.version or string.find(localSrc, scriptInfo.version, 1, true) then
+                    raw = localSrc
+                end
             end
         end
         if not raw then
@@ -1027,7 +1029,11 @@ local function loadScriptModule(scriptInfo)
             raw = safeHttpGet(fetchUrl)
             assert(type(raw) == "string" and #raw > 10,
                 "HttpGet empty URL: " .. scriptInfo.moduleUrl)
+            if type(writefile) == "function" and modFile then
+                pcall(writefile, modFile, raw)
+            end
         end
+
 
         local fn, compileErr = loadstring(raw)
         assert(fn, "loadstring error: " .. tostring(compileErr))
