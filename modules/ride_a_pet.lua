@@ -1,13 +1,13 @@
 --[[
-    RAVEN HUB Module - Ride A Pet v1.1.0
+    RAVEN HUB Module - Ride A Pet v1.2.0
     Game: Ride A Pet (PlaceId: 124216119978534 / GameId: 10035204815)
     Developer: this game is gud
 
-    v1.1.0:
-    - Fixed "Can't Teleport While Carrying Eggs" anti-cheat kick
-    - Replaced instant teleport with 100% safe Glide Fly (TweenService)
-    - Removed TeleportToPlot remote during egg transport
-    - Safe arrival delay for server position replication
+    v1.2.0:
+    - Expanded Glide Fly Speed slider up to 500 studs/s
+    - Expanded WalkSpeed booster slider up to 500 spd
+    - Turbo egg return to base before despawn timer expires
+
 
 
     Features:
@@ -135,8 +135,8 @@ return function(Window, runtimeInfo)
         AutoFarmEggs = false,
         FarmPriority = "Rarest First", -- "Rarest First", "Closest First"
         FarmMethod = "Glide Fly (Safe)", -- "Glide Fly (Safe)", "Instant Teleport (Risky)"
-        TweenSpeed = 135,
-        ReturnSpeed = 135,
+        TweenSpeed = 250,
+        ReturnSpeed = 250,
         AutoDeposit = true,
         AutoReturnWhenFull = true,
         FarmCooldown = 0.35,
@@ -250,8 +250,8 @@ return function(Window, runtimeInfo)
             -- Glide Fly (Safe): smooth linear flight via TweenService
             local startPos = root.Position
             local dist = (startPos - targetPos).Magnitude
-            local speed = math.clamp(State.TweenSpeed or 135, 40, 160)
-            local duration = math.max(0.15, dist / speed)
+            local speed = math.clamp(State.TweenSpeed or 250, 40, 500)
+            local duration = math.max(0.1, dist / speed)
 
             local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
             currentTween = TweenService:Create(root, tweenInfo, {
@@ -260,9 +260,10 @@ return function(Window, runtimeInfo)
             currentTween:Play()
             currentTween.Completed:Wait()
             currentTween = nil
-            task.wait(0.2)
+            task.wait(0.15)
             return true
         end
+
     end
 
     local function returnToPlot(isCarryingEgg)
@@ -691,8 +692,8 @@ return function(Window, runtimeInfo)
 
     FarmTab:CreateSlider({
         Name = "Glide Fly Speed",
-        Range = {60, 160},
-        Increment = 5,
+        Range = {60, 500},
+        Increment = 10,
         Suffix = " studs/s",
         CurrentValue = State.TweenSpeed,
         Flag = "RAP_TweenSpeed",
@@ -700,6 +701,7 @@ return function(Window, runtimeInfo)
             State.TweenSpeed = val
         end,
     })
+
 
     FarmTab:CreateToggle({
         Name = "Auto Deposit When Full",
@@ -905,9 +907,9 @@ return function(Window, runtimeInfo)
     })
 
     MovementTab:CreateSlider({
-        Name = "WalkSpeed (Safe <= 160)",
-        Range = {16, 160},
-        Increment = 5,
+        Name = "WalkSpeed",
+        Range = {16, 500},
+        Increment = 10,
         Suffix = " spd",
         CurrentValue = State.SpeedValue,
         Flag = "RAP_SpeedValue",
@@ -915,6 +917,7 @@ return function(Window, runtimeInfo)
             State.SpeedValue = val
         end,
     })
+
 
 
     MovementTab:CreateToggle({
@@ -1001,7 +1004,7 @@ return function(Window, runtimeInfo)
     end
 
     getgenv().__RAVEN_RIDE_A_PET = {
-        Version = "v1.1.0",
+        Version = "v1.2.0",
         Settings = State,
         GetFilteredEggs = getFilteredEggs,
         ReturnToPlot = returnToPlot,
