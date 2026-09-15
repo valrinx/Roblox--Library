@@ -1,7 +1,7 @@
 --[[
     RAVEN HUB | Iron Soul: Dungeon
     Lobby PlaceId: 117533937949084 | Starless Forest: 116456628154258
-    GameId: 9910245722 | Version: v1.6.8
+    GameId: 9910245722 | Version: v1.7.2
 ]]
 return function(Window, runtimeInfo)
     local Players = game:GetService("Players")
@@ -1146,6 +1146,55 @@ return function(Window, runtimeInfo)
         end
         return cf
     end
+
+    local function resolveRoomCenter(roundNum)
+        local rNum = roundNum or (roundState() or 1)
+        local group = workspace:FindFirstChild("WorldEnemys") and workspace.WorldEnemys:FindFirstChild("RoundSpawnGroup")
+        local roundFolder = group and group:FindFirstChild("Round" .. tostring(rNum))
+        if roundFolder then
+            local spList = {}
+            for _, p in ipairs(roundFolder:GetChildren()) do
+                if p:IsA("BasePart") then table.insert(spList, p.Position) end
+            end
+            if #spList > 0 then
+                local sum = Vector3.zero
+                for _, pos in ipairs(spList) do sum = sum + pos end
+                return (sum / #spList) + Vector3.new(0, 4, 0)
+            end
+        end
+        local wakeTouch = workspace:FindFirstChild("WorldEnemys") and workspace.WorldEnemys:FindFirstChild("RoundWakeTouch")
+        local wakePart = wakeTouch and wakeTouch:FindFirstChild("Round" .. tostring(rNum))
+        if wakePart and wakePart:IsA("BasePart") then
+            return wakePart.Position + Vector3.new(0, 4, 0)
+        end
+        return nil
+    end
+
+    local function proceedToNextRoom(curRound)
+        local doors = workspace:FindFirstChild("RoundDoor")
+        if not doors then return false end
+        local root = myRoot()
+        if not root then return false end
+
+        -- Search for Portal or Door corresponding to current round
+        for _, obj in ipairs(doors:GetChildren()) do
+            local rootPart = obj:FindFirstChild("Root")
+            local rNum = (rootPart and rootPart:GetAttribute("RoundNum")) or obj:GetAttribute("RoundNum")
+            local isMatch = (rNum == curRound) or obj.Name:find("Portal" .. tostring(curRound)) or obj.Name:find("Door" .. tostring(curRound))
+            if isMatch and rootPart then
+                root.CFrame = rootPart.CFrame + Vector3.new(0, 3, 0)
+                root.AssemblyLinearVelocity = Vector3.zero
+                root.AssemblyAngularVelocity = Vector3.zero
+                if type(firetouchinterest) == "function" then
+                    pcall(firetouchinterest, root, rootPart, 0)
+                    pcall(firetouchinterest, root, rootPart, 1)
+                end
+                return true
+            end
+        end
+        return false
+    end
+
     local function runPotassiumAutofarm()
         farmWorkerToken=farmWorkerToken+1
         local token=farmWorkerToken
@@ -1156,12 +1205,15 @@ return function(Window, runtimeInfo)
             local enemiesZeroSince=0
             local lastRoomCenter=nil
             local lastSeenRound=nil
+            local roundInitWarpDone=false
 
             while running and token==farmWorkerToken do
                 if game.PlaceId==117533937949084 then
                     SetCurrentEnemy(nil)
                     enemiesZeroSince=0
                     lastRoomCenter=nil
+                    lastSeenRound=nil
+                    roundInitWarpDone=false
                 elseif settings.autoFarm then
                     local ok,err=pcall(function()
                         clearWhiteEffect()
@@ -1175,7 +1227,22 @@ return function(Window, runtimeInfo)
                         if lastSeenRound~=curRound then
                             lastSeenRound=curRound
                             enemiesZeroSince=0
-                            lastRoomCenter=nil
+                            lastRoomCenter=resolveRoomCenter(curRound)
+                            roundInitWarpDone=false
+                        end
+
+                        -- Step 1: Before engaging, warp to the center of the room to trigger spawn / position player
+                        if not roundInitWarpDone then
+                            local center = lastRoomCenter or resolveRoomCenter(curRound)
+                            if center then
+                                lastRoomCenter = center
+                                root.CFrame = CFrame.new(center)
+                                root.AssemblyLinearVelocity = Vector3.zero
+                                root.AssemblyAngularVelocity = Vector3.zero
+                            end
+                            roundInitWarpDone = true
+                            task.wait(0.1)
+                            return
                         end
 
                         local enemies=collectEnemies()
@@ -1186,27 +1253,24 @@ return function(Window, runtimeInfo)
                                 enemiesZeroSince=now
                             end
 
-                            -- Resolve center of current room/round from spawn points or last seen enemy
-                            local roomCenter = lastRoomCenter
-                            if not roomCenter then
-                                local group = workspace:FindFirstChild("WorldEnemys") and workspace.WorldEnemys:FindFirstChild("RoundSpawnGroup")
-                                local roundFolder = group and group:FindFirstChild("Round" .. tostring(curRound))
-                                if roundFolder then
-                                    local spList = {}
-                                    for _, p in ipairs(roundFolder:GetChildren()) do
-                                        if p:IsA("BasePart") then table.insert(spList, p.Position) end
-                                    end
-                                    if #spList > 0 then
-                                        local sum = Vector3.zero
-                                        for _, pos in ipairs(spList) do sum = sum + pos end
-                                        roomCenter = (sum / #spList) + Vector3.new(0, 4, 0)
-                                        lastRoomCenter = roomCenter
-                                    end
+                            local roomCenter = lastRoomCenter or resolveRoomCenter(curRound)
+                            if roomCenter then lastRoomCenter = roomCenter end
+
+                            local elapsedZero = now - enemiesZeroSince
+
+                            -- Step 2: When mobs are cleared, return to room center and hold for 3 seconds
+                            if elapsedZero < 3.0 then
+                                if roomCenter then
+                                    root.CFrame = CFrame.new(roomCenter)
+                                    root.AssemblyLinearVelocity = Vector3.zero
+                                    root.AssemblyAngularVelocity = Vector3.zero
                                 end
+                                return
                             end
 
-                            -- Force player to stand exactly at room center for at least 5 seconds
-                            if roomCenter then
+                            -- Step 3: After holding 3s with no new mobs spawned, proceed to next room door/portal
+                            local progressed = proceedToNextRoom(curRound)
+                            if not progressed and roomCenter then
                                 root.CFrame = CFrame.new(roomCenter)
                                 root.AssemblyLinearVelocity = Vector3.zero
                                 root.AssemblyAngularVelocity = Vector3.zero
@@ -1245,8 +1309,6 @@ return function(Window, runtimeInfo)
                                     local upVec=Vector3.new(0,1,0)
                                     if math.abs(dir.Unit:Dot(upVec))>0.99 then upVec=enemyRoot.CFrame.LookVector end
                                     targetCF=CFrame.lookAt(safePos,enemyRoot.Position,upVec)
-                                else
-                                    targetCF=CFrame.new(safePos)*enemyRoot.CFrame.Rotation
                                 end
                             end
                         end
@@ -1414,7 +1476,7 @@ return function(Window, runtimeInfo)
     end
 
     local Dashboard=createTab("Dungeon", "activity")
-    Dashboard:CreateSection("Iron Soul v1.7.1")
+    Dashboard:CreateSection("Iron Soul v1.7.2")
     local roundLabel=Dashboard:CreateLabel("Round: scanning...")
     local enemyCountLabel=Dashboard:CreateLabel("Enemies: scanning...")
     local targetLabel=Dashboard:CreateLabel("Target: none")
@@ -1697,6 +1759,6 @@ return function(Window, runtimeInfo)
         local camera=workspace.CurrentCamera; if camera and LP.Character then camera.CameraSubject=LP.Character:FindFirstChildOfClass("Humanoid") end
         if getgenv().__RAVEN_IRON_SOUL and getgenv().__RAVEN_IRON_SOUL.Settings==settings then getgenv().__RAVEN_IRON_SOUL=nil end
     end
-    getgenv().__RAVEN_IRON_SOUL={Version="v1.7.1",Settings=settings,Destroy=destroy}
+    getgenv().__RAVEN_IRON_SOUL={Version="v1.7.2",Settings=settings,Destroy=destroy}
     if runtimeInfo and type(runtimeInfo.registerCleanup)=="function" then runtimeInfo.registerCleanup(destroy) end
 end

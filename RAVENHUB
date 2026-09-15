@@ -526,8 +526,8 @@ local SCRIPTS = {
         description = "Enemy ESP | Reference Autofarm | Auto Dodge | Auto Weapon Cycle | Replay/Lobby",
         placeIds    = {117533937949084, 116456628154258, 112316840155266},
         gameIds     = {9910245722},
-        version     = "v1.7.1",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/iron_soul.lua?v=iron-soul-1.7.1",
+        version     = "v1.7.2",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/iron_soul.lua?v=iron-soul-1.7.2",
     },
     {
         name        = "Dungeon Quest Reborn",
