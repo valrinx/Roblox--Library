@@ -1,7 +1,14 @@
 --[[
-    RAVEN HUB Module - Ride A Pet v1.0.0
+    RAVEN HUB Module - Ride A Pet v1.1.0
     Game: Ride A Pet (PlaceId: 124216119978534 / GameId: 10035204815)
     Developer: this game is gud
+
+    v1.1.0:
+    - Fixed "Can't Teleport While Carrying Eggs" anti-cheat kick
+    - Replaced instant teleport with 100% safe Glide Fly (TweenService)
+    - Removed TeleportToPlot remote during egg transport
+    - Safe arrival delay for server position replication
+
 
     Features:
     - 🥚 Egg Sniper / Auto Farm:
@@ -127,9 +134,9 @@ return function(Window, runtimeInfo)
         -- Farm
         AutoFarmEggs = false,
         FarmPriority = "Rarest First", -- "Rarest First", "Closest First"
-        FarmMethod = "Instant Teleport", -- "Instant Teleport", "Fast Tween"
-        TweenSpeed = 160,
-        ReturnSpeed = 150,
+        FarmMethod = "Glide Fly (Safe)", -- "Glide Fly (Safe)", "Instant Teleport (Risky)"
+        TweenSpeed = 135,
+        ReturnSpeed = 135,
         AutoDeposit = true,
         AutoReturnWhenFull = true,
         FarmCooldown = 0.35,
@@ -231,23 +238,29 @@ return function(Window, runtimeInfo)
 
         stopTween()
 
-        if method == "Instant Teleport" then
+        if method == "Instant Teleport (Risky)" or method == "Instant Teleport" then
             if LP.Character then
                 LP.Character:PivotTo(CFrame.new(targetPos + Vector3.new(0, 2.5, 0)))
             else
                 root.CFrame = CFrame.new(targetPos + Vector3.new(0, 2.5, 0))
             end
-            task.wait(0.08)
+            task.wait(0.2)
             return true
         else
-            -- Tween
-            local dist = (root.Position - targetPos).Magnitude
-            local duration = math.max(0.1, dist / math.max(20, State.TweenSpeed))
+            -- Glide Fly (Safe): smooth linear flight via TweenService
+            local startPos = root.Position
+            local dist = (startPos - targetPos).Magnitude
+            local speed = math.clamp(State.TweenSpeed or 135, 40, 160)
+            local duration = math.max(0.15, dist / speed)
+
             local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
-            currentTween = TweenService:Create(root, tweenInfo, {CFrame = CFrame.new(targetPos + Vector3.new(0, 2.5, 0))})
+            currentTween = TweenService:Create(root, tweenInfo, {
+                CFrame = CFrame.new(targetPos + Vector3.new(0, 2.5, 0))
+            })
             currentTween:Play()
             currentTween.Completed:Wait()
             currentTween = nil
+            task.wait(0.2)
             return true
         end
     end
@@ -260,36 +273,14 @@ return function(Window, runtimeInfo)
 
         local carrying = isCarryingEgg or (getBasketCount() > 0)
         if carrying then
-            -- Server drops/returns eggs if instant teleport or TeleportToPlot is used while carrying!
-            -- High-speed MoveTo directly to base:
-            local root = getRoot()
-            local hum = getHumanoid()
-            if not root or not hum then return false end
-
-            local origSpeed = hum.WalkSpeed
-            local runSpeed = math.clamp(State.ReturnSpeed or 150, 60, 200)
-            hum.WalkSpeed = runSpeed
-
-            local startTime = tick()
-            while not destroyed and (root.Position - targetPos).Magnitude > 16 and (tick() - startTime) < 25 do
-                hum:MoveTo(targetPos)
-                local vel = root.AssemblyLinearVelocity or root.Velocity
-                if vel and vel.Magnitude < 4 then
-                    hum:ChangeState(Enum.HumanoidStateType.Jumping)
-                end
-                task.wait(0.08)
-            end
-
-            hum.WalkSpeed = origSpeed
-            return (root.Position - targetPos).Magnitude <= 22
+            -- When carrying eggs, NEVER instant teleport or fire TeleportToPlot (triggers egg return!)
+            -- Use safe Glide Fly directly into plot:
+            return teleportToPos(targetPos + Vector3.new(0, 3, 0), "Glide Fly (Safe)")
         else
-            if TeleportToPlotRemote then
-                pcall(function() TeleportToPlotRemote:FireServer() end)
-                task.wait(0.15)
-            end
-            return teleportToPos(targetPos + Vector3.new(0, 4, 0), "Instant Teleport")
+            return teleportToPos(targetPos + Vector3.new(0, 4, 0), State.FarmMethod)
         end
     end
+
 
     local function getAvailableNest()
         local plot = getMyPlot()
@@ -407,7 +398,7 @@ return function(Window, runtimeInfo)
                     -- Step 1: Check basket
                     if isBasketFull() then
                         if State.AutoDeposit then
-                            returnToPlot()
+                            returnToPlot(true)
                             depositEggs()
                         end
                     else
@@ -417,29 +408,30 @@ return function(Window, runtimeInfo)
                             local target = eggs[1]
                             local ok = teleportToPos(target.pos, State.FarmMethod)
                             if ok and not destroyed then
-                                task.wait(0.05)
+                                task.wait(0.25) -- allow server position sync
                                 if EggPickupRemote then
                                     pcall(function()
                                         EggPickupRemote:FireServer(target.uuid)
                                     end)
                                 end
-                                task.wait(State.FarmCooldown)
+                                task.wait(State.FarmCooldown or 0.4)
 
-                                -- After pickup, if basket is full and deposit enabled, go deposit
-                                if isBasketFull() and State.AutoDeposit then
-                                    returnToPlot()
+                                -- After pickup, if basket has eggs and auto deposit enabled, return safely
+                                if getBasketCount() > 0 and State.AutoDeposit then
+                                    returnToPlot(true)
                                     depositEggs()
                                 end
                             end
                         else
-                            -- No target eggs found, return to plot if enabled
+                            -- No target eggs found, return to plot if carrying egg
                             if State.AutoReturnWhenFull and getBasketCount() > 0 and State.AutoDeposit then
-                                returnToPlot()
+                                returnToPlot(true)
                                 depositEggs()
                             end
                         end
                     end
                 end)
+
 
                 isFarmingCycle = false
             end
@@ -687,7 +679,7 @@ return function(Window, runtimeInfo)
 
     FarmTab:CreateDropdown({
         Name = "Movement Method",
-        Options = {"Instant Teleport", "Fast Tween"},
+        Options = {"Glide Fly (Safe)", "Instant Teleport (Risky)"},
         CurrentOption = {State.FarmMethod},
         MultipleOptions = false,
         Flag = "RAP_FarmMethod",
@@ -698,9 +690,9 @@ return function(Window, runtimeInfo)
     })
 
     FarmTab:CreateSlider({
-        Name = "Tween Speed",
-        Range = {50, 350},
-        Increment = 10,
+        Name = "Glide Fly Speed",
+        Range = {60, 160},
+        Increment = 5,
         Suffix = " studs/s",
         CurrentValue = State.TweenSpeed,
         Flag = "RAP_TweenSpeed",
@@ -718,17 +710,6 @@ return function(Window, runtimeInfo)
         end,
     })
 
-    FarmTab:CreateSlider({
-        Name = "Return WalkSpeed (Anti-TP Bypass)",
-        Range = {80, 220},
-        Increment = 10,
-        Suffix = " studs/s",
-        CurrentValue = State.ReturnSpeed,
-        Flag = "RAP_ReturnSpeed",
-        Callback = function(val)
-            State.ReturnSpeed = val
-        end,
-    })
 
 
     FarmTab:CreateSection("Tier Whitelist")
@@ -878,14 +859,25 @@ return function(Window, runtimeInfo)
     })
 
     TeleportsTab:CreateButton({
-        Name = "Teleport to Selected Egg",
+        Name = "Fly to Selected Egg (Safe)",
         Callback = function()
             local pos = rareEggMap[selectedRareEggLabel]
             if pos then
-                teleportToPos(pos, "Instant Teleport")
+                teleportToPos(pos, "Glide Fly (Safe)")
             end
         end,
     })
+
+    TeleportsTab:CreateButton({
+        Name = "Teleport to Selected Egg (Instant / Risky)",
+        Callback = function()
+            local pos = rareEggMap[selectedRareEggLabel]
+            if pos then
+                teleportToPos(pos, "Instant Teleport (Risky)")
+            end
+        end,
+    })
+
 
     TeleportsTab:CreateButton({
         Name = "Refresh Egg List",
@@ -913,8 +905,8 @@ return function(Window, runtimeInfo)
     })
 
     MovementTab:CreateSlider({
-        Name = "WalkSpeed",
-        Range = {16, 250},
+        Name = "WalkSpeed (Safe <= 160)",
+        Range = {16, 160},
         Increment = 5,
         Suffix = " spd",
         CurrentValue = State.SpeedValue,
@@ -923,6 +915,7 @@ return function(Window, runtimeInfo)
             State.SpeedValue = val
         end,
     })
+
 
     MovementTab:CreateToggle({
         Name = "Infinite Jump",
@@ -1008,7 +1001,7 @@ return function(Window, runtimeInfo)
     end
 
     getgenv().__RAVEN_RIDE_A_PET = {
-        Version = "v1.0.0",
+        Version = "v1.1.0",
         Settings = State,
         GetFilteredEggs = getFilteredEggs,
         ReturnToPlot = returnToPlot,

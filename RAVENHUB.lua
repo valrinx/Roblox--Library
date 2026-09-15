@@ -766,9 +766,10 @@ local SCRIPTS = {
         description = "Divine/Mythic Egg Sniper | Auto Farm & Deposit | Auto Nest & Rebirth | 100% Drawing ESP",
         placeIds    = {124216119978534},
         gameIds     = {10035204815},
-        version     = "v1.0.0",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/ride_a_pet.lua?v=ride-a-pet-1.0.0",
+        version     = "v1.1.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/ride_a_pet.lua?v=ride-a-pet-1.1.0",
     },
+
 
 
     --[[
