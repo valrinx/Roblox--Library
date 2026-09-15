@@ -459,10 +459,10 @@ local SCRIPTS = {
     },
     {
         name        = "Phantom Forces",
-        description = "Enemy ESP | Box | Distance | Auto Team Detect",
+        description = "Enemy ESP | Box | Distance | Head Dot | Tracers | FOV Aim | Auto Spot",
         placeIds    = {292439477},
         gameIds     = {113491250},
-        version     = "v1.0",
+        version     = "v2.2.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/phantom_forces.lua",
     },
     {
@@ -1102,7 +1102,7 @@ end
 
 pcall(function()
     if type(Window.SortTabs) == "function" then
-        Window:SortTabs({"Overview", "Combat", "Visuals", "Movement", "Automation", "Shooting", "Defense", "Safety", "Match Info", "Settings", "Info", "Main", "Dungeon", "ESP", "Misc"})
+        Window:SortTabs({"Overview", "Combat", "Visuals", "Misc", "Movement", "Automation", "Shooting", "Defense", "Safety", "Match Info", "Info", "Main", "Dungeon", "ESP", "Settings"})
     end
 end)
 
