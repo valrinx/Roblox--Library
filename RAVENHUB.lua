@@ -379,6 +379,14 @@ local SCRIPTS = {
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/basketball_zero.lua",
     },
     {
+        name        = "Karinderya",
+        description = "Instant Dish Wash | Auto Order & Serve | Anti-Theft Smack | Auto Wake Workers | ESP",
+        placeIds    = {116497287371701},
+        gameIds     = {10648820673},
+        version     = "v1.0.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/karinderya.lua",
+    },
+    {
         name        = "BloxStrike",
         description = "ESP Visuals (Drawing API) | Match Telemetry | Player State | Performance Monitor",
         placeIds    = {114234929420007, 108194354348181},
@@ -632,6 +640,14 @@ local SCRIPTS = {
         gameIds     = {8307114974},
         version     = "v1.2",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/operation_one.lua",
+    },
+    {
+        name        = "Guess the Anime Color",
+        description = "100% Auto Answer | Humanized Mode | AI Duel Farm | Coin Magnet | Auto Rewards",
+        placeIds    = {97506470800237},
+        gameIds     = {10667006841},
+        version     = "v1.0.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/guess_the_anime_color.lua",
     },
     {
         name        = "The Sea",
