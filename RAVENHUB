@@ -642,6 +642,14 @@ local SCRIPTS = {
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/operation_one.lua",
     },
     {
+        name        = "Ronopoly Game",
+        description = "Tile ESP | Rent/Buy Intel | Dice Landing Predictor | Player Tracker",
+        placeIds    = {6875760739},
+        gameIds     = {2621511041},
+        version     = "v1.0.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/ronopoly.lua",
+    },
+    {
         name        = "Guess the Anime Color",
         description = "100% Auto Answer | Humanized Mode | AI Duel Farm | Coin Magnet | Auto Rewards",
         placeIds    = {97506470800237},
@@ -779,11 +787,11 @@ local SCRIPTS = {
     },
     {
         name        = "Ride A Pet",
-        description = "Divine/Mythic Egg Sniper | Auto Farm & Deposit | Auto Nest & Rebirth | 100% Drawing ESP",
+        description = "Solaris/Divine/Mutations Sniper | Auto Farm & Hatch | Shop & Gear Automation | 100% Drawing ESP",
         placeIds    = {124216119978534},
         gameIds     = {10035204815},
-        version     = "v1.2.0",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/ride_a_pet.lua?v=ride-a-pet-1.2.0",
+        version     = "v1.3.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/ride_a_pet.lua?v=ride-a-pet-1.3.0",
     },
 
 

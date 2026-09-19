@@ -1,12 +1,16 @@
 --[[
-    RAVEN HUB Module - Ride A Pet v1.2.0
+    RAVEN HUB Module - Ride A Pet v1.3.0
     Game: Ride A Pet (PlaceId: 124216119978534 / GameId: 10035204815)
     Developer: this game is gud
 
-    v1.2.0:
+    v1.3.0:
+    - Added Solaris Egg (Ethereal Tier, Luck 300B, Kitsune Pet)
+    - Added Full Mutation System (Rainbow, Eternal, Void, Rage, Diamond, Volted, Shocked, Gold)
+    - Prioritize Mutated Eggs in Auto Farm (instant jump to top priority)
+    - Mutated Eggs visual glowing ESP badges and color coding
+    - Auto Hatch Ready Eggs on Plot via proximity prompts
+    - Shop & Gear Automation (Auto Buy Radars & Foods: Eternal Radar, Angelic Radar, Dragonfruit, Magic Apple)
     - Expanded Glide Fly Speed slider up to 500 studs/s
-    - Expanded WalkSpeed booster slider up to 500 spd
-    - Turbo egg return to base before despawn timer expires
 
 
 
@@ -58,6 +62,7 @@ return function(Window, runtimeInfo)
     local EGG_TIERS = {
         ["Galaxy Egg"] = "Divine",
         ["Aurora Egg"] = "Divine",
+        ["Solaris Egg"] = "Ethereal",
         ["Blackhole Egg"] = "Ethereal",
         ["Dragon Egg"] = "Ethereal",
         ["Giant Egg"] = "Ethereal",
@@ -106,6 +111,28 @@ return function(Window, runtimeInfo)
         Unknown = Color3.fromRGB(160, 160, 160),
     }
 
+    local MUTATION_RANK = {
+        Eternal = 8,
+        Rainbow = 7,
+        Void = 6,
+        Rage = 5,
+        Diamond = 4,
+        Volted = 3,
+        Shocked = 2,
+        Gold = 1,
+    }
+
+    local MUTATION_COLORS = {
+        Eternal = Color3.fromRGB(255, 20, 147),
+        Rainbow = Color3.fromRGB(255, 80, 200),
+        Void = Color3.fromRGB(130, 70, 255),
+        Rage = Color3.fromRGB(255, 60, 60),
+        Diamond = Color3.fromRGB(0, 240, 255),
+        Volted = Color3.fromRGB(255, 255, 50),
+        Shocked = Color3.fromRGB(120, 190, 255),
+        Gold = Color3.fromRGB(255, 215, 0),
+    }
+
     local BASKET_CAPACITIES = {
         Wooden = 1,
         Infinite = 999999,
@@ -123,6 +150,8 @@ return function(Window, runtimeInfo)
     local ClaimIndexRemote = GameRemotes and GameRemotes:FindFirstChild("ClaimIndexReward")
     local FeedPetRemote = GameRemotes and GameRemotes:FindFirstChild("FeedPet")
     local TeleportToPlotRemote = GameRemotes and GameRemotes:FindFirstChild("TeleportToPlot")
+    local BuyWithCashRemote = GameRemotes and GameRemotes:FindFirstChild("BuyWithCash")
+    local AutobuyRemote = GameRemotes and GameRemotes:FindFirstChild("Autobuy")
 
     local ServerData = ReplicatedStorage:FindFirstChild("ServerData")
     local ActiveEggsFolder = ServerData and ServerData:FindFirstChild("ActiveEggs")
@@ -133,7 +162,8 @@ return function(Window, runtimeInfo)
     local State = {
         -- Farm
         AutoFarmEggs = false,
-        FarmPriority = "Rarest First", -- "Rarest First", "Closest First"
+        FarmPriority = "Rarest First", -- "Rarest First", "Closest First", "Mutations First"
+        PrioritizeMutations = true,
         FarmMethod = "Glide Fly (Safe)", -- "Glide Fly (Safe)", "Instant Teleport (Risky)"
         TweenSpeed = 250,
         ReturnSpeed = 250,
@@ -154,10 +184,15 @@ return function(Window, runtimeInfo)
 
         -- Base & Hatch
         AutoPlaceNests = true,
+        AutoHatchReadyEggs = true,
 
         -- Progression
         AutoRebirth = false,
         AutoClaimIndex = true,
+
+        -- Shop & Gear
+        AutoBuyRadars = false,
+        AutoBuyFood = false,
 
         -- ESP
         EggESP = true,
@@ -341,6 +376,27 @@ return function(Window, runtimeInfo)
         end
     end
 
+    local function autoHatchReady()
+        local plot = getMyPlot()
+        if not plot then return end
+        local eggs = plot:FindFirstChild("Eggs")
+        if not eggs then return end
+
+        for _, egg in ipairs(eggs:GetChildren()) do
+            local primary = egg.PrimaryPart or egg:FindFirstChildWhichIsA("BasePart", true)
+            if primary then
+                local hatchPrompt = primary:FindFirstChild("Hatch")
+                if hatchPrompt and hatchPrompt:IsA("ProximityPrompt") and hatchPrompt.Enabled then
+                    pcall(function()
+                        if fireproximityprompt then
+                            fireproximityprompt(hatchPrompt)
+                        end
+                    end)
+                end
+            end
+        end
+    end
+
     ----------------------------------------------------------------
     --  EGG SCANNER & AUTOFARM LOOP
     ----------------------------------------------------------------
@@ -359,21 +415,28 @@ return function(Window, runtimeInfo)
             local eggName = eggInst:GetAttribute("Egg") or "Unknown"
             local tier = getEggTier(eggName)
             local pos = eggInst:GetAttribute("Position")
+            local mutation = eggInst:GetAttribute("SpawnMutation") or eggInst:GetAttribute("Mutation")
 
             if pos and State.Tiers[tier] == true then
                 local dist = (pos - myPos).Magnitude
+                local rank = TIER_RANK[tier] or 0
+                if State.PrioritizeMutations and mutation then
+                    rank = rank + 20 + (MUTATION_RANK[mutation] or 1)
+                end
+
                 table.insert(list, {
                     uuid = eggInst.Name,
                     name = eggName,
                     tier = tier,
-                    rank = TIER_RANK[tier] or 0,
+                    mutation = mutation,
+                    rank = rank,
                     pos = pos,
                     dist = dist,
                 })
             end
         end
 
-        if State.FarmPriority == "Rarest First" then
+        if State.FarmPriority == "Rarest First" or State.FarmPriority == "Mutations First" then
             table.sort(list, function(a, b)
                 if a.rank ~= b.rank then
                     return a.rank > b.rank
@@ -476,6 +539,36 @@ return function(Window, runtimeInfo)
         end
     end)
 
+    -- Auto Hatch ready eggs loop
+    task.spawn(function()
+        while not destroyed do
+            task.wait(1.5)
+            if State.AutoHatchReadyEggs then
+                pcall(autoHatchReady)
+            end
+        end
+    end)
+
+    -- Auto Buy loop (Radars & Foods)
+    task.spawn(function()
+        while not destroyed do
+            task.wait(4.0)
+            if State.AutoBuyRadars and BuyWithCashRemote then
+                pcall(function()
+                    BuyWithCashRemote:FireServer("Gears", "Eternal Radar")
+                    BuyWithCashRemote:FireServer("Gears", "Angelic Radar")
+                    BuyWithCashRemote:FireServer("Gears", "Magic Radar")
+                end)
+            end
+            if State.AutoBuyFood and BuyWithCashRemote then
+                pcall(function()
+                    BuyWithCashRemote:FireServer("Food", "Dragonfruit")
+                    BuyWithCashRemote:FireServer("Food", "Magic Apple")
+                end)
+            end
+        end
+    end)
+
     ----------------------------------------------------------------
     --  DRAWING API ESP
     ----------------------------------------------------------------
@@ -555,18 +648,23 @@ return function(Window, runtimeInfo)
             local eggName = eggInst:GetAttribute("Egg") or "Unknown"
             local tier = getEggTier(eggName)
             local pos = eggInst:GetAttribute("Position")
+            local mutation = eggInst:GetAttribute("SpawnMutation") or eggInst:GetAttribute("Mutation")
 
-            if pos and minTierPassed(tier) then
+            if pos and (minTierPassed(tier) or mutation ~= nil) then
                 local dist = (pos - myPos).Magnitude
                 if dist <= State.ESPMaxDist then
                     local screenPos, onScreen = Camera:WorldToViewportPoint(pos)
                     local entry = getOrCreateDrawing(uuid)
-                    local color = TIER_COLORS[tier] or Color3.fromRGB(200, 200, 200)
+                    local color = (mutation and MUTATION_COLORS[mutation]) or TIER_COLORS[tier] or Color3.fromRGB(200, 200, 200)
 
                     if onScreen then
                         entry.Text.Position = Vector2.new(screenPos.X, screenPos.Y)
                         entry.Text.Color = color
-                        entry.Text.Text = string.format("[%s] %s\n(%dm)", tier, eggName, math.floor(dist))
+                        if mutation then
+                            entry.Text.Text = string.format("✨ [%s] [%s] %s\n(%dm)", mutation, tier, eggName, math.floor(dist))
+                        else
+                            entry.Text.Text = string.format("[%s] %s\n(%dm)", tier, eggName, math.floor(dist))
+                        end
                         entry.Text.Visible = true
 
                         if State.EggTracers then
@@ -668,13 +766,22 @@ return function(Window, runtimeInfo)
 
     FarmTab:CreateDropdown({
         Name = "Farm Priority",
-        Options = {"Rarest First", "Closest First"},
+        Options = {"Rarest First", "Closest First", "Mutations First"},
         CurrentOption = {State.FarmPriority},
         MultipleOptions = false,
         Flag = "RAP_FarmPriority",
         Callback = function(opt)
             local choice = type(opt) == "table" and opt[1] or opt
             if choice then State.FarmPriority = choice end
+        end,
+    })
+
+    FarmTab:CreateToggle({
+        Name = "Prioritize Mutated Eggs",
+        CurrentValue = State.PrioritizeMutations,
+        Flag = "RAP_PrioritizeMutations",
+        Callback = function(val)
+            State.PrioritizeMutations = val
         end,
     })
 
@@ -702,7 +809,6 @@ return function(Window, runtimeInfo)
         end,
     })
 
-
     FarmTab:CreateToggle({
         Name = "Auto Deposit When Full",
         CurrentValue = State.AutoDeposit,
@@ -711,8 +817,6 @@ return function(Window, runtimeInfo)
             State.AutoDeposit = val
         end,
     })
-
-
 
     FarmTab:CreateSection("Tier Whitelist")
     for _, tier in ipairs({"Divine", "Ethereal", "Mythic", "Legendary", "Epic", "Rare", "Common"}) do
@@ -736,6 +840,15 @@ return function(Window, runtimeInfo)
         end,
     })
 
+    FarmTab:CreateToggle({
+        Name = "Auto Hatch Ready Eggs",
+        CurrentValue = State.AutoHatchReadyEggs,
+        Flag = "RAP_AutoHatchReadyEggs",
+        Callback = function(val)
+            State.AutoHatchReadyEggs = val
+        end,
+    })
+
     FarmTab:CreateButton({
         Name = "Deposit All Basket Eggs Now",
         Callback = function()
@@ -743,6 +856,52 @@ return function(Window, runtimeInfo)
                 returnToPlot()
                 depositEggs()
             end)
+        end,
+    })
+
+    FarmTab:CreateSection("Shop & Gear Automation")
+    FarmTab:CreateToggle({
+        Name = "Auto Buy Best Radars (Eternal/Angelic)",
+        CurrentValue = State.AutoBuyRadars,
+        Flag = "RAP_AutoBuyRadars",
+        Callback = function(val)
+            State.AutoBuyRadars = val
+        end,
+    })
+
+    FarmTab:CreateToggle({
+        Name = "Auto Buy Best Food (Dragonfruit/Apple)",
+        CurrentValue = State.AutoBuyFood,
+        Flag = "RAP_AutoBuyFood",
+        Callback = function(val)
+            State.AutoBuyFood = val
+        end,
+    })
+
+    FarmTab:CreateButton({
+        Name = "Buy Eternal Radar ($30,000,000)",
+        Callback = function()
+            if BuyWithCashRemote then
+                BuyWithCashRemote:FireServer("Gears", "Eternal Radar")
+            end
+        end,
+    })
+
+    FarmTab:CreateButton({
+        Name = "Buy Angelic Radar ($7,000,000)",
+        Callback = function()
+            if BuyWithCashRemote then
+                BuyWithCashRemote:FireServer("Gears", "Angelic Radar")
+            end
+        end,
+    })
+
+    FarmTab:CreateButton({
+        Name = "Buy Dragonfruit ($30,000,000)",
+        Callback = function()
+            if BuyWithCashRemote then
+                BuyWithCashRemote:FireServer("Food", "Dragonfruit")
+            end
         end,
     })
 
@@ -834,15 +993,21 @@ return function(Window, runtimeInfo)
                 local tier = getEggTier(name)
                 local rank = TIER_RANK[tier] or 0
                 local pos = eggInst:GetAttribute("Position")
-                if pos and rank >= TIER_RANK.Legendary then
-                    local label = string.format("[%s] %s (%s)", tier, name, string.sub(eggInst.Name, 1, 6))
+                local mutation = eggInst:GetAttribute("SpawnMutation") or eggInst:GetAttribute("Mutation")
+                if pos and (rank >= TIER_RANK.Legendary or mutation ~= nil) then
+                    local label
+                    if mutation then
+                        label = string.format("✨ [%s] [%s] %s (%s)", mutation, tier, name, string.sub(eggInst.Name, 1, 6))
+                    else
+                        label = string.format("[%s] %s (%s)", tier, name, string.sub(eggInst.Name, 1, 6))
+                    end
                     table.insert(rareEggOptions, label)
                     rareEggMap[label] = pos
                 end
             end
         end
         if #rareEggOptions == 0 then
-            table.insert(rareEggOptions, "No Rare Eggs Active")
+            table.insert(rareEggOptions, "No Rare/Mutated Eggs Active")
         end
     end
     refreshRareEggs()
@@ -1004,7 +1169,7 @@ return function(Window, runtimeInfo)
     end
 
     getgenv().__RAVEN_RIDE_A_PET = {
-        Version = "v1.2.0",
+        Version = "v1.3.0",
         Settings = State,
         GetFilteredEggs = getFilteredEggs,
         ReturnToPlot = returnToPlot,
