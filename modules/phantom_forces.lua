@@ -1,9 +1,10 @@
 -- ============================================================
---   RAVEN HUB  |  Phantom Forces Modular Suite v2.2.0
+--   RAVEN HUB  |  Phantom Forces Modular Suite v2.3.0
 --   PlaceId: 292439477 | GameId: 113491250
 --   Anti-Cheat Compliant (Zero Metatable Hooks / 100% Drawing API)
 --   Tabs: Overview, Combat, Visuals, Misc
---   Real Player Names (DisplayName / Username) & Dynamic HP Bar
+--   Bulletproof Team Detection (Double-Lock Roster + PlayerTag)
+--   Real Player Names & Dynamic HP Bar
 -- ============================================================
 
 return function(Window, runtimeInfo)
@@ -85,6 +86,7 @@ return function(Window, runtimeInfo)
     local hasDrawing = type(Drawing) == "table" and type(Drawing.new) == "function"
     local espDrawings = {}
     local nameCache = {}
+    local rawNameCache = {}
     local hpCache = {}
 
     local function safeDrawing(drawingType)
@@ -225,11 +227,54 @@ return function(Window, runtimeInfo)
     end
 
     -- ------------------------------------------------------------
-    -- PF Definitive Team Auto-Detection Engine
+    -- PF Definitive Team Auto-Detection Engine (Double-Lock Roster)
     -- ------------------------------------------------------------
     local lastTeamScan = 0
+    local ghostRoster = {}
+    local phantomRoster = {}
+
+    local function updateRosters()
+        local pgui = localPlayer:FindFirstChild("PlayerGui")
+        local lb = pgui and pgui:FindFirstChild("LeaderboardScreenGui")
+        local dsf = lb and lb:FindFirstChild("DisplayScoreFrame")
+        if not dsf then return end
+
+        local ghostBoard = dsf:FindFirstChild("DisplayGhostBoard", true)
+        if ghostBoard then
+            for _, pScore in ipairs(ghostBoard:GetDescendants()) do
+                if pScore.Name == "DisplayPlayerScore" then
+                    local textPlr = pScore:FindFirstChild("TextPlayer")
+                    if textPlr and textPlr.Text ~= "" then
+                        ghostRoster[textPlr.Text] = true
+                        phantomRoster[textPlr.Text] = nil
+                    end
+                end
+            end
+        end
+
+        local phantomBoard = dsf:FindFirstChild("DisplayPhantomBoard", true)
+        if phantomBoard then
+            for _, pScore in ipairs(phantomBoard:GetDescendants()) do
+                if pScore.Name == "DisplayPlayerScore" then
+                    local textPlr = pScore:FindFirstChild("TextPlayer")
+                    if textPlr and textPlr.Text ~= "" then
+                        phantomRoster[textPlr.Text] = true
+                        ghostRoster[textPlr.Text] = nil
+                    end
+                end
+            end
+        end
+    end
 
     local function getMyTeamType()
+        -- 1. Check leaderboard roster for localPlayer
+        if ghostRoster[localPlayer.Name] then
+            return "Ghosts"
+        elseif phantomRoster[localPlayer.Name] then
+            return "Phantoms"
+        end
+
+        -- 2. Signal: Native LocalPlayer.TeamColor (Bright orange = Ghosts, Bright blue / Earth blue = Phantoms)
         if localPlayer.TeamColor then
             local tcName = tostring(localPlayer.TeamColor.Name):lower()
             if tcName:find("orange") or tcName:find("red") or tcName:find("brown") or tcName:find("yellow") then
@@ -239,6 +284,7 @@ return function(Window, runtimeInfo)
             end
         end
 
+        -- 3. Signal: MatchScreenGui TextTeamName
         local pgui = localPlayer:FindFirstChild("PlayerGui")
         if pgui then
             local match = pgui:FindFirstChild("MatchScreenGui")
@@ -260,39 +306,79 @@ return function(Window, runtimeInfo)
         local pf = Workspace:FindFirstChild("Players")
         if not pf then return end
 
+        updateRosters()
         local myTeamType = getMyTeamType()
         if not myTeamType then return end
+        state.myTeamType = myTeamType
 
+        -- Correlate each folder in workspace.Players against the rosters
+        local bestFolder = nil
         for _, teamFolder in ipairs(pf:GetChildren()) do
             if teamFolder:IsA("Folder") then
-                local blueCount = 0
-                local brownCount = 0
+                local ghostCount = 0
+                local phantomCount = 0
+                local hasLocalPlayer = false
 
                 for _, model in ipairs(teamFolder:GetChildren()) do
                     if model:IsA("Model") then
-                        for _, d in ipairs(model:GetDescendants()) do
-                            if d:IsA("BasePart") and d.Transparency < 0.95 then
-                                local bc = tostring(d.BrickColor):lower()
-                                if bc:find("blue") then
-                                    blueCount = blueCount + 1
-                                elseif bc:find("brown") or bc:find("cocoa") or bc:find("taupe") or bc:find("orange") then
-                                    brownCount = brownCount + 1
-                                end
+                        local ntg = model:FindFirstChildWhichIsA("BillboardGui", true)
+                        local pt = ntg and ntg:FindFirstChild("PlayerTag", true)
+                        local uName = pt and pt.Text or rawNameCache[model.Name]
+
+                        if uName then
+                            if uName == localPlayer.Name then
+                                hasLocalPlayer = true
+                            end
+                            if ghostRoster[uName] then
+                                ghostCount = ghostCount + 1
+                            elseif phantomRoster[uName] then
+                                phantomCount = phantomCount + 1
                             end
                         end
                     end
                 end
 
-                if blueCount > 0 or brownCount > 0 then
-                    local folderType = (blueCount > brownCount) and "Phantoms" or "Ghosts"
-                    if folderType == myTeamType then
-                        state.myTeamName = teamFolder.Name
-                        state.myTeamType = myTeamType
-                        return
-                    end
+                -- Direct hit: LocalPlayer character is in this folder
+                if hasLocalPlayer then
+                    state.myTeamName = teamFolder.Name
+                    return
+                end
+
+                if myTeamType == "Ghosts" and ghostCount > phantomCount then
+                    bestFolder = teamFolder.Name
+                elseif myTeamType == "Phantoms" and phantomCount > ghostCount then
+                    bestFolder = teamFolder.Name
                 end
             end
         end
+
+        if bestFolder then
+            state.myTeamName = bestFolder
+        end
+    end
+
+    -- Absolute Teammate Resolution (Double-Lock: Roster + Folder)
+    local function isTeammate(rawName, folderName)
+        if rawName and rawName == localPlayer.Name then
+            return true
+        end
+
+        local myType = state.myTeamType or getMyTeamType()
+        if rawName and myType then
+            if myType == "Ghosts" then
+                if ghostRoster[rawName] then return true end
+                if phantomRoster[rawName] then return false end
+            elseif myType == "Phantoms" then
+                if phantomRoster[rawName] then return true end
+                if ghostRoster[rawName] then return false end
+            end
+        end
+
+        if state.myTeamName and folderName then
+            return folderName == state.myTeamName
+        end
+
+        return false
     end
 
     -- ------------------------------------------------------------
@@ -344,6 +430,7 @@ return function(Window, runtimeInfo)
 
         -- 1. Real Player Name Resolution via NameTagGui / PlayerTag
         local mKey = model.Name
+        local rawName = rawNameCache[mKey]
         local realName = nameCache[mKey]
         local hpRatio = hpCache[mKey] or 1
 
@@ -351,7 +438,9 @@ return function(Window, runtimeInfo)
         if ntg then
             local pt = ntg:FindFirstChild("PlayerTag", true)
             if pt and pt.Text and pt.Text ~= "" then
-                local rawName = pt.Text
+                rawName = pt.Text
+                rawNameCache[mKey] = rawName
+
                 local plrObj = Players:FindFirstChild(rawName)
                 if plrObj and plrObj.DisplayName and plrObj.DisplayName ~= "" and plrObj.DisplayName ~= rawName then
                     realName = plrObj.DisplayName .. " (@" .. rawName .. ")"
@@ -375,7 +464,8 @@ return function(Window, runtimeInfo)
             head = headPos,
             feet = feetPos,
             headPart = highestPart,
-            realName = realName or mKey,
+            rawName = rawName,
+            realName = realName or rawName or mKey,
             hpRatio = hpRatio,
         }
     end
@@ -385,18 +475,23 @@ return function(Window, runtimeInfo)
     -- ------------------------------------------------------------
     local function getClosestEnemyToCursor()
         local pf = Workspace:FindFirstChild("Players")
-        if not pf or not state.myTeamName then return nil end
+        if not pf then return nil end
 
         local mousePos = UserInputService:GetMouseLocation()
         local bestTarget = nil
         local bestDist = aimSettings.fov
 
         for _, teamFolder in ipairs(pf:GetChildren()) do
-            if teamFolder:IsA("Folder") and teamFolder.Name ~= state.myTeamName then
+            if teamFolder:IsA("Folder") then
                 for _, model in ipairs(teamFolder:GetChildren()) do
                     if model:IsA("Model") then
                         local mData = getModelData(model)
                         if mData then
+                            -- Skip teammates using double-lock check
+                            if isTeammate(mData.rawName, teamFolder.Name) then
+                                continue
+                            end
+
                             local aimPoint = (aimSettings.targetBone == "Head") and mData.head or mData.center
                             local screenPos, onScreen = camera:WorldToViewportPoint(aimPoint)
 
@@ -482,16 +577,10 @@ return function(Window, runtimeInfo)
         if espSettings.enabled then
             for _, teamFolder in ipairs(pf:GetChildren()) do
                 if teamFolder:IsA("Folder") then
-                    local isEnemyTeam = (teamFolder.Name ~= state.myTeamName)
-                    if espSettings.teamCheck and not isEnemyTeam then
-                        continue
-                    end
-
                     for _, model in ipairs(teamFolder:GetChildren()) do
                         if model:IsA("Model") then
                             local key = model.Name
                             activeKeys[key] = true
-                            totalEnemies = totalEnemies + 1
 
                             if not espDrawings[key] then
                                 espDrawings[key] = newDrawingSet()
@@ -502,6 +591,17 @@ return function(Window, runtimeInfo)
                             if not mData then
                                 hideDrawings(d)
                                 continue
+                            end
+
+                            -- Accurate Teammate Filter (Never flip or confuse own team)
+                            local isMyTeam = isTeammate(mData.rawName, teamFolder.Name)
+                            if espSettings.teamCheck and isMyTeam then
+                                hideDrawings(d)
+                                continue
+                            end
+
+                            if not isMyTeam then
+                                totalEnemies = totalEnemies + 1
                             end
 
                             local dist = (mData.center - myCamPos).Magnitude
@@ -542,6 +642,7 @@ return function(Window, runtimeInfo)
                                 isVisible = isPointVisible(mData.head) or isPointVisible(mData.center)
                             end
 
+                            local isEnemyTeam = not isMyTeam
                             local boxColor = isEnemyTeam
                                 and (isVisible and espSettings.enemyVisible or espSettings.enemyHidden)
                                 or espSettings.teamColor
@@ -648,6 +749,7 @@ return function(Window, runtimeInfo)
             if not activeKeys[key] then
                 hideDrawings(d)
                 nameCache[key] = nil
+                rawNameCache[key] = nil
                 hpCache[key] = nil
             end
         end
@@ -882,6 +984,7 @@ return function(Window, runtimeInfo)
         end
         espDrawings = {}
         nameCache = {}
+        rawNameCache = {}
         hpCache = {}
 
         env.__RAVEN_PF = nil

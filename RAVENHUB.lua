@@ -307,6 +307,14 @@ local camera    = game.Workspace.CurrentCamera
 
 local SCRIPTS = {
     {
+        name        = "Ouwland",
+        description = "Auto Training | Mob & Boss Farm | 100% Drawing ESP | Infinite Stamina | Speed & Fly",
+        placeIds    = {136406881576517},
+        gameIds     = {5595353122},
+        version     = "v1.0.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/ouwland.lua?v=owl-1.0.0",
+    },
+    {
         name        = "Fishing Chef",
         description = "Auto Fish | Instant Reel | Auto Sell | Restaurant Farm | Island TP | Utility",
         placeIds    = {88599461076137},
@@ -470,7 +478,7 @@ local SCRIPTS = {
         description = "Enemy ESP | Box | Distance | Head Dot | Tracers | FOV Aim | Auto Spot",
         placeIds    = {292439477},
         gameIds     = {113491250},
-        version     = "v2.2.0",
+        version     = "v2.3.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/phantom_forces.lua",
     },
     {
@@ -680,6 +688,14 @@ local SCRIPTS = {
         gameIds     = {10563114921},
         version     = "v1.0.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/steal_an_egg.lua",
+    },
+    {
+        name        = "Pull An Egg",
+        description = "Auto Train Dumbell | Auto Cash Sweep | Auto Rebirth | Auto Egg Sniper & Steal | Drawing ESP | World TP",
+        placeIds    = {70640255604878},
+        gameIds     = {10649255304},
+        version     = "v1.0.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/pull_an_egg.lua",
     },
     {
         name        = "Steal Fish Eggs",
@@ -1126,7 +1142,7 @@ end
 
 pcall(function()
     if type(Window.SortTabs) == "function" then
-        Window:SortTabs({"Overview", "Combat", "Visuals", "Misc", "Movement", "Automation", "Shooting", "Defense", "Safety", "Match Info", "Info", "Main", "Dungeon", "ESP", "Settings"})
+        Window:SortTabs({"Overview", "Training", "Combat", "Visuals", "Player", "Teleport", "Misc", "Movement", "Automation", "Shooting", "Defense", "Safety", "Match Info", "Info", "Main", "Dungeon", "ESP", "Settings"})
     end
 end)
 
