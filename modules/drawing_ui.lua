@@ -1209,6 +1209,20 @@ function DrawingUI:RefreshConfigList()
     local configs = {}
     local seen = {}
 
+    local function cleanConfigTitle(raw)
+        local s = tostring(raw or "")
+        s = s:gsub("[^\x20-\x7E]", "")
+        s = s:gsub("%b[]", " ")
+        s = s:gsub("%b()", " ")
+        s = s:gsub("%b{}", " ")
+        s = s:gsub("_[%w%s%!%-%_%.]+_", " ")
+        s = s:gsub("^[Uu][Pp][Dd][A-Za-z0-9%s%!%-%._]*%s*%-?%s*", "")
+        s = s:gsub("%s*%-?%s*[Uu][Pp][Dd][A-Za-z0-9%s%!%-%._]*$", "")
+        s = s:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+        s = s:gsub("^[%-%_%.%!%s]+", ""):gsub("[%-%_%.%s]+$", "")
+        return s
+    end
+
     local function scanDir(dir)
         if type(listfiles) == "function" and type(isfolder) == "function" and isfolder(dir) then
             local ok, files = pcall(listfiles, dir)
@@ -1225,6 +1239,24 @@ function DrawingUI:RefreshConfigList()
     end
 
     scanDir(settingsFolder)
+
+    -- Auto-discover configs from legacy update folders matching this game
+    local parentFolder = target.folder:match("^(.-)/[^/]+$") or "RAVENHUB"
+    local canonicalName = target.folder:match("([^/\\]+)$")
+    if canonicalName and type(listfiles) == "function" and type(isfolder) == "function" and isfolder(parentFolder) then
+        local allDirs = listfiles(parentFolder)
+        for _, d in ipairs(allDirs or {}) do
+            local bName = d:match("([^/\\]+)$")
+            if bName and isfolder(d) and d ~= target.folder then
+                local cl = cleanConfigTitle(bName)
+                if cl == canonicalName or bName:find(canonicalName, 1, true) then
+                    scanDir(d .. "/settings")
+                    scanDir(d)
+                end
+            end
+        end
+    end
+
     if #configs == 0 and settingsFolder ~= "RAVENHUB/settings" then
         scanDir("RAVENHUB/settings")
     end
@@ -1315,6 +1347,53 @@ function DrawingUI:LoadConfig(configName)
     local folder = target.folder or DrawingUI.Folder or "RAVENHUB"
     local settingsFolder = folder .. "/settings"
     local filePath = settingsFolder .. "/" .. configName .. ".json"
+
+    local function cleanConfigTitle(raw)
+        local s = tostring(raw or "")
+        s = s:gsub("[^\x20-\x7E]", "")
+        s = s:gsub("%b[]", " ")
+        s = s:gsub("%b()", " ")
+        s = s:gsub("%b{}", " ")
+        s = s:gsub("_[%w%s%!%-%_%.]+_", " ")
+        s = s:gsub("^[Uu][Pp][Dd][A-Za-z0-9%s%!%-%._]*%s*%-?%s*", "")
+        s = s:gsub("%s*%-?%s*[Uu][Pp][Dd][A-Za-z0-9%s%!%-%._]*$", "")
+        s = s:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+        s = s:gsub("^[%-%_%.%!%s]+", ""):gsub("[%-%_%.%s]+$", "")
+        return s
+    end
+
+    if (type(isfile) ~= "function" or not isfile(filePath)) then
+        local parentFolder = target.folder:match("^(.-)/[^/]+$") or "RAVENHUB"
+        local canonicalName = target.folder:match("([^/\\]+)$")
+        if canonicalName and type(listfiles) == "function" and type(isfolder) == "function" and isfolder(parentFolder) then
+            local allDirs = listfiles(parentFolder)
+            for _, d in ipairs(allDirs or {}) do
+                local bName = d:match("([^/\\]+)$")
+                if bName and isfolder(d) and d ~= target.folder then
+                    local cl = cleanConfigTitle(bName)
+                    if cl == canonicalName or bName:find(canonicalName, 1, true) then
+                        local c1 = d .. "/settings/" .. configName .. ".json"
+                        local c2 = d .. "/" .. configName .. ".json"
+                        if type(isfile) == "function" and isfile(c1) then
+                            filePath = c1
+                            if type(readfile) == "function" and type(writefile) == "function" then
+                                local cData = readfile(c1)
+                                if cData then pcall(writefile, settingsFolder .. "/" .. configName .. ".json", cData) end
+                            end
+                            break
+                        elseif type(isfile) == "function" and isfile(c2) then
+                            filePath = c2
+                            if type(readfile) == "function" and type(writefile) == "function" then
+                                local cData = readfile(c2)
+                                if cData then pcall(writefile, settingsFolder .. "/" .. configName .. ".json", cData) end
+                            end
+                            break
+                        end
+                    end
+                end
+            end
+        end
+    end
 
     if (type(isfile) ~= "function" or not isfile(filePath)) and isfile("RAVENHUB/settings/" .. configName .. ".json") then
         filePath = "RAVENHUB/settings/" .. configName .. ".json"

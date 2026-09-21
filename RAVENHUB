@@ -3,6 +3,10 @@
 --   MacLib UI + Lazy Load + Module pattern
 -- ============================================================
 
+if not game:IsLoaded() then
+    pcall(function() game.Loaded:Wait() end)
+end
+
 local Players     = game:GetService("Players")
 
 local hasDrawing = type(Drawing) == "table" and type(Drawing.new) == "function"
@@ -280,9 +284,16 @@ if not HubUI and not isBac then
     end
 end
 
-local player    = Players.LocalPlayer
-local character = player.Character
-if not character then
+local player = Players.LocalPlayer
+if not player then
+    local t0 = tick()
+    while not player and (tick() - t0) < 10 do
+        task.wait(0.1)
+        player = Players.LocalPlayer
+    end
+end
+local character = player and player.Character
+if player and not character then
     -- Some games (e.g. BRM5) use custom character systems without standard
     -- Roblox Characters. Wait briefly with timeout so the hub boots regardless.
     local done = false
@@ -809,6 +820,22 @@ local SCRIPTS = {
         version     = "v1.3.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/ride_a_pet.lua?v=ride-a-pet-1.3.0",
     },
+    {
+        name        = "Dig Into Secrets",
+        description = "Auto Mine | Auto Collect Current Depth | Auto Sell | Drawing Ore ESP | Auto Pets & Freebies",
+        placeIds    = {119409763193569, 86641960184547},
+        gameIds     = {10685312778},
+        version     = "v1.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/dig_into_secrets.lua?v=dig-secrets-1.0",
+    },
+    {
+        name        = "Shovel It!",
+        description = "Fast Auto Dig | Auto Sell Snow | Auto Claim Rewards | Drills Manager | Teleports | Drawing ESP",
+        placeIds    = {133832344745984},
+        gameIds     = {9226697658},
+        version     = "v1.0.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/shovel_it.lua?v=shovel-it-1.0.0",
+    },
 
 
 
@@ -843,14 +870,128 @@ if not isBac then
 end
 
 -- ============================================================
---   WINDOW
+--   WINDOW & CONFIG
 -- ============================================================
 
--- Keep configuration profiles isolated per Roblox experience while using a
--- readable hierarchy. MacLib appends /settings/<name>.json to FolderName.
-local CONFIG_GAME_NAME = sanitizeConfigSegment(EXPERIENCE_NAME, "Roblox Experience")
+local currentPlaceId = game.PlaceId
+local currentGameId  = game.GameId
+
+local function containsId(idList, value)
+    if not idList then return false end
+    local valueStr = tostring(value)
+    for _, id in ipairs(idList) do
+        if tostring(id) == valueStr then
+            return true
+        end
+    end
+    return false
+end
+
+local function cleanExperienceTitle(raw)
+    local s = tostring(raw or "")
+    s = s:gsub("[^\x20-\x7E]", "")
+    s = s:gsub("%b[]", " ")
+    s = s:gsub("%b()", " ")
+    s = s:gsub("%b{}", " ")
+    s = s:gsub("_[%w%s%!%-%_%.]+_", " ")
+    s = s:gsub("^[Uu][Pp][Dd][A-Za-z0-9%s%!%-%._]*%s*%-?%s*", "")
+    s = s:gsub("%s*%-?%s*[Uu][Pp][Dd][A-Za-z0-9%s%!%-%._]*$", "")
+    s = s:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+    s = s:gsub("^[%-%_%.%!%s]+", ""):gsub("[%-%_%.%s]+$", "")
+    return s
+end
+
+local function shouldLoadScript(scriptInfo)
+    if scriptInfo.detector then
+        local ok, matched = pcall(scriptInfo.detector)
+        if ok and matched then
+            return true
+        end
+    end
+
+    if scriptInfo.universal == true then
+        return true
+    end
+
+    if scriptInfo.placeIds and containsId(scriptInfo.placeIds, currentPlaceId) then
+        return true
+    end
+
+    if scriptInfo.gameIds and containsId(scriptInfo.gameIds, currentGameId) then
+        return true
+    end
+
+    -- backward compatibility for old schema
+    if scriptInfo.gameId == 0 then
+        return true
+    end
+    if scriptInfo.gameId == currentPlaceId or scriptInfo.gameId == currentGameId then
+        return true
+    end
+
+    return false
+end
+
+local function findMatchingScript()
+    for _, scriptInfo in ipairs(SCRIPTS) do
+        if shouldLoadScript(scriptInfo) then
+            return scriptInfo
+        end
+    end
+    return nil
+end
+
+local matchedScript = findMatchingScript()
+local CONFIG_GAME_NAME
+if matchedScript and matchedScript.name and matchedScript.name ~= "" then
+    CONFIG_GAME_NAME = sanitizeConfigSegment(matchedScript.name, "Roblox Experience")
+else
+    local cleaned = cleanExperienceTitle(EXPERIENCE_NAME)
+    CONFIG_GAME_NAME = sanitizeConfigSegment(cleaned, "Roblox Experience")
+end
+
 local CONFIG_FOLDER = "RAVENHUB/" .. CONFIG_GAME_NAME
 local CONFIG_FILE_NAME = "TEST"
+
+-- Auto-migrate legacy configuration profiles from previous game update folders
+pcall(function()
+    if type(isfolder) == "function" and type(listfiles) == "function"
+        and type(readfile) == "function" and type(writefile) == "function"
+        and isfolder("RAVENHUB") then
+        local targetSettings = CONFIG_FOLDER .. "/settings"
+        if type(makefolder) == "function" then
+            if not isfolder(CONFIG_FOLDER) then makefolder(CONFIG_FOLDER) end
+            if not isfolder(targetSettings) then makefolder(targetSettings) end
+        end
+        local allDirs = listfiles("RAVENHUB")
+        for _, d in ipairs(allDirs or {}) do
+            local bName = d:match("([^/\\]+)$")
+            if bName and isfolder(d) and d ~= CONFIG_FOLDER then
+                local cl = cleanExperienceTitle(bName)
+                if cl == CONFIG_GAME_NAME or bName:find(CONFIG_GAME_NAME, 1, true) then
+                    local searchDirs = { d .. "/settings", d }
+                    for _, sDir in ipairs(searchDirs) do
+                        if isfolder(sDir) then
+                            local files = listfiles(sDir)
+                            for _, filePath in ipairs(files or {}) do
+                                local fName = filePath:match("([^/\\]+%.json)$")
+                                if fName then
+                                    local dest = targetSettings .. "/" .. fName
+                                    if not isfile(dest) then
+                                        local content = readfile(filePath)
+                                        if content and #content > 10 then
+                                            pcall(writefile, dest, content)
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
 
 local env = (type(getgenv) == "function" and getgenv()) or _G
 if env and env.__RAVEN_WINDOW and type(env.__RAVEN_WINDOW.Destroy) == "function" then
@@ -972,51 +1113,6 @@ HubSettingsTab:InsertConfigSection("Right")
 -- ============================================================
 --   LAZY LOAD
 -- ============================================================
-
-local currentPlaceId = game.PlaceId
-local currentGameId  = game.GameId
-
-local function containsId(idList, value)
-    if not idList then return false end
-    local valueStr = tostring(value)
-    for _, id in ipairs(idList) do
-        if tostring(id) == valueStr then
-            return true
-        end
-    end
-    return false
-end
-
-local function shouldLoadScript(scriptInfo)
-    if scriptInfo.detector then
-        local ok, matched = pcall(scriptInfo.detector)
-        if ok and matched then
-            return true
-        end
-    end
-
-    if scriptInfo.universal == true then
-        return true
-    end
-
-    if scriptInfo.placeIds and containsId(scriptInfo.placeIds, currentPlaceId) then
-        return true
-    end
-
-    if scriptInfo.gameIds and containsId(scriptInfo.gameIds, currentGameId) then
-        return true
-    end
-
-    -- backward compatibility for old schema
-    if scriptInfo.gameId == 0 then
-        return true
-    end
-    if scriptInfo.gameId == currentPlaceId or scriptInfo.gameId == currentGameId then
-        return true
-    end
-
-    return false
-end
 
 -- map fingerprint fallback for cases where PlaceId/GameId differs across sub-places
 for _, scriptInfo in ipairs(SCRIPTS) do
