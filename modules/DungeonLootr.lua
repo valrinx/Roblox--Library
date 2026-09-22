@@ -115,6 +115,66 @@ local function isChallengeDungeon()
     return false
 end
 
+local function isInDungeon()
+    return LocalPlayer:GetAttribute("InDungeon") == true
+        or LocalPlayer:GetAttribute("InChallenge") == true
+        or LocalPlayer:GetAttribute("InBossRush") == true
+        or LocalPlayer:GetAttribute("InPayload") == true
+        or (game.PlaceId ~= 106484206883664 and workspace:FindFirstChild("Dungeons") ~= nil)
+end
+
+local function isGuiObjectVisible(guiObj)
+    if not guiObj or not guiObj:IsA("GuiObject") then return false end
+    local cur = guiObj
+    while cur and cur ~= workspace and not cur:IsA("PlayerGui") do
+        if cur:IsA("GuiObject") and not cur.Visible then
+            return false
+        end
+        if cur:IsA("ScreenGui") and not cur.Enabled then
+            return false
+        end
+        cur = cur.Parent
+    end
+    return true
+end
+
+local dungeonCompleted = false
+
+task.spawn(function()
+    pcall(function()
+        local svc = Knit.GetService("DungeonRunService")
+        if svc and svc.DungeonComplete then
+            svc.DungeonComplete:Connect(function()
+                dungeonCompleted = true
+            end)
+        end
+    end)
+    pcall(function()
+        local svc = Knit.GetService("ChallengeRunService")
+        if svc and svc.DungeonComplete then
+            svc.DungeonComplete:Connect(function()
+                dungeonCompleted = true
+            end)
+        end
+    end)
+    pcall(function()
+        local svc = Knit.GetService("BossRushService")
+        if svc and svc.DungeonComplete then
+            svc.DungeonComplete:Connect(function()
+                dungeonCompleted = true
+            end)
+        end
+    end)
+    pcall(function()
+        local svc = Knit.GetService("PayloadRunService")
+        if svc and svc.DungeonComplete then
+            svc.DungeonComplete:Connect(function()
+                dungeonCompleted = true
+            end)
+        end
+    end)
+end)
+
 local function getHRP(model)
     if not model or not model:IsA("Instance") then return nil end
     local hrp = model:FindFirstChild("HumanoidRootPart")
@@ -1004,6 +1064,7 @@ local farmThread=nil
 local function startFarm()
     if farmThread then return end
     farmThread=task.spawn(function()
+        dungeonCompleted = false
         setNoclip(true)
         _G.__farmStarted=nil
         local lastRoomIndex=nil
@@ -1617,6 +1678,10 @@ local function setAutoReplay(enabled)
         replayConn=task.spawn(function()
             while State.AutoReplay do
                 if (not running) then break end
+                if not isInDungeon() then
+                    task.wait(1)
+                    continue
+                end
                 if tick() - lastReplay >= 3 then
                     -- 1. จัดการเคลียร์หน้าเลือกกล่องรางวัลถ้ามี (ป้องกันการค้างที่ Chest Selection)
                     handleChestSelection()
@@ -1633,12 +1698,18 @@ local function setAutoReplay(enabled)
                         btn = comp.Content.ActionButtons:FindFirstChild("ReplayButton")
                     end
 
-                    if (comp and comp.Visible) or (btn and btn.Visible) then
+                    -- ต้องเช็คว่าหน้าต่าง Completion_Info เปิดแสดงอยู่จริงบนหน้าจอเท่านั้น (ห้ามเช็คแค่ btn.Visible โดดๆ เพราะ Roblox UI ซ่อน parent แต่ปุ่มยังคง Visible=true)
+                    local isComplete = dungeonCompleted or isGuiObjectVisible(comp)
+                    local scale = btn and btn:FindFirstChildOfClass("UIScale")
+                    local scaleOk = not scale or scale.Scale > 0.1
+
+                    if isComplete and btn and isGuiObjectVisible(btn) and scaleOk then
                         lastReplay=tick()
-                        if btn and btn.Visible and btn.Active then
+                        dungeonCompleted = false
+                        if btn.Active then
                             pcall(function() btn:Activate() end)
                         end
-                        task.wait(0.15)
+                        task.wait(0.2)
                         local svc = getActiveRunService()
                         if svc and svc.RequestReplay then
                             pcall(function() svc:RequestReplay() end)
@@ -1668,6 +1739,10 @@ local function setAutoReturn(enabled)
         returnConn=task.spawn(function()
             while State.AutoReturn do
                 if (not running) then break end
+                if not isInDungeon() then
+                    task.wait(1)
+                    continue
+                end
                 if tick() - lastReturn >= 3 then
                     -- 1. จัดการเคลียร์หน้าเลือกกล่องรางวัลถ้ามี
                     handleChestSelection()
@@ -1684,12 +1759,18 @@ local function setAutoReturn(enabled)
                         btn = comp.Content.ActionButtons:FindFirstChild("ReturnButton") or comp.Content.ActionButtons:FindFirstChild("CloseButton")
                     end
 
-                    if (comp and comp.Visible) or (btn and btn.Visible) then
+                    -- ต้องเช็คว่าหน้าต่าง Completion_Info เปิดแสดงอยู่จริงบนหน้าจอเท่านั้น (ห้ามเช็คแค่ btn.Visible โดดๆ เพราะ Roblox UI ซ่อน parent แต่ปุ่มยังคง Visible=true)
+                    local isComplete = dungeonCompleted or isGuiObjectVisible(comp)
+                    local scale = btn and btn:FindFirstChildOfClass("UIScale")
+                    local scaleOk = not scale or scale.Scale > 0.1
+
+                    if isComplete and btn and isGuiObjectVisible(btn) and scaleOk then
                         lastReturn=tick()
-                        if btn and btn.Visible and btn.Active then
+                        dungeonCompleted = false
+                        if btn.Active then
                             pcall(function() btn:Activate() end)
                         end
-                        task.wait(0.15)
+                        task.wait(0.2)
                         local svc = getActiveRunService()
                         if svc and svc.RequestReturn then
                             pcall(function() svc:RequestReturn() end)
