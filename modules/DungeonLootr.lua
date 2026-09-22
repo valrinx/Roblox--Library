@@ -1074,6 +1074,19 @@ local function startFarm()
 
         while State.AutoFarm do
             if (not running) then break end
+            local pgui = LocalPlayer:FindFirstChild("PlayerGui")
+            local comp = pgui and pgui:FindFirstChild("Main", true)
+                and pgui.Main:FindFirstChild("HUD", true)
+                and pgui.Main.HUD:FindFirstChild("Dungeon_Container", true)
+                and pgui.Main.HUD.Dungeon_Container:FindFirstChild("Completion_Info", true)
+
+            if dungeonCompleted or isGuiObjectVisible(comp) then
+                stopLock()
+                stopHover()
+                setNoclip(false)
+                break
+            end
+
             if State.AutoBlessing then selectBlessingCardNow() end
             if not isValidChar() then stopLock() task.wait(1) continue end
             local char=LocalPlayer.Character local hrp=char:FindFirstChild("HumanoidRootPart")
@@ -1576,6 +1589,8 @@ local function setAutoContinue(enabled)
         if ok and svc and svc.EndlessDecision then
             continueConn=svc.EndlessDecision:Connect(function(data)
                 if not State.AutoContinue and not State.AutoExtractEndless then return end
+                -- สำคัญมาก: ต้องอยู่ในโหมด Endless จริงๆ เท่านั้น ห้ามยิง SubmitEndlessChoice ในดันเจี้ยนปกติ
+                if LocalPlayer:GetAttribute("InEndless") ~= true then return end
                 task.wait(0.5)
                 local curDepth = data and (data.ExtensionIndex or 0) + 1 or 1
                 local shouldExtract = State.AutoExtractEndless and (curDepth >= (State.EndlessExtractDepth or 15))
@@ -1586,33 +1601,6 @@ local function setAutoContinue(enabled)
                     if warnCtrl and warnCtrl.Dismiss then warnCtrl:Dismiss() end
                 end)
             end)
-        end
-        -- fallback ดัก Warning prompt ถ้า event ไม่มา
-        if not continueConn then
-            continueConn=task.spawn(function()
-                while State.AutoContinue or State.AutoExtractEndless do
-                    if (not running) then break end
-                    local done=false
-                    pcall(function()
-                        for _,gui in ipairs(LocalPlayer.PlayerGui:GetDescendants()) do
-                            if gui:IsA("TextLabel") and gui.Visible and gui.Text:find("Checkpoint %d+ cleared!") then
-                                local num = tonumber(gui.Text:match("Checkpoint (%d+) cleared!")) or 1
-                                local shouldExtract = State.AutoExtractEndless and (num >= (State.EndlessExtractDepth or 15))
-                                local svc2=Knit.GetService("DungeonRunService")
-                                svc2:SubmitEndlessChoice(not shouldExtract)
-                                task.wait(0.2)
-                                local warnCtrl = Knit.GetController("WarningController")
-                                if warnCtrl and warnCtrl.Dismiss then warnCtrl:Dismiss() end
-                                done=true
-                            end
-                        end
-                    end)
-                    if done then task.wait(2) end
-                    task.wait(0.5)
-                end
-            end)
-            local real=continueConn
-            continueConn={Disconnect=function() pcall(function() task.cancel(real) end) end}
         end
     else
         if continueConn then pcall(function() continueConn:Disconnect() end) continueConn=nil end
@@ -1698,21 +1686,39 @@ local function setAutoReplay(enabled)
                         btn = comp.Content.ActionButtons:FindFirstChild("ReplayButton")
                     end
 
-                    -- ต้องเช็คว่าหน้าต่าง Completion_Info เปิดแสดงอยู่จริงบนหน้าจอเท่านั้น (ห้ามเช็คแค่ btn.Visible โดดๆ เพราะ Roblox UI ซ่อน parent แต่ปุ่มยังคง Visible=true)
                     local isComplete = dungeonCompleted or isGuiObjectVisible(comp)
-                    local scale = btn and btn:FindFirstChildOfClass("UIScale")
-                    local scaleOk = not scale or scale.Scale > 0.1
-
-                    if isComplete and btn and isGuiObjectVisible(btn) and scaleOk then
+                    if isComplete then
                         lastReplay=tick()
                         dungeonCompleted = false
-                        if btn.Active then
+                        stopFarm()
+                        stopLock()
+                        stopHover()
+                        setNoclip(false)
+
+                        -- ตรวจสอบว่าเป็นการ Extract หรือไม่ (ถ้า Extract จะ Replay ไม่ได้ ต้อง Return)
+                        local isExtracted = false
+                        pcall(function()
+                            local header = comp and comp:FindFirstChild("Header", true)
+                            local title = header and header:FindFirstChild("Title", true)
+                            if title and title.Text and title.Text:upper():find("EXTRACT") then
+                                isExtracted = true
+                            end
+                        end)
+
+                        if btn and isGuiObjectVisible(btn) and scaleOk and btn.Active then
                             pcall(function() btn:Activate() end)
                         end
-                        task.wait(0.2)
+
+                        task.wait(1)
                         local svc = getActiveRunService()
-                        if svc and svc.RequestReplay then
-                            pcall(function() svc:RequestReplay() end)
+                        if isExtracted then
+                            if svc and svc.RequestReturn then
+                                pcall(function() svc:RequestReturn() end)
+                            end
+                        else
+                            if svc and svc.RequestReplay then
+                                pcall(function() svc:RequestReplay() end)
+                            end
                         end
                     end
                 end
@@ -1759,18 +1765,23 @@ local function setAutoReturn(enabled)
                         btn = comp.Content.ActionButtons:FindFirstChild("ReturnButton") or comp.Content.ActionButtons:FindFirstChild("CloseButton")
                     end
 
-                    -- ต้องเช็คว่าหน้าต่าง Completion_Info เปิดแสดงอยู่จริงบนหน้าจอเท่านั้น (ห้ามเช็คแค่ btn.Visible โดดๆ เพราะ Roblox UI ซ่อน parent แต่ปุ่มยังคง Visible=true)
-                    local isComplete = dungeonCompleted or isGuiObjectVisible(comp)
                     local scale = btn and btn:FindFirstChildOfClass("UIScale")
                     local scaleOk = not scale or scale.Scale > 0.1
 
-                    if isComplete and btn and isGuiObjectVisible(btn) and scaleOk then
+                    local isComplete = dungeonCompleted or isGuiObjectVisible(comp)
+                    if isComplete then
                         lastReturn=tick()
                         dungeonCompleted = false
-                        if btn.Active then
+                        stopFarm()
+                        stopLock()
+                        stopHover()
+                        setNoclip(false)
+
+                        if btn and isGuiObjectVisible(btn) and scaleOk and btn.Active then
                             pcall(function() btn:Activate() end)
                         end
-                        task.wait(0.2)
+
+                        task.wait(1)
                         local svc = getActiveRunService()
                         if svc and svc.RequestReturn then
                             pcall(function() svc:RequestReturn() end)
