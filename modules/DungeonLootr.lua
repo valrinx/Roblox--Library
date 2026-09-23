@@ -1,4 +1,4 @@
--- VoltScriptZ | Dungeon Lootr | RAVEN HUB Module (v3.6.1)
+-- VoltScriptZ | Dungeon Lootr | RAVEN HUB Module (v3.6.2)
 -- Converted to RAVEN HUB (MacLib Adapter)
 -- PlaceIds: 132285059959516, 135245842886361 | GameIds: 9656201728, 8410525651
 
@@ -104,12 +104,30 @@ end
 local function isChallengeDungeon()
     if LocalPlayer:GetAttribute("InChallenge") == true then return true end
     if LocalPlayer:GetAttribute("InBossRush") == true then return true end
+    -- ถ้ามีโฟลเดอร์ Generated_ แปลว่าอยู่ใน Procedural Dungeon ปกติ 100% ไม่ใช่ Challenge
+    if getGeneratedFolder() ~= nil then return false end
+
     local cn = workspace:FindFirstChild("Challenge_NPCs")
-    if cn and #cn:GetChildren() > 0 then return true end
+    if cn and #cn:GetChildren() > 0 then
+        for _, m in ipairs(cn:GetChildren()) do
+            if m:IsA("Model") and not m.Name:find("DungeonChest") and m:GetAttribute("DungeonChest") ~= true then
+                return true
+            end
+        end
+    end
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
     local cd = workspace:FindFirstChild("Challenge_Dungeons")
-    if cd and #cd:GetChildren() > 0 then
+    if hrp and cd and #cd:GetChildren() > 0 then
         for _, d in ipairs(cd:GetChildren()) do
-            if d:FindFirstChild("Spawns") or d:FindFirstChild("Map") then return true end
+            local cf, sz = nil, nil
+            pcall(function() cf, sz = d:GetBoundingBox() end)
+            if cf and sz then
+                local dist = (hrp.Position - cf.Position).Magnitude
+                if dist < (math.max(sz.X, sz.Z) / 2 + 100) then
+                    return true
+                end
+            end
         end
     end
     return false
@@ -619,9 +637,21 @@ local function hasMobsInRoom(roomIdx, roomCenter)
     return false
 end
 
+local failedChests = {}
+
+local function isChestIgnored(obj)
+    if not obj then return true end
+    local uid = obj:GetAttribute("ChestUID") or obj.Name
+    if failedChests[uid] and failedChests[uid] >= 2 then
+        return true
+    end
+    return false
+end
+
 local function hasAvailableChest()
     local function isChestReady(obj)
         if obj:IsA("Model") and (obj.Name:find("DungeonChest") or obj:GetAttribute("DungeonChest") == true) then
+            if isChestIgnored(obj) then return false end
             local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
             if prompt and prompt.Enabled then
                 return true
@@ -680,6 +710,7 @@ local function collectRoomChests(roomIdx, roomCenter)
     local chestsToLoot = {}
     local function checkChest(obj)
         if obj:IsA("Model") and (obj.Name:find("DungeonChest") or obj:GetAttribute("DungeonChest") == true) then
+            if isChestIgnored(obj) then return end
             local chestRoomIdx = obj:GetAttribute("RoomIndex")
             local cf = nil
             pcall(function() cf = obj:GetBoundingBox() end)
@@ -693,7 +724,11 @@ local function collectRoomChests(roomIdx, roomCenter)
                     inRoom = true
                 end
             else
-                inRoom = true
+                -- เมื่อไม่ได้ระบุ roomIdx (เช่น บอสตายแล้ว หรือเก็บรอบตัว):
+                -- เก็บเฉพาะกล่องที่อยู่ใกล้ตัว (< 90 studs) เท่านั้น ห้ามวาร์ปย้อนข้ามทั้งดันเจี้ยน
+                if cf and (cf.Position - hrp.Position).Magnitude < 90 then
+                    inRoom = true
+                end
             end
 
             if inRoom then
@@ -738,6 +773,9 @@ local function collectRoomChests(roomIdx, roomCenter)
 
     for _, cData in ipairs(chestsToLoot) do
         if not State.AutoFarm or not State.AutoLootChests then break end
+        local uid = cData.model:GetAttribute("ChestUID") or cData.model.Name
+        if failedChests[uid] and failedChests[uid] >= 2 then continue end
+
         if cData.prompt and cData.prompt.Parent and cData.prompt.Enabled then
             local promptPos = nil
             local pPart = cData.prompt.Parent
@@ -751,24 +789,24 @@ local function collectRoomChests(roomIdx, roomCenter)
 
             if promptPos then
                 local standPos = promptPos + Vector3.new(0, 2, 2.5)
-                if isChallengeDungeon() then
-                    stopHover()
-                    pcall(function()
-                        hrp.CFrame = CFrame.new(standPos, promptPos)
-                        hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-                    end)
-                    task.wait(0.12)
-                    pcall(function()
-                        fireproximityprompt(cData.prompt)
-                    end)
-                    task.wait(0.2)
+                local targetCF = CFrame.new(standPos, promptPos)
+                stopHover()
+                pcall(function()
+                    hrp.CFrame = targetCF
+                    hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                    hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+                end)
+                startHover(targetCF) -- ล็อค Hover ไว้ที่กล่อง ป้องกันตัวละครร่วงตกเหวทะลุพื้น
+                task.wait(0.2)
+                pcall(function()
+                    fireproximityprompt(cData.prompt)
+                end)
+                task.wait(0.35)
+                -- ตรวจสอบผลลัพธ์: หากหลังกดแล้ว Prompt ยังคง Enabled อยู่ แปลว่าเซิร์ฟเวอร์ปฏิเสธหรือไม่สามารถเก็บได้
+                if cData.prompt and cData.prompt.Parent and cData.prompt.Enabled then
+                    failedChests[uid] = (failedChests[uid] or 0) + 1
                 else
-                    safeWarp(CFrame.new(standPos, promptPos))
-                    task.wait(0.2)
-                    pcall(function()
-                        fireproximityprompt(cData.prompt)
-                    end)
-                    task.wait(0.35)
+                    failedChests[uid] = 999 -- เปิดสำเร็จแล้ว
                 end
             end
         end
@@ -885,15 +923,26 @@ local function processSecretRoom(parentRoomIdx, parentRoomCenter)
                                 if (cPos - roomPivot.Position).Magnitude < 70 then
                                     local hasLock = c:FindFirstChild("Chest_Lock") ~= nil
                                     local prompt = c:FindFirstChildWhichIsA("ProximityPrompt", true)
-                                    -- กล่องต้องปลดล็อคแล้ว (ไม่มี Chest_Lock และ Prompt.Enabled == true)
-                                    if not hasLock and prompt and prompt.Enabled then
+                                    local sUid = c:GetAttribute("ChestUID") or c.Name
+                                    if not hasLock and prompt and prompt.Enabled and not isChestIgnored(c) then
                                         stopLock()
                                         stopHover()
                                         local standPos = cPos + Vector3.new(0, 2, 3)
-                                        safeWarp(CFrame.new(standPos, cPos))
+                                        local targetCF = CFrame.new(standPos, cPos)
+                                        pcall(function()
+                                            hrp.CFrame = targetCF
+                                            hrp.AssemblyLinearVelocity = Vector3.zero
+                                            hrp.AssemblyAngularVelocity = Vector3.zero
+                                        end)
+                                        startHover(targetCF)
                                         task.wait(0.2)
                                         pcall(function() fireproximityprompt(prompt) end)
                                         task.wait(0.35)
+                                        if prompt and prompt.Parent and prompt.Enabled then
+                                            failedChests[sUid] = (failedChests[sUid] or 0) + 1
+                                        else
+                                            failedChests[sUid] = 999
+                                        end
                                     end
                                 end
                             end
@@ -1102,6 +1151,7 @@ local function startFarm()
     if farmThread then return end
     farmThread=task.spawn(function()
         dungeonCompleted = false
+        failedChests = {}
         setNoclip(true)
         _G.__farmStarted=nil
         local lastRoomIndex=nil
@@ -1127,7 +1177,11 @@ local function startFarm()
                 and pgui.Main.HUD:FindFirstChild("Dungeon_Container", true)
                 and pgui.Main.HUD.Dungeon_Container:FindFirstChild("Completion_Info", true)
 
-            if dungeonCompleted or isGuiObjectVisible(comp) then
+            local topLevel = pgui and pgui:FindFirstChild("TopLevel")
+            local rf = topLevel and topLevel:FindFirstChild("RewardsFrame", true)
+            local isFinished = dungeonCompleted or isGuiObjectVisible(comp) or (rf and isGuiObjectVisible(rf))
+
+            if isFinished then
                 stopLock()
                 stopHover()
                 setNoclip(false)
@@ -1238,9 +1292,9 @@ local function startFarm()
                     stopLock()
                     if not isValidChar() then task.wait(1) continue end
                     task.wait(0.5)
-                    -- บอสตายแล้ว ตรวจสอบว่าไม่มีมอนเหลือแล้ว จึงเก็บกล่องทั้งหมด
+                    -- บอสตายแล้ว ตรวจสอบว่าไม่มีมอนเหลือแล้ว จึงเก็บกล่องในห้องบอส
                     if #getMonsters() == 0 then
-                        collectRoomChests(nil, nil)
+                        collectRoomChests(curIdx, curCenter)
                     end
                     task.wait(1)
                     continue
@@ -1812,8 +1866,9 @@ local function setAutoReplay(enabled)
                     if comp and comp:FindFirstChild("Content", true) and comp.Content:FindFirstChild("ActionButtons", true) then
                         btn = comp.Content.ActionButtons:FindFirstChild("ReplayButton")
                     end
-
-                    local isComplete = dungeonCompleted or isGuiObjectVisible(comp)
+                    local topLevel = pgui and pgui:FindFirstChild("TopLevel")
+                    local rf = topLevel and topLevel:FindFirstChild("RewardsFrame", true)
+                    local isComplete = dungeonCompleted or isGuiObjectVisible(comp) or (rf and isGuiObjectVisible(rf))
                     if isComplete then
                         lastReplay=tick()
                         dungeonCompleted = false
@@ -1897,7 +1952,9 @@ local function setAutoReturn(enabled)
                     local scale = btn and btn:FindFirstChildOfClass("UIScale")
                     local scaleOk = not scale or scale.Scale > 0.1
 
-                    local isComplete = dungeonCompleted or isGuiObjectVisible(comp)
+                    local topLevel = pgui and pgui:FindFirstChild("TopLevel")
+                    local rf = topLevel and topLevel:FindFirstChild("RewardsFrame", true)
+                    local isComplete = dungeonCompleted or isGuiObjectVisible(comp) or (rf and isGuiObjectVisible(rf))
                     if isComplete then
                         lastReturn=tick()
                         dungeonCompleted = false
