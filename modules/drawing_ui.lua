@@ -132,9 +132,9 @@ local function createBoldText(baseZIndex, isHeavy)
     baseZIndex = baseZIndex or 6
     local t = safeDrawing("Text")
     if t then
-        t.Font = 2 -- IBM Plex Sans: Solid stem geometry, zero subpixel blur
-        t.Outline = false
-        t.Color = Color3.fromRGB(255, 255, 255)
+        pcall(function() t.Font = 2 end)
+        pcall(function() t.Outline = false end)
+        pcall(function() t.Color = Color3.fromRGB(255, 255, 255) end)
         pcall(function() t.ZIndex = baseZIndex end)
     end
     return t
@@ -175,12 +175,15 @@ local function createRoundedCard(baseZIndex, isNeumorphic)
 
     for k, obj in pairs(card) do
         if obj then
-            obj.Filled = true
-            obj.Thickness = 1
-            obj.Visible = false
+            local isLine = (k == "neuLightTop" or k == "neuLightLeft" or k == "neuDarkBot" or k == "neuDarkRight")
+            if not isLine then
+                pcall(function() obj.Filled = true end)
+            end
+            pcall(function() obj.Thickness = 1 end)
+            pcall(function() obj.Visible = false end)
             if k == "neuDropMid" or k == "neuDropBR" then
                 pcall(function() obj.ZIndex = math.max(0, baseZIndex - 1) end)
-            elseif k == "neuLightTop" or k == "neuLightLeft" or k == "neuDarkBot" or k == "neuDarkRight" then
+            elseif isLine then
                 pcall(function() obj.ZIndex = baseZIndex + 1 end)
             else
                 pcall(function() obj.ZIndex = baseZIndex end)
