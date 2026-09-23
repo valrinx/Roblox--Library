@@ -1,4 +1,4 @@
--- VoltScriptZ | Dungeon Lootr | RAVEN HUB Module (v3.5.0)
+-- VoltScriptZ | Dungeon Lootr | RAVEN HUB Module (v3.6.1)
 -- Converted to RAVEN HUB (MacLib Adapter)
 -- PlaceIds: 132285059959516, 135245842886361 | GameIds: 9656201728, 8410525651
 
@@ -248,6 +248,36 @@ local function getMonsters()
     return list
 end
 
+local function getRoomTargetCF(room)
+    if not room then return nil end
+    local spawns = room:FindFirstChild("Spawns")
+    if spawns then
+        local eSpawn = spawns:FindFirstChild("Enemy_Spawn", true) or spawns:FindFirstChildWhichIsA("BasePart", true)
+        if eSpawn and eSpawn:IsA("BasePart") then
+            return CFrame.new(eSpawn.Position + Vector3.new(0, 3, 0))
+        end
+    end
+    local zone = room:FindFirstChild("Zone")
+    if zone and zone:IsA("BasePart") then
+        local floorY = zone.Position.Y - (zone.Size.Y / 2) + 3
+        return CFrame.new(Vector3.new(zone.Position.X, floorY, zone.Position.Z))
+    end
+    local anchor = room:FindFirstChild("TileAnchor")
+    if anchor and anchor:IsA("BasePart") then
+        return CFrame.new(anchor.Position + Vector3.new(0, 3, 0))
+    end
+    local cf, sz = nil, nil
+    pcall(function() cf, sz = room:GetBoundingBox() end)
+    if cf then
+        local floorY = cf.Position.Y
+        if sz and sz.Y > 10 then
+            floorY = cf.Position.Y - (sz.Y / 2) + 6
+        end
+        return CFrame.new(Vector3.new(cf.Position.X, floorY, cf.Position.Z))
+    end
+    return nil
+end
+
 local function getActiveDungeonZone()
     -- ดึงลำดับ Zone ตรงจาก Completion_Progress Data ของ DungeonHUDController (ตรงตามรูปดาว HUD 100%)
     if getgc and debug and debug.getupvalues then
@@ -257,9 +287,15 @@ local function getActiveDungeonZone()
                 if info.name == "CPBuild" or info.name == "CPMoveCurrentToPos" then
                     for _, u in ipairs(debug.getupvalues(v)) do
                         if type(u) == "table" and rawget(u, "Zones") and rawget(u, "ByIndex") then
-                            local curZone = u.Zones[u.CurrentPos]
-                            if curZone then
-                                return curZone.Index, u.CurrentPos, u.Zones
+                            -- ค้นหาห้องแรกในลำดับที่ยังไม่เสร็จ (Done ~= true) เพื่อป้องกันการข้ามห้อง 100%
+                            for zIdx, z in ipairs(u.Zones) do
+                                if not z.Done then
+                                    return z.Index, zIdx, u.Zones
+                                end
+                            end
+                            local last = u.Zones[#u.Zones]
+                            if last then
+                                return last.Index, #u.Zones, u.Zones
                             end
                         end
                     end
@@ -318,18 +354,13 @@ local function getCombatRoomCenters()
             local rName = "Room_" .. tostring(z.Index)
             local room = gen:FindFirstChild(rName)
             if room then
-                local cf, sz = nil, nil
-                pcall(function() cf, sz = room:GetBoundingBox() end)
-                if cf then
-                    local floorY = cf.Position.Y
-                    if sz and sz.Y > 10 then
-                        floorY = cf.Position.Y - (sz.Y / 2) + 6
-                    end
-                    local roomCF = CFrame.new(Vector3.new(cf.Position.X, floorY, cf.Position.Z))
+                local roomCF = getRoomTargetCF(room)
+                if roomCF then
                     table.insert(out, {
                         idx = z.Index,
                         cf = roomCF,
                         name = rName,
+                        room = room,
                         isBoss = z.IsBoss == true,
                         done = z.Done == true
                     })
@@ -351,16 +382,10 @@ local function getCombatRoomCenters()
                 end
             end
             local idx = room:GetAttribute("RoomIndex") or tonumber(room.Name:match("%d+")) or 999
-            if hasSpawn or idx == 22 then
-                local cf, sz = nil, nil
-                pcall(function() cf, sz = room:GetBoundingBox() end)
-                if cf then
-                    local floorY = cf.Position.Y
-                    if sz and sz.Y > 10 then
-                        floorY = cf.Position.Y - (sz.Y / 2) + 6
-                    end
-                    local roomCF = CFrame.new(Vector3.new(cf.Position.X, floorY, cf.Position.Z))
-                    table.insert(out, {idx = idx, cf = roomCF, name = room.Name, isBoss = (idx == 22)})
+            if hasSpawn or idx == 22 or room:FindFirstChild("Zone") then
+                local roomCF = getRoomTargetCF(room)
+                if roomCF then
+                    table.insert(out, {idx = idx, cf = roomCF, name = room.Name, room = room, isBoss = (idx == 22)})
                 end
             end
         end
@@ -477,7 +502,7 @@ local function startHover(cf)
     local char=LocalPlayer.Character if not char then return end
     local hrp=char:FindFirstChild("HumanoidRootPart") if not hrp then return end
     hoverConn=RunService.Heartbeat:Connect(function()
-        if not State.AutoFarm then return end
+        if not State.AutoFarm or dungeonCompleted then stopHover() return end
         if lockConn then return end -- ถ้าล็อคมอนอยู่ให้ lock คุมแทน
         if isDodgingNow then return end -- กำลังหลบ AoE อยู่ ให้ระงับการ hover ชั่วคราว
         if not isValidChar() then stopHover() return end
@@ -506,7 +531,7 @@ local function startLock(targetHRP)
     hoverCF=initCF
     local hb, rs
     hb=RunService.Heartbeat:Connect(function()
-        if not State.AutoFarm or not State.CFrameLock then return end
+        if not State.AutoFarm or not State.CFrameLock or dungeonCompleted then stopLock() return end
         if isDodgingNow then return end -- กำลังหลบ AoE อยู่ ให้ระงับการล็อกตำแหน่งชั่วคราว
         if not isValidChar() then stopLock() return end
         local c=LocalPlayer.Character
@@ -520,7 +545,7 @@ local function startLock(targetHRP)
         h.Velocity=Vector3.new(0,0,0)
     end)
     rs=RunService.Stepped:Connect(function()
-        if not State.AutoFarm or not State.CFrameLock then return end
+        if not State.AutoFarm or not State.CFrameLock or dungeonCompleted then stopLock() return end
         if isDodgingNow then return end -- กำลังหลบ AoE อยู่ ให้ระงับการล็อกตำแหน่งชั่วคราว
         if not isValidChar() then stopLock() return end
         local c=LocalPlayer.Character
@@ -569,7 +594,19 @@ local function isInRoom(m, roomIdx, roomCenter)
     if isChallengeDungeon() then return true end
     if m:GetAttribute("RoomIndex") == roomIdx then return true end
     local hrpM = getHRP(m)
-    if hrpM and roomCenter and (hrpM.Position - roomCenter.cf.Position).Magnitude < 130 then return true end
+    if not hrpM or not roomCenter or not roomCenter.cf then return false end
+    local dist = (hrpM.Position - roomCenter.cf.Position).Magnitude
+    if dist < 185 then return true end
+    if roomCenter.room then
+        local cf, sz = nil, nil
+        pcall(function() cf, sz = roomCenter.room:GetBoundingBox() end)
+        if cf and sz then
+            local rel = cf:PointToObjectSpace(hrpM.Position)
+            if math.abs(rel.X) <= (sz.X / 2 + 25) and math.abs(rel.Z) <= (sz.Z / 2 + 25) and math.abs(rel.Y) <= (sz.Y / 2 + 35) then
+                return true
+            end
+        end
+    end
     return false
 end
 
@@ -1069,8 +1106,18 @@ local function startFarm()
         _G.__farmStarted=nil
         local lastRoomIndex=nil
         local clearedRooms={}
+        local currentHudZones = nil
         local function markCleared(idx) clearedRooms[idx]=true end
-        local function isCleared(idx) return clearedRooms[idx]==true end
+        local function isCleared(idx)
+            if currentHudZones and #currentHudZones > 0 then
+                for _, z in ipairs(currentHudZones) do
+                    if z.Index == idx then
+                        return z.Done == true
+                    end
+                end
+            end
+            return clearedRooms[idx]==true
+        end
 
         while State.AutoFarm do
             if (not running) then break end
@@ -1095,12 +1142,13 @@ local function startFarm()
             local combatCenters = getCombatRoomCenters()
             if #combatCenters == 0 then task.wait(1) continue end
 
-            -- ค้นหาห้องเป้าหมายตามลำดับดาว HUD ของเกมโดยตรง (ห้ามข้ามห้อง)
+            -- ค้นหาห้องเป้าหมายตามลำดับดาว HUD ของเกมโดยตรง (ห้ามข้ามห้องเด็ดขาด)
             local activeRoomIdx, curZonePos, zones = getActiveDungeonZone()
+            if zones and #zones > 0 then currentHudZones = zones end
             local curCenter = nil
 
-            -- ถ้า activeRoomIdx ยังไม่ถูกเคลียร์ ให้เล็ง activeRoomIdx ก่อน
-            if activeRoomIdx and not isCleared(activeRoomIdx) then
+            -- ลำดับที่ 1: ถ้า activeRoomIdx มีค่า ให้หา combatCenter ที่ตรงกับ activeRoomIdx เสมอ
+            if activeRoomIdx then
                 for _, c in ipairs(combatCenters) do
                     if c.idx == activeRoomIdx then
                         curCenter = c
@@ -1109,7 +1157,7 @@ local function startFarm()
                 end
             end
 
-            -- ถ้า activeRoomIdx ถูกเคลียร์ไปแล้ว หรือหาไม่เจอ ให้เดินหน้าไปยังห้องถัดไปในลำดับที่ยังไม่เคลียร์
+            -- ลำดับที่ 2: ถ้าหาไม่เจอ ให้เดินหน้าไปยังห้องแรกใน combatCenters ที่เซิร์ฟเวอร์ยังไม่ได้ติ๊ก Done
             if not curCenter then
                 for _, c in ipairs(combatCenters) do
                     if not isCleared(c.idx) and not c.done then
@@ -1140,7 +1188,19 @@ local function startFarm()
                 end
             end
 
-            if boss and (curCenter.isBoss or (curIdx == 22)) then
+            -- ตรวจสอบว่าห้องก่อนหน้าทั้งหมดในดันเจี้ยนถูกเคลียร์ (Done == true) หมดหรือยัง
+            local allPriorDone = true
+            if not isChallengeDungeon() and currentHudZones and #currentHudZones > 0 then
+                for _, z in ipairs(currentHudZones) do
+                    if not z.IsBoss and z.Index ~= curIdx and not z.Done then
+                        allPriorDone = false
+                        break
+                    end
+                end
+            end
+
+            -- ห้ามสู้หรือวาร์ปหา Boss เด็ดขาดถ้าห้องปกติก่อนหน้ายังเคลียร์ไม่ครบ (ประตูห้องบอสจะยังล็อคอยู่!)
+            if boss and allPriorDone and (curCenter.isBoss or (curCenter == combatCenters[#combatCenters]) or isChallengeDungeon()) then
                 local targetHRP = getHRP(boss)
                 if not targetHRP then
                     safeWarp(curCenter.cf + Vector3.new(0, 10, 0))
@@ -1277,6 +1337,38 @@ local function startFarm()
                 continue
             end
 
+            -- ตรวจสอบสถานะ Server ปัจจุบันของห้องนี้
+            local isServerDone = false
+            local _, _, freshHudZones = getActiveDungeonZone()
+            if freshHudZones and #freshHudZones > 0 then currentHudZones = freshHudZones end
+            if currentHudZones and #currentHudZones > 0 then
+                for _, z in ipairs(currentHudZones) do
+                    if z.Index == curIdx and z.Done then isServerDone = true break end
+                end
+            end
+
+            -- หาก server ยังไม่ติ๊ก Done และไม่ใช่ห้องบอส ให้รอสปอนอย่างน้อย 5.0 วินาทีขณะอยู่ในห้อง
+            -- (ห้ามใช้ #getMonsters() > 0 เพื่อป้องกันบอสห้องสุดท้ายหรือมอนนอกห้องมาตัดเวลาสปอน!)
+            if not isServerDone and not curCenter.isBoss and not isChallengeDungeon() then
+                local spawnWait = 0
+                while State.AutoFarm and spawnWait < 5.0 do
+                    if hasMobsInRoom(curIdx, curCenter) then break end
+                    local _, _, fz = getActiveDungeonZone()
+                    if fz then
+                        currentHudZones = fz
+                        for _, z in ipairs(fz) do
+                            if z.Index == curIdx and z.Done then isServerDone = true break end
+                        end
+                    end
+                    if isServerDone or isZoneClear() then break end
+                    task.wait(0.3)
+                    spawnWait += 0.3
+                end
+                if hasMobsInRoom(curIdx, curCenter) then
+                    continue -- มอนสเตอร์สปอนออกมาแล้ว! ลุยตีทันที ห้ามข้ามห้อง
+                end
+            end
+
             -- รอเช็ค Wave สปอนถัดไป (2.5 วิ) กันกรณีมอนเวฟ 2 กำลังจะเกิด ไม่รีบไปหากล่อง
             local moreWave = false
             local waitTime = 0
@@ -1300,6 +1392,26 @@ local function startFarm()
                 task.wait(0.5) waited += 0.5
             end
 
+            -- อัปเดตสถานะเซิร์ฟเวอร์อีกครั้ง
+            local _, _, finalZones = getActiveDungeonZone()
+            if finalZones then currentHudZones = finalZones end
+            local canMark = false
+            if currentHudZones and #currentHudZones > 0 then
+                for _, z in ipairs(currentHudZones) do
+                    if z.Index == curIdx and z.Done then canMark = true break end
+                end
+            else
+                canMark = not hasMobsInRoom(curIdx, curCenter)
+            end
+
+            -- กฎเหล็ก: ถ้าเซิร์ฟเวอร์ยังไม่ติ๊ก Done และยังมีห้องนี้อยู่ ห้ามข้ามห้องเด็ดขาด!
+            if not canMark and not curCenter.isBoss and not isChallengeDungeon() then
+                -- ลองขยับแตะพื้นห้องอีกครั้งเพื่อกระตุ้น Trigger สปอน
+                safeWarp(curCenter.cf + Vector3.new(0, 1.5, 0))
+                task.wait(0.4)
+                continue -- วนลูปตรวจสอบห้องเดิมซ้ำ ห้ามวาร์ปไปห้องถัดไป!
+            end
+
             -- เคลียร์มอนหมดห้องแน่นอนแล้ว 100% จึงเก็บกล่องของห้องนี้
             if not hasMobsInRoom(curIdx, curCenter) then
                 collectRoomChests(curIdx, curCenter)
@@ -1310,7 +1422,10 @@ local function startFarm()
                 -- ตรวจสอบและเสกบอสพิเศษจากแท่น Skull_Totem (ถ้ามีกุญแจ 7x Platinum Key)
                 processSpecialBossSummon()
             end
-            markCleared(curIdx)
+
+            if canMark then
+                markCleared(curIdx)
+            end
 
             -- ตรวจสอบการจบดันเจี้ยนเมื่อถึงห้องบอส (ห้องสุดท้ายของดันเจี้ยน)
             local isLastRoom = (curCenter == combatCenters[#combatCenters]) or (curIdx == 22)
@@ -1325,15 +1440,27 @@ local function startFarm()
             else
                 -- หากไม่ใช่ห้องบอส ให้พาตัวละครวาร์ปมุ่งหน้าไปยังห้องถัดไปทันที
                 local nextTarget = nil
-                for _, c in ipairs(combatCenters) do
-                    if not isCleared(c.idx) and not c.done then
-                        nextTarget = c
-                        break
+                local nextIdx, _, nZones = getActiveDungeonZone()
+                if nZones and #nZones > 0 then currentHudZones = nZones end
+                if nextIdx and not isCleared(nextIdx) then
+                    for _, c in ipairs(combatCenters) do
+                        if c.idx == nextIdx then
+                            nextTarget = c
+                            break
+                        end
+                    end
+                end
+                if not nextTarget then
+                    for _, c in ipairs(combatCenters) do
+                        if not isCleared(c.idx) and not c.done then
+                            nextTarget = c
+                            break
+                        end
                     end
                 end
                 if nextTarget and nextTarget.cf then
                     stopLock()
-                    safeWarp(nextTarget.cf + Vector3.new(0, 3, 0))
+                    safeWarp(nextTarget.cf + Vector3.new(0, 2, 0))
                     task.wait(0.3)
                 end
             end
@@ -1705,6 +1832,8 @@ local function setAutoReplay(enabled)
                             end
                         end)
 
+                        local scale = btn and btn:FindFirstChildOfClass("UIScale")
+                        local scaleOk = not scale or scale.Scale > 0.1
                         if btn and isGuiObjectVisible(btn) and scaleOk and btn.Active then
                             pcall(function() btn:Activate() end)
                         end
