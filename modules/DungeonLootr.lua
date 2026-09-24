@@ -1,4 +1,4 @@
--- VoltScriptZ | Dungeon Lootr | RAVEN HUB Module (v3.6.2)
+-- VoltScriptZ | Dungeon Lootr | RAVEN HUB Module (v3.6.4)
 -- Converted to RAVEN HUB (MacLib Adapter)
 -- PlaceIds: 132285059959516, 135245842886361 | GameIds: 9656201728, 8410525651
 
@@ -520,7 +520,7 @@ local function startHover(cf)
     local char=LocalPlayer.Character if not char then return end
     local hrp=char:FindFirstChild("HumanoidRootPart") if not hrp then return end
     hoverConn=RunService.Heartbeat:Connect(function()
-        if not State.AutoFarm or dungeonCompleted then stopHover() return end
+        if not State.AutoFarm then stopHover() return end
         if lockConn then return end -- ถ้าล็อคมอนอยู่ให้ lock คุมแทน
         if isDodgingNow then return end -- กำลังหลบ AoE อยู่ ให้ระงับการ hover ชั่วคราว
         if not isValidChar() then stopHover() return end
@@ -610,21 +610,43 @@ end
 
 local function isInRoom(m, roomIdx, roomCenter)
     if isChallengeDungeon() then return true end
-    if m:GetAttribute("RoomIndex") == roomIdx then return true end
+    local mRoomIdx = m:GetAttribute("RoomIndex")
+    if mRoomIdx ~= nil and roomIdx ~= nil then
+        return mRoomIdx == roomIdx or mRoomIdx == (1000 + roomIdx)
+    end
     local hrpM = getHRP(m)
     if not hrpM or not roomCenter or not roomCenter.cf then return false end
-    local dist = (hrpM.Position - roomCenter.cf.Position).Magnitude
-    if dist < 185 then return true end
+
+    -- 1. ตรวจสอบ Zone Part ของห้อง (ถ้ามี) ซึ่งเป็นขอบเขต trigger ตรงตามแมพที่สุด
     if roomCenter.room then
+        local zone = roomCenter.room:FindFirstChild("Zone")
+        if zone and zone:IsA("BasePart") then
+            local rel = zone.CFrame:PointToObjectSpace(hrpM.Position)
+            if math.abs(rel.X) <= (zone.Size.X / 2 + 20) and math.abs(rel.Z) <= (zone.Size.Z / 2 + 20) and math.abs(rel.Y) <= (zone.Size.Y / 2 + 35) then
+                return true
+            else
+                return false
+            end
+        end
+    end
+
+    -- 2. ตรวจสอบ BoundingBox ของโมเดลห้องก่อนเป็นอันดับแรกเพื่อป้องกันการตรวจจับมอนสเตอร์ในห้องข้างเคียงผิดพลาด
+    if roomCenter.room and roomCenter.room:IsA("Model") then
         local cf, sz = nil, nil
         pcall(function() cf, sz = roomCenter.room:GetBoundingBox() end)
         if cf and sz then
             local rel = cf:PointToObjectSpace(hrpM.Position)
             if math.abs(rel.X) <= (sz.X / 2 + 25) and math.abs(rel.Z) <= (sz.Z / 2 + 25) and math.abs(rel.Y) <= (sz.Y / 2 + 35) then
                 return true
+            else
+                return false
             end
         end
     end
+
+    -- 3. Fallback ในกรณีที่ห้องไม่มี BoundingBox หรืออ่านขนาดไม่ได้: ใช้ระยะแคบ 80 studs
+    local dist = (hrpM.Position - roomCenter.cf.Position).Magnitude
+    if dist < 80 then return true end
     return false
 end
 
@@ -637,14 +659,14 @@ local function hasMobsInRoom(roomIdx, roomCenter)
     return false
 end
 
-local failedChests = {}
+local failedChests = setmetatable({}, {__mode = "k"})
 
 local function isChestIgnored(obj)
     if not obj then return true end
-    local uid = obj:GetAttribute("ChestUID") or obj.Name
-    if failedChests[uid] and failedChests[uid] >= 2 then
-        return true
-    end
+    if obj:GetAttribute("RavenLooted") == true then return true end
+    local status = failedChests[obj]
+    if status == "opened" then return true end
+    if type(status) == "number" and status >= 3 then return true end
     return false
 end
 
@@ -653,7 +675,7 @@ local function hasAvailableChest()
         if obj:IsA("Model") and (obj.Name:find("DungeonChest") or obj:GetAttribute("DungeonChest") == true) then
             if isChestIgnored(obj) then return false end
             local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
-            if prompt and prompt.Enabled then
+            if prompt and prompt.Enabled and not obj:FindFirstChild("Chest_Lock") then
                 return true
             end
         end
@@ -687,17 +709,23 @@ local function hasAvailableChest()
     if gen then
         for _, c in ipairs(gen:GetChildren()) do
             if isChestReady(c) then return true end
+            if c:IsA("Model") or c:IsA("Folder") then
+                for _, sub in ipairs(c:GetChildren()) do
+                    if isChestReady(sub) then return true end
+                end
+            end
         end
     end
     return false
 end
 
-local function collectRoomChests(roomIdx, roomCenter)
+local function collectRoomChests(roomIdx, roomCenter, maxRadius)
     if not State.AutoLootChests then return end
+    local isBossOrLast = (roomCenter and roomCenter.isBoss) or (roomIdx == 22) or (maxRadius and maxRadius >= 140)
     -- กฎสำคัญสำหรับดันเจี้ยนปกติ: ต้องเคลียร์มอนสเตอร์ในห้องให้หมด 100% ก่อน ห้ามวาร์ปไปหากล่องถ้ายังมีมอนสเตอร์อยู่
-    if not isChallengeDungeon() then
-        if roomIdx and roomCenter and hasMobsInRoom(roomIdx, roomCenter) then return end
-        if not roomIdx and #getMonsters() > 0 then return end
+    -- ข้อยกเว้น: หากดันเจี้ยนจบแล้ว (dungeonCompleted) หรือเป็นห้องบอส/เก็บรอบตัว ไม่ต้องเช็คมอนสเตอร์
+    if not isChallengeDungeon() and not dungeonCompleted then
+        if roomIdx and roomCenter and not isBossOrLast and hasMobsInRoom(roomIdx, roomCenter) then return end
     end
     -- สำหรับ Challenge Dungeon: กล่องที่ดรอปตามแมพสามารถเก็บได้ทันที ไม่ต้องรอมอนสเตอร์หมด (ตามคำสั่งผู้ใช้)
 
@@ -713,28 +741,32 @@ local function collectRoomChests(roomIdx, roomCenter)
             if isChestIgnored(obj) then return end
             local chestRoomIdx = obj:GetAttribute("RoomIndex")
             local cf = nil
-            pcall(function() cf = obj:GetBoundingBox() end)
+            pcall(function() cf = obj:GetPivot() end)
+            if not cf then pcall(function() cf = obj:GetBoundingBox() end) end
             local inRoom = false
-            if isChallengeDungeon() then
+            local checkRadius = maxRadius or ((roomCenter and roomCenter.isBoss or roomIdx == 22) and 140) or 70
+            if isChallengeDungeon() or dungeonCompleted then
                 inRoom = true
             elseif roomIdx then
                 if chestRoomIdx == roomIdx or chestRoomIdx == (1000 + roomIdx) then
                     inRoom = true
-                elseif roomCenter and cf and (cf.Position - roomCenter.cf.Position).Magnitude < 70 then
+                elseif roomCenter and cf and (cf.Position - roomCenter.cf.Position).Magnitude < checkRadius then
+                    inRoom = true
+                elseif (roomCenter and roomCenter.isBoss or roomIdx == 22 or maxRadius) and cf and (cf.Position - hrp.Position).Magnitude < (maxRadius or 140) then
                     inRoom = true
                 end
             else
                 -- เมื่อไม่ได้ระบุ roomIdx (เช่น บอสตายแล้ว หรือเก็บรอบตัว):
-                -- เก็บเฉพาะกล่องที่อยู่ใกล้ตัว (< 90 studs) เท่านั้น ห้ามวาร์ปย้อนข้ามทั้งดันเจี้ยน
-                if cf and (cf.Position - hrp.Position).Magnitude < 90 then
+                local fallbackRadius = maxRadius or 200
+                if cf and (cf.Position - hrp.Position).Magnitude < fallbackRadius then
                     inRoom = true
                 end
             end
 
             if inRoom then
                 local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
-                -- กล่องต้องปลดล็อคแล้ว (Enabled = true) เท่านั้น
-                if prompt and prompt.Enabled then
+                -- กล่องต้องปลดล็อคแล้ว (ไม่มี Chest_Lock และ Enabled = true)
+                if prompt and prompt.Enabled and not obj:FindFirstChild("Chest_Lock") then
                     table.insert(chestsToLoot, {model = obj, cf = cf, prompt = prompt})
                 end
             end
@@ -742,7 +774,14 @@ local function collectRoomChests(roomIdx, roomCenter)
     end
 
     if gen then
-        for _, obj in ipairs(gen:GetChildren()) do checkChest(obj) end
+        for _, obj in ipairs(gen:GetChildren()) do
+            checkChest(obj)
+            if obj:IsA("Model") or obj:IsA("Folder") then
+                for _, sub in ipairs(obj:GetChildren()) do
+                    checkChest(sub)
+                end
+            end
+        end
     end
     local challengeNPCs = workspace:FindFirstChild("Challenge_NPCs")
     if challengeNPCs then
@@ -772,9 +811,8 @@ local function collectRoomChests(roomIdx, roomCenter)
     stopHover()
 
     for _, cData in ipairs(chestsToLoot) do
-        if not State.AutoFarm or not State.AutoLootChests then break end
-        local uid = cData.model:GetAttribute("ChestUID") or cData.model.Name
-        if failedChests[uid] and failedChests[uid] >= 2 then continue end
+        if not running or not State.AutoLootChests then break end
+        if isChestIgnored(cData.model) then continue end
 
         if cData.prompt and cData.prompt.Parent and cData.prompt.Enabled then
             local promptPos = nil
@@ -801,12 +839,18 @@ local function collectRoomChests(roomIdx, roomCenter)
                 pcall(function()
                     fireproximityprompt(cData.prompt)
                 end)
-                task.wait(0.35)
+                -- รอ prompt.Enabled == false ตาม ping สูงสุด 0.8 - 1.0s
+                local promptWait = 0
+                while promptWait < 1.0 and cData.prompt and cData.prompt.Parent and cData.prompt.Enabled do
+                    task.wait(0.1)
+                    promptWait = promptWait + 0.1
+                end
                 -- ตรวจสอบผลลัพธ์: หากหลังกดแล้ว Prompt ยังคง Enabled อยู่ แปลว่าเซิร์ฟเวอร์ปฏิเสธหรือไม่สามารถเก็บได้
                 if cData.prompt and cData.prompt.Parent and cData.prompt.Enabled then
-                    failedChests[uid] = (failedChests[uid] or 0) + 1
+                    failedChests[cData.model] = (type(failedChests[cData.model]) == "number" and failedChests[cData.model] or 0) + 1
                 else
-                    failedChests[uid] = 999 -- เปิดสำเร็จแล้ว
+                    failedChests[cData.model] = "opened" -- เปิดสำเร็จแล้ว
+                    pcall(function() cData.model:SetAttribute("RavenLooted", true) end)
                 end
             end
         end
@@ -917,33 +961,47 @@ local function processSecretRoom(parentRoomIdx, parentRoomCenter)
                     end
 
                     if remainingMobs == 0 then
-                        for _, c in ipairs(gen:GetChildren()) do
-                            if c.Name:match("^DungeonChest_") then
+                        local secretChests = {}
+                        local function addSecretChest(c)
+                            if c:IsA("Model") and (c.Name:find("DungeonChest") or c:GetAttribute("DungeonChest") == true) then
+                                local cPivot = nil
+                                pcall(function() cPivot = c:GetPivot() end)
+                                if not cPivot then pcall(function() cPivot = c:GetBoundingBox() end) end
+                                if cPivot and (cPivot.Position - roomPivot.Position).Magnitude < 70 then
+                                    table.insert(secretChests, c)
+                                end
+                            end
+                        end
+                        for _, c in ipairs(ch:GetDescendants()) do addSecretChest(c) end
+                        for _, c in ipairs(gen:GetChildren()) do addSecretChest(c) end
+
+                        for _, c in ipairs(secretChests) do
+                            local hasLock = c:FindFirstChild("Chest_Lock") ~= nil
+                            local prompt = c:FindFirstChildWhichIsA("ProximityPrompt", true)
+                            if not hasLock and prompt and prompt.Enabled and not isChestIgnored(c) then
+                                stopLock()
+                                stopHover()
                                 local cPos = c:GetPivot().Position
-                                if (cPos - roomPivot.Position).Magnitude < 70 then
-                                    local hasLock = c:FindFirstChild("Chest_Lock") ~= nil
-                                    local prompt = c:FindFirstChildWhichIsA("ProximityPrompt", true)
-                                    local sUid = c:GetAttribute("ChestUID") or c.Name
-                                    if not hasLock and prompt and prompt.Enabled and not isChestIgnored(c) then
-                                        stopLock()
-                                        stopHover()
-                                        local standPos = cPos + Vector3.new(0, 2, 3)
-                                        local targetCF = CFrame.new(standPos, cPos)
-                                        pcall(function()
-                                            hrp.CFrame = targetCF
-                                            hrp.AssemblyLinearVelocity = Vector3.zero
-                                            hrp.AssemblyAngularVelocity = Vector3.zero
-                                        end)
-                                        startHover(targetCF)
-                                        task.wait(0.2)
-                                        pcall(function() fireproximityprompt(prompt) end)
-                                        task.wait(0.35)
-                                        if prompt and prompt.Parent and prompt.Enabled then
-                                            failedChests[sUid] = (failedChests[sUid] or 0) + 1
-                                        else
-                                            failedChests[sUid] = 999
-                                        end
-                                    end
+                                local standPos = cPos + Vector3.new(0, 2, 3)
+                                local targetCF = CFrame.new(standPos, cPos)
+                                pcall(function()
+                                    hrp.CFrame = targetCF
+                                    hrp.AssemblyLinearVelocity = Vector3.zero
+                                    hrp.AssemblyAngularVelocity = Vector3.zero
+                                end)
+                                startHover(targetCF)
+                                task.wait(0.2)
+                                pcall(function() fireproximityprompt(prompt) end)
+                                local promptWait = 0
+                                while promptWait < 1.0 and prompt and prompt.Parent and prompt.Enabled do
+                                    task.wait(0.1)
+                                    promptWait = promptWait + 0.1
+                                end
+                                if prompt and prompt.Parent and prompt.Enabled then
+                                    failedChests[c] = (type(failedChests[c]) == "number" and failedChests[c] or 0) + 1
+                                else
+                                    failedChests[c] = "opened"
+                                    pcall(function() c:SetAttribute("RavenLooted", true) end)
                                 end
                             end
                         end
@@ -1146,12 +1204,11 @@ end
 
 local farmThread=nil
 -- ใหม่: เคลียร์ครบทุกห้องสปอนก่อน Boss จะเกิด (ห้ามข้าม / ห้ามรอเวฟมั่ว)
-local farmThread=nil
 local function startFarm()
     if farmThread then return end
     farmThread=task.spawn(function()
         dungeonCompleted = false
-        failedChests = {}
+        failedChests = setmetatable({}, {__mode = "k"})
         setNoclip(true)
         _G.__farmStarted=nil
         local lastRoomIndex=nil
@@ -1177,11 +1234,24 @@ local function startFarm()
                 and pgui.Main.HUD:FindFirstChild("Dungeon_Container", true)
                 and pgui.Main.HUD.Dungeon_Container:FindFirstChild("Completion_Info", true)
 
-            local topLevel = pgui and pgui:FindFirstChild("TopLevel")
-            local rf = topLevel and topLevel:FindFirstChild("RewardsFrame", true)
-            local isFinished = dungeonCompleted or isGuiObjectVisible(comp) or (rf and isGuiObjectVisible(rf))
+            local isFinished = dungeonCompleted or isGuiObjectVisible(comp)
 
             if isFinished then
+                if State.AutoLootChests then
+                    local waitChest = 0
+                    while waitChest < 4.0 and State.AutoFarm and running do
+                        if hasAvailableChest() then
+                            collectRoomChests(nil, nil, 140)
+                            task.wait(0.5)
+                        else
+                            task.wait(0.5)
+                            waitChest = waitChest + 0.5
+                        end
+                    end
+                    if hasAvailableChest() then
+                        collectRoomChests(nil, nil, 140)
+                    end
+                end
                 stopLock()
                 stopHover()
                 setNoclip(false)
@@ -1291,12 +1361,27 @@ local function startFarm()
                     end
                     stopLock()
                     if not isValidChar() then task.wait(1) continue end
-                    task.wait(0.5)
-                    -- บอสตายแล้ว ตรวจสอบว่าไม่มีมอนเหลือแล้ว จึงเก็บกล่องในห้องบอส
-                    if #getMonsters() == 0 then
-                        collectRoomChests(curIdx, curCenter)
+
+                    -- บอสตายแล้ว: รอสปอนกล่องบอส (กล่องใช้เวลา 1.5 - 3.0 วินาทีในการเกิด)
+                    if State.AutoLootChests then
+                        local bossChestWait = 0
+                        while bossChestWait < 4.0 and State.AutoFarm and running do
+                            task.wait(0.5)
+                            bossChestWait = bossChestWait + 0.5
+                            if hasAvailableChest() then
+                                break
+                            end
+                        end
+                        -- สแกนและเก็บกล่องบอสในรัศมีกว้าง 140 studs รอบห้องบอสและตัวละคร
+                        collectRoomChests(curIdx, curCenter, 140)
+
+                        -- เผื่อมีกล่องบอสสปอนช้าหรือหลายกล่อง ตรวจสอบอีกรอบ
+                        if hasAvailableChest() then
+                            task.wait(0.5)
+                            collectRoomChests(curIdx, curCenter, 140)
+                        end
                     end
-                    task.wait(1)
+                    task.wait(0.5)
                     continue
                 end
             end
@@ -1466,9 +1551,10 @@ local function startFarm()
                 continue -- วนลูปตรวจสอบห้องเดิมซ้ำ ห้ามวาร์ปไปห้องถัดไป!
             end
 
+            local isLastRoom = (curCenter == combatCenters[#combatCenters]) or (curIdx == 22)
             -- เคลียร์มอนหมดห้องแน่นอนแล้ว 100% จึงเก็บกล่องของห้องนี้
             if not hasMobsInRoom(curIdx, curCenter) then
-                collectRoomChests(curIdx, curCenter)
+                collectRoomChests(curIdx, curCenter, (curCenter.isBoss or isLastRoom) and 140 or nil)
                 -- ตรวจสอบและปลดล็อคห้องลับ (ถ้ามีกุญแจ) พร้อมจัดการมอนสเตอร์และเก็บกล่องลับ
                 processSecretRoom(curIdx, curCenter)
                 -- ตรวจสอบและรับบัฟจากแท่น Altar (ถ้ามีในห้องนี้)
@@ -1482,7 +1568,6 @@ local function startFarm()
             end
 
             -- ตรวจสอบการจบดันเจี้ยนเมื่อถึงห้องบอส (ห้องสุดท้ายของดันเจี้ยน)
-            local isLastRoom = (curCenter == combatCenters[#combatCenters]) or (curIdx == 22)
             if not isChallengeDungeon() and isLastRoom and (curCenter.isBoss or curIdx == 22 or #combatCenters == 1) then
                 local waitedBoss = 0
                 while waitedBoss < 8 and State.AutoFarm do
@@ -1836,6 +1921,7 @@ end
 
 local replayConn=nil
 local lastReplay=0
+local replayChestWaitStart=nil
 local function setAutoReplay(enabled)
     State.AutoReplay=enabled
     if enabled then
@@ -1866,42 +1952,48 @@ local function setAutoReplay(enabled)
                     if comp and comp:FindFirstChild("Content", true) and comp.Content:FindFirstChild("ActionButtons", true) then
                         btn = comp.Content.ActionButtons:FindFirstChild("ReplayButton")
                     end
-                    local topLevel = pgui and pgui:FindFirstChild("TopLevel")
-                    local rf = topLevel and topLevel:FindFirstChild("RewardsFrame", true)
-                    local isComplete = dungeonCompleted or isGuiObjectVisible(comp) or (rf and isGuiObjectVisible(rf))
+                    local isComplete = dungeonCompleted or isGuiObjectVisible(comp)
                     if isComplete then
-                        lastReplay=tick()
-                        dungeonCompleted = false
-                        stopFarm()
-                        stopLock()
-                        stopHover()
-                        setNoclip(false)
-
-                        -- ตรวจสอบว่าเป็นการ Extract หรือไม่ (ถ้า Extract จะ Replay ไม่ได้ ต้อง Return)
-                        local isExtracted = false
-                        pcall(function()
-                            local header = comp and comp:FindFirstChild("Header", true)
-                            local title = header and header:FindFirstChild("Title", true)
-                            if title and title.Text and title.Text:upper():find("EXTRACT") then
-                                isExtracted = true
-                            end
-                        end)
-
                         local scale = btn and btn:FindFirstChildOfClass("UIScale")
                         local scaleOk = not scale or scale.Scale > 0.1
                         if btn and isGuiObjectVisible(btn) and scaleOk and btn.Active then
-                            pcall(function() btn:Activate() end)
-                        end
-
-                        task.wait(1)
-                        local svc = getActiveRunService()
-                        if isExtracted then
-                            if svc and svc.RequestReturn then
-                                pcall(function() svc:RequestReturn() end)
+                            -- AutoLootChests guard: รอให้เก็บกล่องบอส/ดันเจี้ยนให้เสร็จก่อนเสมอ (สูงสุด 8 วินาที)
+                            if State.AutoLootChests and (farmThread ~= nil or hasAvailableChest()) then
+                                if not replayChestWaitStart then replayChestWaitStart = tick() end
+                                if tick() - replayChestWaitStart < 8 then
+                                    task.wait(0.5)
+                                    continue
+                                end
                             end
-                        else
-                            if svc and svc.RequestReplay then
-                                pcall(function() svc:RequestReplay() end)
+                            replayChestWaitStart = nil
+                            lastReplay=tick()
+                            dungeonCompleted = false
+                            stopFarm()
+                            stopLock()
+                            stopHover()
+                            setNoclip(false)
+
+                            -- ตรวจสอบว่าเป็นการ Extract หรือไม่ (ถ้า Extract จะ Replay ไม่ได้ ต้อง Return)
+                            local isExtracted = false
+                            pcall(function()
+                                local header = comp and comp:FindFirstChild("Header", true)
+                                local title = header and header:FindFirstChild("Title", true)
+                                if title and title.Text and title.Text:upper():find("EXTRACT") then
+                                    isExtracted = true
+                                end
+                            end)
+
+                            pcall(function() btn:Activate() end)
+                            task.wait(1)
+                            local svc = getActiveRunService()
+                            if isExtracted then
+                                if svc and svc.RequestReturn then
+                                    pcall(function() svc:RequestReturn() end)
+                                end
+                            else
+                                if svc and svc.RequestReplay then
+                                    pcall(function() svc:RequestReplay() end)
+                                end
                             end
                         end
                     end
@@ -1918,6 +2010,7 @@ end
 
 local returnConn=nil
 local lastReturn=0
+local returnChestWaitStart=nil
 local function setAutoReturn(enabled)
     State.AutoReturn=enabled
     if enabled then
@@ -1952,25 +2045,31 @@ local function setAutoReturn(enabled)
                     local scale = btn and btn:FindFirstChildOfClass("UIScale")
                     local scaleOk = not scale or scale.Scale > 0.1
 
-                    local topLevel = pgui and pgui:FindFirstChild("TopLevel")
-                    local rf = topLevel and topLevel:FindFirstChild("RewardsFrame", true)
-                    local isComplete = dungeonCompleted or isGuiObjectVisible(comp) or (rf and isGuiObjectVisible(rf))
+                    local isComplete = dungeonCompleted or isGuiObjectVisible(comp)
                     if isComplete then
-                        lastReturn=tick()
-                        dungeonCompleted = false
-                        stopFarm()
-                        stopLock()
-                        stopHover()
-                        setNoclip(false)
-
                         if btn and isGuiObjectVisible(btn) and scaleOk and btn.Active then
-                            pcall(function() btn:Activate() end)
-                        end
+                            -- AutoLootChests guard: รอให้เก็บกล่องบอส/ดันเจี้ยนให้เสร็จก่อนเสมอ (สูงสุด 8 วินาที)
+                            if State.AutoLootChests and (farmThread ~= nil or hasAvailableChest()) then
+                                if not returnChestWaitStart then returnChestWaitStart = tick() end
+                                if tick() - returnChestWaitStart < 8 then
+                                    task.wait(0.5)
+                                    continue
+                                end
+                            end
+                            returnChestWaitStart = nil
+                            lastReturn=tick()
+                            dungeonCompleted = false
+                            stopFarm()
+                            stopLock()
+                            stopHover()
+                            setNoclip(false)
 
-                        task.wait(1)
-                        local svc = getActiveRunService()
-                        if svc and svc.RequestReturn then
-                            pcall(function() svc:RequestReturn() end)
+                            pcall(function() btn:Activate() end)
+                            task.wait(1)
+                            local svc = getActiveRunService()
+                            if svc and svc.RequestReturn then
+                                pcall(function() svc:RequestReturn() end)
+                            end
                         end
                     end
                 end

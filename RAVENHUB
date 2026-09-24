@@ -318,6 +318,14 @@ local camera    = game.Workspace.CurrentCamera
 
 local SCRIPTS = {
     {
+        name        = "Lumber INC.",
+        description = "Smart Auto Chop | Value Wood Filter | Auto Sawmill Deliver | Tree & Log ESP | Infinite Nitro | Vehicle Mod",
+        placeIds    = {3344967357},
+        gameIds     = {1200145783},
+        version     = "v1.0.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/lumber_inc.lua?v=lumber-1.0.0",
+    },
+    {
         name        = "Ouwland",
         description = "Auto Training | Mob & Boss Farm | 100% Drawing ESP | Infinite Stamina | Speed & Fly",
         placeIds    = {136406881576517},
@@ -736,8 +744,8 @@ local SCRIPTS = {
         description = "Auto Queue | Kill Aura | Auto Skills | Farm | Sell | Forge | Webhook",
         placeIds    = {132285059959516, 135245842886361, 106484206883664},
         gameIds     = {9656201728, 8410525651},
-        version     = "v3.6.2",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/DungeonLootr.lua?v=dungeon-lootr-3.6.2",
+        version     = "v3.6.4",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/DungeonLootr.lua?v=dungeon-lootr-3.6.4",
     },
     {
         name        = "Greedy Growers",
