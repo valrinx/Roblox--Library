@@ -334,6 +334,14 @@ local SCRIPTS = {
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/ouwland.lua?v=owl-2.0.0",
     },
     {
+        name        = "Steal From The Rich!",
+        description = "Instant Steal Crate | Priority Rarity Sniper | Infinite Speed Farm | Remote Auto Sell | Bat Aura | ESP",
+        placeIds    = {120475074479690},
+        gameIds     = {10753751277},
+        version     = "v1.1.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/steal_from_the_rich.lua?v=steal-1.1.0",
+    },
+    {
         name        = "Fishing Chef",
         description = "Auto Fish | Instant Reel | Auto Sell | Restaurant Farm | Island TP | Utility",
         placeIds    = {88599461076137},
