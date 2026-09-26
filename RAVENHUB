@@ -327,11 +327,11 @@ local SCRIPTS = {
     },
     {
         name        = "Ouwland",
-        description = "Auto Training | Mob & Boss Farm | 100% Drawing ESP | Infinite Stamina | Speed & Fly",
+        description = "Auto Farm & Bosses | Auto Minigames & Quests | Fast Attack & Skills | No Dash CD | Auto Fish & Tame | 100% Drawing ESP",
         placeIds    = {136406881576517},
         gameIds     = {5595353122},
-        version     = "v1.0.0",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/ouwland.lua?v=owl-1.0.0",
+        version     = "v2.0.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/ouwland.lua?v=owl-2.0.0",
     },
     {
         name        = "Fishing Chef",
@@ -1246,7 +1246,7 @@ end
 
 pcall(function()
     if type(Window.SortTabs) == "function" then
-        Window:SortTabs({"Overview", "Training", "Combat", "Visuals", "Player", "Teleport", "Misc", "Movement", "Automation", "Shooting", "Defense", "Safety", "Match Info", "Info", "Main", "Dungeon", "ESP", "Settings"})
+        Window:SortTabs({"Overview", "Training", "Combat", "Farming", "Player", "Visuals", "Teleport", "Misc", "Movement", "Automation", "Shooting", "Defense", "Safety", "Match Info", "Info", "Main", "Dungeon", "ESP", "Settings"})
     end
 end)
 
