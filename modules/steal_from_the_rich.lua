@@ -125,7 +125,7 @@ return function(Window, scriptInfo)
         -- Steal Farm
         autoSteal           = false,
         minRarity           = "All",
-        matchCarryTier      = true, -- Prioritizes crates matching player's current CarryStat (Common if tier 1, etc.)
+        matchCarryTier      = false, -- Disabled: can steal ANY crate tier freely!
         vacuumCrates        = true, -- Rapid remote steal combined with proximity prompt hold
         stealMethod         = "Fast Glide", -- "Fast Glide", "Instant Snap", "Walk"
         glideSpeed          = 350,
@@ -939,8 +939,8 @@ return function(Window, scriptInfo)
         end
     })
     StealTab:CreateToggle({
-        Name = "Smart Match Carry Tier (Anti-Reject)",
-        CurrentValue = true,
+        Name = "Smart Match Carry Tier",
+        CurrentValue = false,
         Flag = "StealMatchCarryTier",
         Callback = function(v)
             settings.matchCarryTier = v
