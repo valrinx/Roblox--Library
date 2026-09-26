@@ -42,216 +42,23 @@ return function(Window, scriptInfo)
     local char = player.Character or player.CharacterAdded:Wait()
     local root = char:WaitForChild("HumanoidRootPart")
     local humanoid = char:WaitForChild("Humanoid")
-    
-    local BYPASS_CONFIG = {
-        minTweenDuration = 0.8,
-        maxTweenDuration = 1.5,
-        microStepSize = 12,
-        microStepDelay = 0.025,
-        postTweenDelayMin = 0.05,
-        postTweenDelayMax = 0.3,
-        velocitySpoofSpeed = 80,
-        useVelocitySpoof = true,
-        useMicroStep = false,
-        microStepThreshold = 200,
-        easingStyle = Enum.EasingStyle.Sine,
-        easingDirection = Enum.EasingDirection.InOut,
-    }
-    
-    local waypoints = {}
-    
-    local function setupAntiCheatBypass()
-        local mt = getrawmetatable(game)
-        local oldNamecall = mt.__namecall
-        setreadonly(mt, false)
-        
-        mt.__namecall = newcclosure(function(self, ...)
-            local method = getnamecallmethod()
-            
-            if method == "FireServer" or method == "InvokeServer" then
-                local remoteName = tostring(self):lower()
-                
-                if remoteName:find("anticheat") or 
-                   remoteName:find("anticheats") or
-                   remoteName:find("validate") or
-                   remoteName:find("checkposition") or
-                   remoteName:find("flagplayer") or
-                   remoteName:find("detectexploit") then
-                    return
-                end
-            end
-            
-            return oldNamecall(self, ...)
-        end)
-        
-        setreadonly(mt, true)
-    end
-    
-    local function microStepTP(targetCFrame)
-        if not root or not root.Parent then
-            char = player.Character or player.CharacterAdded:Wait()
-            root = char:WaitForChild("HumanoidRootPart")
-        end
-        
-        local start = root.Position
-        local target = targetCFrame.Position
-        local distance = (target - start).Magnitude
-        local steps = math.ceil(distance / BYPASS_CONFIG.microStepSize)
-        
-        for i = 1, steps do
-            local alpha = i / steps
-            local newPos = start:Lerp(target, alpha)
-            local lookVector = (target - start).Unit
-            local newCFrame = CFrame.new(newPos, newPos + lookVector)
-            
-            root.CFrame = newCFrame
-            task.wait(BYPASS_CONFIG.microStepDelay)
-        end
-        
-        root.CFrame = targetCFrame
-    end
-    
-    local function safeTween(targetCFrame, customDuration)
-        if not root or not root.Parent then
-            char = player.Character or player.CharacterAdded:Wait()
-            root = char:WaitForChild("HumanoidRootPart")
-            humanoid = char:WaitForChild("Humanoid")
-        end
-        
-        local distance = (targetCFrame.Position - root.Position).Magnitude
-        
-        if BYPASS_CONFIG.useMicroStep or distance > BYPASS_CONFIG.microStepThreshold then
-            return microStepTP(targetCFrame)
-        end
-        
-        local duration = customDuration or math.random(
-            BYPASS_CONFIG.minTweenDuration * 100,
-            BYPASS_CONFIG.maxTweenDuration * 100
-        ) / 100
-        
-        local originalSpeed = humanoid.WalkSpeed
-        if BYPASS_CONFIG.useVelocitySpoof then
-            humanoid.WalkSpeed = BYPASS_CONFIG.velocitySpoofSpeed
-        end
-        
-        -- Heartbeat-driven tween bypass (prevents server cancel)
-        local startCF = root.CFrame
-        local startTime = tick()
-        local connection
-        
-        connection = RunService.Heartbeat:Connect(function()
-            local elapsed = tick() - startTime
-            local alpha = math.min(elapsed / duration, 1)
-            
-            -- Sine InOut easing
-            local easedAlpha = alpha < 0.5 
-                and 2 * alpha * alpha 
-                or 1 - math.pow(-2 * alpha + 2, 2) / 2
-            
-            if root and root.Parent then
-                root.CFrame = startCF:Lerp(targetCFrame, easedAlpha)
-            end
-            
-            if alpha >= 1 then
-                connection:Disconnect()
-            end
-        end)
-        
-        task.wait(duration)
-        if connection and connection.Connected then
-            connection:Disconnect()
-        end
-        
-        -- Force final position
-        if root and root.Parent then
-            root.CFrame = targetCFrame
-        end
-        
-        if BYPASS_CONFIG.useVelocitySpoof then
-            humanoid.WalkSpeed = originalSpeed
-        end
-        
-        local postDelay = math.random(
-            BYPASS_CONFIG.postTweenDelayMin * 100,
-            BYPASS_CONFIG.postTweenDelayMax * 100
-        ) / 100
-        task.wait(postDelay)
-    end
-    
-    local function tpToPosition(x, y, z)
-        local targetCFrame = CFrame.new(x, y, z)
-        safeTween(targetCFrame)
-    end
-    
-    local function tpToPart(part)
-        if not part or not part:IsA("BasePart") then
-            return
-        end
-        
-        local targetCFrame = part.CFrame + Vector3.new(0, 3, 0)
-        safeTween(targetCFrame)
-    end
-    
-    local function tpToNearestOre(oreType)
-        local workspace = game:GetService("Workspace")
-        local ores = workspace:FindFirstChild("Ores") or workspace
-        local nearest = nil
-        local minDist = math.huge
-        
-        for _, obj in pairs(ores:GetDescendants()) do
-            if obj:IsA("BasePart") then
-                if oreType and not obj.Name:lower():find(oreType:lower()) then
-                    continue
-                end
-                
-                local dist = (obj.Position - root.Position).Magnitude
-                if dist < minDist then
-                    minDist = dist
-                    nearest = obj
-                end
-            end
-        end
-        
-        if nearest then
-            tpToPart(nearest)
-            return nearest
-        else
-            return nil
-        end
-    end
-    
-    local function saveWaypoint(name, cframe)
-        cframe = cframe or root.CFrame
-        waypoints[name] = cframe
-    end
-    
-    local function tpToWaypoint(name)
-        local wp = waypoints[name]
-        if wp then
-            safeTween(wp)
-        end
-    end
-    
-    pcall(setupAntiCheatBypass)
-    
-    _G.UMTBypass = {
-        safeTween = safeTween,
-        microStepTP = microStepTP,
-        tpToPosition = tpToPosition,
-        tpToPart = tpToPart,
-        tpToNearestOre = tpToNearestOre,
-        saveWaypoint = saveWaypoint,
-        tpToWaypoint = tpToWaypoint,
-        config = BYPASS_CONFIG,
-        waypoints = waypoints,
-    }
-    
     -- ═══════════════════════════════════════════════════════════════
-    -- END TP BYPASS MODULE
+    -- NO TP / NO TWEEN POLICY (Current Patch Compatible)
+    -- ═══════════════════════════════════════════════════════════════
+    _G.UMTBypass = nil
     -- ═══════════════════════════════════════════════════════════════
     local function loadUmtHelper(relativePath)
-        local baseUrl = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/umt/"
-        local raw = game:HttpGet(baseUrl .. relativePath .. "?v=umt-modular-13")
+        local devUrl = "http://localhost:8999/modules/umt/" .. relativePath
+        local okDev, devRes = pcall(function()
+            return game:HttpGet(devUrl)
+        end)
+        if okDev and type(devRes) == "string" and #devRes > 50 and not devRes:sub(1, 15):find("<!DOCTYPE") then
+            local chunk, compileErr = loadstring(devRes)
+            if chunk then return chunk() end
+        end
+
+        local baseUrl = "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/umt/"
+        local raw = game:HttpGet(baseUrl .. relativePath .. "?v=" .. tostring(os.time()))
         local chunk, compileErr = loadstring(raw)
         assert(chunk, "compile helper failed (" .. relativePath .. "): " .. tostring(compileErr))
         return chunk()
@@ -301,11 +108,14 @@ return function(Window, scriptInfo)
         return {
             settingsVersion = CURRENT_SETTINGS_VERSION,
             autoMineEnabled = false,
-            autoMineRange = 10,
-            autoMineDelay = 1.2,
+            autoMineRange = 25,
+            autoMineDelay = 0,
+            instantMine = true,
+            onlyOres = true,
+            mineAnyOre = true,
             forceMineDamage = 0,
             forceMineMadCommId = 0,
-            safeProfileEnabled = true,
+            safeProfileEnabled = false,
             safeNearbyPauseEnabled = true,
             safeNearbyRadius = 70,
             safeSellCooldown = 6,
@@ -401,6 +211,15 @@ return function(Window, scriptInfo)
             autoSettingsLoaded.autoMineEnabled = decoded.autoMineEnabled == true
             autoSettingsLoaded.autoMineRange = tonumber(decoded.autoMineRange) or autoSettingsLoaded.autoMineRange
             autoSettingsLoaded.autoMineDelay = tonumber(decoded.autoMineDelay) or autoSettingsLoaded.autoMineDelay
+            if decoded.instantMine ~= nil then
+                autoSettingsLoaded.instantMine = decoded.instantMine == true
+            end
+            if decoded.onlyOres ~= nil then
+                autoSettingsLoaded.onlyOres = decoded.onlyOres == true
+            end
+            if decoded.mineAnyOre ~= nil then
+                autoSettingsLoaded.mineAnyOre = decoded.mineAnyOre == true
+            end
             autoSettingsLoaded.forceMineDamage = tonumber(decoded.forceMineDamage) or autoSettingsLoaded.forceMineDamage
             autoSettingsLoaded.forceMineMadCommId = tonumber(decoded.forceMineMadCommId) or autoSettingsLoaded.forceMineMadCommId
             if decoded.safeProfileEnabled ~= nil then
@@ -611,59 +430,15 @@ return function(Window, scriptInfo)
             end
 
             local oreCountBefore = countCarriedOres(player)
-            
-            -- Find TP target
-            local tpTarget = nil
-            if positionCargoVolume and positionCargoVolume:IsA("BasePart") then
-                tpTarget = positionCargoVolume
-            elseif cargoPrompt.Parent and cargoPrompt.Parent:IsA("BasePart") then
-                tpTarget = cargoPrompt.Parent
-            elseif cargoPrompt.Parent and cargoPrompt.Parent.Parent and cargoPrompt.Parent.Parent:IsA("BasePart") then
-                tpTarget = cargoPrompt.Parent.Parent
-            end
-            
-            if not tpTarget then
-                return false, "No valid TP target found for CargoVolume!", oreCountBefore
-            end
-            
-            -- NUCLEAR: Direct instant TP + forced wait for replication
-            local targetCF = tpTarget.CFrame * CFrame.new(0, 2, 0)
-            
-            local ok, tpErr = pcall(function()
-                if not root or not root.Parent then
-                    char = player.Character or player.CharacterAdded:Wait()
-                    root = char:WaitForChild("HumanoidRootPart")
-                end
-                
-                -- Instant teleport
-                root.CFrame = targetCF
-                
-                -- Force physics update
-                root.Velocity = Vector3.new(0, 0, 0)
-                root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-                
-                -- Wait for server replication (critical)
-                task.wait(0.3)
-            end)
-            
-            if not ok then
-                return false, "TP to sell location failed: " .. tostring(tpErr), oreCountBefore
-            end
-            
-            -- Double check we're close enough
-            if root and (root.Position - tpTarget.Position).Magnitude > 50 then
-                -- Force position again if server rejected first TP
-                pcall(function()
-                    root.CFrame = targetCF
-                    task.wait(0.2)
-                end)
-            end
-            
-            -- Now physically trigger the prompt
+
             local oldHold = cargoPrompt.HoldDuration
+            local oldDistance = cargoPrompt.MaxActivationDistance
+            local oldLos = cargoPrompt.RequiresLineOfSight
             
             pcall(function()
                 cargoPrompt.HoldDuration = 0
+                cargoPrompt.MaxActivationDistance = math.max(1024, tonumber(oldDistance) or 0)
+                cargoPrompt.RequiresLineOfSight = false
             end)
             
             local okFire, fireErr = pcall(function()
@@ -672,6 +447,8 @@ return function(Window, scriptInfo)
             
             pcall(function()
                 cargoPrompt.HoldDuration = oldHold
+                cargoPrompt.MaxActivationDistance = oldDistance
+                cargoPrompt.RequiresLineOfSight = oldLos
             end)
 
             if not okFire then
@@ -2555,6 +2332,20 @@ return function(Window, scriptInfo)
                         end
                         local dist = (hrp.Position - pos).Magnitude
                         if not dist then continue end
+                        -- Distance culling: purge distant visuals so thousands of 3D instances don't accumulate
+                        if dist > (ESP.maxDistance + 60) then
+                            if espRuntimeHelper and type(espRuntimeHelper.destroyVisualEntry) == "function" then
+                                espRuntimeHelper.destroyVisualEntry(v)
+                            else
+                                if v.visual and v.visual.Parent then pcall(function() v.visual:Destroy() end) end
+                                if v.billboard and v.billboard.Parent then pcall(function() v.billboard:Destroy() end) end
+                            end
+                            ESP.activeVisuals[target] = nil
+                            if renderPart and ESP.activeRenderParts[renderPart] == target then
+                                ESP.activeRenderParts[renderPart] = nil
+                            end
+                            continue
+                        end
                         local visible = dist <= ESP.maxDistance
                         if espRuntimeHelper and type(espRuntimeHelper.setVisualVisibility) == "function" then
                             espRuntimeHelper.setVisualVisibility(v, visible)
@@ -2698,16 +2489,12 @@ return function(Window, scriptInfo)
         local function clearAutoMineTargetVisual()
             autoMineTargetAdornee = nil
             if autoMineHighlightInst then
-                pcall(function()
-                    autoMineHighlightInst:Destroy()
-                end)
-                autoMineHighlightInst = nil
+                autoMineHighlightInst.Adornee = nil
+                autoMineHighlightInst.Enabled = false
             end
             if autoMineBillboardInst then
-                pcall(function()
-                    autoMineBillboardInst:Destroy()
-                end)
-                autoMineBillboardInst = nil
+                autoMineBillboardInst.Adornee = nil
+                autoMineBillboardInst.Enabled = false
             end
         end
 
@@ -2717,9 +2504,7 @@ return function(Window, scriptInfo)
                 return
             end
             local adornee = nil
-            if targetModel:IsA("Model") then
-                adornee = targetModel
-            elseif targetModel:IsA("BasePart") then
+            if targetModel:IsA("Model") or targetModel:IsA("BasePart") then
                 adornee = targetModel
             elseif renderPart and renderPart:IsA("BasePart") and renderPart.Parent then
                 adornee = renderPart
@@ -2730,21 +2515,24 @@ return function(Window, scriptInfo)
                 clearAutoMineTargetVisual()
                 return
             end
-            if autoMineTargetAdornee == adornee and autoMineHighlightInst and autoMineHighlightInst.Parent then
+            if autoMineTargetAdornee == adornee and autoMineHighlightInst and autoMineHighlightInst.Enabled then
                 return
             end
-            clearAutoMineTargetVisual()
             autoMineTargetAdornee = adornee
-            local hl = Instance.new("Highlight")
-            hl.Name = "RavenHub_AutoMineMarker"
-            hl.Adornee = adornee
-            hl.FillColor = Color3.fromRGB(55, 255, 130)
-            hl.OutlineColor = Color3.fromRGB(255, 220, 50)
-            hl.FillTransparency = 0.74
-            hl.OutlineTransparency = 0.12
-            hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-            hl.Parent = workspace
-            autoMineHighlightInst = hl
+
+            if not autoMineHighlightInst or not autoMineHighlightInst.Parent then
+                local hl = Instance.new("Highlight")
+                hl.Name = "RavenHub_AutoMineMarker"
+                hl.FillColor = Color3.fromRGB(55, 255, 130)
+                hl.OutlineColor = Color3.fromRGB(255, 220, 50)
+                hl.FillTransparency = 0.74
+                hl.OutlineTransparency = 0.12
+                hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                hl.Parent = workspace
+                autoMineHighlightInst = hl
+            end
+            autoMineHighlightInst.Adornee = adornee
+            autoMineHighlightInst.Enabled = true
 
             local partForBillboard = renderPart
             if not partForBillboard or not partForBillboard.Parent or not partForBillboard:IsA("BasePart") then
@@ -2755,37 +2543,51 @@ return function(Window, scriptInfo)
                 end
             end
             if partForBillboard and partForBillboard.Parent then
-                local bb = Instance.new("BillboardGui")
-                bb.Name = "RavenHub_AutoMineTag"
-                bb.AlwaysOnTop = true
-                bb.Size = UDim2.new(0, 132, 0, 34)
-                bb.StudsOffsetWorldSpace = Vector3.new(0, 2.9, 0)
-                bb.MaxDistance = 420
-                bb.LightInfluence = 0
-                bb.Parent = partForBillboard
-                autoMineBillboardInst = bb
-                local frame = Instance.new("Frame")
-                frame.Size = UDim2.new(1, 0, 1, 0)
-                frame.BackgroundColor3 = Color3.fromRGB(22, 95, 58)
-                frame.BackgroundTransparency = 0.12
-                frame.BorderSizePixel = 0
-                frame.Parent = bb
-                local corner = Instance.new("UICorner")
-                corner.CornerRadius = UDim.new(0, 7)
-                corner.Parent = frame
-                local stroke = Instance.new("UIStroke")
-                stroke.Color = Color3.fromRGB(255, 230, 80)
-                stroke.Thickness = 1.5
-                stroke.Parent = frame
-                local tl = Instance.new("TextLabel")
-                tl.Size = UDim2.new(1, -8, 1, -6)
-                tl.Position = UDim2.new(0, 4, 0, 3)
-                tl.BackgroundTransparency = 1
-                tl.Font = Enum.Font.GothamBold
-                tl.TextSize = 15
-                tl.TextColor3 = Color3.new(1, 1, 1)
-                tl.Text = "⛏ AUTO MINE"
-                tl.Parent = frame
+                if not autoMineBillboardInst or not autoMineBillboardInst.Parent then
+                    local bb = Instance.new("BillboardGui")
+                    bb.Name = "RavenHub_AutoMineTag"
+                    bb.AlwaysOnTop = true
+                    bb.Size = UDim2.new(0, 132, 0, 34)
+                    bb.StudsOffsetWorldSpace = Vector3.new(0, 2.9, 0)
+                    bb.MaxDistance = 420
+                    bb.LightInfluence = 0
+                    bb.Parent = workspace
+
+                    local frame = Instance.new("Frame")
+                    frame.Size = UDim2.new(1, 0, 1, 0)
+                    frame.BackgroundColor3 = Color3.fromRGB(22, 95, 58)
+                    frame.BackgroundTransparency = 0.12
+                    frame.BorderSizePixel = 0
+                    frame.Parent = bb
+
+                    local corner = Instance.new("UICorner")
+                    corner.CornerRadius = UDim.new(0, 7)
+                    corner.Parent = frame
+
+                    local stroke = Instance.new("UIStroke")
+                    stroke.Color = Color3.fromRGB(255, 230, 80)
+                    stroke.Thickness = 1.5
+                    stroke.Parent = frame
+
+                    local tl = Instance.new("TextLabel")
+                    tl.Size = UDim2.new(1, -8, 1, -6)
+                    tl.Position = UDim2.new(0, 4, 0, 3)
+                    tl.BackgroundTransparency = 1
+                    tl.Font = Enum.Font.GothamBold
+                    tl.TextSize = 15
+                    tl.TextColor3 = Color3.new(1, 1, 1)
+                    tl.Text = "⛏ AUTO MINE"
+                    tl.Parent = frame
+
+                    autoMineBillboardInst = bb
+                end
+                autoMineBillboardInst.Adornee = partForBillboard
+                autoMineBillboardInst.Enabled = true
+            else
+                if autoMineBillboardInst then
+                    autoMineBillboardInst.Adornee = nil
+                    autoMineBillboardInst.Enabled = false
+                end
             end
         end
     
@@ -2793,6 +2595,9 @@ return function(Window, scriptInfo)
         local autoMineThread
         local autoMineRange = math.clamp(autoSettingsLoaded.autoMineRange, 5, 50)
         local autoMineDelay = math.clamp(autoSettingsLoaded.autoMineDelay, 0, 5)
+        local instantMineEnabled = autoSettingsLoaded.instantMine ~= false
+        local onlyOresEnabled = autoSettingsLoaded.onlyOres ~= false
+        local mineAnyOreEnabled = autoSettingsLoaded.mineAnyOre ~= false
         local forceMineDamage = math.clamp(tonumber(autoSettingsLoaded.forceMineDamage) or 0, 0, 5000)
         local forceMineMadCommId = math.max(0, math.floor(tonumber(autoSettingsLoaded.forceMineMadCommId) or 0))
         local safeProfileEnabled = autoSettingsLoaded.safeProfileEnabled ~= false
@@ -2811,6 +2616,9 @@ return function(Window, scriptInfo)
                 autoMineEnabled = autoMineEnabled,
                 autoMineRange = autoMineRange,
                 autoMineDelay = autoMineDelay,
+                instantMine = instantMineEnabled,
+                onlyOres = onlyOresEnabled,
+                mineAnyOre = mineAnyOreEnabled,
                 forceMineDamage = forceMineDamage,
                 forceMineMadCommId = forceMineMadCommId,
                 safeProfileEnabled = safeProfileEnabled,
@@ -2885,6 +2693,9 @@ return function(Window, scriptInfo)
             workspaceService = workspace,
             range = autoMineRange,
             delay = autoMineDelay,
+            instantMine = instantMineEnabled,
+            onlyOres = onlyOresEnabled,
+            mineAnyOre = mineAnyOreEnabled,
             forceDamage = forceMineDamage,
             forceMadCommId = forceMineMadCommId,
             safeProfile = safeProfileEnabled,
@@ -3419,8 +3230,10 @@ return function(Window, scriptInfo)
                         end
 
                         local function pickaxeCanMineOre(pickaxeDamage, economy)
+                            if mineAnyOreEnabled ~= false then
+                                return true
+                            end
                             if forceMineDamage > 0 then
-                                -- Force mode is for packet compatibility debugging; let server decide validity.
                                 return true
                             end
                             if type(economy) ~= "table" then return true end
@@ -3705,19 +3518,7 @@ return function(Window, scriptInfo)
                                         continue
                                     end
                                     
-                                    -- ═══════════════════════════════════════════════════════════════
-                                    -- AUTO-TP TO ORE IF TOO FAR (BYPASS ENABLED)
-                                    -- ═══════════════════════════════════════════════════════════════
-                                    if autoSettingsLoaded.autoTpToOre and root and root.Position and renderPart and renderPart.Position then
-                                        local dist = (root.Position - renderPart.Position).Magnitude
-                                        if dist > autoMineRange then
-                                            pcall(function()
-                                                _G.UMTBypass.tpToPart(renderPart)
-                                            end)
-                                            task.wait(0.2) -- stabilization delay after TP
-                                        end
-                                    end
-                                    -- ═══════════════════════════════════════════════════════════════
+
                                     
                                     setAutoMineTargetVisual(closestBlock, renderPart)
                                     local oreName = getOreNameForEsp(closestBlock, renderPart)
@@ -3856,6 +3657,20 @@ return function(Window, scriptInfo)
                                         task.wait(math.max(0.03, minReadyAt - now))
                                         continue
                                     end
+                                    local cellInt = nil
+                                    if autoMineHelper and type(autoMineHelper.getOreCell) == "function" then
+                                        cellInt = autoMineHelper.getOreCell(renderPart)
+                                    else
+                                        local terrain = workspace:FindFirstChildOfClass("Terrain")
+                                        if terrain and renderPart and renderPart.Position then
+                                            cellInt = terrain:WorldToCell(renderPart.Position)
+                                        end
+                                    end
+                                    if not cellInt and renderPart and renderPart.Position then
+                                        local wp = renderPart.Position
+                                        cellInt = Vector3int16.new(math.floor(wp.X), math.floor(wp.Y), math.floor(wp.Z))
+                                    end
+
                                     if inVehicleDrill then
                                         local drillActivateRemote, drillMineRemote, drillCollectToggleRemote = resolveDrillRemotes()
                                         if drillActivateRemote and drillMineRemote then
@@ -3873,28 +3688,48 @@ return function(Window, scriptInfo)
                                                     drillCollectDisabled = true
                                                 end
                                             end
-                                            local activateNonce = nextDrillPacketNonce(5)
-                                            local mineNonce = nextDrillPacketNonce(5)
                                             local okFire = pcall(function()
-                                                drillActivateRemote:FireServer(activateNonce, true)
-                                                drillMineRemote:FireServer(mineNonce, gridForRemote)
+                                                if drillActivateRemote:IsA("RemoteFunction") then
+                                                    drillActivateRemote:InvokeServer(true)
+                                                else
+                                                    drillActivateRemote:FireServer(true)
+                                                end
+                                                if drillMineRemote:IsA("RemoteFunction") then
+                                                    drillMineRemote:InvokeServer(cellInt)
+                                                else
+                                                    drillMineRemote:FireServer(cellInt)
+                                                end
                                             end)
                                             firedOk = okFire
                                             fireFailed = not okFire
                                             mineModeText = "drill"
                                         end
                                     else
-                                        local activateRemote = pickMineActivateRemoteAlternateDiscovered(Tool)
-                                        local args = { pickaxeDamage, gridForRemote }
-                                        if activateRemote then
+                                        local pickaxeComp = autoMineHelper and type(autoMineHelper.getPickaxeComponent) == "function" and autoMineHelper.getPickaxeComponent(player) or nil
+                                        if pickaxeComp and pickaxeComp.ActivateRemote then
                                             attemptedFire = true
-                                            firedActivateRemote = activateRemote
-                                            ensureRemoteClientDrain(activateRemote)
+                                            firedActivateRemote = pickaxeComp.ActivateRemote._Remote
                                             local okFire = pcall(function()
-                                                activateRemote:FireServer(table.unpack(args))
+                                                pickaxeComp.ActivateRemote:InvokeServer(cellInt)
                                             end)
                                             firedOk = okFire
                                             fireFailed = not okFire
+                                        else
+                                            local activateRemote = pickMineActivateRemoteAlternateDiscovered(Tool)
+                                            if activateRemote then
+                                                attemptedFire = true
+                                                firedActivateRemote = activateRemote
+                                                ensureRemoteClientDrain(activateRemote)
+                                                local okFire = pcall(function()
+                                                    if activateRemote:IsA("RemoteFunction") then
+                                                        activateRemote:InvokeServer(cellInt)
+                                                    else
+                                                        activateRemote:FireServer(cellInt)
+                                                    end
+                                                end)
+                                                firedOk = okFire
+                                                fireFailed = not okFire
+                                            end
                                         end
                                     end
                                     if firedOk then
@@ -3939,13 +3774,19 @@ return function(Window, scriptInfo)
                                         clearAutoMineTargetVisual()
                                         resetTargetLock()
                                     end
-                                    local waitDelay = autoMineDelay
-                                    if safeProfileEnabled then
+                                    local waitDelay = tonumber(autoMineDelay) or 0
+                                    if instantMineEnabled == false and safeProfileEnabled then
                                         waitDelay = math.max(waitDelay, 0.45) + randomRange(0.06, 0.38)
+                                        waitDelay = math.max(waitDelay, adaptiveMinInterval)
+                                    elseif instantMineEnabled ~= false then
+                                        waitDelay = math.max(0, waitDelay)
                                     end
-                                    waitDelay = math.max(waitDelay, adaptiveMinInterval)
                                     nextMineAllowedAt = os.clock() + waitDelay
-                                    task.wait(waitDelay)
+                                    if waitDelay > 0 then
+                                        task.wait(waitDelay)
+                                    else
+                                        task.wait(0.01)
+                                    end
                                     continue
                                 else
                                     clearAutoMineTargetVisual()
@@ -3959,11 +3800,15 @@ return function(Window, scriptInfo)
                                 end
                             end
                             if noTargetMode then
-                                if safeProfileEnabled then
+                                if instantMineEnabled ~= false then
+                                    task.wait(0.05)
+                                elseif safeProfileEnabled then
                                     task.wait(math.max(noTargetLoopSleep, randomRange(0.12, 0.22)))
                                 else
                                     task.wait(noTargetLoopSleep)
                                 end
+                            elseif instantMineEnabled ~= false then
+                                task.wait(0.01)
                             elseif safeProfileEnabled then
                                 task.wait(randomRange(0.06, 0.14))
                             else
@@ -4013,6 +3858,36 @@ return function(Window, scriptInfo)
             Callback = function(Value)
                 autoMineDelay = Value
                 autoMineCtx.delay = Value
+                saveAutoSettings()
+            end,
+        })
+        Farm:CreateToggle({
+            Name = "⚡ Instant Mine (No Lag)",
+            CurrentValue = instantMineEnabled,
+            Flag = "InstantMine",
+            Callback = function(Value)
+                instantMineEnabled = Value
+                autoMineCtx.instantMine = Value
+                saveAutoSettings()
+            end,
+        })
+        Farm:CreateToggle({
+            Name = "💎 Only Ores (Never Mine Dirt/Stone)",
+            CurrentValue = onlyOresEnabled,
+            Flag = "OnlyOres",
+            Callback = function(Value)
+                onlyOresEnabled = Value
+                autoMineCtx.onlyOres = Value
+                saveAutoSettings()
+            end,
+        })
+        Farm:CreateToggle({
+            Name = "⛏️ Mine Any Ore (Bypass Pickaxe Req)",
+            CurrentValue = mineAnyOreEnabled,
+            Flag = "MineAnyOre",
+            Callback = function(Value)
+                mineAnyOreEnabled = Value
+                autoMineCtx.mineAnyOre = Value
                 saveAutoSettings()
             end,
         })
@@ -4813,149 +4688,7 @@ return function(Window, scriptInfo)
             end,
         })
     
-        -- ═══════════════════════════════════════════════════════════════
-        -- TP/TWEEN SYSTEM UI (BYPASS ENABLED)
-        -- ═══════════════════════════════════════════════════════════════
-        
-        Farm:CreateSection("Teleport System")
-        
-        Farm:CreateButton({
-            Name = "TP to Nearest Ore",
-            Callback = function()
-                local ore = _G.UMTBypass.tpToNearestOre()
-                if ore then
-                    Rayfield:Notify({
-                        Title = "Teleport",
-                        Content = "Warped to: " .. ore.Name,
-                        Duration = 2,
-                    })
-                else
-                    Rayfield:Notify({
-                        Title = "Teleport Failed",
-                        Content = "No ore found nearby",
-                        Duration = 2,
-                    })
-                end
-            end,
-        })
-        
-        Farm:CreateButton({
-            Name = "Save Current Position",
-            Callback = function()
-                local waypointName = "wp_" .. tostring(#_G.UMTBypass.waypoints + 1)
-                _G.UMTBypass.saveWaypoint(waypointName)
-                Rayfield:Notify({
-                    Title = "Waypoint Saved",
-                    Content = "Saved as: " .. waypointName,
-                    Duration = 2,
-                })
-            end,
-        })
-        
-        Farm:CreateButton({
-            Name = "List Saved Waypoints",
-            Callback = function()
-                local count = 0
-                for name, _ in pairs(_G.UMTBypass.waypoints) do
-                    count = count + 1
-                    print("[Waypoint] " .. name)
-                end
-                Rayfield:Notify({
-                    Title = "Waypoints",
-                    Content = "Total saved: " .. count .. " (check console)",
-                    Duration = 3,
-                })
-            end,
-        })
-        
-        Farm:CreateInput({
-            Name = "TP to Waypoint (name)",
-            PlaceholderText = "Enter waypoint name",
-            RemoveTextAfterFocusLost = false,
-            Callback = function(text)
-                if text and text ~= "" then
-                    _G.UMTBypass.tpToWaypoint(text)
-                    Rayfield:Notify({
-                        Title = "Teleport",
-                        Content = "Attempting TP to: " .. text,
-                        Duration = 2,
-                    })
-                end
-            end,
-        })
-        
-        Farm:CreateSection("Advanced TP Settings")
-        
-        Farm:CreateSlider({
-            Name = "Tween Speed (Duration)",
-            Range = {0.3, 3.0},
-            Increment = 0.1,
-            Suffix = "s",
-            CurrentValue = _G.UMTBypass.config.minTweenDuration,
-            Callback = function(value)
-                _G.UMTBypass.config.minTweenDuration = value
-                _G.UMTBypass.config.maxTweenDuration = value + 0.5
-                Rayfield:Notify({
-                    Title = "Tween Speed Updated",
-                    Content = "Duration: " .. value .. "s - " .. (value + 0.5) .. "s",
-                    Duration = 2,
-                })
-            end,
-        })
-        
-        Farm:CreateToggle({
-            Name = "Use Micro-Step Mode",
-            CurrentValue = _G.UMTBypass.config.useMicroStep,
-            Flag = "UseMicroStep",
-            Callback = function(value)
-                _G.UMTBypass.config.useMicroStep = value
-                Rayfield:Notify({
-                    Title = "Micro-Step Mode",
-                    Content = value and "Enabled (safer, slower)" or "Disabled (faster)",
-                    Duration = 2,
-                })
-            end,
-        })
-        
-        Farm:CreateToggle({
-            Name = "Velocity Spoofing",
-            CurrentValue = _G.UMTBypass.config.useVelocitySpoof,
-            Flag = "VelocitySpoof",
-            Callback = function(value)
-                _G.UMTBypass.config.useVelocitySpoof = value
-                Rayfield:Notify({
-                    Title = "Velocity Spoofing",
-                    Content = value and "Enabled" or "Disabled",
-                    Duration = 2,
-                })
-            end,
-        })
-        
-        Farm:CreateToggle({
-            Name = "Auto-TP to Ore While Farming",
-            CurrentValue = autoSettingsLoaded.autoTpToOre or false,
-            Flag = "AutoTpToOre",
-            Callback = function(value)
-                autoSettingsLoaded.autoTpToOre = value
-                Rayfield:Notify({
-                    Title = "Auto-TP to Ore",
-                    Content = value and "Enabled (auto-farms distant ore)" or "Disabled",
-                    Duration = 2,
-                })
-                if saveAutoSettings then
-                    saveAutoSettings()
-                end
-            end,
-        })
-        
-        Farm:CreateParagraph({
-            Title = "TP Bypass Info",
-            Content = "Anti-detection enabled. Use Micro-Step for extreme safety. Increase Tween Duration if detected. Auto-TP works with Auto Mine."
-        })
-        
-        -- ═══════════════════════════════════════════════════════════════
-        -- END TP/TWEEN UI
-        -- ═══════════════════════════════════════════════════════════════
+
 
 
         local function destroyScript()

@@ -121,6 +121,77 @@ function AutoMineSystem.resolveToolMadCommId(tool)
     return nil
 end
 
+-- ============================================================
+-- CURRENT PATCH: ToolBase & PickaxeClient Native Integration
+-- ============================================================
+function AutoMineSystem.ensurePickaxeEquipped(localPlayer)
+    local character = localPlayer and localPlayer.Character
+    if not character then return end
+    for _, model in ipairs(character:GetChildren()) do
+        if model:IsA("Model") and model:FindFirstChild("EquipRemote") and model:GetAttribute("ToolId") then
+            if model:GetAttribute("Equipped") ~= true then
+                pcall(function()
+                    model.EquipRemote:FireServer(true)
+                end)
+            end
+        end
+    end
+end
+
+function AutoMineSystem.getPickaxeComponent(localPlayer)
+    local RS = game:GetService("ReplicatedStorage")
+    local packages = RS:FindFirstChild("Packages")
+    local innoTools = packages and packages:FindFirstChild("InnoTools")
+    local toolBaseMod = innoTools and innoTools:FindFirstChild("ToolBase")
+    if not toolBaseMod then return nil end
+
+    local ok, ToolBase = pcall(require, toolBaseMod)
+    if not ok or type(ToolBase) ~= "table" or not ToolBase.ToolsByModel then return nil end
+
+    local character = localPlayer and localPlayer.Character
+    if not character then return nil end
+
+    for model, obj in pairs(ToolBase.ToolsByModel) do
+        if obj.EquippedCharacter == character then
+            local comp = obj.FindComponentByName and obj:FindComponentByName("PickaxeClient")
+            if comp then
+                return comp, obj
+            end
+        end
+    end
+    return nil
+end
+
+function AutoMineSystem.getPickaxeRange(localPlayer)
+    local comp, obj = AutoMineSystem.getPickaxeComponent(localPlayer)
+    if obj and obj.Definition and obj.Definition.Stats and obj.Definition.Stats.Range then
+        local r = tonumber(obj.Definition.Stats.Range)
+        if r and r > 0 then return r end
+    end
+    if comp and comp.Tool and comp.Tool.Definition and comp.Tool.Definition.Stats and comp.Tool.Definition.Stats.Range then
+        local r = tonumber(comp.Tool.Definition.Stats.Range)
+        if r and r > 0 then return r end
+    end
+    return 20
+end
+
+-- ============================================================
+-- CURRENT PATCH: Terrain WorldToCell Ore Mapping
+-- ============================================================
+function AutoMineSystem.getOreCell(renderPart)
+    if not renderPart then return nil end
+    local terrain = workspace.Terrain
+    if terrain and type(terrain.WorldToCell) == "function" then
+        return terrain:WorldToCell(renderPart.Position)
+    end
+    local pos = renderPart.Position
+    return Vector3int16.new(
+        math.floor(pos.X / 4),
+        math.floor(pos.Y / 4),
+        math.floor(pos.Z / 4)
+    )
+end
+
 function AutoMineSystem.mineGridForActivateRemote(gridPos)
     local x = math.floor(tonumber(gridPos.X or gridPos.x) or 0)
     local y = math.floor(tonumber(gridPos.Y or gridPos.y) or 0)
@@ -140,23 +211,67 @@ function AutoMineSystem.buildGridCandidates(primaryGridPos, renderPart)
         table.insert(candidates, vec)
     end
 
+    if renderPart then
+        local terrainCell = AutoMineSystem.getOreCell(renderPart)
+        if terrainCell then
+            addCandidate(terrainCell)
+        end
+    end
+
     addCandidate(primaryGridPos)
     if renderPart then
         local worldPos = renderPart.Position
         if worldPos then
             addCandidate(Vector3int16.new(
-                math.floor(worldPos.X),
-                math.floor(worldPos.Y),
-                math.floor(worldPos.Z)
-            ))
-            addCandidate(Vector3int16.new(
                 math.floor(worldPos.X / 4),
                 math.floor(worldPos.Y / 4),
                 math.floor(worldPos.Z / 4)
             ))
+            addCandidate(Vector3int16.new(
+                math.floor(worldPos.X),
+                math.floor(worldPos.Y),
+                math.floor(worldPos.Z)
+            ))
         end
     end
     return candidates
+end
+
+-- ============================================================
+-- CURRENT PATCH: Native Block Mining via PickaxeClient MineBlock
+-- ============================================================
+function AutoMineSystem.mineBlock(pickaxeComp, cellVector3int16)
+    if not cellVector3int16 then return false, "no cell" end
+    local cell = Vector3int16.new(cellVector3int16.X, cellVector3int16.Y, cellVector3int16.Z)
+
+    if pickaxeComp then
+        -- Primary: Native client MineBlock method (instantly updates client terrain, generates around, invokes server, handles rollback)
+        if type(pickaxeComp.MineBlock) == "function" then
+            local ok, res = pcall(function()
+                return pickaxeComp:MineBlock(Vector3.new(cell.X, cell.Y, cell.Z))
+            end)
+            if ok then
+                pcall(function()
+                    if pickaxeComp.BreakSound and type(pickaxeComp.BreakSound.Play) == "function" then
+                        pickaxeComp.BreakSound:Play()
+                    end
+                end)
+                return true, res
+            end
+        end
+
+        -- Secondary: InvokeServer on ActivateRemote (MadComm RemoteFunction wrapper)
+        if pickaxeComp.ActivateRemote and type(pickaxeComp.ActivateRemote.InvokeServer) == "function" then
+            local ok, promOrRes = pcall(function()
+                return pickaxeComp.ActivateRemote:InvokeServer(cell)
+            end)
+            if ok then
+                return true, promOrRes
+            end
+        end
+    end
+
+    return false, "no pickaxe component"
 end
 
 function AutoMineSystem.ensureRemoteClientDrain(remote, remoteClientDrainConnections, trackConnectionFn)
@@ -276,6 +391,80 @@ function AutoMineSystem.pickMineActivateRemoteAlternateDiscovered(tool, madCommE
         resolveToolMadCommIdFn,
         collectEntriesFn
     ), counter
+end
+
+function AutoMineSystem.getNearbyTerrainBlock(localPlayer, effectiveRange, isIgnoredOreFn, pickaxeDamage)
+    local RS = game:GetService("ReplicatedStorage")
+    local packages = RS:FindFirstChild("Packages")
+    local miningPkg = packages and packages:FindFirstChild("Mining")
+    local mineTerrainMod = miningPkg and miningPkg:FindFirstChild("MineTerrain")
+    if not mineTerrainMod then return nil end
+
+    local ok, MineTerrain = pcall(require, mineTerrainMod)
+    if not ok or not MineTerrain or type(MineTerrain.GetInstance) ~= "function" then return nil end
+
+    local inst = MineTerrain.GetInstance()
+    local char = localPlayer and localPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil end
+
+    local terrain = workspace.Terrain
+    if not terrain or type(terrain.WorldToCell) ~= "function" then return nil end
+
+    local playerCell = terrain:WorldToCell(hrp.Position)
+    local maxRadiusCells = math.clamp(math.floor((effectiveRange or 25) / 4), 1, 10)
+
+    local bestOreCell = nil
+    local bestOreDist = math.huge
+    local bestOreName = nil
+
+    local blockDefsMod = RS:FindFirstChild("Definitions") and RS.Definitions:FindFirstChild("BlockDefinitions")
+    local okDefs, BlockDefinitions = pcall(require, blockDefsMod)
+    local blockDefs = okDefs and BlockDefinitions or nil
+
+    for dy = -maxRadiusCells, maxRadiusCells do
+        for dx = -maxRadiusCells, maxRadiusCells do
+            for dz = -maxRadiusCells, maxRadiusCells do
+                local distSq = dx * dx + dy * dy + dz * dz
+                if distSq <= (maxRadiusCells * maxRadiusCells) then
+                    local cell = Vector3int16.new(playerCell.X + dx, playerCell.Y + dy, playerCell.Z + dz)
+                    local data = inst:Get(cell)
+                    -- MUST BE AN ORE: data.Ore is required! Never mine plain stone or boundary blocks
+                    if data and data.Ore and data.Block and data.Block ~= "Air" and data.Block ~= "BottomBoundary" and data.Block ~= "TopBoundary" and data.Block ~= "Ravine" and data.Block ~= "Cave" then
+                        local blockId = data.Ore
+                        local def = blockDefs and (blockDefs[blockId] or blockDefs[data.Block])
+                        -- Only consider blocks that have valid Hardness (minable)
+                        if not def or (def.Hardness and not (def.Types and def.Types.Boundary)) then
+                            local oreName = (def and def.Name) or blockId
+                            local ignored = false
+                            if type(isIgnoredOreFn) == "function" then
+                                ignored = isIgnoredOreFn(oreName) or isIgnoredOreFn(blockId)
+                            end
+                            if not ignored then
+                                local cellDist = math.sqrt(distSq) * 4
+                                if cellDist < bestOreDist then
+                                    bestOreDist = cellDist
+                                    bestOreCell = cell
+                                    bestOreName = oreName
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if bestOreCell then
+        return {
+            isTerrainCell = true,
+            cell = bestOreCell,
+            oreName = bestOreName,
+            dist = bestOreDist,
+        }
+    end
+
+    return nil
 end
 
 return AutoMineSystem

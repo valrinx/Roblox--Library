@@ -525,7 +525,10 @@ function AutoMineLoop.start(ctx)
     end
 
     local function pickaxeCanMineOre(pickaxeDamage, economy)
-        if ctx.forceDamage > 0 then
+        if ctx.mineAnyOre ~= false then
+            return true
+        end
+        if ctx.forceDamage and ctx.forceDamage > 0 then
             return true
         end
         if type(economy) ~= "table" then return true end
@@ -625,8 +628,37 @@ function AutoMineLoop.start(ctx)
         return table.find(ctx.oreIgnoreList, canonical) ~= nil or table.find(ctx.oreIgnoreList, oreName) ~= nil
     end
 
-    local function isTargetValid(target, rootPart, pickaxeDamage)
-        if not target or not target.Parent or not rootPart then
+    local function isTargetValid(target, rootPart, pickaxeDamage, effectiveRange)
+        if not target or not rootPart then
+            return false
+        end
+        if type(target) == "table" and target.isTerrainCell then
+            if not target.cell then return false end
+            local RS = game:GetService("ReplicatedStorage")
+            local packages = RS:FindFirstChild("Packages")
+            local miningPkg = packages and packages:FindFirstChild("Mining")
+            local mineTerrainMod = miningPkg and miningPkg:FindFirstChild("MineTerrain")
+            if mineTerrainMod then
+                local ok, MineTerrain = pcall(require, mineTerrainMod)
+                if ok and MineTerrain and type(MineTerrain.GetInstance) == "function" then
+                    local inst = MineTerrain.GetInstance()
+                    local d = inst:Get(target.cell)
+                    if not d or not d.Block or d.Block == "Air" then
+                        return false
+                    end
+                    if ctx.onlyOres ~= false and not d.Ore then
+                        return false
+                    end
+                end
+            end
+            local terrain = workspace.Terrain
+            local worldPos = terrain and terrain:CellCenterToWorld(target.cell.X, target.cell.Y, target.cell.Z)
+            if not worldPos then return false end
+            local dist = (rootPart.Position - worldPos).Magnitude
+            local maxRange = effectiveRange or (tonumber(ctx.range) or 25)
+            return dist <= maxRange
+        end
+        if not target.Parent then
             return false
         end
         local renderPart = ctx.getOreRenderPart(target)
@@ -642,11 +674,17 @@ function AutoMineLoop.start(ctx)
             return false
         end
         local dist = (rootPart.Position - renderPart.Position).Magnitude
-        return dist <= (ctx.range + 8)
+        local maxRange = effectiveRange or (ctx.range or 20)
+        return dist <= maxRange
     end
 
     local function markTargetLoop(target, renderPart)
-        local sig = ctx.makeOreSignature(target, renderPart) or tostring(target)
+        local sig = nil
+        if type(target) == "table" and target.isTerrainCell and target.cell then
+            sig = "terrain_" .. tostring(target.cell.X) .. "_" .. tostring(target.cell.Y) .. "_" .. tostring(target.cell.Z)
+        else
+            sig = ctx.makeOreSignature(target, renderPart) or tostring(target)
+        end
         if sig == lastTargetSignature then
             sameTargetLoops = sameTargetLoops + 1
         else
@@ -664,6 +702,9 @@ function AutoMineLoop.start(ctx)
     end
 
     local function getTargetKey(target, renderPart)
+        if type(target) == "table" and target.isTerrainCell and target.cell then
+            return "terrain_" .. tostring(target.cell.X) .. "_" .. tostring(target.cell.Y) .. "_" .. tostring(target.cell.Z)
+        end
         return ctx.makeOreSignature(target, renderPart) or tostring(target)
     end
 
@@ -743,6 +784,9 @@ function AutoMineLoop.start(ctx)
                     task.wait(randomRange(0.5, 1.0))
                     continue
                 end
+                local pickaxeMaxReach = (ctx.autoMineHelper and ctx.autoMineHelper.getPickaxeRange and ctx.autoMineHelper.getPickaxeRange(LocalPlayer)) or 25
+                local effectiveRange = inVehicleDrill and (tonumber(ctx.range) or 35) or (tonumber(ctx.range) or 25)
+
                 local pickaxeDamage = inVehicleDrill and 9999 or resolvePickaxeDamage(Tool)
                 if ctx.forceDamage > 0 then
                     pickaxeDamage = ctx.forceDamage
@@ -757,7 +801,7 @@ function AutoMineLoop.start(ctx)
                     nextContainersRefreshAt = now + 1.5
                 end
 
-                if isTargetValid(lockedTarget, root, pickaxeDamage) then
+                if isTargetValid(lockedTarget, root, pickaxeDamage, effectiveRange) then
                     closestBlock = lockedTarget
                     nextTargetSearchAt = now + targetSearchActiveInterval
                 else
@@ -780,7 +824,7 @@ function AutoMineLoop.start(ctx)
                                     local oreName = ctx.getOreNameForEsp(v, renderPart)
                                     if isIgnoredOre(oreName) then continue end
                                     local dist = (root.Position - renderPart.Position).Magnitude
-                                    if dist <= ctx.range then
+                                    if dist <= effectiveRange then
                                         anyInRange = true
                                         local economy = getOreEconomyForAutoMine(oreName, v, renderPart)
                                         if pickaxeCanMineOre(pickaxeDamage, economy) then
@@ -802,6 +846,13 @@ function AutoMineLoop.start(ctx)
                         if not closestBlock and anyInRange and not anyMineable then
                             weakPickaxeNoTargets = true
                         end
+                        if not closestBlock and not inVehicleDrill and ctx.autoMineHelper and type(ctx.autoMineHelper.getNearbyTerrainBlock) == "function" then
+                            local terrainTarget = ctx.autoMineHelper.getNearbyTerrainBlock(LocalPlayer, effectiveRange, isIgnoredOre, pickaxeDamage)
+                            if terrainTarget and terrainTarget.cell then
+                                closestBlock = terrainTarget
+                                closestDist = terrainTarget.dist
+                            end
+                        end
                         lockedTarget = closestBlock
                         if lockedTarget then
                             targetLockedAt = os.clock()
@@ -814,22 +865,30 @@ function AutoMineLoop.start(ctx)
                 end
 
                 if closestBlock then
-                    local renderPart = ctx.getOreRenderPart(closestBlock)
-                    if not renderPart or not renderPart.Parent then
+                    local isTerrain = type(closestBlock) == "table" and closestBlock.isTerrainCell == true
+                    local renderPart = nil
+                    if isTerrain then
                         if type(ctx.clearVisual) == "function" then
                             ctx.clearVisual()
                         end
-                        setAutoMineStatus("Auto Mine Status: switching ore (no render part)")
-                        resetTargetLock()
-                        task.wait(0.08)
-                        continue
+                    else
+                        renderPart = ctx.getOreRenderPart(closestBlock)
+                        if not renderPart or not renderPart.Parent then
+                            if type(ctx.clearVisual) == "function" then
+                                ctx.clearVisual()
+                            end
+                            setAutoMineStatus("Auto Mine Status: switching ore (no render part)")
+                            resetTargetLock()
+                            task.wait(0.08)
+                            continue
+                        end
+                        if type(ctx.setVisual) == "function" then
+                            ctx.setVisual(closestBlock, renderPart)
+                        end
                     end
-                    if type(ctx.setVisual) == "function" then
-                        ctx.setVisual(closestBlock, renderPart)
-                    end
-                    local oreName = ctx.getOreNameForEsp(closestBlock, renderPart)
+                    local oreName = isTerrain and (closestBlock.oreName or "Stone") or ctx.getOreNameForEsp(closestBlock, renderPart)
                     local targetKey = getTargetKey(closestBlock, renderPart)
-                    local targetDurability = getTargetDurability(closestBlock, renderPart)
+                    local targetDurability = isTerrain and 100 or getTargetDurability(closestBlock, renderPart)
                     if lastProgressTargetKey == targetKey
                         and lastProgressDurability ~= nil
                         and targetDurability ~= nil
@@ -851,7 +910,7 @@ function AutoMineLoop.start(ctx)
                             continue
                         end
                     end
-                    local adaptiveMinInterval = math.clamp(0.9 / math.max(1, pickaxeDamage), 0.08, 0.55)
+                    local adaptiveMinInterval = (ctx.instantMine ~= false) and 0 or math.clamp(0.9 / math.max(1, pickaxeDamage), 0.08, 0.55)
                     local elapsedOnTarget = (targetLockedAt > 0) and (os.clock() - targetLockedAt) or 0
                     local nowMine = os.clock()
                     local readyToFireAt = math.max(nextMineAllowedAt, lastMineFiredAt + adaptiveMinInterval)
@@ -867,7 +926,7 @@ function AutoMineLoop.start(ctx)
                             firedHitsOnTarget = 0
                         end
                     end
-                    if staleProgressHits > 0 then
+                    if staleProgressHits > 0 and ctx.instantMine == false then
                         adaptiveMinInterval = math.min(0.95, adaptiveMinInterval + (staleProgressHits * 0.06))
                     end
                     local expectedHits = nil
@@ -934,24 +993,29 @@ function AutoMineLoop.start(ctx)
                         task.wait(0.08)
                         continue
                     end
-                    local gridPos = getTargetGridPositionDeep(closestBlock, renderPart)
-                    if not gridPos then
-                        local worldPos = renderPart and renderPart.Position
-                        if not worldPos then
-                            if type(ctx.clearVisual) == "function" then
-                                ctx.clearVisual()
+                    local gridPos = nil
+                    if isTerrain then
+                        gridPos = closestBlock.cell
+                    else
+                        gridPos = getTargetGridPositionDeep(closestBlock, renderPart)
+                        if not gridPos then
+                            local worldPos = renderPart and renderPart.Position
+                            if not worldPos then
+                                if type(ctx.clearVisual) == "function" then
+                                    ctx.clearVisual()
+                                end
+                                setAutoMineStatus("Auto Mine Status: target no position")
+                                task.wait(0.03)
+                                continue
                             end
-                            setAutoMineStatus("Auto Mine Status: target no position")
-                            task.wait(0.03)
-                            continue
+                            gridPos = Vector3int16.new(
+                                math.floor(worldPos.X / 4),
+                                math.floor(worldPos.Y / 4),
+                                math.floor(worldPos.Z / 4)
+                            )
                         end
-                        gridPos = Vector3int16.new(
-                            math.floor(worldPos.X / 4),
-                            math.floor(worldPos.Y / 4),
-                            math.floor(worldPos.Z / 4)
-                        )
                     end
-                    local gridCandidates = buildGridCandidates(gridPos, renderPart)
+                    local gridCandidates = isTerrain and { closestBlock.cell } or buildGridCandidates(gridPos, renderPart)
                     local gridForRemote = gridCandidates[1] or mineGridForActivateRemote(gridPos)
                     if #gridCandidates >= 2 and staleProgressHits >= 2 then
                         local altIdx = (firedHitsOnTarget % #gridCandidates) + 1
@@ -965,7 +1029,7 @@ function AutoMineLoop.start(ctx)
                     local firedMineRemote = nil
                     local now = os.clock()
                     local minReadyAt = math.max(nextMineAllowedAt, lastMineFiredAt + adaptiveMinInterval)
-                    if now < minReadyAt then
+                    if ctx.instantMine == false and now < minReadyAt then
                         task.wait(math.max(0.03, minReadyAt - now))
                         continue
                     end
@@ -986,28 +1050,101 @@ function AutoMineLoop.start(ctx)
                                     drillCollectDisabled = true
                                 end
                             end
-                            local activateNonce = nextDrillPacketNonce(5)
-                            local mineNonce = nextDrillPacketNonce(5)
-                            local okFire = pcall(function()
-                                drillActivateRemote:FireServer(activateNonce, true)
-                                drillMineRemote:FireServer(mineNonce, gridForRemote)
-                            end)
+                            local cellInt = gridForRemote
+                            local okFire = false
+                            if type(drillMineRemote.InvokeServer) == "function" then
+                                okFire = pcall(function()
+                                    pcall(function() drillActivateRemote:InvokeServer(true) end)
+                                    drillMineRemote:InvokeServer(cellInt)
+                                end)
+                            end
+                            if not okFire then
+                                local activateNonce = nextDrillPacketNonce(5)
+                                local mineNonce = nextDrillPacketNonce(5)
+                                okFire = pcall(function()
+                                    drillActivateRemote:FireServer(activateNonce, true)
+                                    drillMineRemote:FireServer(mineNonce, cellInt)
+                                end)
+                            end
                             firedOk = okFire
                             fireFailed = not okFire
                             mineModeText = "drill"
                         end
                     else
-                        local activateRemote = pickMineActivateRemoteAlternateDiscovered(Tool)
-                        local args = { pickaxeDamage, gridForRemote }
-                        if activateRemote then
+                        local cellInt = gridForRemote
+                        -- Ensure pickaxe is equipped and valid
+                        local pickaxeComp = (ctx.autoMineHelper and ctx.autoMineHelper.getPickaxeComponent and ctx.autoMineHelper.getPickaxeComponent(LocalPlayer))
+                        if not pickaxeComp and ctx.autoMineHelper and type(ctx.autoMineHelper.ensurePickaxeEquipped) == "function" then
+                            ctx.autoMineHelper.ensurePickaxeEquipped(LocalPlayer)
+                            task.wait(0.08)
+                            pickaxeComp = ctx.autoMineHelper.getPickaxeComponent(LocalPlayer)
+                        end
+
+                        if pickaxeComp and ctx.autoMineHelper and type(ctx.autoMineHelper.mineBlock) == "function" then
                             attemptedFire = true
-                            firedActivateRemote = activateRemote
-                            ensureRemoteClientDrain(activateRemote)
-                            local okFire = pcall(function()
-                                activateRemote:FireServer(table.unpack(args))
-                            end)
-                            firedOk = okFire
-                            fireFailed = not okFire
+                            local okMine, res = ctx.autoMineHelper.mineBlock(pickaxeComp, cellInt)
+                            firedOk = okMine
+                            fireFailed = not okMine
+                            mineModeText = "pickaxe"
+                            if ctx.instantMine ~= false and firedOk and not isTerrain then
+                                local burstCount = 0
+                                local maxBurst = expectedHits and math.min(expectedHits + 2, 20) or 8
+                                while burstCount < maxBurst and closestBlock and closestBlock.Parent do
+                                    burstCount = burstCount + 1
+                                    local okB = ctx.autoMineHelper.mineBlock(pickaxeComp, cellInt)
+                                    if not okB then break end
+                                    task.wait(0.01)
+                                end
+                            end
+                        elseif pickaxeComp then
+                            attemptedFire = true
+                            if type(pickaxeComp.MineBlock) == "function" then
+                                local okMine = pcall(function()
+                                    return pickaxeComp:MineBlock(Vector3.new(cellInt.X, cellInt.Y, cellInt.Z))
+                                end)
+                                firedOk = okMine
+                                fireFailed = not okMine
+                            elseif pickaxeComp.ActivateRemote and type(pickaxeComp.ActivateRemote.InvokeServer) == "function" then
+                                local okInvoke = pcall(function()
+                                    return pickaxeComp.ActivateRemote:InvokeServer(cellInt)
+                                end)
+                                firedOk = okInvoke
+                                fireFailed = not okInvoke
+                            end
+                            mineModeText = "pickaxe"
+                            if ctx.instantMine ~= false and firedOk and not isTerrain then
+                                local burstCount = 0
+                                local maxBurst = expectedHits and math.min(expectedHits + 2, 20) or 8
+                                while burstCount < maxBurst and closestBlock and closestBlock.Parent do
+                                    burstCount = burstCount + 1
+                                    local okB = false
+                                    if type(pickaxeComp.MineBlock) == "function" then
+                                        okB = pcall(function() return pickaxeComp:MineBlock(Vector3.new(cellInt.X, cellInt.Y, cellInt.Z)) end)
+                                    elseif pickaxeComp.ActivateRemote then
+                                        okB = pcall(function() return pickaxeComp.ActivateRemote:InvokeServer(cellInt) end)
+                                    end
+                                    if not okB then break end
+                                    task.wait(0.01)
+                                end
+                            end
+                        end
+
+                        if not firedOk then
+                            local activateRemote = pickMineActivateRemoteAlternateDiscovered(Tool)
+                            if activateRemote then
+                                attemptedFire = true
+                                firedActivateRemote = activateRemote
+                                ensureRemoteClientDrain(activateRemote)
+                                local okFire = pcall(function()
+                                    if type(activateRemote.InvokeServer) == "function" then
+                                        return activateRemote:InvokeServer(cellInt)
+                                    else
+                                        return activateRemote:FireServer(pickaxeDamage, cellInt)
+                                    end
+                                end)
+                                firedOk = okFire
+                                fireFailed = not okFire
+                            end
                         end
                     end
                     if firedOk then
@@ -1038,14 +1175,9 @@ function AutoMineLoop.start(ctx)
                         setAutoMineStatus("Auto Mine Status: mining " .. tostring(oreName) .. " (" .. mineModeText .. " | dmg " .. tostring(math.floor(pickaxeDamage + 0.5)) .. hpText .. econText .. ")")
                     else
                         if attemptedFire and fireFailed then
-                            if inVehicleDrill then
-                                markMadCommRemoteInvalid(firedActivateRemote)
-                                markMadCommRemoteInvalid(firedMineRemote)
-                            else
-                                markMadCommRemoteInvalid(firedActivateRemote)
-                            end
+                            blockTargetTemporarily(closestBlock, renderPart, 2.0)
                             nextMineAllowedAt = os.clock() + remoteBackoffInterval
-                            setAutoMineStatus("Auto Mine Status: backoff (remote busy)")
+                            setAutoMineStatus("Auto Mine Status: backoff (skipping stuck block)")
                             task.wait(0.08)
                             continue
                         end
@@ -1055,13 +1187,19 @@ function AutoMineLoop.start(ctx)
                         end
                         resetTargetLock()
                     end
-                    local waitDelay = ctx.delay
-                    if ctx.safeProfile then
+                    local waitDelay = tonumber(ctx.delay) or 0
+                    if ctx.instantMine == false and ctx.safeProfile then
                         waitDelay = math.max(waitDelay, 0.45) + randomRange(0.06, 0.38)
+                        waitDelay = math.max(waitDelay, adaptiveMinInterval)
+                    elseif ctx.instantMine ~= false then
+                        waitDelay = math.max(0, waitDelay)
                     end
-                    waitDelay = math.max(waitDelay, adaptiveMinInterval)
                     nextMineAllowedAt = os.clock() + waitDelay
-                    task.wait(waitDelay)
+                    if waitDelay > 0 then
+                        task.wait(waitDelay)
+                    else
+                        task.wait(0.01)
+                    end
                     continue
                 else
                     if type(ctx.clearVisual) == "function" then
@@ -1077,11 +1215,15 @@ function AutoMineLoop.start(ctx)
                 end
             end
             if noTargetMode then
-                if ctx.safeProfile then
+                if ctx.instantMine ~= false then
+                    task.wait(0.05)
+                elseif ctx.safeProfile then
                     task.wait(math.max(noTargetLoopSleep, randomRange(0.12, 0.22)))
                 else
                     task.wait(noTargetLoopSleep)
                 end
+            elseif ctx.instantMine ~= false then
+                task.wait(0.01)
             elseif ctx.safeProfile then
                 task.wait(randomRange(0.06, 0.14))
             else

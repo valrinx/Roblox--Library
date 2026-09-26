@@ -448,9 +448,9 @@ local SCRIPTS = {
         name        = "Ultimate Mining Tycoon",
         description = "Auto Mine | Auto Sell | Ore ESP | Remote Utility",
         placeIds    = {18680867089},
-        gameIds     = {18680867089},
-        version     = "v1.2.0",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/umt/main.lua",
+        gameIds     = {18680867089, 6329693946},
+        version     = "v1.3.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/umt/main.lua",
     },
     {
         name        = "The Walking Dead Online 3",
@@ -1148,7 +1148,7 @@ local function loadScriptModule(scriptInfo)
 
     local ok, result = pcall(function()
         local raw
-        local modFile = scriptInfo.moduleUrl:match("modules/[%w_%.%-%%]+")
+        local modFile = scriptInfo.moduleUrl:match("modules/[^%?]+")
         if modFile then
             local devOk, devRes = pcall(function()
                 return game:HttpGet("http://localhost:8999/" .. modFile .. "?_cb=" .. tostring(os.time()))

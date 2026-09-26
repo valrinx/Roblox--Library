@@ -49,11 +49,14 @@ function Settings.buildDefaults(currentVersion)
     return {
         settingsVersion = tonumber(currentVersion) or 1,
         autoMineEnabled = false,
-        autoMineRange = 10,
-        autoMineDelay = 1.2,
+        autoMineRange = 25,
+        autoMineDelay = 0,
+        instantMine = true,
+        onlyOres = true,
+        mineAnyOre = true,
         forceMineDamage = 0,
         forceMineMadCommId = 0,
-        safeProfileEnabled = true,
+        safeProfileEnabled = false,
         safeNearbyPauseEnabled = true,
         safeNearbyRadius = 70,
         safeSellCooldown = 6,
@@ -123,6 +126,15 @@ function Settings.applyDecoded(defaults, decoded, currentVersion)
     defaults.autoMineEnabled = decoded.autoMineEnabled == true
     defaults.autoMineRange = tonumber(decoded.autoMineRange) or defaults.autoMineRange
     defaults.autoMineDelay = tonumber(decoded.autoMineDelay) or defaults.autoMineDelay
+    if decoded.instantMine ~= nil then
+        defaults.instantMine = decoded.instantMine == true
+    end
+    if decoded.onlyOres ~= nil then
+        defaults.onlyOres = decoded.onlyOres == true
+    end
+    if decoded.mineAnyOre ~= nil then
+        defaults.mineAnyOre = decoded.mineAnyOre == true
+    end
     defaults.forceMineDamage = tonumber(decoded.forceMineDamage) or defaults.forceMineDamage
     defaults.forceMineMadCommId = tonumber(decoded.forceMineMadCommId) or defaults.forceMineMadCommId
     if decoded.safeProfileEnabled ~= nil then

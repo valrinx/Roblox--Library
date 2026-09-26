@@ -107,6 +107,22 @@ function EspRuntime.scanAll(workspaceRef, applyTargetFn, resolveTargetFromInstan
 end
 
 function EspRuntime.createOreVisuals(renderPart, target, color, oreName, useAdornment, price)
+    -- Clean up any existing orphan visuals on renderPart or target first
+    if renderPart then
+        local oldBox = renderPart:FindFirstChild("UH_ESP_Box")
+        if oldBox then pcall(function() oldBox:Destroy() end) end
+        local oldHl = renderPart:FindFirstChild("UH_ESP_Highlight")
+        if oldHl then pcall(function() oldHl:Destroy() end) end
+        local oldBb = renderPart:FindFirstChild("UH_ESP_Billboard")
+        if oldBb then pcall(function() oldBb:Destroy() end) end
+    end
+    if target and target ~= renderPart then
+        local oldHl = target:FindFirstChild("UH_ESP_Highlight")
+        if oldHl then pcall(function() oldHl:Destroy() end) end
+        local oldBb = target:FindFirstChild("UH_ESP_Billboard")
+        if oldBb then pcall(function() oldBb:Destroy() end) end
+    end
+
     local visual = nil
     if useAdornment then
         local box = Instance.new("BoxHandleAdornment")

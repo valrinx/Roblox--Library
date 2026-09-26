@@ -1,5 +1,5 @@
 return function(Window, scriptInfo)
-    local BASE_URL = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/umt/"
+    local BASE_URL = "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/umt/"
 
     local function notify(message)
         local rayfield = scriptInfo and scriptInfo.hubRayfield
@@ -17,8 +17,17 @@ return function(Window, scriptInfo)
     end
 
     local function loadRemote(relativePath)
+        local devUrl = "http://localhost:8999/modules/umt/" .. relativePath
+        local okDev, devRes = pcall(function()
+            return game:HttpGet(devUrl)
+        end)
+        if okDev and type(devRes) == "string" and #devRes > 50 and not devRes:sub(1, 15):find("<!DOCTYPE") then
+            local chunk, compileErr = loadstring(devRes)
+            if chunk then return chunk() end
+        end
+
         local separator = string.find(relativePath, "?", 1, true) and "&" or "?"
-        local versionedPath = relativePath .. separator .. "v=umt-modular-1"
+        local versionedPath = relativePath .. separator .. "v=" .. tostring(os.time())
         local raw = game:HttpGet(BASE_URL .. versionedPath)
         local chunk, compileErr = loadstring(raw)
         assert(chunk, "compile failed for " .. relativePath .. ": " .. tostring(compileErr))
