@@ -240,6 +240,8 @@ end
 -- ============================================================
 -- CURRENT PATCH: Native Block Mining via PickaxeClient MineBlock
 -- ============================================================
+local lastBreakSoundAt = 0
+
 function AutoMineSystem.mineBlock(pickaxeComp, cellVector3int16)
     if not cellVector3int16 then return false, "no cell" end
     local cell = Vector3int16.new(cellVector3int16.X, cellVector3int16.Y, cellVector3int16.Z)
@@ -251,11 +253,15 @@ function AutoMineSystem.mineBlock(pickaxeComp, cellVector3int16)
                 return pickaxeComp:MineBlock(Vector3.new(cell.X, cell.Y, cell.Z))
             end)
             if ok then
-                pcall(function()
-                    if pickaxeComp.BreakSound and type(pickaxeComp.BreakSound.Play) == "function" then
-                        pickaxeComp.BreakSound:Play()
-                    end
-                end)
+                local now = os.clock()
+                if now - lastBreakSoundAt >= 0.12 then
+                    lastBreakSoundAt = now
+                    pcall(function()
+                        if pickaxeComp.BreakSound and type(pickaxeComp.BreakSound.Play) == "function" then
+                            pickaxeComp.BreakSound:Play()
+                        end
+                    end)
+                end
                 return true, res
             end
         end
@@ -393,6 +399,19 @@ function AutoMineSystem.pickMineActivateRemoteAlternateDiscovered(tool, madCommE
     ), counter
 end
 
+local _terrainScanCache = {
+    lastScanAt = 0,
+    lastPlayerPos = nil,
+    cells = {},
+    scanInterval = 0.35,
+}
+
+function AutoMineSystem.clearTerrainCache()
+    _terrainScanCache.lastScanAt = 0
+    _terrainScanCache.lastPlayerPos = nil
+    _terrainScanCache.cells = {}
+end
+
 function AutoMineSystem.getNearbyTerrainBlock(localPlayer, effectiveRange, isIgnoredOreFn, pickaxeDamage)
     local RS = game:GetService("ReplicatedStorage")
     local packages = RS:FindFirstChild("Packages")
@@ -411,22 +430,63 @@ function AutoMineSystem.getNearbyTerrainBlock(localPlayer, effectiveRange, isIgn
     local terrain = workspace.Terrain
     if not terrain or type(terrain.WorldToCell) ~= "function" then return nil end
 
-    local playerCell = terrain:WorldToCell(hrp.Position)
-    local maxRadiusCells = math.clamp(math.floor((effectiveRange or 25) / 4), 1, 10)
+    local now = os.clock()
+    local playerPos = hrp.Position
+    local maxRange = effectiveRange or 25
 
-    local bestOreCell = nil
-    local bestOreDist = math.huge
-    local bestOreName = nil
+    -- Fast-path: Check cached candidate cells before doing an expensive 3D loop
+    if #_terrainScanCache.cells > 0 and (now - _terrainScanCache.lastScanAt < _terrainScanCache.scanInterval) and _terrainScanCache.lastPlayerPos and (playerPos - _terrainScanCache.lastPlayerPos).Magnitude < 8 then
+        for i = #_terrainScanCache.cells, 1, -1 do
+            local item = _terrainScanCache.cells[i]
+            local d = inst:Get(item.cell)
+            if d and d.Ore and d.Block and d.Block ~= "Air" then
+                local ignored = false
+                if type(isIgnoredOreFn) == "function" then
+                    ignored = isIgnoredOreFn(item.oreName) or isIgnoredOreFn(d.Ore)
+                end
+                if not ignored then
+                    local worldPos = terrain:CellCenterToWorld(item.cell.X, item.cell.Y, item.cell.Z)
+                    local dist = (playerPos - worldPos).Magnitude
+                    if dist <= maxRange then
+                        return {
+                            isTerrainCell = true,
+                            cell = item.cell,
+                            oreName = item.oreName,
+                            dist = dist,
+                        }
+                    end
+                end
+            else
+                table.remove(_terrainScanCache.cells, i)
+            end
+        end
+    end
+
+    -- Throttle fresh full scans so we don't spam 2000+ checks every 10ms
+    if now - _terrainScanCache.lastScanAt < 0.25 and _terrainScanCache.lastPlayerPos and (playerPos - _terrainScanCache.lastPlayerPos).Magnitude < 4 then
+        return nil
+    end
+
+    _terrainScanCache.lastScanAt = now
+    _terrainScanCache.lastPlayerPos = playerPos
+    _terrainScanCache.cells = {}
+
+    local playerCell = terrain:WorldToCell(playerPos)
+    local maxRadiusCells = math.clamp(math.floor(maxRange / 4), 1, 8)
+    local maxDistSq = maxRadiusCells * maxRadiusCells
 
     local blockDefsMod = RS:FindFirstChild("Definitions") and RS.Definitions:FindFirstChild("BlockDefinitions")
     local okDefs, BlockDefinitions = pcall(require, blockDefsMod)
     local blockDefs = okDefs and BlockDefinitions or nil
 
+    local bestOre = nil
+    local bestOreDist = math.huge
+
     for dy = -maxRadiusCells, maxRadiusCells do
         for dx = -maxRadiusCells, maxRadiusCells do
             for dz = -maxRadiusCells, maxRadiusCells do
                 local distSq = dx * dx + dy * dy + dz * dz
-                if distSq <= (maxRadiusCells * maxRadiusCells) then
+                if distSq <= maxDistSq then
                     local cell = Vector3int16.new(playerCell.X + dx, playerCell.Y + dy, playerCell.Z + dz)
                     local data = inst:Get(cell)
                     -- MUST BE AN ORE: data.Ore is required! Never mine plain stone or boundary blocks
@@ -442,10 +502,20 @@ function AutoMineSystem.getNearbyTerrainBlock(localPlayer, effectiveRange, isIgn
                             end
                             if not ignored then
                                 local cellDist = math.sqrt(distSq) * 4
+                                local entry = {
+                                    cell = cell,
+                                    oreName = oreName,
+                                    dist = cellDist,
+                                }
+                                table.insert(_terrainScanCache.cells, entry)
                                 if cellDist < bestOreDist then
                                     bestOreDist = cellDist
-                                    bestOreCell = cell
-                                    bestOreName = oreName
+                                    bestOre = {
+                                        isTerrainCell = true,
+                                        cell = cell,
+                                        oreName = oreName,
+                                        dist = cellDist,
+                                    }
                                 end
                             end
                         end
@@ -455,16 +525,7 @@ function AutoMineSystem.getNearbyTerrainBlock(localPlayer, effectiveRange, isIgn
         end
     end
 
-    if bestOreCell then
-        return {
-            isTerrainCell = true,
-            cell = bestOreCell,
-            oreName = bestOreName,
-            dist = bestOreDist,
-        }
-    end
-
-    return nil
+    return bestOre
 end
 
 return AutoMineSystem

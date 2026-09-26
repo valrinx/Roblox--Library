@@ -447,13 +447,20 @@ function AutoMineLoop.start(ctx)
     end
 
     local function getTargetGridPositionDeep(target, renderPart)
-        local gridPos = ctx.getTargetGridPosition(target, renderPart)
-        if gridPos then return gridPos end
-        gridPos = getDescendantGridPosition(target)
+        if type(ctx.getTargetGridPosition) == "function" then
+            local okPos, p = pcall(ctx.getTargetGridPosition, target, renderPart)
+            if okPos and p then return p end
+        end
+        local gridPos = getDescendantGridPosition(target)
         if gridPos then return gridPos end
         if renderPart then
             gridPos = getDescendantGridPosition(renderPart)
             if gridPos then return gridPos end
+            local terrain = Workspace.Terrain
+            if terrain and type(terrain.WorldToCell) == "function" and renderPart.Position then
+                local okCell, cell = pcall(terrain.WorldToCell, terrain, renderPart.Position)
+                if okCell and cell then return cell end
+            end
         end
         return nil
     end
@@ -1086,15 +1093,8 @@ function AutoMineLoop.start(ctx)
                             firedOk = okMine
                             fireFailed = not okMine
                             mineModeText = "pickaxe"
-                            if ctx.instantMine ~= false and firedOk and not isTerrain then
-                                local burstCount = 0
-                                local maxBurst = expectedHits and math.min(expectedHits + 2, 20) or 8
-                                while burstCount < maxBurst and closestBlock and closestBlock.Parent do
-                                    burstCount = burstCount + 1
-                                    local okB = ctx.autoMineHelper.mineBlock(pickaxeComp, cellInt)
-                                    if not okB then break end
-                                    task.wait(0.01)
-                                end
+                            if firedOk and not isTerrain and closestBlock then
+                                blockTargetTemporarily(closestBlock, renderPart, 0.8)
                             end
                         elseif pickaxeComp then
                             attemptedFire = true
@@ -1112,20 +1112,8 @@ function AutoMineLoop.start(ctx)
                                 fireFailed = not okInvoke
                             end
                             mineModeText = "pickaxe"
-                            if ctx.instantMine ~= false and firedOk and not isTerrain then
-                                local burstCount = 0
-                                local maxBurst = expectedHits and math.min(expectedHits + 2, 20) or 8
-                                while burstCount < maxBurst and closestBlock and closestBlock.Parent do
-                                    burstCount = burstCount + 1
-                                    local okB = false
-                                    if type(pickaxeComp.MineBlock) == "function" then
-                                        okB = pcall(function() return pickaxeComp:MineBlock(Vector3.new(cellInt.X, cellInt.Y, cellInt.Z)) end)
-                                    elseif pickaxeComp.ActivateRemote then
-                                        okB = pcall(function() return pickaxeComp.ActivateRemote:InvokeServer(cellInt) end)
-                                    end
-                                    if not okB then break end
-                                    task.wait(0.01)
-                                end
+                            if firedOk and not isTerrain and closestBlock then
+                                blockTargetTemporarily(closestBlock, renderPart, 0.8)
                             end
                         end
 
@@ -1192,13 +1180,13 @@ function AutoMineLoop.start(ctx)
                         waitDelay = math.max(waitDelay, 0.45) + randomRange(0.06, 0.38)
                         waitDelay = math.max(waitDelay, adaptiveMinInterval)
                     elseif ctx.instantMine ~= false then
-                        waitDelay = math.max(0, waitDelay)
+                        waitDelay = math.max(0.035, waitDelay)
                     end
                     nextMineAllowedAt = os.clock() + waitDelay
                     if waitDelay > 0 then
                         task.wait(waitDelay)
                     else
-                        task.wait(0.01)
+                        task.wait(0.035)
                     end
                     continue
                 else
@@ -1216,14 +1204,14 @@ function AutoMineLoop.start(ctx)
             end
             if noTargetMode then
                 if ctx.instantMine ~= false then
-                    task.wait(0.05)
+                    task.wait(0.12)
                 elseif ctx.safeProfile then
                     task.wait(math.max(noTargetLoopSleep, randomRange(0.12, 0.22)))
                 else
                     task.wait(noTargetLoopSleep)
                 end
             elseif ctx.instantMine ~= false then
-                task.wait(0.01)
+                task.wait(0.035)
             elseif ctx.safeProfile then
                 task.wait(randomRange(0.06, 0.14))
             else
