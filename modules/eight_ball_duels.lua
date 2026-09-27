@@ -81,6 +81,7 @@ return function(Window, scriptInfo)
         autoAim = false,
         autoAimKey = "E",
         autoShoot = false,
+        lockAimOnTarget = true,
         smoothAim = true,
         aimSmoothingSpeed = 8, -- higher = faster smooth glide
         aimHumanOvershoot = true, -- realistic micro human adjustments
@@ -159,6 +160,13 @@ return function(Window, scriptInfo)
 
     local function resolveActiveControllers()
         if activeInputController and activeSimulation then
+            if not activeInputController._ravenShotHooked and activeInputController.Shot then
+                activeInputController._ravenShotHooked = true
+                connect(activeInputController.Shot, function()
+                    activeInputController.AimLocked = false
+                    activeInputController.AimAnchor = nil
+                end)
+            end
             return activeInputController, activeSimulation
         end
         if getgc then
@@ -167,6 +175,13 @@ return function(Window, scriptInfo)
                     activeInputController = obj
                     activeSimulation = obj.Simulation
                     if obj.Overlay then activeAimOverlay = obj.Overlay end
+                    if not obj._ravenShotHooked and obj.Shot then
+                        obj._ravenShotHooked = true
+                        connect(obj.Shot, function()
+                            obj.AimLocked = false
+                            obj.AimAnchor = nil
+                        end)
+                    end
                     return activeInputController, activeSimulation
                 end
             end
@@ -1180,7 +1195,7 @@ return function(Window, scriptInfo)
         -- If Smooth Aim is disabled, snap directly
         if not settings.smoothAim then
             activeInputController.Direction = targetDir
-            activeInputController.AimLocked = false
+            activeInputController.AimLocked = settings.lockAimOnTarget
             activeInputController.AimAnchor = nil
             activeInputController.Power = power
 
@@ -1196,6 +1211,11 @@ return function(Window, scriptInfo)
                 pcall(function()
                     activeInputController.ShotBindable:Fire(targetDir, power, spin)
                 end)
+                activeInputController.AimLocked = false
+            else
+                if settings.lockAimOnTarget then
+                    notify("Aim Assist", "Target Locked! Right-Click to unlock 🔒")
+                end
             end
             return true
         end
@@ -1255,7 +1275,7 @@ return function(Window, scriptInfo)
             end
 
             activeInputController.Direction = targetDir
-            activeInputController.AimLocked = false
+            activeInputController.AimLocked = settings.lockAimOnTarget
             activeInputController.AimAnchor = nil
             activeInputController.Power = power
 
@@ -1275,6 +1295,11 @@ return function(Window, scriptInfo)
                 pcall(function()
                     activeInputController.ShotBindable:Fire(targetDir, power, spin)
                 end)
+                activeInputController.AimLocked = false
+            else
+                if settings.lockAimOnTarget then
+                    notify("Aim Assist", "Target Locked! Right-Click to unlock 🔒")
+                end
             end
         end)
 
@@ -1285,15 +1310,21 @@ return function(Window, scriptInfo)
     --   INPUT LISTENERS
     -- ============================================================
     connect(UserInputService.InputBegan, function(input, gameProcessed)
-        -- If player clicks or touches screen while smooth aim is running, yield smooth aim and restore manual control
+        -- Right Click immediately releases Aim Lock and restores manual aiming
+        if input.UserInputType == Enum.UserInputType.MouseButton2 then
+            if activeInputController and activeInputController.AimLocked then
+                activeInputController.AimLocked = false
+                activeInputController.AimAnchor = nil
+                notify("Aim Assist", "Aim Lock Released 🔓")
+            end
+            return
+        end
+
+        -- If player clicks or touches screen while smooth aim is animating, yield smooth aim
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             if isSmoothAiming and smoothAimThread then
                 task.cancel(smoothAimThread)
                 isSmoothAiming = false
-                if activeInputController then
-                    activeInputController.AimLocked = false
-                    activeInputController.AimAnchor = nil
-                end
             end
         end
 
@@ -1793,6 +1824,30 @@ return function(Window, scriptInfo)
     })
 
     AimTab:CreateToggle({
+        Name = "Lock Aim Angle (No Mouse Drag-Back)",
+        CurrentValue = settings.lockAimOnTarget,
+        Flag = "BD_LockAim",
+        Callback = function(val)
+            settings.lockAimOnTarget = val
+            if not val and activeInputController then
+                activeInputController.AimLocked = false
+                activeInputController.AimAnchor = nil
+            end
+        end,
+    })
+
+    AimTab:CreateButton({
+        Name = "Release Aim Lock (Or Right-Click) 🔓",
+        Callback = function()
+            if activeInputController then
+                activeInputController.AimLocked = false
+                activeInputController.AimAnchor = nil
+                notify("Aim Assist", "Aim Lock Released 🔓")
+            end
+        end,
+    })
+
+    AimTab:CreateToggle({
         Name = "Smart Power (Distance Scaled)",
         CurrentValue = settings.smartPower,
         Flag = "BD_SmartPower",
@@ -1920,6 +1975,8 @@ return function(Window, scriptInfo)
 
     -- Cleanup Lifecycle
     local moduleInstance = {
+        executeAutoAim = executeAutoAim,
+        findBestPocketShot = findBestPocketShot,
         Destroy = function()
             running = false
             for _, conn in ipairs(connections) do
