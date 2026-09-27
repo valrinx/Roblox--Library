@@ -2,7 +2,12 @@ $ErrorActionPreference = "Stop"
 $source = Get-Content -Raw (Join-Path $PSScriptRoot "..\modules\anime_battlegrounds.lua")
 $required = @{
     "ability-scoped animation" = 'movesetFolder\.Parent ~= animRoot'
-    "only Start marker" = 'animation\.Name ~= "Start"'
+    "default Start marker" = 'animation\.Name ~= "Start" and not roadRollerTrack'
+    "Road Roller cast/end" = '\(animation\.Name == "Cast" or animation\.Name == "End"\)'
+    "Road Roller only Diyo" = 'movesetFolder\.Name == "Diyo"'
+    "Road Roller only valid ability" = 'abilityFolder\.Name == "RoadRoller"'
+    "Road Roller observable" = 'roadRollerAccelerated = fastCast\.RoadRollerAccelerated'
+    "server timing unchanged" = 'serverTimedRoadRollerUnchanged = true'
     "ignore melee" = 'ability\.Config\.Kind ~= "Melee"'
     "regular animation played event" = 'animator\.AnimationPlayed:Connect'
     "deferred speed update" = 'task\.defer\(function\(\)'
@@ -22,4 +27,4 @@ if ($source -match 'localPlayer\.Character\.HumanoidRootPart\.CFrame\s*=' -or
     $source -match 'cfg\.Damage\s*=\s*9999') {
     throw "Fast Cast must not include camera/root steering or fake cooldown/damage"
 }
-Write-Output "PASS: 12 Fast Cast source contracts; safe restoration and no fake cooldown/damage"
+Write-Output "PASS: 17 Fast Cast source contracts; Road Roller Cast/End scoped and server timing unchanged"

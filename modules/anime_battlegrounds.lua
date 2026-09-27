@@ -532,39 +532,41 @@ return function(Window, scriptInfo)
     end
     createSkillAimHUD()
 
-    -- [[ FAST CAST: accelerate owned ability Start animations only ]]
-    -- FireArrow one-cast trial: 2.5x animation; server Shoot at ~0.34s
-    -- versus ~0.74s baseline. This does not reduce server cooldown or damage.
+    -- [[ FAST CAST: skill Start, plus RoadRoller Cast/End animations ]]
+    -- FireArrow server Shoot timing improved in a one-cast trial.
+    -- RoadRoller animation speed does not accelerate its server-timed strike sequence.
     local fastCast = {
         Enabled = true, Multiplier = 2.5, Running = true,
-        Accelerated = 0, Eligible = 0, Bound = false,
+        Accelerated = 0, RoadRollerAccelerated = 0, Eligible = 0, Bound = false,
         ActiveTracks = setmetatable({}, {__mode = "k"}),
         TrackConnections = setmetatable({}, {__mode = "k"}),
         AnimationConnection = nil, CharacterConnection = nil,
     }
     local animRoot = ReplicatedStorage:FindFirstChild("Assets")
     animRoot = animRoot and animRoot:FindFirstChild("Animations")
-    local function isAbilityStartAnimation(animation)
-        if not animation or not animation:IsA("Animation") or animation.Name ~= "Start" then
-            return false
-        end
+    local function fastCastTrackKind(animation)
+        if not animation or not animation:IsA("Animation") then return nil end
         local abilityFolder = animation.Parent
         local movesetFolder = abilityFolder and abilityFolder.Parent
         if not animRoot or not movesetFolder or movesetFolder.Parent ~= animRoot
             or movesetFolder.Name ~= localPlayer:GetAttribute("Moveset") then
-            return false
+            return nil
         end
+        local roadRollerTrack = movesetFolder.Name == "Diyo"
+            and abilityFolder.Name == "RoadRoller"
+            and (animation.Name == "Cast" or animation.Name == "End")
+        if animation.Name ~= "Start" and not roadRollerTrack then return nil end
         local registry = skillAim.Registry
-        if not registry then return false end
+        if not registry then return nil end
         local ok, moveset = pcall(registry.GetMoveset, movesetFolder.Name)
-        if not ok or type(moveset) ~= "table" then return false end
+        if not ok or type(moveset) ~= "table" then return nil end
         for _, ability in ipairs(moveset.Abilities or {}) do
             if ability.Key == abilityFolder.Name and ability.Config
                 and ability.Config.Kind ~= "Attack" and ability.Config.Kind ~= "Melee" then
-                return true
+                return roadRollerTrack and "RoadRoller" or "Start"
             end
         end
-        return false
+        return nil
     end
     local function restoreActiveCastTracks()
         for track, original in pairs(fastCast.ActiveTracks) do
@@ -589,8 +591,9 @@ return function(Window, scriptInfo)
             or hum:WaitForChild("Animator", 8))
         if not fastCast.Running or character ~= localPlayer.Character or not animator then return end
         fastCast.AnimationConnection = animator.AnimationPlayed:Connect(function(track)
-            if not fastCast.Enabled or not fastCast.Running
-                or not isAbilityStartAnimation(track.Animation) then return end
+            if not fastCast.Enabled or not fastCast.Running then return end
+            local trackKind = fastCastTrackKind(track.Animation)
+            if not trackKind then return end
             fastCast.Eligible += 1
             -- Defer until the game's normal animation setup has run; no input/packet hooks.
             task.defer(function()
@@ -608,7 +611,10 @@ return function(Window, scriptInfo)
                 fastCast.TrackConnections[track] = con
                 local boosted = math.min(3, math.max(original, 1) * fastCast.Multiplier)
                 local ok = pcall(function() track:AdjustSpeed(boosted) end)
-                if ok then fastCast.Accelerated += 1 end
+                if ok then
+                    fastCast.Accelerated += 1
+                    if trackKind == "RoadRoller" then fastCast.RoadRollerAccelerated += 1 end
+                end
             end)
         end)
         fastCast.Bound = true
@@ -1134,7 +1140,7 @@ return function(Window, scriptInfo)
     CombatTab:CreateSection("Fast Cast - animation timing")
 
     CombatTab:CreateToggle({
-        Name = "Fast Cast (skill Start animations only)",
+        Name = "Fast Cast (Start + Road Roller Cast/End)",
         CurrentValue = true,
         Flag = "AB_FastCast",
         Callback = function(value)
@@ -1587,7 +1593,8 @@ return function(Window, scriptInfo)
             return {enabled = fastCast.Enabled, bound = fastCast.Bound,
                 running = fastCast.Running, multiplier = fastCast.Multiplier,
                 eligible = fastCast.Eligible, accelerated = fastCast.Accelerated,
-                serverCooldownChanged = false}
+                roadRollerAccelerated = fastCast.RoadRollerAccelerated,
+                serverCooldownChanged = false, serverTimedRoadRollerUnchanged = true}
         end,
         GetSkillAimStatus = function()
             local profile = skillAim.RangeInfo or {classification = "unknown"}
