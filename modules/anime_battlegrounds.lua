@@ -145,9 +145,11 @@ return function(Window, scriptInfo)
     local CollectionService = game:GetService("CollectionService")
     local skillAim = {
         Enabled = true, Fov = 175, Prediction = 0.07, LockUntil = 0,
+        RangeAware = true, RangeMargin = 0.95, RangeInfo = nil,
+        ActiveAbilityId = nil, ProfileUntil = 0, Registry = nil,
         Target = nil, VisualTarget = nil, LastScan = 0, ScanInterval = 0.2,
         Original = {}, Wrappers = {}, Packets = nil, Aim = nil,
-        Stats = {acquired = 0, redirected = 0, passed = 0},
+        Stats = {acquired = 0, redirected = 0, passed = 0, outOfRange = 0},
     }
     local function aimTargetValid(target)
         if not target or not target.model or not target.model.Parent then return nil end
@@ -167,14 +169,79 @@ return function(Window, scriptInfo)
         if velocity.Magnitude > 5 then velocity = velocity.Unit * 5 end
         return root.Position + Vector3.new(0, 1.35, 0) + velocity
     end
+    -- Resolve declared reach separately from movement distances and hitbox dimensions.
+    -- A range hint is not necessarily a server-enforced maximum.
+    local explicitRangeKeys = {
+        "TravelDistance", "MaxTravel", "MaxRange", "AimRange", "MaxDistance",
+        "ExtendDistance", "DetectRadius", "SeekRadius", "AttackRange",
+        "GrabRange", "GrabRadius", "GrabDistance", "Reach", "M1Reach",
+        "SwordReach", "HandReach",
+    }
+    local hintRangeKeys = {
+        "DashDistance", "RunDistance", "TeleportDistance", "HopDistance",
+        "SwoopDistance", "CarryDistance", "HoldRadius", "SpawnDistance",
+        "HitboxSize", "Hitbox", "FireHitbox", "FinalHitbox", "SlamHitbox",
+    }
+    local function skillRangeProfile(config)
+        if type(config) ~= "table" then
+            return {classification = "unknown", max = nil, key = nil}
+        end
+        for _, key in ipairs(explicitRangeKeys) do
+            local n = tonumber(config[key])
+            if n and n > 0 then
+                return {classification = "declared", max = n, key = key}
+            end
+        end
+        for _, key in ipairs(hintRangeKeys) do
+            local v = config[key]
+            if v ~= nil then
+                return {classification = "hint-only", hint = v, key = key}
+            end
+        end
+        return {classification = "unknown", max = nil, key = nil}
+    end
+    local function setSkillRange(abilityId, packetName)
+        local config
+        if abilityId ~= nil and skillAim.Registry then
+            local ok, ability = pcall(skillAim.Registry.GetAbilityById, abilityId)
+            if ok and type(ability) == "table" then config = ability.Config end
+        end
+        if not config and type(packetName) == "string" then
+            local kind = packetName:match("^([%w_]+)Cast$")
+                or packetName:match("^([%w_]+)Fire$")
+            local module = kind and ReplicatedStorage.Shared.Abilities.Config:FindFirstChild(kind)
+            if module and module:IsA("ModuleScript") then
+                local ok, value = pcall(require, module)
+                if ok then config = value end
+            end
+        end
+        skillAim.ActiveAbilityId = abilityId
+        skillAim.RangeInfo = skillRangeProfile(config)
+        skillAim.ProfileUntil = os.clock() + math.max(5, (config and config.CastTimeout) or 5)
+        return skillAim.RangeInfo
+    end
+    local function activeSkillRange()
+        if skillAim.RangeAware and os.clock() <= skillAim.ProfileUntil then
+            local info = skillAim.RangeInfo
+            if info and info.classification == "declared" then
+                return info.max * skillAim.RangeMargin
+            end
+        end
+        return nil
+    end
     local function chooseSkillTarget()
         local cam = Workspace.CurrentCamera
         if not cam or not getLocalRoot() then return nil end
         local center, closest, chosen = cam.ViewportSize / 2, skillAim.Fov, nil
+        local ownRoot, range = getLocalRoot(), activeSkillRange()
         local function consider(model, player, name)
             local candidate = {model = model, player = player, name = name}
             local point = aimPoint(candidate)
             if not point then return end
+            if range and (point - ownRoot.Position).Magnitude > range then
+                skillAim.Stats.outOfRange += 1
+                return
+            end
             local view, onScreen = cam:WorldToViewportPoint(point)
             local pixels = (Vector2.new(view.X, view.Y) - center).Magnitude
             if not onScreen or view.Z <= 0 or pixels >= closest then return end
@@ -207,9 +274,18 @@ return function(Window, scriptInfo)
         if not skillAim.Enabled then return nil end
         if os.clock() > skillAim.LockUntil or not aimTargetValid(skillAim.Target) then
             skillAim.Target = nil
-            if reacquire then acquireSkillTarget() end
         end
-        return aimPoint(skillAim.Target)
+        local point, ownRoot = aimPoint(skillAim.Target), getLocalRoot()
+        local range = activeSkillRange()
+        if point and range and ownRoot and (point - ownRoot.Position).Magnitude > range then
+            skillAim.Stats.outOfRange += 1
+            skillAim.Target, point = nil, nil
+        end
+        if not point and reacquire then
+            acquireSkillTarget()
+            point = aimPoint(skillAim.Target)
+        end
+        return point
     end
     local function restoreSkillAim()
         if skillAim.Aim then
@@ -227,6 +303,7 @@ return function(Window, scriptInfo)
             end
         end
         skillAim.Target = nil
+        skillAim.ActiveAbilityId, skillAim.RangeInfo, skillAim.ProfileUntil = nil, nil, 0
         skillAim.Enabled = false
     end
     local function installSkillAim()
@@ -240,6 +317,10 @@ return function(Window, scriptInfo)
             or type(network) ~= "table" or not network.Combat then return end
         local packets = network.Combat.packets
         if type(packets) ~= "table" then return end
+        local okRegistry, registry = pcall(function()
+            return require(shared.Abilities.Registry)
+        end)
+        if okRegistry and type(registry) == "table" then skillAim.Registry = registry end
         skillAim.Aim, skillAim.Packets = aim, packets
         skillAim.Original.Point, skillAim.Original.Direction = aim.Point, aim.Direction
         skillAim.Wrappers.Point = function(...)
@@ -267,10 +348,17 @@ return function(Window, scriptInfo)
                 local wrapper = function(payload, ...)
                     if skillAim.Enabled and type(payload) == "table" then
                         if name == "AbilityCast" and payload.AbilityId ~= nil then
+                            setSkillRange(payload.AbilityId, nil)
                             acquireSkillTarget()
                         elseif name == "AbilityCharge" and payload.AbilityId ~= nil then
+                            if payload.AbilityId ~= skillAim.ActiveAbilityId then
+                                setSkillRange(payload.AbilityId, nil)
+                            end
                             if not aimTargetValid(skillAim.Target) then acquireSkillTarget() end
                             if skillAim.Target then skillAim.LockUntil = os.clock() + 5 end
+                        elseif name:match("Cast$") and name ~= "AbilityCast" then
+                            setSkillRange(payload.AbilityId, name)
+                            acquireSkillTarget()
                         end
                         if typeof(payload.Look) == "Vector3" then
                             local point, own = currentSkillPoint(true), getLocalRoot()
@@ -420,6 +508,106 @@ return function(Window, scriptInfo)
         warn("[RAVEN Skill Aim] Unavailable:", aimError)
     end
     createSkillAimHUD()
+
+    -- [[ FAST CAST: accelerate owned ability Start animations only ]]
+    -- FireArrow one-cast trial: 2.5x animation; server Shoot at ~0.34s
+    -- versus ~0.74s baseline. This does not reduce server cooldown or damage.
+    local fastCast = {
+        Enabled = true, Multiplier = 2.5, Running = true,
+        Accelerated = 0, Eligible = 0, Bound = false,
+        ActiveTracks = setmetatable({}, {__mode = "k"}),
+        TrackConnections = setmetatable({}, {__mode = "k"}),
+        AnimationConnection = nil, CharacterConnection = nil,
+    }
+    local animRoot = ReplicatedStorage:FindFirstChild("Assets")
+    animRoot = animRoot and animRoot:FindFirstChild("Animations")
+    local function isAbilityStartAnimation(animation)
+        if not animation or not animation:IsA("Animation") or animation.Name ~= "Start" then
+            return false
+        end
+        local abilityFolder = animation.Parent
+        local movesetFolder = abilityFolder and abilityFolder.Parent
+        if not animRoot or not movesetFolder or movesetFolder.Parent ~= animRoot
+            or movesetFolder.Name ~= localPlayer:GetAttribute("Moveset") then
+            return false
+        end
+        local registry = skillAim.Registry
+        if not registry then return false end
+        local ok, moveset = pcall(registry.GetMoveset, movesetFolder.Name)
+        if not ok or type(moveset) ~= "table" then return false end
+        for _, ability in ipairs(moveset.Abilities or {}) do
+            if ability.Key == abilityFolder.Name and ability.Config
+                and ability.Config.Kind ~= "Attack" and ability.Config.Kind ~= "Melee" then
+                return true
+            end
+        end
+        return false
+    end
+    local function restoreActiveCastTracks()
+        for track, original in pairs(fastCast.ActiveTracks) do
+            if track.IsPlaying then
+                pcall(function() track:AdjustSpeed(original) end)
+            end
+            local conn = fastCast.TrackConnections[track]
+            if conn then pcall(function() conn:Disconnect() end) end
+            fastCast.TrackConnections[track] = nil
+            fastCast.ActiveTracks[track] = nil
+        end
+    end
+    local function bindFastCastCharacter(character)
+        if fastCast.AnimationConnection then
+            fastCast.AnimationConnection:Disconnect()
+            fastCast.AnimationConnection = nil
+        end
+        fastCast.Bound = false
+        local hum = character:FindFirstChildOfClass("Humanoid")
+            or character:WaitForChild("Humanoid", 8)
+        local animator = hum and (hum:FindFirstChildOfClass("Animator")
+            or hum:WaitForChild("Animator", 8))
+        if not fastCast.Running or character ~= localPlayer.Character or not animator then return end
+        fastCast.AnimationConnection = animator.AnimationPlayed:Connect(function(track)
+            if not fastCast.Enabled or not fastCast.Running
+                or not isAbilityStartAnimation(track.Animation) then return end
+            fastCast.Eligible += 1
+            -- Defer until the game's normal animation setup has run; no input/packet hooks.
+            task.defer(function()
+                if not fastCast.Running or not fastCast.Enabled
+                    or character ~= localPlayer.Character or not track.IsPlaying
+                    or fastCast.ActiveTracks[track] then return end
+                local original = track.Speed
+                fastCast.ActiveTracks[track] = original
+                local con
+                con = track.Stopped:Connect(function()
+                    if con then con:Disconnect() end
+                    fastCast.TrackConnections[track] = nil
+                    fastCast.ActiveTracks[track] = nil
+                end)
+                fastCast.TrackConnections[track] = con
+                local boosted = math.min(3, math.max(original, 1) * fastCast.Multiplier)
+                local ok = pcall(function() track:AdjustSpeed(boosted) end)
+                if ok then fastCast.Accelerated += 1 end
+            end)
+        end)
+        fastCast.Bound = true
+    end
+    local function stopFastCast()
+        fastCast.Enabled = false
+        fastCast.Running = false
+        if fastCast.AnimationConnection then
+            fastCast.AnimationConnection:Disconnect()
+            fastCast.AnimationConnection = nil
+        end
+        if fastCast.CharacterConnection then
+            fastCast.CharacterConnection:Disconnect()
+            fastCast.CharacterConnection = nil
+        end
+        restoreActiveCastTracks()
+        fastCast.Bound = false
+    end
+    fastCast.CharacterConnection = localPlayer.CharacterAdded:Connect(function(character)
+        task.spawn(bindFastCastCharacter, character)
+    end)
+    if localPlayer.Character then task.spawn(bindFastCastCharacter, localPlayer.Character) end
 
     -- [[ DRAWING ESP SYSTEM ]]
     local function createDrawingESP(player)
@@ -891,6 +1079,17 @@ return function(Window, scriptInfo)
         end,
     })
 
+    CombatTab:CreateToggle({
+        Name = "Range-aware Skill Aim (declared ranges)",
+        CurrentValue = true,
+        Flag = "AB_SkillAimRangeAware",
+        Callback = function(value)
+            skillAim.RangeAware = value
+            skillAim.Target = nil
+            skillAim.LockUntil = 0
+        end,
+    })
+
     CombatTab:CreateSlider({
         Name = "Skill Aim Prediction",
         Range = {0, 0.2},
@@ -899,6 +1098,30 @@ return function(Window, scriptInfo)
         CurrentValue = 0.07,
         Flag = "AB_SkillAimPredict",
         Callback = function(value) skillAim.Prediction = value end,
+    })
+
+    CombatTab:CreateSection("Fast Cast - animation timing")
+
+    CombatTab:CreateToggle({
+        Name = "Fast Cast (skill Start animations only)",
+        CurrentValue = true,
+        Flag = "AB_FastCast",
+        Callback = function(value)
+            fastCast.Enabled = value
+            if not value then restoreActiveCastTracks() end
+            notify("Fast Cast", value and "Enabled - normal skill inputs, faster windup"
+                or "Disabled - animation speeds restored")
+        end,
+    })
+
+    CombatTab:CreateSlider({
+        Name = "Fast Cast Speed",
+        Range = {1, 3},
+        Increment = 0.25,
+        Suffix = "x",
+        CurrentValue = 2.5,
+        Flag = "AB_FastCastSpeed",
+        Callback = function(value) fastCast.Multiplier = math.clamp(value, 1, 3) end,
     })
 
     CombatTab:CreateSection("Extended Attack Reach / Query Hook")
@@ -1326,10 +1549,33 @@ return function(Window, scriptInfo)
 
     -- Cleanup object
     local hubInstance = {
+        GetFastCastStatus = function()
+            return {enabled = fastCast.Enabled, bound = fastCast.Bound,
+                running = fastCast.Running, multiplier = fastCast.Multiplier,
+                eligible = fastCast.Eligible, accelerated = fastCast.Accelerated,
+                serverCooldownChanged = false}
+        end,
         GetSkillAimStatus = function()
+            local profile = skillAim.RangeInfo or {classification = "unknown"}
             return {enabled = skillAim.Enabled, installed = skillAim.Aim ~= nil,
-                fov = skillAim.Fov, acquired = skillAim.Stats.acquired,
-                redirected = skillAim.Stats.redirected, passed = skillAim.Stats.passed}
+                fov = skillAim.Fov, rangeAware = skillAim.RangeAware,
+                activeAbilityId = skillAim.ActiveAbilityId,
+                rangeClass = profile.classification, rangeKey = profile.key,
+                rangeMax = activeSkillRange(), acquired = skillAim.Stats.acquired,
+                redirected = skillAim.Stats.redirected, passed = skillAim.Stats.passed,
+                outOfRange = skillAim.Stats.outOfRange}
+        end,
+        GetSkillRangeProfile = function(abilityId)
+            local registry = skillAim.Registry
+            if not registry then return nil, "registry unavailable" end
+            local ok, ability = pcall(registry.GetAbilityById, abilityId)
+            if not ok or type(ability) ~= "table" then return nil, "ability not found" end
+            local config = ability.Config
+            local info = skillRangeProfile(config)
+            return {id = ability.Id, key = ability.Key, moveset = ability.Moveset,
+                name = config.Name, cooldown = config.Cooldown, damage = config.Damage,
+                classification = info.classification, rangeKey = info.key,
+                declaredRange = info.max, hint = info.hint}
         end,
         Destroy = function()
             running = false
@@ -1339,6 +1585,7 @@ return function(Window, scriptInfo)
             for player, _ in pairs(espObjects) do
                 removeDrawingESP(player)
             end
+            stopFastCast()
             restoreSkillAim()
             if skillAim.Gui then pcall(function() skillAim.Gui:Destroy() end) end
             restoreHitboxHooks()
