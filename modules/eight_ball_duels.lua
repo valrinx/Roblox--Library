@@ -364,15 +364,24 @@ return function(Window, scriptInfo)
     -- ============================================================
     local function traceCueBallRay(sim, startPos, startDir, maxBounces)
         local segments = {}
+        if not sim or not startPos or not startDir or startDir.Magnitude < 1e-6 then
+            return segments, nil
+        end
         local currPos = startPos
         local currDir = startDir.Unit
         local finalHit = nil
 
         for bounce = 1, maxBounces do
+            if not sim.Balls or not sim.Balls[CueBallNumber] then break end
             sim.Balls[CueBallNumber].Position = currPos
-            local cast = PoolPhysics.CastCueBall(sim, currDir)
+            sim.Balls[CueBallNumber].Pocketed = false
+            sim.Balls[CueBallNumber].Velocity = currDir
 
-            if cast.Kind == "None" or not cast.Ghost then
+            local okCast, cast = pcall(function()
+                return PoolPhysics.CastCueBall(sim, currDir)
+            end)
+
+            if not okCast or not cast or cast.Kind == "None" or not cast.Ghost then
                 local endPoint = currPos + currDir * 70
                 table.insert(segments, {
                     from = currPos,
@@ -414,21 +423,30 @@ return function(Window, scriptInfo)
 
     local function traceObjectBallRay(sim, startPos, startDir, maxBounces, hitBallNum)
         local segments = {}
+        if not sim or not startPos or not startDir or startDir.Magnitude < 1e-6 then
+            return segments
+        end
         local currPos = startPos
         local currDir = startDir.Unit
 
         -- Temporarily hide the hit object ball to prevent immediate self-collision
         local originalObjPos = nil
-        if hitBallNum and sim.Balls[hitBallNum] then
+        if hitBallNum and sim.Balls and sim.Balls[hitBallNum] then
             originalObjPos = sim.Balls[hitBallNum].Position
             sim.Balls[hitBallNum].Position = Vector2.new(9999, 9999)
         end
 
         for bounce = 1, maxBounces do
+            if not sim.Balls or not sim.Balls[CueBallNumber] then break end
             sim.Balls[CueBallNumber].Position = currPos
-            local cast = PoolPhysics.CastCueBall(sim, currDir)
+            sim.Balls[CueBallNumber].Pocketed = false
+            sim.Balls[CueBallNumber].Velocity = currDir
 
-            if cast.Kind == "None" or not cast.Ghost then
+            local okCast, cast = pcall(function()
+                return PoolPhysics.CastCueBall(sim, currDir)
+            end)
+
+            if not okCast or not cast or cast.Kind == "None" or not cast.Ghost then
                 local endPoint = currPos + currDir * 60
                 table.insert(segments, {
                     from = currPos,
@@ -475,6 +493,9 @@ return function(Window, scriptInfo)
     -- Calculates exact physical roll distance based on shot speed, impact cut angle, and table friction
     local function traceCueDeflectionRay(sim, startPos, startDir, maxDistance, maxBounces)
         local segments = {}
+        if not sim or not startPos or not startDir or startDir.Magnitude < 1e-6 then
+            return segments, startPos or Vector2.zero, false
+        end
         local currPos = startPos
         local currDir = startDir.Unit
         local remainingDist = maxDistance or 50
@@ -483,11 +504,17 @@ return function(Window, scriptInfo)
 
         for bounce = 1, maxBounces do
             if remainingDist <= 0.05 then break end
+            if not sim.Balls or not sim.Balls[CueBallNumber] then break end
 
             sim.Balls[CueBallNumber].Position = currPos
-            local cast = PoolPhysics.CastCueBall(sim, currDir)
+            sim.Balls[CueBallNumber].Pocketed = false
+            sim.Balls[CueBallNumber].Velocity = currDir
 
-            if cast.Kind == "None" or not cast.Ghost then
+            local okCast, cast = pcall(function()
+                return PoolPhysics.CastCueBall(sim, currDir)
+            end)
+
+            if not okCast or not cast or cast.Kind == "None" or not cast.Ghost then
                 local endPoint = currPos + currDir * remainingDist
                 table.insert(segments, {
                     from = currPos,
@@ -977,8 +1004,7 @@ return function(Window, scriptInfo)
                                             local bankPower = math.clamp(calculateOptimalPower(contactDist + bounceDist + 25) + 0.15, 0.55, 0.90)
                                             local verifiedPred = PoolPhysics.PredictShot(sim, aimDir, bankPower, Vector2.zero)
                                             if verifiedPred.Kind == "Ball" and verifiedPred.Other == ballNum then
-                                                local simClone = { Balls = {}, Order = sim.Order, CueBallNumber = sim.CueBallNumber }
-                                                for k, v in pairs(sim.Balls) do simClone.Balls[k] = { Position = v.Position, Pocketed = v.Pocketed } end
+                                                local simClone = PoolPhysics.Clone(sim)
                                                 local objSegs = traceObjectBallRay(simClone, contactPoint, objTravelDir, 2, ballNum)
                                                 local hitsPocket = false
                                                 for _, oS in ipairs(objSegs) do
@@ -1068,8 +1094,7 @@ return function(Window, scriptInfo)
                         local kickPower = 0.50
                         local pred = PoolPhysics.PredictShot(sim, kickDir, kickPower, Vector2.zero)
                         if pred.Kind == "Cushion" then
-                            local simClone = { Balls = {}, Order = sim.Order, CueBallNumber = sim.CueBallNumber }
-                            for k, v in pairs(sim.Balls) do simClone.Balls[k] = { Position = v.Position, Pocketed = v.Pocketed } end
+                            local simClone = PoolPhysics.Clone(sim)
                             local segs, finalHit = traceCueBallRay(simClone, cuePos, kickDir, 3)
                             if finalHit and finalHit.Kind == "Ball" and finalHit.Other == ballNum then
                                 local willScratch = checkWillCueScratch(sim, kickDir, kickPower, Vector2.zero)
