@@ -11,6 +11,7 @@ return function(Window, scriptInfo)
     local Workspace = game:GetService("Workspace")
     local VirtualInputManager = game:GetService("VirtualInputManager")
     local Debris = game:GetService("Debris")
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
     local localPlayer = Players.LocalPlayer
     local camera = Workspace.CurrentCamera
@@ -22,6 +23,12 @@ return function(Window, scriptInfo)
         pcall(environment.__RAVEN_ANIME_BATTLEGROUNDS.Destroy)
     end
 
+    -- Retire transient prototypes so only the repository module owns aim hooks/UI.
+    if type(environment.RAVEN_SKILL_AIM_V3) == "table"
+        and type(environment.RAVEN_SKILL_AIM_V3.Stop) == "function" then
+        pcall(function() environment.RAVEN_SKILL_AIM_V3:Stop() end)
+    end
+
     local running = true
     local connections = {}
     local espObjects = {}
@@ -29,10 +36,8 @@ return function(Window, scriptInfo)
     -- Settings
     local settings = {
         -- Combat
-        aimlockEnabled = false,
-        aimlockKey = Enum.KeyCode.C,
+        -- Legacy target-finder defaults are retained for reach/backstab systems.
         aimlockPart = "HumanoidRootPart",
-        aimlockSmoothness = 0.25,
         aimlockMaxDist = 350,
         reachEnabled = true,
         reachDistance = 12,
@@ -71,7 +76,6 @@ return function(Window, scriptInfo)
         backstabPlayAnim = true,
     }
 
-    local isAiming = false
     local lastM1Time = 0
 
     local function notify(title, content)
@@ -136,6 +140,287 @@ return function(Window, scriptInfo)
         return closest
     end
 
+    -- [[ SKILL AIM V4: payload direction only; never steer camera/character ]]
+    -- Shared targets work across movesets. The server remains authoritative over range and hits.
+    local CollectionService = game:GetService("CollectionService")
+    local skillAim = {
+        Enabled = true, Fov = 175, Prediction = 0.07, LockUntil = 0,
+        Target = nil, VisualTarget = nil, LastScan = 0, ScanInterval = 0.2,
+        Original = {}, Wrappers = {}, Packets = nil, Aim = nil,
+        Stats = {acquired = 0, redirected = 0, passed = 0},
+    }
+    local function aimTargetValid(target)
+        if not target or not target.model or not target.model.Parent then return nil end
+        local root = target.model:FindFirstChild("HumanoidRootPart")
+        local hum = target.model:FindFirstChildOfClass("Humanoid")
+        if not root or not hum or hum.Health <= 0 or target.model:GetAttribute("IsGhost") then return nil end
+        if target.player and target.player ~= localPlayer and not localPlayer.Neutral
+            and not target.player.Neutral and localPlayer.Team and target.player.Team == localPlayer.Team then
+            return nil
+        end
+        return root
+    end
+    local function aimPoint(target)
+        local root = aimTargetValid(target)
+        if not root then return nil end
+        local velocity = root.AssemblyLinearVelocity * skillAim.Prediction
+        if velocity.Magnitude > 5 then velocity = velocity.Unit * 5 end
+        return root.Position + Vector3.new(0, 1.35, 0) + velocity
+    end
+    local function chooseSkillTarget()
+        local cam = Workspace.CurrentCamera
+        if not cam or not getLocalRoot() then return nil end
+        local center, closest, chosen = cam.ViewportSize / 2, skillAim.Fov, nil
+        local function consider(model, player, name)
+            local candidate = {model = model, player = player, name = name}
+            local point = aimPoint(candidate)
+            if not point then return end
+            local view, onScreen = cam:WorldToViewportPoint(point)
+            local pixels = (Vector2.new(view.X, view.Y) - center).Magnitude
+            if not onScreen or view.Z <= 0 or pixels >= closest then return end
+            local params = RaycastParams.new()
+            params.FilterType = Enum.RaycastFilterType.Exclude
+            params.FilterDescendantsInstances = localPlayer.Character and {localPlayer.Character} or {}
+            local ray = Workspace:Raycast(cam.CFrame.Position, point - cam.CFrame.Position, params)
+            if ray and not ray.Instance:IsDescendantOf(model) then return end
+            closest, chosen = pixels, candidate
+        end
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= localPlayer and player.Character then
+                consider(player.Character, player, player.DisplayName)
+            end
+        end
+        for _, dummy in ipairs(CollectionService:GetTagged("Dummy")) do
+            if dummy:IsA("Model") then consider(dummy, nil, dummy.Name) end
+        end
+        return chosen
+    end
+    local function acquireSkillTarget()
+        if not skillAim.Enabled then return nil end
+        local target = chooseSkillTarget()
+        skillAim.Target = target
+        skillAim.LockUntil = target and os.clock() + 5 or 0
+        if target then skillAim.Stats.acquired += 1 end
+        return target
+    end
+    local function currentSkillPoint(reacquire)
+        if not skillAim.Enabled then return nil end
+        if os.clock() > skillAim.LockUntil or not aimTargetValid(skillAim.Target) then
+            skillAim.Target = nil
+            if reacquire then acquireSkillTarget() end
+        end
+        return aimPoint(skillAim.Target)
+    end
+    local function restoreSkillAim()
+        if skillAim.Aim then
+            if skillAim.Aim.Point == skillAim.Wrappers.Point then
+                skillAim.Aim.Point = skillAim.Original.Point
+            end
+            if skillAim.Aim.Direction == skillAim.Wrappers.Direction then
+                skillAim.Aim.Direction = skillAim.Original.Direction
+            end
+        end
+        if skillAim.Packets then
+            for name, wrapper in pairs(skillAim.Wrappers) do
+                local packet = skillAim.Packets[name]
+                if packet and packet.send == wrapper then packet.send = skillAim.Original[name] end
+            end
+        end
+        skillAim.Target = nil
+        skillAim.Enabled = false
+    end
+    local function installSkillAim()
+        if not skillAim.Enabled then return end
+        local ok, shared = pcall(function() return ReplicatedStorage:WaitForChild("Shared", 3) end)
+        if not ok or not shared then return end
+        local okAim, aim = pcall(function() return require(shared.Client.Aim) end)
+        local okNetwork, network = pcall(function() return require(shared.Network) end)
+        if not okAim or not okNetwork or type(aim) ~= "table"
+            or type(aim.Point) ~= "function" or type(aim.Direction) ~= "function"
+            or type(network) ~= "table" or not network.Combat then return end
+        local packets = network.Combat.packets
+        if type(packets) ~= "table" then return end
+        skillAim.Aim, skillAim.Packets = aim, packets
+        skillAim.Original.Point, skillAim.Original.Direction = aim.Point, aim.Direction
+        skillAim.Wrappers.Point = function(...)
+            local point = currentSkillPoint(false)
+            if point then return point end
+            return skillAim.Original.Point(...)
+        end
+        skillAim.Wrappers.Direction = function(...)
+            local point, cam = currentSkillPoint(false), Workspace.CurrentCamera
+            if point and cam then
+                local direction = point - cam.CFrame.Position
+                if direction.Magnitude > 0.01 then return direction.Unit end
+            end
+            return skillAim.Original.Direction(...)
+        end
+        aim.Point, aim.Direction = skillAim.Wrappers.Point, skillAim.Wrappers.Direction
+        for name, packet in pairs(packets) do
+            local outgoing = type(name) == "string" and (name == "AbilityCast" or name == "AbilityCharge"
+                or name == "AbilityFire" or name:match("Cast$") or name:match("Fire$")
+                or name:match("Fired$") or name:match("Shoot$") or name:match("Shot$")
+                or name:match("Aim$") or name:match("Release$"))
+            if outgoing and type(packet) == "table" and type(packet.send) == "function" then
+                local original = packet.send
+                skillAim.Original[name] = original
+                local wrapper = function(payload, ...)
+                    if skillAim.Enabled and type(payload) == "table" then
+                        if name == "AbilityCast" and payload.AbilityId ~= nil then
+                            acquireSkillTarget()
+                        elseif name == "AbilityCharge" and payload.AbilityId ~= nil then
+                            if not aimTargetValid(skillAim.Target) then acquireSkillTarget() end
+                            if skillAim.Target then skillAim.LockUntil = os.clock() + 5 end
+                        end
+                        if typeof(payload.Look) == "Vector3" then
+                            local point, own = currentSkillPoint(true), getLocalRoot()
+                            if point and own then
+                                local delta = point - own.Position
+                                local flat = Vector3.new(delta.X, 0, delta.Z)
+                                if flat.Magnitude > 0.01 then
+                                    local copy = table.clone(payload)
+                                    -- Preserve vertical aiming only for packets that already use it.
+                                    copy.Look = math.abs(payload.Look.Y) > 0.05 and delta.Unit or flat.Unit
+                                    skillAim.Stats.redirected += 1
+                                    skillAim.LockUntil = os.clock() + 2.5
+                                    return original(copy, ...)
+                                end
+                            end
+                            skillAim.Stats.passed += 1
+                        end
+                    end
+                    return original(payload, ...)
+                end
+                skillAim.Wrappers[name] = wrapper
+                packet.send = wrapper
+            end
+        end
+    end
+
+    -- Classic Smooth HUD: scan every 0.2s; move only the target brackets each frame.
+    local function createSkillAimHUD()
+        local pg = localPlayer:FindFirstChildOfClass("PlayerGui")
+        if not pg then return end
+        local stale = pg:FindFirstChild("RAVEN_SkillAim_V4")
+        if stale then stale:Destroy() end
+        local gui = Instance.new("ScreenGui")
+        gui.Name = "RAVEN_SkillAim_V4"
+        gui.ResetOnSpawn = false
+        gui.IgnoreGuiInset = true
+        gui.DisplayOrder = 180
+        gui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+        gui.Parent = pg
+        local ring = Instance.new("Frame")
+        ring.Name = "FOVRing"
+        ring.Size = UDim2.fromOffset(skillAim.Fov * 2, skillAim.Fov * 2)
+        ring.Position = UDim2.fromScale(0.5, 0.5)
+        ring.AnchorPoint = Vector2.new(0.5, 0.5)
+        ring.BackgroundTransparency = 1
+        ring.BorderSizePixel = 0
+        ring.Parent = gui
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(1, 0)
+        corner.Parent = ring
+        local stroke = Instance.new("UIStroke")
+        stroke.Thickness = 2.4
+        stroke.Transparency = 0.06
+        stroke.Color = Color3.fromRGB(255, 212, 69)
+        stroke.Parent = ring
+        local ticks = Instance.new("Frame")
+        ticks.Name = "Ticks"
+        ticks.Size = UDim2.fromScale(1, 1)
+        ticks.BackgroundTransparency = 1
+        ticks.Parent = gui
+        for i = 1, 36 do
+            local angle = i * math.pi * 2 / 36
+            local tick = Instance.new("Frame")
+            tick.Size = UDim2.fromOffset(i % 3 == 0 and 4 or 3, i % 3 == 0 and 4 or 3)
+            tick.AnchorPoint = Vector2.new(0.5, 0.5)
+            tick.Position = UDim2.new(0.5, math.cos(angle) * skillAim.Fov,
+                0.5, math.sin(angle) * skillAim.Fov)
+            tick.BackgroundColor3 = stroke.Color
+            tick.BorderSizePixel = 0
+            tick.Parent = ticks
+        end
+        local label = Instance.new("TextLabel")
+        label.Name = "AimStatus"
+        label.AnchorPoint = Vector2.new(0.5, 0)
+        label.Position = UDim2.new(0.5, 0, 0.5, skillAim.Fov + 10)
+        label.Size = UDim2.fromOffset(315, 27)
+        label.BackgroundColor3 = Color3.fromRGB(20, 24, 27)
+        label.BackgroundTransparency = 0.26
+        label.Font = Enum.Font.GothamMedium
+        label.TextSize = 14
+        label.TextColor3 = stroke.Color
+        label.TextStrokeTransparency = 1
+        label.Text = "SKILL AIM  -  NO TARGET"
+        label.Parent = gui
+        local lc = Instance.new("UICorner")
+        lc.CornerRadius = UDim.new(0, 6)
+        lc.Parent = label
+        local marker = Instance.new("Frame")
+        marker.Name = "TargetBrackets"
+        marker.AnchorPoint = Vector2.new(0.5, 0.5)
+        marker.Size = UDim2.fromOffset(62, 62)
+        marker.BackgroundTransparency = 1
+        marker.Visible = false
+        marker.Parent = gui
+        for x = 0, 1 do
+            for y = 0, 1 do
+                local horizontal = Instance.new("Frame")
+                horizontal.Size = UDim2.fromOffset(17, 3)
+                horizontal.Position = UDim2.new(x, x == 0 and 0 or -17,
+                    y, y == 0 and 0 or -3)
+                horizontal.BackgroundColor3 = Color3.fromRGB(80, 255, 149)
+                horizontal.BorderSizePixel = 0
+                horizontal.Parent = marker
+                local vertical = Instance.new("Frame")
+                vertical.Size = UDim2.fromOffset(3, 17)
+                vertical.Position = UDim2.new(x, x == 0 and 0 or -3,
+                    y, y == 0 and 0 or -17)
+                vertical.BackgroundColor3 = horizontal.BackgroundColor3
+                vertical.BorderSizePixel = 0
+                vertical.Parent = marker
+            end
+        end
+        skillAim.Gui, skillAim.Ring, skillAim.Ticks = gui, ring, ticks
+        skillAim.Label, skillAim.Marker = label, marker
+    end
+    local function updateSkillAimHUD()
+        if not skillAim.Gui then return end
+        local now = os.clock()
+        if now - skillAim.LastScan >= skillAim.ScanInterval then
+            skillAim.LastScan = now
+            skillAim.VisualTarget = skillAim.Enabled and chooseSkillTarget() or nil
+            local locked = aimTargetValid(skillAim.Target) and now <= skillAim.LockUntil
+            local target = locked and skillAim.Target or skillAim.VisualTarget
+            skillAim.Label.Text = not skillAim.Enabled and "SKILL AIM  -  OFF"
+                or (target and ("SKILL AIM  -  " .. (locked and "LOCKED  " or "READY  ")
+                    .. target.name) or "SKILL AIM  -  NO TARGET")
+        end
+        local locked = aimTargetValid(skillAim.Target) and now <= skillAim.LockUntil
+        local target = locked and skillAim.Target or skillAim.VisualTarget
+        local cam = Workspace.CurrentCamera
+        local point = target and aimPoint(target)
+        local marker = skillAim.Marker
+        marker.Visible = false
+        if not skillAim.Enabled or not cam or not point then return end
+        local screen, onScreen = cam:WorldToViewportPoint(point)
+        local center = cam.ViewportSize / 2
+        if onScreen and screen.Z > 0
+            and (Vector2.new(screen.X, screen.Y) - center).Magnitude <= skillAim.Fov then
+            marker.Position = UDim2.fromOffset(screen.X, screen.Y)
+            marker.Visible = true
+        end
+    end
+
+    local aimInstalled, aimError = pcall(installSkillAim)
+    if not aimInstalled or not skillAim.Aim then
+        restoreSkillAim()
+        warn("[RAVEN Skill Aim] Unavailable:", aimError)
+    end
+    createSkillAimHUD()
+
     -- [[ DRAWING ESP SYSTEM ]]
     local function createDrawingESP(player)
         if espObjects[player] then return end
@@ -198,7 +483,6 @@ return function(Window, scriptInfo)
     end)
 
     -- [[ COMBAT REACH & HITBOX QUERY HOOK ]]
-    local ReplicatedStorage = game:GetService("ReplicatedStorage")
     local hitUtil = nil
     local origQueryFront = nil
     local origInReach = nil
@@ -436,9 +720,7 @@ return function(Window, scriptInfo)
     connect(UserInputService.InputBegan, function(input, processed)
         if processed then return end
 
-        if input.KeyCode == settings.aimlockKey then
-            isAiming = true
-        elseif input.KeyCode == settings.backstabKey then
+        if input.KeyCode == settings.backstabKey then
             executeBackstab()
         elseif input.KeyCode == Enum.KeyCode.Space and settings.infiniteJump then
             local hum = getLocalHumanoid()
@@ -448,28 +730,12 @@ return function(Window, scriptInfo)
         end
     end)
 
-    connect(UserInputService.InputEnded, function(input)
-        if input.KeyCode == settings.aimlockKey then
-            isAiming = false
-        end
-    end)
-
     -- [[ RENDER LOOP ]]
     connect(RunService.RenderStepped, function()
         if not running then return end
 
-        -- 1. Aimlock
-        if settings.aimlockEnabled and isAiming then
-            local target = getClosestEnemy(settings.aimlockMaxDist, true)
-            if target and target.Character then
-                local part = target.Character:FindFirstChild(settings.aimlockPart) or target.Character:FindFirstChild("HumanoidRootPart")
-                if part then
-                    local currentCF = camera.CFrame
-                    local targetCF = CFrame.new(currentCF.Position, part.Position)
-                    camera.CFrame = currentCF:Lerp(targetCF, settings.aimlockSmoothness)
-                end
-            end
-        end
+        -- HUD target acquisition is throttled; bracket position alone tracks each frame.
+        updateSkillAimHUD()
 
         -- 2. Speed Boost
         if settings.speedEnabled then
@@ -583,64 +849,56 @@ return function(Window, scriptInfo)
     -- [[ UI CONSTRUCTION ]]
     -- Tab 1: Combat
     local CombatTab = Window:CreateTab("Combat", 4483362458)
-    CombatTab:CreateSection("Target Aimlock")
+    CombatTab:CreateSection("Skill Aim - Classic Smooth")
 
     CombatTab:CreateToggle({
-        Name = "🎯 Smooth Camera Aimlock",
-        CurrentValue = false,
-        Flag = "AB_Aimlock",
-        Callback = function(v)
-            settings.aimlockEnabled = v
-            if v then
-                notify("Combat", "Aimlock ON: Hold [" .. tostring(settings.aimlockKey.Name) .. "] to lock target")
-            end
-        end,
-    })
-
-    CombatTab:CreateKeybind({
-        Name = "Aimlock Key",
-        CurrentKeybind = "C",
-        HoldToInteract = false,
-        Flag = "AB_AimlockKey",
-        Callback = function(key)
-            if typeof(key) == "EnumItem" then
-                settings.aimlockKey = key
-            end
-        end,
-    })
-
-    CombatTab:CreateDropdown({
-        Name = "Aim Target Part",
-        Options = {"HumanoidRootPart", "Head"},
-        CurrentOption = {"HumanoidRootPart"},
-        Flag = "AB_AimPart",
-        Callback = function(v)
-            settings.aimlockPart = type(v) == "table" and v[1] or v
+        Name = "Skill Aim (FOV, no camera lock)",
+        CurrentValue = true,
+        Flag = "AB_SkillAim",
+        Callback = function(value)
+            skillAim.Enabled = value
+            skillAim.Target = nil
+            skillAim.LockUntil = 0
+            notify("Skill Aim", value and "Enabled - aim at a target and cast normally"
+                or "Disabled - original skill directions preserved")
         end,
     })
 
     CombatTab:CreateSlider({
-        Name = "Aim Smoothness",
-        Range = {0.05, 1.0},
-        Increment = 0.05,
-        Suffix = " Lerp",
-        CurrentValue = 0.25,
-        Flag = "AB_AimSmooth",
-        Callback = function(v)
-            settings.aimlockSmoothness = v
+        Name = "Skill Aim FOV",
+        Range = {60, 400},
+        Increment = 5,
+        Suffix = " px",
+        CurrentValue = 175,
+        Flag = "AB_SkillAimFov",
+        Callback = function(value)
+            skillAim.Fov = value
+            if skillAim.Ring then
+                skillAim.Ring.Size = UDim2.fromOffset(value * 2, value * 2)
+            end
+            if skillAim.Label then
+                skillAim.Label.Position = UDim2.new(0.5, 0, 0.5, value + 10)
+            end
+            if skillAim.Ticks then
+                for i, tick in ipairs(skillAim.Ticks:GetChildren()) do
+                    if tick:IsA("Frame") then
+                        local angle = i * math.pi * 2 / 36
+                        tick.Position = UDim2.new(0.5, math.cos(angle) * value,
+                            0.5, math.sin(angle) * value)
+                    end
+                end
+            end
         end,
     })
 
     CombatTab:CreateSlider({
-        Name = "Aimlock Max Distance",
-        Range = {50, 500},
-        Increment = 10,
-        Suffix = " Studs",
-        CurrentValue = 350,
-        Flag = "AB_AimMaxDist",
-        Callback = function(v)
-            settings.aimlockMaxDist = v
-        end,
+        Name = "Skill Aim Prediction",
+        Range = {0, 0.2},
+        Increment = 0.01,
+        Suffix = " s",
+        CurrentValue = 0.07,
+        Flag = "AB_SkillAimPredict",
+        Callback = function(value) skillAim.Prediction = value end,
     })
 
     CombatTab:CreateSection("Extended Attack Reach / Query Hook")
@@ -1068,6 +1326,11 @@ return function(Window, scriptInfo)
 
     -- Cleanup object
     local hubInstance = {
+        GetSkillAimStatus = function()
+            return {enabled = skillAim.Enabled, installed = skillAim.Aim ~= nil,
+                fov = skillAim.Fov, acquired = skillAim.Stats.acquired,
+                redirected = skillAim.Stats.redirected, passed = skillAim.Stats.passed}
+        end,
         Destroy = function()
             running = false
             for _, conn in ipairs(connections) do
@@ -1076,6 +1339,8 @@ return function(Window, scriptInfo)
             for player, _ in pairs(espObjects) do
                 removeDrawingESP(player)
             end
+            restoreSkillAim()
+            if skillAim.Gui then pcall(function() skillAim.Gui:Destroy() end) end
             restoreHitboxHooks()
             restoreDashSettings()
             local hum = getLocalHumanoid()
