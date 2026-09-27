@@ -532,42 +532,75 @@ return function(Window, scriptInfo)
     end
     createSkillAimHUD()
 
-    -- [[ FAST CAST: skill Start, plus RoadRoller Cast/End animations ]]
-    -- FireArrow server Shoot timing improved in a one-cast trial.
-    -- RoadRoller animation speed does not accelerate its server-timed strike sequence.
+    -- [[ FAST CAST: discover all registered special-ability animation phases ]]
+    -- Only the local player's Animator is touched. Server-timed casts, hits and cooldowns
+    -- are unchanged; victim tracks, emotes, movement and basic M1 are intentionally excluded.
     local fastCast = {
         Enabled = true, Multiplier = 2.5, Running = true,
         Accelerated = 0, RoadRollerAccelerated = 0, Eligible = 0, Bound = false,
         ActiveTracks = setmetatable({}, {__mode = "k"}),
         TrackConnections = setmetatable({}, {__mode = "k"}),
         AnimationConnection = nil, CharacterConnection = nil,
+        Catalog = {}, RegisteredAbilities = 0, CoveredAbilities = 0,
+        CataloguedTracks = 0, ExcludedVictimTracks = 0, Missing = {},
+        LastAbility = nil, LastPhase = nil, LastSpeed = nil,
     }
     local animRoot = ReplicatedStorage:FindFirstChild("Assets")
     animRoot = animRoot and animRoot:FindFirstChild("Animations")
-    local function fastCastTrackKind(animation)
-        if not animation or not animation:IsA("Animation") then return nil end
-        local abilityFolder = animation.Parent
-        local movesetFolder = abilityFolder and abilityFolder.Parent
-        if not animRoot or not movesetFolder or movesetFolder.Parent ~= animRoot
-            or movesetFolder.Name ~= localPlayer:GetAttribute("Moveset") then
-            return nil
-        end
-        local roadRollerTrack = movesetFolder.Name == "Diyo"
-            and abilityFolder.Name == "RoadRoller"
-            and (animation.Name == "Cast" or animation.Name == "End")
-        if animation.Name ~= "Start" and not roadRollerTrack then return nil end
-        local registry = skillAim.Registry
-        if not registry then return nil end
-        local ok, moveset = pcall(registry.GetMoveset, movesetFolder.Name)
-        if not ok or type(moveset) ~= "table" then return nil end
-        for _, ability in ipairs(moveset.Abilities or {}) do
-            if ability.Key == abilityFolder.Name and ability.Config
-                and ability.Config.Kind ~= "Attack" and ability.Config.Kind ~= "Melee" then
-                return roadRollerTrack and "RoadRoller" or "Start"
+    local function buildFastCastCatalog()
+        table.clear(fastCast.Catalog)
+        table.clear(fastCast.Missing)
+        fastCast.RegisteredAbilities, fastCast.CoveredAbilities = 0, 0
+        fastCast.CataloguedTracks, fastCast.ExcludedVictimTracks = 0, 0
+        local ok, registry = pcall(function()
+            return require(ReplicatedStorage.Shared.Abilities.Registry)
+        end)
+        if not ok or type(registry) ~= "table" or not animRoot then return end
+        for _, movesetFolder in ipairs(animRoot:GetChildren()) do
+            if movesetFolder:IsA("Folder") then
+                local found, moveset = pcall(registry.GetMoveset, movesetFolder.Name)
+                if found and type(moveset) == "table" then
+                    for _, ability in ipairs(moveset.Abilities or {}) do
+                        local config = ability.Config
+                        if config and config.Kind ~= "Attack" and config.Kind ~= "Melee" then
+                            fastCast.RegisteredAbilities += 1
+                            local abilityFolder = movesetFolder:FindFirstChild(ability.Key)
+                            local covered = false
+                            if abilityFolder then
+                                for _, animation in ipairs(abilityFolder:GetDescendants()) do
+                                    if animation:IsA("Animation") then
+                                        if animation.Name:lower():find("victim", 1, true) then
+                                            fastCast.ExcludedVictimTracks += 1
+                                        else
+                                            fastCast.Catalog[animation] = {
+                                                moveset = movesetFolder.Name, key = ability.Key,
+                                                phase = animation.Name,
+                                            }
+                                            fastCast.CataloguedTracks += 1
+                                            covered = true
+                                        end
+                                    end
+                                end
+                            end
+                            if covered then
+                                fastCast.CoveredAbilities += 1
+                            else
+                                table.insert(fastCast.Missing, movesetFolder.Name .. "/" .. ability.Key)
+                            end
+                        end
+                    end
+                end
             end
+        end
+    end
+    local function fastCastTrackKind(animation)
+        local entry = animation and fastCast.Catalog[animation]
+        if entry and entry.moveset == localPlayer:GetAttribute("Moveset") then
+            return entry
         end
         return nil
     end
+    buildFastCastCatalog()
     local function restoreActiveCastTracks()
         for track, original in pairs(fastCast.ActiveTracks) do
             if track.IsPlaying then
@@ -580,10 +613,12 @@ return function(Window, scriptInfo)
         end
     end
     local function bindFastCastCharacter(character)
+        if not fastCast.Running or character ~= localPlayer.Character then return end
         if fastCast.AnimationConnection then
             fastCast.AnimationConnection:Disconnect()
             fastCast.AnimationConnection = nil
         end
+        restoreActiveCastTracks()
         fastCast.Bound = false
         local hum = character:FindFirstChildOfClass("Humanoid")
             or character:WaitForChild("Humanoid", 8)
@@ -613,7 +648,9 @@ return function(Window, scriptInfo)
                 local ok = pcall(function() track:AdjustSpeed(boosted) end)
                 if ok then
                     fastCast.Accelerated += 1
-                    if trackKind == "RoadRoller" then fastCast.RoadRollerAccelerated += 1 end
+                    fastCast.LastAbility, fastCast.LastPhase = trackKind.key, trackKind.phase
+                    fastCast.LastSpeed = boosted
+                    if trackKind.key == "RoadRoller" then fastCast.RoadRollerAccelerated += 1 end
                 end
             end)
         end)
@@ -1140,13 +1177,13 @@ return function(Window, scriptInfo)
     CombatTab:CreateSection("Fast Cast - animation timing")
 
     CombatTab:CreateToggle({
-        Name = "Fast Cast (Start + Road Roller Cast/End)",
+        Name = "Fast Cast (All special-skill animations)",
         CurrentValue = true,
         Flag = "AB_FastCast",
         Callback = function(value)
             fastCast.Enabled = value
             if not value then restoreActiveCastTracks() end
-            notify("Fast Cast", value and "Enabled - normal skill inputs, faster windup"
+            notify("Fast Cast", value and "Skill animations accelerated; server timing unchanged"
                 or "Disabled - animation speeds restored")
         end,
     })
@@ -1589,11 +1626,24 @@ return function(Window, scriptInfo)
         SetSkillAimTargetPriority = function(value)
             return setSkillTargetPriority(value)
         end,
+        GetFastCastCoverage = function()
+            return {registeredAbilities = fastCast.RegisteredAbilities,
+                coveredAbilities = fastCast.CoveredAbilities,
+                cataloguedTracks = fastCast.CataloguedTracks,
+                excludedVictimTracks = fastCast.ExcludedVictimTracks,
+                missing = table.clone(fastCast.Missing)}
+        end,
         GetFastCastStatus = function()
             return {enabled = fastCast.Enabled, bound = fastCast.Bound,
                 running = fastCast.Running, multiplier = fastCast.Multiplier,
                 eligible = fastCast.Eligible, accelerated = fastCast.Accelerated,
                 roadRollerAccelerated = fastCast.RoadRollerAccelerated,
+                registeredAbilities = fastCast.RegisteredAbilities,
+                coveredAbilities = fastCast.CoveredAbilities,
+                cataloguedTracks = fastCast.CataloguedTracks,
+                excludedVictimTracks = fastCast.ExcludedVictimTracks,
+                lastAbility = fastCast.LastAbility, lastPhase = fastCast.LastPhase,
+                lastSpeed = fastCast.LastSpeed,
                 serverCooldownChanged = false, serverTimedRoadRollerUnchanged = true}
         end,
         GetSkillAimStatus = function()
