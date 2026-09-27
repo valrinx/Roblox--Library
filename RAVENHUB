@@ -857,8 +857,8 @@ local SCRIPTS = {
         description = "Multi-Bounce Guidelines | Cushion Bank Reflections | Auto Aim & Pocket Solver | Ghost Ball | Max Cue Stats",
         placeIds    = {116921506811323},
         gameIds     = {10526463655},
-        version     = "v1.0.3",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/eight_ball_duels.lua?v=8bd-1.0.3",
+        version     = "v1.0.4",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/eight_ball_duels.lua?v=8bd-1.0.4",
     },
 
 

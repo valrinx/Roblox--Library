@@ -28,6 +28,25 @@ return function(Window, scriptInfo)
         return connection
     end
 
+    local StarterGui = game:GetService("StarterGui")
+    local function notify(title, text)
+        pcall(function()
+            if Window and type(Window.Notify) == "function" then
+                Window:Notify({
+                    Title = title,
+                    Description = text,
+                    Duration = 3
+                })
+            else
+                StarterGui:SetCore("SendNotification", {
+                    Title = title,
+                    Text = text,
+                    Duration = 3
+                })
+            end
+        end)
+    end
+
     -- Core Pool Modules
     local Pool = ReplicatedStorage:WaitForChild("Libraries"):WaitForChild("GameSpecific"):WaitForChild("Pool")
     local PoolConstants = require(Pool:WaitForChild("PoolConstants"))
@@ -605,7 +624,14 @@ return function(Window, scriptInfo)
         local u = dir / dist
 
         -- Check other balls obstructing path
-        for _, num in ipairs(sim.Order) do
+        local ballOrder = sim.Order
+        if not ballOrder then
+            ballOrder = {}
+            for num, _ in pairs(sim.Balls or {}) do
+                table.insert(ballOrder, num)
+            end
+        end
+        for _, num in ipairs(ballOrder) do
             if num ~= ignoreBall1 and num ~= ignoreBall2 then
                 local b = sim.Balls[num]
                 if b and not b.Pocketed then
@@ -892,6 +918,13 @@ return function(Window, scriptInfo)
 
         local candidates = {}
 
+        local primaryRails = {
+            { axis = "Y", val = 22, norm = Vector2.new(0, -1), minT = -40.8, maxT = 40.8, contactY = 22 - BallRadius },
+            { axis = "Y", val = -22, norm = Vector2.new(0, 1), minT = -40.8, maxT = 40.8, contactY = -22 + BallRadius },
+            { axis = "X", val = -44, norm = Vector2.new(1, 0), minT = -18.8, maxT = 18.8, contactX = -44 + BallRadius },
+            { axis = "X", val = 44, norm = Vector2.new(-1, 0), minT = -18.8, maxT = 18.8, contactX = 44 - BallRadius },
+        }
+
         -- TIER 1: Direct Potting Shots
         if settings.shotPreference ~= "Bank Only (ฉิ่งเท่านั้น)" then
             for _, ballNum in ipairs(legalBalls) do
@@ -963,13 +996,6 @@ return function(Window, scriptInfo)
 
         -- TIER 2: 1-Cushion Bank Potting Shots (Object ball banks off rail into pocket)
         if settings.shotPreference ~= "Direct Only (ยิงตรงเท่านั้น)" then
-            local primaryRails = {
-                { axis = "Y", val = 22, norm = Vector2.new(0, -1), minT = -40.8, maxT = 40.8, contactY = 22 - BallRadius },
-                { axis = "Y", val = -22, norm = Vector2.new(0, 1), minT = -40.8, maxT = 40.8, contactY = -22 + BallRadius },
-                { axis = "X", val = -44, norm = Vector2.new(1, 0), minT = -18.8, maxT = 18.8, contactX = -44 + BallRadius },
-                { axis = "X", val = 44, norm = Vector2.new(-1, 0), minT = -18.8, maxT = 18.8, contactX = 44 - BallRadius },
-            }
-
             for _, ballNum in ipairs(legalBalls) do
                 local objBall = sim.Balls[ballNum]
                 if objBall and not objBall.Pocketed then
