@@ -5,7 +5,7 @@ $source = Get-Content -Raw $modulePath
 $checks = @{
     "skill aim target selector" = 'local function chooseSkillTarget\(\)'
     "players and dummy targets" = 'CollectionService:GetTagged\("Dummy"\)'
-    "FOV target selection" = 'pixels >= closest'
+    "FOV target selection" = 'pixels >= skillAim\.Fov'
     "cast acquisition" = 'name == "AbilityCast"'
     "charged ability handling" = 'name == "AbilityCharge"'
     "direction payload only" = 'copy\.Look = math\.abs\(payload\.Look\.Y\)'

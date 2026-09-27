@@ -145,6 +145,7 @@ return function(Window, scriptInfo)
     local CollectionService = game:GetService("CollectionService")
     local skillAim = {
         Enabled = true, Fov = 175, Prediction = 0.07, LockUntil = 0,
+        TargetPriority = "Center FOV",
         RangeAware = true, RangeMargin = 0.95, RangeInfo = nil,
         ActiveAbilityId = nil, ProfileUntil = 0, Registry = nil,
         Target = nil, VisualTarget = nil, LastScan = 0, ScanInterval = 0.2,
@@ -229,11 +230,19 @@ return function(Window, scriptInfo)
         end
         return nil
     end
+    local function betterSkillCandidate(pixels, health, bestPixels, bestHealth)
+        if bestPixels == nil then return true end
+        if skillAim.TargetPriority == "Lowest HP" then
+            return health < bestHealth or (health == bestHealth and pixels < bestPixels)
+        end
+        return pixels < bestPixels or (pixels == bestPixels and health < bestHealth)
+    end
     local function chooseSkillTarget()
         local cam = Workspace.CurrentCamera
-        if not cam or not getLocalRoot() then return nil end
-        local center, closest, chosen = cam.ViewportSize / 2, skillAim.Fov, nil
-        local ownRoot, range = getLocalRoot(), activeSkillRange()
+        local ownRoot = getLocalRoot()
+        if not cam or not ownRoot then return nil end
+        local center, chosen, bestPixels, bestHealth = cam.ViewportSize / 2, nil, nil, nil
+        local range = activeSkillRange()
         local function consider(model, player, name)
             local candidate = {model = model, player = player, name = name}
             local point = aimPoint(candidate)
@@ -244,23 +253,37 @@ return function(Window, scriptInfo)
             end
             local view, onScreen = cam:WorldToViewportPoint(point)
             local pixels = (Vector2.new(view.X, view.Y) - center).Magnitude
-            if not onScreen or view.Z <= 0 or pixels >= closest then return end
+            if not onScreen or view.Z <= 0 or pixels >= skillAim.Fov then return end
+            local hum = model:FindFirstChildOfClass("Humanoid")
+            if not hum or hum.Health <= 0
+                or not betterSkillCandidate(pixels, hum.Health, bestPixels, bestHealth) then return end
             local params = RaycastParams.new()
             params.FilterType = Enum.RaycastFilterType.Exclude
             params.FilterDescendantsInstances = localPlayer.Character and {localPlayer.Character} or {}
             local ray = Workspace:Raycast(cam.CFrame.Position, point - cam.CFrame.Position, params)
             if ray and not ray.Instance:IsDescendantOf(model) then return end
-            closest, chosen = pixels, candidate
+            bestPixels, bestHealth, chosen = pixels, hum.Health, candidate
         end
+        -- Players take priority. A tagged dummy is only a fallback when no player qualifies.
         for _, player in ipairs(Players:GetPlayers()) do
             if player ~= localPlayer and player.Character then
                 consider(player.Character, player, player.DisplayName)
             end
         end
-        for _, dummy in ipairs(CollectionService:GetTagged("Dummy")) do
-            if dummy:IsA("Model") then consider(dummy, nil, dummy.Name) end
+        if not chosen then
+            for _, dummy in ipairs(CollectionService:GetTagged("Dummy")) do
+                if dummy:IsA("Model") then consider(dummy, nil, dummy.Name) end
+            end
         end
         return chosen
+    end
+    local function setSkillTargetPriority(value)
+        local mode = type(value) == "table" and value[1] or value
+        if mode ~= "Center FOV" and mode ~= "Lowest HP" then return false end
+        skillAim.TargetPriority = mode
+        skillAim.Target, skillAim.VisualTarget = nil, nil
+        skillAim.LockUntil, skillAim.LastScan = 0, 0
+        return true
     end
     local function acquireSkillTarget()
         if not skillAim.Enabled then return nil end
@@ -1079,6 +1102,14 @@ return function(Window, scriptInfo)
         end,
     })
 
+    CombatTab:CreateDropdown({
+        Name = "Skill Aim Target Priority",
+        Options = {"Center FOV", "Lowest HP"},
+        CurrentOption = {"Center FOV"},
+        Flag = "AB_SkillAimTargetPriority",
+        Callback = function(value) setSkillTargetPriority(value) end,
+    })
+
     CombatTab:CreateToggle({
         Name = "Range-aware Skill Aim (declared ranges)",
         CurrentValue = true,
@@ -1549,6 +1580,9 @@ return function(Window, scriptInfo)
 
     -- Cleanup object
     local hubInstance = {
+        SetSkillAimTargetPriority = function(value)
+            return setSkillTargetPriority(value)
+        end,
         GetFastCastStatus = function()
             return {enabled = fastCast.Enabled, bound = fastCast.Bound,
                 running = fastCast.Running, multiplier = fastCast.Multiplier,
@@ -1558,7 +1592,10 @@ return function(Window, scriptInfo)
         GetSkillAimStatus = function()
             local profile = skillAim.RangeInfo or {classification = "unknown"}
             return {enabled = skillAim.Enabled, installed = skillAim.Aim ~= nil,
-                fov = skillAim.Fov, rangeAware = skillAim.RangeAware,
+                fov = skillAim.Fov, targetPriority = skillAim.TargetPriority,
+                target = skillAim.Target and skillAim.Target.name or nil,
+                previewTarget = skillAim.VisualTarget and skillAim.VisualTarget.name or nil,
+                rangeAware = skillAim.RangeAware,
                 activeAbilityId = skillAim.ActiveAbilityId,
                 rangeClass = profile.classification, rangeKey = profile.key,
                 rangeMax = activeSkillRange(), acquired = skillAim.Stats.acquired,
