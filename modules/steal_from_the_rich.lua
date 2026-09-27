@@ -1,7 +1,7 @@
 --[[
     RAVEN HUB | Steal From The Rich!
     PlaceId: 120475074479690 | GameId: 10753751277
-    Version: v1.1.0
+    Version: v1.3.1
 
     Features:
       • Auto Steal Crate (Anti-Rubberband Smooth Fast Mover, Priority Rarity Sniper, Auto SafeZone Escape)
@@ -76,7 +76,7 @@ return function(Window, scriptInfo)
     -- ============================================================
     --  CONSTANTS & WAYPOINTS
     -- ============================================================
-    local SAFEZONE_POS = Vector3.new(2435.0, 5.0, -940.0)
+    local SAFEZONE_POS = Vector3.new(2465.0, 5.0, -940.0)
 
     local ZONE_WAYPOINTS = {
         ["Grandpa (👴 Common)"]           = Vector3.new(2364.4, 4.5, -984.7),
@@ -125,7 +125,7 @@ return function(Window, scriptInfo)
         -- Steal Farm
         autoSteal           = false,
         minRarity           = "All",
-        matchCarryTier      = false, -- Disabled: can steal ANY crate tier freely!
+        matchCarryTier      = true, -- Match player CarryStat so bot never targets impossible crates
         vacuumCrates        = true, -- Rapid remote steal combined with proximity prompt hold
         stealMethod         = "Fast Glide", -- "Fast Glide", "Instant Snap", "Walk"
         glideSpeed          = 350,
@@ -160,6 +160,7 @@ return function(Window, scriptInfo)
         spinInterval        = 20,
 
         -- Combat
+        disableGuards       = true, -- Freeze and displace all zone guards and bosses to the void
         batSlapAura         = false,
         batAuraRange        = 22,
         antiRagdoll         = true,
@@ -199,7 +200,10 @@ return function(Window, scriptInfo)
 
     local function forceDismountAndUnanchor()
         local char, hum, root = getCharacter()
-        if DismountRemote then pcall(function() DismountRemote:FireServer() end) end
+        if DismountRemote and player:GetAttribute("OnTreadmill") == true then
+            pcall(function() DismountRemote:FireServer() end)
+            task.wait(0.12)
+        end
         player:SetAttribute("OnTreadmill", false)
         if char then
             for _, p in ipairs(char:GetDescendants()) do
@@ -207,6 +211,9 @@ return function(Window, scriptInfo)
                     p.Anchored = false
                 end
             end
+        end
+        if root then
+            root.Anchored = false
         end
         if hum and hum.WalkSpeed < 16 then
             local runSpeed = tonumber(player:GetAttribute("RunSpeed")) or 50
@@ -234,6 +241,198 @@ return function(Window, scriptInfo)
             end
         end
         return nil, nil
+    end
+
+    -- ============================================================
+    --  ZONE GUARDS DISABLER (FREEZE & VOID DISPLACEMENT)
+    -- ============================================================
+    local ZONE_GUARDS = {
+        "Archeologist", "Gold Tycoon", "Museum Worker", "Mafia Boss", "Pirate",
+        "Bodyguard 1", "Bodyguard 2", "Demon Dragon", "Fan 1", "dinosaur (active)",
+        "Jeweler", "Astronaut", "demon king", "Celebirty NPC", "Angel Queen", "Angel Beast (chaser)"
+    }
+
+    local function disableZoneGuards()
+        for _, name in ipairs(ZONE_GUARDS) do
+            local m = Workspace:FindFirstChild(name)
+            if m and m:IsA("Model") then
+                for _, p in ipairs(m:GetDescendants()) do
+                    if p:IsA("BasePart") then
+                        p.CanCollide = false
+                        p.CanTouch = false
+                        p.CanQuery = false
+                        p.CFrame = CFrame.new(0, -2500, 0)
+                        p.Anchored = true
+                    end
+                end
+                local hum = m:FindFirstChildOfClass("Humanoid")
+                if hum and hum.WalkSpeed > 0 then
+                    hum.WalkSpeed = 0
+                end
+            end
+        end
+    end
+
+    -- ============================================================
+    --  CRATE OFFLOADING & PLACEMENT (UNBLOCK HANDS)
+    -- ============================================================
+    local function getInventoryCrate()
+        local char = player.Character
+        if char then
+            for _, t in ipairs(char:GetChildren()) do
+                if t:IsA("Tool") and (t.Name == "Crate" or t:GetAttribute("CrateUid")) then
+                    return t
+                end
+            end
+        end
+        if player.Backpack then
+            for _, t in ipairs(player.Backpack:GetChildren()) do
+                if t:IsA("Tool") and (t.Name == "Crate" or t:GetAttribute("CrateUid")) then
+                    return t
+                end
+            end
+        end
+        return nil
+    end
+
+    local cachedTryPlace = nil
+    local function getTryPlaceFunction()
+        if cachedTryPlace then return cachedTryPlace end
+        if type(getgc) ~= "function" then return nil end
+        for _, f in ipairs(getgc(false)) do
+            if type(f) == "function" and not isexecutorclosure(f) then
+                local src, name = debug.info(f, "sn")
+                if src and src:find("LBTHPlacementMarkerClient") and name == "tryPlace" then
+                    cachedTryPlace = f
+                    return f
+                end
+            end
+        end
+        return nil
+    end
+
+    local function offloadInventoryCrate()
+        local crateTool = getInventoryCrate()
+        if not crateTool then return false end
+
+        local char, hum, root = getCharacter()
+        local plot, floor = getPlayerPlot()
+
+        -- 1. Auto open any ready appraisal crates first to free up slots
+        if settings.autoOpenCrates and CrateTimersFunc then
+            pcall(function()
+                local list = CrateTimersFunc:InvokeServer("list")
+                if type(list) == "table" then
+                    for _, item in ipairs(list) do
+                        if item.Ready then
+                            CrateTimersFunc:InvokeServer("open", item.Uid)
+                        end
+                    end
+                end
+            end)
+        end
+
+        -- 2. Auto sell items to clear stands if enabled
+        if settings.autoSell and SellDoRemote then
+            pcall(function() SellDoRemote:FireServer("all") end)
+        end
+
+        if plot and floor and root then
+            -- Equip crate tool so it can be placed
+            if hum and crateTool.Parent ~= char then
+                hum:EquipTool(crateTool)
+                task.wait(0.12)
+            end
+
+            -- Fast Glide to plot floor center
+            local plotCenter = floor.Position + Vector3.new(0, 3, 0)
+            moveToTarget(plotCenter, "Fast Glide", 450)
+
+            -- Gather all existing fixtures/stands/crates on the plot floor
+            local obstacles = {}
+            for _, child in ipairs(floor:GetChildren()) do
+                if child:IsA("PVInstance") then
+                    local pName = child.Name
+                    if pName == "AppraisingCrate" or pName == "ItemStand" or pName == "PlayerSpawn" or pName == "treadmill sign" then
+                        table.insert(obstacles, child:GetPivot().Position)
+                    end
+                end
+            end
+
+            local topY = floor.Position.Y + floor.Size.Y / 2
+            local halfX = math.max(floor.Size.X / 2 - 3, 2)
+            local halfZ = math.max(floor.Size.Z / 2 - 3, 2)
+
+            -- Grid scan for collision-free candidate positions
+            local candidates = {}
+            for ox = -halfX, halfX, 3.2 do
+                for oz = -halfZ, halfZ, 3.2 do
+                    local worldPos = floor.CFrame:PointToWorldSpace(Vector3.new(ox, floor.Size.Y / 2, oz))
+                    local collides = false
+                    for _, obsPos in ipairs(obstacles) do
+                        local dx = obsPos.X - worldPos.X
+                        local dz = obsPos.Z - worldPos.Z
+                        if dx * dx + dz * dz < 12.25 then -- distance < 3.5 studs
+                            collides = true
+                            break
+                        end
+                    end
+                    if not collides then
+                        table.insert(candidates, worldPos)
+                    end
+                end
+            end
+
+            -- Sort candidates by distance to plot center
+            table.sort(candidates, function(a, b)
+                return (a - floor.Position).Magnitude < (b - floor.Position).Magnitude
+            end)
+
+            local placed = false
+            for i = 1, math.min(#candidates, 4) do
+                local slotPos = candidates[i]
+                root.CFrame = CFrame.new(slotPos + Vector3.new(0, 2.5, 0))
+                root.AssemblyLinearVelocity = Vector3.zero
+
+                local cam = Workspace.CurrentCamera
+                if cam then
+                    cam.CFrame = CFrame.lookAt(root.Position + Vector3.new(0, 1.5, 0), slotPos)
+                end
+                task.wait(0.08)
+
+                if PlaceAtRemote then
+                    pcall(function() PlaceAtRemote:FireServer(slotPos, 0) end)
+                    task.wait(0.25)
+                end
+
+                placed = (crateTool.Parent == nil or (crateTool.Parent ~= char and crateTool.Parent ~= player.Backpack))
+                if placed then break end
+            end
+
+            -- Fallback 1: Try LBTHPlacementMarkerClient tryPlace function
+            if not placed then
+                local tryPlace = getTryPlaceFunction()
+                if tryPlace then
+                    pcall(tryPlace)
+                    task.wait(0.25)
+                    placed = (crateTool.Parent == nil or (crateTool.Parent ~= char and crateTool.Parent ~= player.Backpack))
+                end
+            end
+
+            -- Fallback 2: Unequip tools to Backpack so character hands are NEVER clogged
+            if hum then
+                hum:UnequipTools()
+            end
+
+            return placed
+        else
+            -- If no plot found, unequip to backpack so hands are free
+            if hum then
+                hum:UnequipTools()
+            end
+        end
+
+        return false
     end
 
     local function moveToTarget(targetPos, method, speedOverride)
@@ -292,7 +491,18 @@ return function(Window, scriptInfo)
         return Workspace:FindFirstChild("Crates")
     end
 
+    local failedCrates = {}
+    local function cleanFailedCrates()
+        local now = os.clock()
+        for c, expire in pairs(failedCrates) do
+            if now >= expire then
+                failedCrates[c] = nil
+            end
+        end
+    end
+
     local function findBestCrate()
+        cleanFailedCrates()
         local crates = getCratesFolder()
         if not crates then return nil, nil end
 
@@ -310,49 +520,27 @@ return function(Window, scriptInfo)
         elseif settings.minRarity == "Cosmic+" then minWeight = 7
         end
 
+        local now = os.clock()
         local candidates = {}
         for _, crate in ipairs(crates:GetChildren()) do
             if crate:IsA("Model") then
-                local prompt = crate:FindFirstChildWhichIsA("ProximityPrompt", true)
-                local part = crate:FindFirstChild("Cube") or crate:FindFirstChildWhichIsA("BasePart")
-                if prompt and prompt.Enabled and part then
-                    local worldPos = part.Position
-                    local zone, rarity, weight = parseCrateInfo(crate)
-                    local isTutorial = crate:GetAttribute("TutorialCrate") or string.find(crate.Name, "tutorial")
-                    local isGrandpa = (crate:GetAttribute("AreaId") == "Grandpa") or (zone == "Grandpa")
-
-                    -- If matchCarryTier is true, reject crates that require higher tier than player currently has
-                    local canCarry = (not settings.matchCarryTier) or (weight <= playerCarry)
-
-                    if not isTutorial and canCarry and weight >= minWeight then
-                        local dist = (root.Position - worldPos).Magnitude
-                        table.insert(candidates, {
-                            crate = crate,
-                            prompt = prompt,
-                            part = part,
-                            worldPos = worldPos,
-                            weight = weight,
-                            dist = dist,
-                            rarity = rarity,
-                            zone = zone,
-                            isGrandpa = isGrandpa and 1 or 0
-                        })
-                    end
-                end
-            end
-        end
-
-        -- Fallback: If no candidate matched due to strict carry tier filter, find any available crate
-        if #candidates == 0 then
-            for _, crate in ipairs(crates:GetChildren()) do
-                if crate:IsA("Model") then
+                local failedUntil = failedCrates[crate]
+                if not (failedUntil and now < failedUntil) then
                     local prompt = crate:FindFirstChildWhichIsA("ProximityPrompt", true)
-                    local part = crate:FindFirstChild("Cube") or crate:FindFirstChildWhichIsA("BasePart")
+                    local part = (prompt and prompt.Parent and prompt.Parent:IsA("BasePart") and prompt.Parent)
+                        or crate:FindFirstChild("Cube")
+                        or crate:FindFirstChildWhichIsA("BasePart")
+
                     if prompt and prompt.Enabled and part then
                         local worldPos = part.Position
                         local zone, rarity, weight = parseCrateInfo(crate)
                         local isTutorial = crate:GetAttribute("TutorialCrate") or string.find(crate.Name, "tutorial")
-                        if not isTutorial then
+                        local isGrandpa = (crate:GetAttribute("AreaId") == "Grandpa") or (zone == "Grandpa")
+
+                        -- If matchCarryTier is true, reject crates that require higher tier than player currently has
+                        local canCarry = (not settings.matchCarryTier) or (weight <= playerCarry)
+
+                        if not isTutorial and canCarry and weight >= minWeight then
                             local dist = (root.Position - worldPos).Magnitude
                             table.insert(candidates, {
                                 crate = crate,
@@ -363,8 +551,43 @@ return function(Window, scriptInfo)
                                 dist = dist,
                                 rarity = rarity,
                                 zone = zone,
-                                isGrandpa = (zone == "Grandpa") and 1 or 0
+                                isGrandpa = isGrandpa and 1 or 0
                             })
+                        end
+                    end
+                end
+            end
+        end
+
+        -- Fallback: If no candidate matched due to strict filters or blacklists, find any non-blacklisted crate
+        if #candidates == 0 then
+            for _, crate in ipairs(crates:GetChildren()) do
+                if crate:IsA("Model") then
+                    local failedUntil = failedCrates[crate]
+                    if not (failedUntil and now < failedUntil) then
+                        local prompt = crate:FindFirstChildWhichIsA("ProximityPrompt", true)
+                        local part = (prompt and prompt.Parent and prompt.Parent:IsA("BasePart") and prompt.Parent)
+                            or crate:FindFirstChild("Cube")
+                            or crate:FindFirstChildWhichIsA("BasePart")
+
+                        if prompt and prompt.Enabled and part then
+                            local worldPos = part.Position
+                            local zone, rarity, weight = parseCrateInfo(crate)
+                            local isTutorial = crate:GetAttribute("TutorialCrate") or string.find(crate.Name, "tutorial")
+                            if not isTutorial then
+                                local dist = (root.Position - worldPos).Magnitude
+                                table.insert(candidates, {
+                                    crate = crate,
+                                    prompt = prompt,
+                                    part = part,
+                                    worldPos = worldPos,
+                                    weight = weight,
+                                    dist = dist,
+                                    rarity = rarity,
+                                    zone = zone,
+                                    isGrandpa = (zone == "Grandpa") and 1 or 0
+                                })
+                            end
                         end
                     end
                 end
@@ -560,49 +783,24 @@ return function(Window, scriptInfo)
     task.spawn(function()
         while running do
             if settings.autoSteal then
+                -- 1. If player has a Crate tool in hand or backpack, offload it onto plot so hands are 100% free
+                if settings.autoPlaceCrates and getInventoryCrate() then
+                    offloadInventoryCrate()
+                end
+
                 local isCarrying = player:GetAttribute("CarryingStolen") == true
-                local bankedCount = tonumber(player:GetAttribute("BankedCrateCount")) or 0
 
-                -- 1. Check if we need to offload banked crates to Plot first
-                if bankedCount > 0 and settings.autoPlaceCrates and PlaceAtRemote then
-                    local plot, floor = getPlayerPlot()
-                    local char, _, root = getCharacter()
-                    if plot and floor and root then
-                        -- Equip crate tool
-                        local crateTool = char:FindFirstChildWhichIsA("Tool")
-                        if not (crateTool and crateTool:GetAttribute("CrateUid")) then
-                            crateTool = nil
-                            for _, t in ipairs(player.Backpack:GetChildren()) do
-                                if t:GetAttribute("CrateUid") then
-                                    crateTool = t
-                                    t.Parent = char
-                                    task.wait(0.15)
-                                    break
+                -- Auto-dismiss any modal dialogs (SellDialogUI, LBTHPurchaseThanks, etc.)
+                local pgui = player:FindFirstChild("PlayerGui")
+                if pgui then
+                    for _, dName in ipairs({"SellDialogUI", "LBTHPurchaseThanks"}) do
+                        local dlg = pgui:FindFirstChild(dName)
+                        if dlg and dlg:IsA("ScreenGui") and dlg.Enabled then
+                            local closeBtn = dlg:FindFirstChild("Close", true) or dlg:FindFirstChild("Exit", true) or dlg:FindFirstChild("Cancel", true)
+                            if closeBtn and closeBtn:IsA("GuiButton") and type(getconnections) == "function" then
+                                for _, c in ipairs(getconnections(closeBtn.MouseButton1Click) or {}) do
+                                    pcall(function() c:Fire() end)
                                 end
-                            end
-                        end
-
-                        if crateTool then
-                            -- Glide to plot floor
-                            local plotPos = floor.Position + Vector3.new(0, 3, 0)
-                            moveToTarget(plotPos, "Fast Glide", 450)
-                            task.wait(0.2)
-
-                            -- Place on plot
-                            local placeSpot = floor.Position + Vector3.new(math.random(-6, 6), floor.Size.Y / 2, math.random(-6, 6))
-                            PlaceAtRemote:FireServer(placeSpot, 0)
-                            task.wait(0.35)
-
-                            -- Auto open/appraise if enabled
-                            if settings.autoOpenCrates and CrateTimersFunc then
-                                pcall(function()
-                                    local list = CrateTimersFunc:InvokeServer("list")
-                                    if type(list) == "table" then
-                                        for _, item in ipairs(list) do
-                                            CrateTimersFunc:InvokeServer("open", item.Uid)
-                                        end
-                                    end
-                                end)
                             end
                         end
                     end
@@ -610,21 +808,21 @@ return function(Window, scriptInfo)
 
                 -- 2. Steal & Bank Execution
                 if isCarrying then
-                    -- Carrying stolen crate -> Fly/Glide to SafeZone to bank it!
-                    if settings.autoReturnSafeZone then
-                        moveToTarget(SAFEZONE_POS + Vector3.new(0, 1.5, 0), "Fast Glide", 400)
-                        local t0 = os.clock()
-                        while running and settings.autoSteal and player:GetAttribute("CarryingStolen") == true and (os.clock() - t0 < 3.0) do
-                            task.wait(0.1)
-                        end
-                        task.wait(0.2)
-                        -- Auto sell after banking if enabled
-                        if settings.autoSell then
-                            if SellAllFunc then pcall(function() SellAllFunc:InvokeServer() end) end
-                            if SellDoRemote then pcall(function() SellDoRemote:FireServer() end) end
-                        end
-                    else
-                        task.wait(0.3)
+                    -- Carrying stolen crate -> Glide to SafeZone to bank it into cash!
+                    moveToTarget(SAFEZONE_POS + Vector3.new(0, 1.5, 0), "Fast Glide", 400)
+                    local t0 = os.clock()
+                    while running and settings.autoSteal and player:GetAttribute("CarryingStolen") == true and (os.clock() - t0 < 3.5) do
+                        task.wait(0.1)
+                    end
+                    task.wait(0.2)
+                    -- Immediately offload any rewarded crate tool to plot floor so hands stay free
+                    if settings.autoPlaceCrates and getInventoryCrate() then
+                        offloadInventoryCrate()
+                    end
+                    -- Auto sell after banking if enabled
+                    if settings.autoSell then
+                        if SellAllFunc then pcall(function() SellAllFunc:InvokeServer() end) end
+                        if SellDoRemote then pcall(function() SellDoRemote:FireServer("all") end) end
                     end
                 else
                     -- Not carrying crate -> Find best crate and steal
@@ -633,55 +831,69 @@ return function(Window, scriptInfo)
                         local targetPos = cubePart.Position
                         local okMove = moveToTarget(targetPos + Vector3.new(0, 1.2, 0), "Fast Glide", 400)
                         if okMove then
-                            task.wait(0.12)
-                            -- Align camera and character facing directly at crate prompt so Roblox registers line of sight and focus
-                            local _, _, rootPart = getCharacter()
+                            task.wait(0.08)
+                            local _, humPart, rootPart = getCharacter()
+                            if humPart then
+                                humPart:UnequipTools()
+                            end
                             local cam = Workspace.CurrentCamera
                             if rootPart then
-                                rootPart.CFrame = CFrame.lookAt(targetPos + Vector3.new(0, 1.2, 2.5), targetPos)
+                                local diff = (rootPart.Position - targetPos)
+                                local flatDir = Vector3.new(diff.X, 0, diff.Z)
+                                if flatDir.Magnitude < 0.1 then
+                                    flatDir = Vector3.new(0, 0, 1)
+                                end
+                                local standPos = targetPos + flatDir.Unit * 2.2
+                                rootPart.CFrame = CFrame.lookAt(Vector3.new(standPos.X, targetPos.Y + 1.2, standPos.Z), targetPos)
+                                rootPart.AssemblyLinearVelocity = Vector3.zero
                             end
                             if cam and rootPart then
                                 cam.CFrame = CFrame.lookAt(rootPart.Position + Vector3.new(0, 1.5, 0), targetPos)
                             end
-                            task.wait(0.08)
+                            task.wait(0.05)
 
-                            -- Direct network remote steal burst
-                            if StealRemote then
-                                pcall(function() StealRemote:FireServer(bestCrate) end)
-                                pcall(function() StealRemote:FireServer(cubePart) end)
+                            -- Trigger ProximityPrompt (Potassium & standard executor compatible)
+                            local holdSec = prompt.HoldDuration or 1
+                            if type(fireproximityprompt) == "function" then
+                                pcall(function() fireproximityprompt(prompt) end)
+                                pcall(function() fireproximityprompt(prompt, 0) end)
+                                pcall(function() fireproximityprompt(prompt, prompt.MaxActivationDistance or 12) end)
+                            else
+                                local VIM = pcall(function() return game:GetService("VirtualInputManager") end) and game:GetService("VirtualInputManager")
+                                if VIM then
+                                    pcall(function() VIM:SendKeyEvent(true, Enum.KeyCode.E, false, game) end)
+                                end
+                                pcall(function() prompt:InputHoldBegin() end)
                             end
-                            if InteractRemote then
-                                pcall(function() InteractRemote:FireServer(bestCrate) end)
-                            end
-
-                            -- Trigger prompt hold & VIM key E simulation
-                            local VIM = pcall(function() return game:GetService("VirtualInputManager") end) and game:GetService("VirtualInputManager")
-                            if VIM then
-                                pcall(function() VIM:SendKeyEvent(true, Enum.KeyCode.E, false, game) end)
-                            end
-                            pcall(function() prompt:InputHoldBegin() end)
 
                             local holdT0 = os.clock()
-                            local holdMax = math.max(prompt.HoldDuration + 0.6, 2.2)
+                            local holdMax = math.max(holdSec + 0.4, 1.2)
                             while running and settings.autoSteal and (os.clock() - holdT0 < holdMax) do
                                 if player:GetAttribute("CarryingStolen") == true then
                                     break
                                 end
-                                -- Continuously pulse direct remotes while holding
-                                if StealRemote and math.random() > 0.5 then
-                                    pcall(function() StealRemote:FireServer(bestCrate) end)
+                                if type(fireproximityprompt) == "function" then
+                                    pcall(function() fireproximityprompt(prompt) end)
                                 end
-                                task.wait(0.08)
+                                task.wait(0.1)
                             end
 
-                            pcall(function() prompt:InputHoldEnd() end)
-                            if VIM then
-                                pcall(function() VIM:SendKeyEvent(false, Enum.KeyCode.E, false, game) end)
+                            if type(fireproximityprompt) ~= "function" then
+                                pcall(function() prompt:InputHoldEnd() end)
+                                local VIM = pcall(function() return game:GetService("VirtualInputManager") end) and game:GetService("VirtualInputManager")
+                                if VIM then
+                                    pcall(function() VIM:SendKeyEvent(false, Enum.KeyCode.E, false, game) end)
+                                end
                             end
-                            task.wait(0.15)
+
+                            -- If crate pickup failed or was rejected by server, blacklist it for 25s
+                            if player:GetAttribute("CarryingStolen") ~= true then
+                                failedCrates[bestCrate] = os.clock() + 25
+                            end
+                            task.wait(0.08)
                         end
                     else
-                        task.wait(0.4)
+                        task.wait(0.3)
                     end
                 end
             else
@@ -736,7 +948,7 @@ return function(Window, scriptInfo)
                     pcall(function() SellAllFunc:InvokeServer() end)
                 end
                 if SellDoRemote then
-                    pcall(function() SellDoRemote:FireServer() end)
+                    pcall(function() SellDoRemote:FireServer("all") end)
                 end
             end
             task.wait(settings.sellInterval or 3)
@@ -830,6 +1042,11 @@ return function(Window, scriptInfo)
         local _, hum, root = getCharacter()
         if not hum or not root then return end
 
+        -- Zone Guards & Bosses Disabler (Freeze to Void)
+        if settings.disableGuards then
+            disableZoneGuards()
+        end
+
         -- Anti-Ragdoll
         if settings.antiRagdoll then
             hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
@@ -859,7 +1076,7 @@ return function(Window, scriptInfo)
     -- ============================================================
 
     -- 1. OVERVIEW TAB
-    local OverviewTab = Window:CreateTab("Overview", "home")
+    local OverviewTab = (Window.GetTab and Window:GetTab("Overview")) or Window:CreateTab("Overview", "home")
     OverviewTab:CreateSection("Live Player Stats")
     local statLabelSpeed = OverviewTab:CreateLabel("Speed Level: Loading...")
     local statLabelCash = OverviewTab:CreateLabel("Cash Record: Loading...")
@@ -996,6 +1213,17 @@ return function(Window, scriptInfo)
         Flag = "StealAutoOpenPlot",
         Callback = function(v)
             settings.autoOpenCrates = v
+        end
+    })
+    StealTab:CreateToggle({
+        Name = "Disable Zone Guards & Bosses (Void Freeze)",
+        CurrentValue = true,
+        Flag = "StealDisableGuards",
+        Callback = function(v)
+            settings.disableGuards = v
+            if v then
+                notify("Guards", "Zone Guards & Bosses Disabled 😈")
+            end
         end
     })
 
@@ -1165,6 +1393,17 @@ return function(Window, scriptInfo)
             settings.antiRagdoll = v
         end
     })
+    CombatTab:CreateToggle({
+        Name = "Disable Zone Guards & Bosses (Void Freeze)",
+        CurrentValue = true,
+        Flag = "CombatDisableGuards",
+        Callback = function(v)
+            settings.disableGuards = v
+            if v then
+                notify("Guards", "Zone Guards & Bosses Disabled 😈")
+            end
+        end
+    })
     CombatTab:CreateButton({
         Name = "Drop Bear Trap Here",
         Callback = function()
@@ -1268,7 +1507,7 @@ return function(Window, scriptInfo)
     -- ============================================================
     if Window and type(Window.SortTabs) == "function" then
         pcall(function()
-            Window:SortTabs({"Overview", "Steal Farm", "Speed Farm", "Economy", "Combat", "Visuals", "Teleports"})
+            Window:SortTabs({"Overview", "Steal Farm", "Speed Farm", "Economy", "Combat", "Visuals", "Teleports", "Settings"})
         end)
     end
 
@@ -1290,6 +1529,6 @@ return function(Window, scriptInfo)
         forceDismount = forceDismountAndUnanchor,
     }
 
-    notify("RAVEN HUB", "Steal From The Rich! v1.1.0 Loaded 😈")
+    notify("RAVEN HUB", "Steal From The Rich! v1.3.0 Loaded 😈")
     return environment.__RAVEN_STEAL_RICH
 end

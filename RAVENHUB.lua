@@ -338,8 +338,8 @@ local SCRIPTS = {
         description = "Instant Steal Crate | Priority Rarity Sniper | Infinite Speed Farm | Remote Auto Sell | Bat Aura | ESP",
         placeIds    = {120475074479690},
         gameIds     = {10753751277},
-        version     = "v1.1.0",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/steal_from_the_rich.lua?v=steal-1.1.0",
+        version     = "v1.3.1",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/steal_from_the_rich.lua?v=steal-1.3.1",
     },
     {
         name        = "Fishing Chef",
@@ -851,6 +851,14 @@ local SCRIPTS = {
         gameIds     = {9226697658},
         version     = "v1.0.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/shovel_it.lua?v=shovel-it-1.0.0",
+    },
+    {
+        name        = "[GALAXY] 8 Ball Duels",
+        description = "Multi-Bounce Guidelines | Cushion Bank Reflections | Auto Aim & Pocket Solver | Ghost Ball | Max Cue Stats",
+        placeIds    = {116921506811323},
+        gameIds     = {10526463655},
+        version     = "v1.0.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/eight_ball_duels.lua?v=8bd-1.0.0",
     },
 
 
