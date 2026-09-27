@@ -82,6 +82,7 @@ return function(Window, scriptInfo)
         autoAimKey = "E",
         autoShoot = false,
         lockAimOnTarget = true,
+        shotPreference = "Prefer Bank (ฉิ่งลงหลุมก่อน)",
         smoothAim = true,
         aimSmoothingSpeed = 8, -- higher = faster smooth glide
         aimHumanOvershoot = true, -- realistic micro human adjustments
@@ -633,25 +634,35 @@ return function(Window, scriptInfo)
     local function getLegalBalls(sim)
         local legal = {}
 
-        -- 1. Ensure matchClient reference is captured
-        if not activeMatchClient and getgc then
-            for _, obj in ipairs(getgc(true)) do
-                if type(obj) == "table" and rawget(obj, "Rules") and rawget(obj, "Seat") and rawget(obj, "Simulation") then
-                    activeMatchClient = obj
-                    break
+        -- 1. Primary method: activeInputController.IsLegalTarget
+        if activeInputController and activeInputController.IsLegalTarget then
+            for n = 1, 15 do
+                local b = sim.Balls[n]
+                if b and not b.Pocketed then
+                    local ok, isLeg = pcall(function()
+                        return activeInputController.IsLegalTarget(n)
+                    end)
+                    if ok and isLeg then
+                        table.insert(legal, n)
+                    end
                 end
+            end
+            if #legal > 0 then
+                return legal
             end
         end
 
-        -- 2. Use official game rules engine (PoolRules.IsLegalFirstContact)
-        if activeMatchClient and activeMatchClient.Rules then
+        -- 2. Fallback: matchClient rules
+        if activeMatchClient and type(activeMatchClient.Rules) == "table" then
             local rules = activeMatchClient.Rules
             for n = 1, 15 do
                 local b = sim.Balls[n]
                 if b and not b.Pocketed then
-                    if PoolRules.IsLegalFirstContact(rules, sim, n) then
-                        table.insert(legal, n)
-                    end
+                    pcall(function()
+                        if PoolRules.IsLegalFirstContact(rules, sim, n) then
+                            table.insert(legal, n)
+                        end
+                    end)
                 end
             end
             if #legal > 0 then
@@ -882,60 +893,63 @@ return function(Window, scriptInfo)
         local candidates = {}
 
         -- TIER 1: Direct Potting Shots
-        for _, ballNum in ipairs(legalBalls) do
-            local objBall = sim.Balls[ballNum]
-            if objBall and not objBall.Pocketed then
-                local objPos = objBall.Position
+        if settings.shotPreference ~= "Bank Only (ฉิ่งเท่านั้น)" then
+            for _, ballNum in ipairs(legalBalls) do
+                local objBall = sim.Balls[ballNum]
+                if objBall and not objBall.Pocketed then
+                    local objPos = objBall.Position
 
-                for _, pocket in ipairs(Pockets) do
-                    local toPocket = pocket.MouthCentre - objPos
-                    local pocketDist = toPocket.Magnitude
-                    if pocketDist > 0.1 then
-                        local pocketDir = toPocket / pocketDist
+                    for _, pocket in ipairs(Pockets) do
+                        local toPocket = pocket.MouthCentre - objPos
+                        local pocketDist = toPocket.Magnitude
+                        if pocketDist > 0.1 then
+                            local pocketDir = toPocket / pocketDist
 
-                        -- Ghost ball center where cue ball must land
-                        local contactPoint = objPos - pocketDir * BallDiameter
-                        local toContact = contactPoint - cuePos
-                        local contactDist = toContact.Magnitude
+                            -- Ghost ball center where cue ball must land
+                            local contactPoint = objPos - pocketDir * BallDiameter
+                            local toContact = contactPoint - cuePos
+                            local contactDist = toContact.Magnitude
 
-                        if contactDist > 0.1 then
-                            local aimDir = toContact / contactDist
-                            local cutAngleCos = aimDir:Dot(pocketDir)
+                            if contactDist > 0.1 then
+                                local aimDir = toContact / contactDist
+                                local cutAngleCos = aimDir:Dot(pocketDir)
 
-                            -- Cut angle must be within reasonable forward angle (> 8 degrees angle)
-                            if cutAngleCos > 0.14 then
-                                local cueClear = isPathClear(sim, cuePos, contactPoint, CueBallNumber, ballNum)
-                                local objClear = isPathClear(sim, objPos, pocket.MouthCentre, CueBallNumber, ballNum)
+                                -- Cut angle must be within reasonable forward angle (> 8 degrees angle)
+                                if cutAngleCos > 0.14 then
+                                    local cueClear = isPathClear(sim, cuePos, contactPoint, CueBallNumber, ballNum)
+                                    local objClear = isPathClear(sim, objPos, pocket.MouthCentre, CueBallNumber, ballNum)
 
-                                if cueClear and objClear then
-                                    local refinedAimDir = aimDir
-                                    local optimalPower = calculateOptimalPower(contactDist + pocketDist)
-                                    local verifiedPred = PoolPhysics.PredictShot(sim, refinedAimDir, optimalPower, Vector2.zero)
+                                    if cueClear and objClear then
+                                        local refinedAimDir = aimDir
+                                        local optimalPower = calculateOptimalPower(contactDist + pocketDist)
+                                        local verifiedPred = PoolPhysics.PredictShot(sim, refinedAimDir, optimalPower, Vector2.zero)
 
-                                    if verifiedPred.Kind == "Ball" and verifiedPred.Other == ballNum and verifiedPred.ObjectDirection then
-                                        local objActualDir = verifiedPred.ObjectDirection
-                                        local alignmentDot = objActualDir:Dot(pocketDir)
+                                        if verifiedPred.Kind == "Ball" and verifiedPred.Other == ballNum and verifiedPred.ObjectDirection then
+                                            local objActualDir = verifiedPred.ObjectDirection
+                                            local alignmentDot = objActualDir:Dot(pocketDir)
 
-                                        if alignmentDot > 0.94 then
-                                            -- MANDATORY ZERO-SCRATCH CHECK
-                                            local willScratch = checkWillCueScratch(sim, refinedAimDir, optimalPower, Vector2.zero)
-                                            if not willScratch then
-                                                local distPenalty = (pocketDist * 0.45) + (contactDist * 0.25)
-                                                local score = (cutAngleCos ^ 1.5) * 100 + (alignmentDot * 50) - distPenalty + 500
+                                            if alignmentDot > 0.94 then
+                                                -- MANDATORY ZERO-SCRATCH CHECK
+                                                local willScratch = checkWillCueScratch(sim, refinedAimDir, optimalPower, Vector2.zero)
+                                                if not willScratch then
+                                                    local distPenalty = (pocketDist * 0.45) + (contactDist * 0.25)
+                                                    local baseDirectScore = (settings.shotPreference == "Prefer Bank (ฉิ่งลงหลุมก่อน)") and 400 or 500
+                                                    local score = (cutAngleCos ^ 1.5) * 100 + (alignmentDot * 50) - distPenalty + baseDirectScore
 
-                                                table.insert(candidates, {
-                                                    target = ballNum,
-                                                    pocket = pocket.Id,
-                                                    pocketPos = pocket.MouthCentre,
-                                                    contactPoint = contactPoint,
-                                                    aimDir = refinedAimDir,
-                                                    cutAngleCos = cutAngleCos,
-                                                    alignmentDot = alignmentDot,
-                                                    score = score,
-                                                    distance = contactDist + pocketDist,
-                                                    power = optimalPower,
-                                                    shotType = "Direct"
-                                                })
+                                                    table.insert(candidates, {
+                                                        target = ballNum,
+                                                        pocket = pocket.Id,
+                                                        pocketPos = pocket.MouthCentre,
+                                                        contactPoint = contactPoint,
+                                                        aimDir = refinedAimDir,
+                                                        cutAngleCos = cutAngleCos,
+                                                        alignmentDot = alignmentDot,
+                                                        score = score,
+                                                        distance = contactDist + pocketDist,
+                                                        power = optimalPower,
+                                                        shotType = "Direct"
+                                                    })
+                                                end
                                             end
                                         end
                                     end
@@ -948,101 +962,101 @@ return function(Window, scriptInfo)
         end
 
         -- TIER 2: 1-Cushion Bank Potting Shots (Object ball banks off rail into pocket)
-        local primaryRails = {
-            { axis = "Y", val = 22, norm = Vector2.new(0, -1), minT = -40, maxT = 40 },
-            { axis = "Y", val = -22, norm = Vector2.new(0, 1), minT = -40, maxT = 40 },
-            { axis = "X", val = -44, norm = Vector2.new(1, 0), minT = -18, maxT = 18 },
-            { axis = "X", val = 44, norm = Vector2.new(-1, 0), minT = -18, maxT = 18 },
-        }
+        if settings.shotPreference ~= "Direct Only (ยิงตรงเท่านั้น)" then
+            local primaryRails = {
+                { axis = "Y", val = 22, norm = Vector2.new(0, -1), minT = -40.8, maxT = 40.8, contactY = 22 - BallRadius },
+                { axis = "Y", val = -22, norm = Vector2.new(0, 1), minT = -40.8, maxT = 40.8, contactY = -22 + BallRadius },
+                { axis = "X", val = -44, norm = Vector2.new(1, 0), minT = -18.8, maxT = 18.8, contactX = -44 + BallRadius },
+                { axis = "X", val = 44, norm = Vector2.new(-1, 0), minT = -18.8, maxT = 18.8, contactX = 44 - BallRadius },
+            }
 
-        for _, ballNum in ipairs(legalBalls) do
-            local objBall = sim.Balls[ballNum]
-            if objBall and not objBall.Pocketed then
-                local objPos = objBall.Position
+            for _, ballNum in ipairs(legalBalls) do
+                local objBall = sim.Balls[ballNum]
+                if objBall and not objBall.Pocketed then
+                    local objPos = objBall.Position
 
-                for _, pocket in ipairs(Pockets) do
-                    local pPos = pocket.MouthCentre
-                    for _, rail in ipairs(primaryRails) do
-                        local mirrorP = nil
-                        local canReflect = false
-
-                        if rail.axis == "Y" then
-                            mirrorP = Vector2.new(pPos.X, 2 * rail.val - pPos.Y)
-                            if (rail.val > 0 and objPos.Y < (rail.val - 1)) or (rail.val < 0 and objPos.Y > (rail.val + 1)) then
-                                local dy = mirrorP.Y - objPos.Y
-                                if math.abs(dy) > 0.1 then
-                                    local t = (rail.val - objPos.Y) / dy
-                                    if t > 0.05 and t < 0.95 then
-                                        local bounceX = objPos.X + t * (mirrorP.X - objPos.X)
-                                        if bounceX >= rail.minT and bounceX <= rail.maxT then
-                                            local bouncePoint = Vector2.new(bounceX, rail.val + rail.norm.Y * BallRadius)
-                                            canReflect = true
-                                            mirrorP = bouncePoint
+                    for _, pocket in ipairs(Pockets) do
+                        local pPos = pocket.MouthCentre
+                        for _, rail in ipairs(primaryRails) do
+                            local bouncePoint = nil
+                            if rail.axis == "Y" then
+                                local rY = rail.contactY
+                                local mirrorY = 2 * rY - pPos.Y
+                                local toMirror = Vector2.new(pPos.X, mirrorY) - objPos
+                                if math.abs(toMirror.Y) > 0.1 then
+                                    local t = (rY - objPos.Y) / toMirror.Y
+                                    if t > 0.02 and t < 0.98 then
+                                        local bX = objPos.X + t * toMirror.X
+                                        if bX >= rail.minT and bX <= rail.maxT then
+                                            bouncePoint = Vector2.new(bX, rY)
+                                        end
+                                    end
+                                end
+                            else
+                                local rX = rail.contactX
+                                local mirrorX = 2 * rX - pPos.X
+                                local toMirror = Vector2.new(mirrorX, pPos.Y) - objPos
+                                if math.abs(toMirror.X) > 0.1 then
+                                    local t = (rX - objPos.X) / toMirror.X
+                                    if t > 0.02 and t < 0.98 then
+                                        local bY = objPos.Y + t * toMirror.Y
+                                        if bY >= rail.minT and bY <= rail.maxT then
+                                            bouncePoint = Vector2.new(rX, bY)
                                         end
                                     end
                                 end
                             end
-                        else
-                            mirrorP = Vector2.new(2 * rail.val - pPos.X, pPos.Y)
-                            if (rail.val > 0 and objPos.X < (rail.val - 1)) or (rail.val < 0 and objPos.X > (rail.val + 1)) then
-                                local dx = mirrorP.X - objPos.X
-                                if math.abs(dx) > 0.1 then
-                                    local t = (rail.val - objPos.X) / dx
-                                    if t > 0.05 and t < 0.95 then
-                                        local bounceY = objPos.Y + t * (mirrorP.Y - objPos.Y)
-                                        if bounceY >= rail.minT and bounceY <= rail.maxT then
-                                            local bouncePoint = Vector2.new(rail.val + rail.norm.X * BallRadius, bounceY)
-                                            canReflect = true
-                                            mirrorP = bouncePoint
-                                        end
-                                    end
-                                end
-                            end
-                        end
 
-                        if canReflect and mirrorP then
-                            local toBounce = (mirrorP - objPos)
-                            local bounceDist = toBounce.Magnitude
-                            if bounceDist > 0.2 then
-                                local objTravelDir = toBounce / bounceDist
-                                local contactPoint = objPos - objTravelDir * BallDiameter
-                                local toContact = contactPoint - cuePos
-                                local contactDist = toContact.Magnitude
+                            if bouncePoint then
+                                local toBounce = (bouncePoint - objPos)
+                                local bounceDist = toBounce.Magnitude
+                                if bounceDist > 0.5 then
+                                    local objTravelDir = toBounce / bounceDist
+                                    local contactPoint = objPos - objTravelDir * BallDiameter
+                                    local toContact = contactPoint - cuePos
+                                    local contactDist = toContact.Magnitude
 
-                                if contactDist > 0.2 then
-                                    local aimDir = toContact / contactDist
-                                    local cutCos = aimDir:Dot(objTravelDir)
-                                    if cutCos > 0.22 then
-                                        local cueClear = isPathClear(sim, cuePos, contactPoint, CueBallNumber, ballNum)
-                                        local objClear = isPathClear(sim, objPos, mirrorP, CueBallNumber, ballNum)
-                                        if cueClear and objClear then
-                                            local bankPower = math.clamp(calculateOptimalPower(contactDist + bounceDist + 25) + 0.15, 0.55, 0.90)
-                                            local verifiedPred = PoolPhysics.PredictShot(sim, aimDir, bankPower, Vector2.zero)
-                                            if verifiedPred.Kind == "Ball" and verifiedPred.Other == ballNum then
-                                                local simClone = PoolPhysics.Clone(sim)
-                                                local objSegs = traceObjectBallRay(simClone, contactPoint, objTravelDir, 2, ballNum)
-                                                local hitsPocket = false
-                                                for _, oS in ipairs(objSegs) do
-                                                    if oS.kind == "Pocket" and oS.pocketId == pocket.Id then
-                                                        hitsPocket = true
-                                                        break
-                                                    end
-                                                end
+                                    if contactDist > 0.5 then
+                                        local aimDir = toContact / contactDist
+                                        local cutCos = aimDir:Dot(objTravelDir)
+                                        if cutCos > 0.10 then
+                                            local cueClear = isPathClear(sim, cuePos, contactPoint, CueBallNumber, ballNum)
+                                            local objClear = isPathClear(sim, objPos, bouncePoint, CueBallNumber, ballNum)
+                                            if cueClear and objClear then
+                                                local baseAngle = math.atan2(aimDir.Y, aimDir.X)
+                                                local bankPower = math.clamp(calculateOptimalPower(contactDist + bounceDist + 22) + 0.12, 0.50, 0.90)
 
-                                                if hitsPocket then
-                                                    local willScratch = checkWillCueScratch(sim, aimDir, bankPower, Vector2.zero)
-                                                    if not willScratch then
-                                                        table.insert(candidates, {
-                                                            target = ballNum,
-                                                            pocket = pocket.Id,
-                                                            pocketPos = pocket.MouthCentre,
-                                                            contactPoint = contactPoint,
-                                                            aimDir = aimDir,
-                                                            score = 250 + (cutCos * 40) - (contactDist * 0.3),
-                                                            distance = contactDist + bounceDist,
-                                                            power = bankPower,
-                                                            shotType = "Bank"
-                                                        })
+                                                -- Physics Angle Sweep: Sweeps +-4.5 deg to account for rail friction & restitution
+                                                for _, dDeg in ipairs({0, -1.5, 1.5, -3, 3, -4.5, 4.5}) do
+                                                    local rad = baseAngle + math.rad(dDeg)
+                                                    local testAimDir = Vector2.new(math.cos(rad), math.sin(rad))
+                                                    local pred = PoolPhysics.PredictShot(sim, testAimDir, bankPower, Vector2.zero)
+                                                    if pred.Kind == "Ball" and pred.Other == ballNum then
+                                                        local simRes = runFullPhysicsSimulation(sim, testAimDir, bankPower, Vector2.zero)
+                                                        if simRes.pocketed[ballNum] and not simRes.cueScratch then
+                                                            local hitCushion = false
+                                                            for _, ev in ipairs(simRes.events or {}) do
+                                                                local evBall = (type(ev.Ball) == "table" and ev.Ball.Number) or ev.Ball
+                                                                if ev.Kind == "CushionHit" and evBall == ballNum then
+                                                                    hitCushion = true
+                                                                    break
+                                                                end
+                                                            end
+
+                                                            local bankBonus = (settings.shotPreference == "Prefer Bank (ฉิ่งลงหลุมก่อน)") and 1500 or 520
+                                                            table.insert(candidates, {
+                                                                target = ballNum,
+                                                                pocket = simRes.pocketed[ballNum],
+                                                                pocketPos = pocket.MouthCentre,
+                                                                contactPoint = contactPoint,
+                                                                aimDir = testAimDir,
+                                                                score = bankBonus + (cutCos * 60) - (contactDist * 0.2),
+                                                                distance = contactDist + bounceDist,
+                                                                power = bankPower,
+                                                                shotType = hitCushion and "Bank" or "Direct"
+                                                            })
+                                                            break
+                                                        end
                                                     end
                                                 end
                                             end
@@ -1783,6 +1797,21 @@ return function(Window, scriptInfo)
         Flag = "BD_AutoAim",
         Callback = function(val)
             settings.autoAim = val
+        end,
+    })
+
+    AimTab:CreateDropdown({
+        Name = "Shot Strategy (สไตล์การเล็ง)",
+        Options = {
+            "Prefer Bank (ฉิ่งลงหลุมก่อน)",
+            "Smart Balanced (คำนวณตามความง่าย)",
+            "Bank Only (ฉิ่งเท่านั้น)",
+            "Direct Only (ยิงตรงเท่านั้น)"
+        },
+        CurrentOption = settings.shotPreference,
+        Flag = "BD_ShotPreference",
+        Callback = function(val)
+            settings.shotPreference = val
         end,
     })
 
