@@ -406,6 +406,14 @@ local SCRIPTS = {
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/war_tycoon.lua",
     },
     {
+        name        = "Wanted",
+        description = "Player ESP | ATM/NPC/Vehicle ESP | Wanted HUD (Cash/Bounty) | Camera-Lock Aimbot | 100% Drawing API",
+        placeIds    = {14438406081},
+        gameIds     = {4987856151},
+        version     = "v1.2.9",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/wanted.lua",
+    },
+    {
         name        = "Dueling Grounds",
         description = "Marker-Driven Auto Parry | 81 Attack Animations | Jump Attack Prediction | Auto Counter (Riposte) | Combat Assist",
         placeIds    = {94217045453265},
