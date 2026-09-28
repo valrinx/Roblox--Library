@@ -54,7 +54,7 @@ return function(Window, scriptInfo)
 
     -- Version marker (readable from the client to verify which build is live)
     if type(getgenv) == "function" then
-        pcall(function() getgenv().RAVEN_ILLEGAL_SOCCER_VER = "1.4.5" end)
+        pcall(function() getgenv().RAVEN_ILLEGAL_SOCCER_VER = "1.4.6" end)
     end
 
     local function connect(signal, callback)
@@ -1824,6 +1824,10 @@ return function(Window, scriptInfo)
                                 local hl = createHighlight(char, jerseyCol, Color3.fromRGB(255, 255, 255))
                                 espObjects[id] = { billboard = bb, label = lbl, highlight = hl }
                             else
+                                -- Character models are destroyed on respawn; re-attach ESP to the new instances
+                                local pe = espObjects[id]
+                                if pe.billboard then pe.billboard.Adornee = root end
+                                if pe.highlight then pe.highlight.Adornee = char end
                                 local infoText = "<b>" .. char.Name .. "</b>"
                                 if settings.playerEspShowDistance then
                                     infoText = infoText .. string.format("\n<font size='10' color='#CCCCCC'>[%d studs]</font>", dist)
