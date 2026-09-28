@@ -398,6 +398,14 @@ local SCRIPTS = {
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/frisbee_frenzy.lua",
     },
     {
+        name        = "War Tycoon",
+        description = "Player ESP (Box/Name/HP/Distance) | Auto-Collect Cash | 100% Drawing API",
+        placeIds    = {4639625707},
+        gameIds     = {1526814825},
+        version     = "v1.0.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/war_tycoon.lua",
+    },
+    {
         name        = "Dueling Grounds",
         description = "Marker-Driven Auto Parry | 81 Attack Animations | Jump Attack Prediction | Auto Counter (Riposte) | Combat Assist",
         placeIds    = {94217045453265},
