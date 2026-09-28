@@ -1,3 +1,7 @@
+- **Frisbee Frenzy v1.0.0** - New module: Player ESP + Combat State ESP for [Mobile Revamp] Frisbee Frenzy (Beginner Servers):
+  - **100% Drawing API ESP**: 2D boxes, name + distance tags, HSV health bars - zero instances, zero hooks (game kicks on `InvokeServer` hooks, Error 267).
+  - **Combat State ESP**: reads live character attributes - current element (`AbilityName`), RAGDOLL / M1-IMM / STAR status, combo count.
+  - Read-only visuals only; no remotes fired, no function hooks.
 - **RAVEN HUB Ghost Architecture (100% Drawing API Primary Standard v1.1.0)** - Transitioned the entire repository and loader to pure Drawing API as the primary standard:
   - **Zero-Instance Anti-Cheat Ghost Mode**: Engineered a complete, zero-instance GUI engine (`modules/drawing_ui.lua`) using 100% pure executor `Drawing` primitives (`Square`, `Text`, `Line`). Bypasses object-injection detection by creating 0 `ScreenGui`, 0 `Frame`, 0 `BillboardGui`, and 0 `Highlight` in `CoreGui` or `PlayerGui`.
   - **BAC (Frog Anti-Cheat / fr0g) Immunity**: Specifically protects games governed by Frog Anti-Cheat (e.g. *BloxStrike*, *Basketball: Zero*, *Basketball: Current*). In these games, standard GUI libraries (`ScreenGui`, MacLib, Rayfield) trigger instant `BAC - Alpha-3B` kicks. The hub now automatically detects BAC games (`isBacExperience`), bypassing MacLib and booting straight into Ghost DrawingUI mode.

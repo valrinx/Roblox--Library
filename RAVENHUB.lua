@@ -390,6 +390,14 @@ local SCRIPTS = {
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/illegal_soccer.lua",
     },
     {
+        name        = "Frisbee Frenzy",
+        description = "Player ESP | Combat State ESP (Element/Status) | 100% Drawing API",
+        placeIds    = {106986181033085},
+        gameIds     = {10230942274},
+        version     = "v1.0.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/frisbee_frenzy.lua",
+    },
+    {
         name        = "Dueling Grounds",
         description = "Marker-Driven Auto Parry | 81 Attack Animations | Jump Attack Prediction | Auto Counter (Riposte) | Combat Assist",
         placeIds    = {94217045453265},
