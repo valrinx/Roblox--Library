@@ -402,7 +402,7 @@ local SCRIPTS = {
         description = "Player ESP (Box/Name/HP/Distance) | Auto-Collect Cash | 100% Drawing API",
         placeIds    = {4639625707},
         gameIds     = {1526814825},
-        version     = "v1.0.0",
+        version     = "v1.1.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/war_tycoon.lua",
     },
     {

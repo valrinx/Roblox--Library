@@ -2,7 +2,7 @@
 --   RAVEN HUB  |  War Tycoon
 --   UniverseId: 1526814825  |  PlaceId: 4639625707
 --   Player ESP + Auto-Collect | 100% Drawing API visuals (zero instances)
---   v1.0.0 — read-only ESP, teleport-based cash collect, no hooks, no remotes
+--   v1.1.0 — read-only ESP, blink-collect (0.35s teleport + touch trigger), no hooks, no remotes
 --   Auto-Collect: teleports to your base's Collector pad when waiting cash
 --   reaches the threshold, then returns you to your original spot.
 --   Tested live 2026-09-29: pad stand 4s => +3427 cash (firetouchinterest = 0).
@@ -22,7 +22,7 @@ return function(Window, scriptInfo)
         and type(environment.__RAVEN_WAR_TYCOON.Destroy) == "function" then
         pcall(environment.__RAVEN_WAR_TYCOON.Destroy)
     end
-    environment.RAVEN_WAR_TYCOON_VER = "1.0.0"
+    environment.RAVEN_WAR_TYCOON_VER = "1.1.0"
 
     local running = true
     local connections = {}
@@ -223,7 +223,9 @@ return function(Window, scriptInfo)
         local orig = hrp.CFrame
         hrp.CFrame = best.part.CFrame + Vector3.new(0, 4, 0)
         hrp.Velocity = Vector3.new(0, 0, 0)
-        task.wait(1.0)
+        task.wait(0.2)
+        pcall(firetouchinterest, hrp, best.part, 0)
+        task.wait(0.15)
         local ch2 = localPlayer.Character
         local hrp2 = ch2 and ch2:FindFirstChild("HumanoidRootPart")
         if hrp2 then
