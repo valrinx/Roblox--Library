@@ -1730,11 +1730,19 @@ return function(Window, scriptInfo)
             if ball and ball:IsA("BasePart") and ball.Parent then
                 local dist = math.floor((ball.Position - myPos).Magnitude)
                 local id = "Ball_Main"
-                if not espObjects[id] then
+                local entry = espObjects[id]
+                -- Visual ball instances get recycled by the game; re-attach when adornee died or changed
+                if entry and (not entry.billboard or not entry.billboard.Parent) then
+                    clearEspEntry(id)
+                    entry = nil
+                end
+                if not entry then
                     local bb, lbl = createBillboard(id, ball, Color3.fromRGB(255, 215, 0), "⚽ Ball", Vector3.new(0, 2, 0))
                     local hl = createHighlight(ball, Color3.fromRGB(255, 215, 0), Color3.fromRGB(255, 255, 255))
                     espObjects[id] = { billboard = bb, label = lbl, highlight = hl }
                 else
+                    if entry.billboard then entry.billboard.Adornee = ball end
+                    if entry.highlight then entry.highlight.Adornee = ball end
                     espObjects[id].label.Text = string.format("⚽ <b>Ball</b>\n<font size='11' color='#FFFFFF'>[%d studs]</font>", dist)
                 end
             else
