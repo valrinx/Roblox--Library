@@ -29,7 +29,8 @@ return function(Window, scriptInfo)
         gkAutoDive = true,
         gkPredictArc = true,
         gkAutoJump = true,
-        gkAutoPunch = false,
+        gkAutoPunch = true,
+        gkSweeper = true,
         gkDiveReach = 32,
         gkOpHitbox = true,
         gkInstantDive = true,
@@ -50,6 +51,11 @@ return function(Window, scriptInfo)
         fullbright = false,
         fieldOfView = 75,
     }
+
+    -- Version marker (readable from the client to verify which build is live)
+    if type(getgenv) == "function" then
+        pcall(function() getgenv().RAVEN_ILLEGAL_SOCCER_VER = "1.4.5" end)
+    end
 
     local function connect(signal, callback)
         local connection = signal:Connect(callback)
@@ -984,6 +990,7 @@ return function(Window, scriptInfo)
 
     local lastDiveTime = 0
     local lastPunchTime = 0
+    local stagingSince = 0
     local lastBallPos = nil
     local lastBallPosTime = 0
     local lastBallInstance = nil
@@ -1343,7 +1350,7 @@ return function(Window, scriptInfo)
         -- 2. Exact Goal Crossing Point
         local goalCrossingPos = nil
         local isShotOnGoal = false
-        if timeToGoal and timeToGoal > 0 and timeToGoal < 3.5 then
+        if timeToGoal and timeToGoal > 0 and timeToGoal < 5.0 then
             if GoalkeeperPrediction and type(GoalkeeperPrediction.GetBallPositionAtTime) == "function" and ballMovementState then
                 pcall(function()
                     goalCrossingPos = GoalkeeperPrediction.GetBallPositionAtTime(ballMovementState, timeToGoal)
@@ -1370,7 +1377,7 @@ return function(Window, scriptInfo)
         local canInterceptInFlight = false
 
         local maxScanTime = timeToGoal and math.min(timeToGoal, 1.6) or 1.3
-        if ballSpeed > 12 and forwardSpeed > 1.0 then
+        if ballSpeed > 8 and forwardSpeed > 1.0 then
             local scanSteps = math.clamp(math.floor(maxScanTime / 0.05), 2, 26)
             for step = 1, scanSteps do
                 local t = step * 0.05
@@ -1417,6 +1424,7 @@ return function(Window, scriptInfo)
             local shouldTriggerNow = (timeDiff <= 0.18) or (interceptDist <= 7.0 and arrivalTime <= 0.40)
 
             if shouldTriggerNow then
+                stagingSince = 0
                 local diveCooldown = settings.gkInstantDive and 0.35 or 0.95
                 if (now - lastDiveTime) > diveCooldown then
                     lastDiveTime = now
@@ -1425,18 +1433,43 @@ return function(Window, scriptInfo)
                 end
             else
                 -- Angle Cutting & Staging: Strafe/move on foot toward intercept line while waiting
+                if stagingSince == 0 then stagingSince = now end
                 local stagingPos = Vector3.new(targetIntercept.X, root.Position.Y, targetIntercept.Z)
                 if (root.Position - stagingPos).Magnitude > 0.8 then
                     hum:MoveTo(stagingPos)
                 end
+                -- Fallback: if the sync gate never opens, force the dive instead of strafing forever
+                if (now - stagingSince) > 0.6 then
+                    local diveCooldown = settings.gkInstantDive and 0.35 or 0.95
+                    if (now - lastDiveTime) > diveCooldown then
+                        stagingSince = 0
+                        lastDiveTime = now
+                        triggerDive(targetIntercept, isHighShot, interceptDist)
+                        return
+                    end
+                end
             end
         end
+        if not isShotIncoming then stagingSince = 0 end
 
         -- 6. Auto Punch / Clear loose ball
         if settings.gkAutoPunch and distToBall <= 12 and (now - lastPunchTime) > 0.38 then
             lastPunchTime = now
             triggerPunch(ballPos)
             return
+        end
+
+        -- 6b. Sweeper: chase slow/loose balls near the goal instead of standing on the line
+        if settings.gkSweeper and not isShotIncoming and ballSpeed < 10 then
+            local distBallToGoal = (ballPos - goalPos).Magnitude
+            local ballInFront = (ballPos - goalPos):Dot(goalForward)
+            if distBallToGoal <= 30 and ballInFront > -5 then
+                local chasePos = Vector3.new(ballPos.X, root.Position.Y, ballPos.Z)
+                if (root.Position - chasePos).Magnitude > 1.0 then
+                    hum:MoveTo(chasePos)
+                    return
+                end
+            end
         end
 
         -- 7. Auto Positioning along the net (Magnetic net guarding & angle cutting)
@@ -2090,6 +2123,15 @@ return function(Window, scriptInfo)
         Callback = function(value)
             settings.gkFastRecovery = value
             applyGoalkeeperEnhancements()
+        end,
+    })
+
+    GKTab:CreateToggle({
+        Name = "Sweeper (Chase Loose Balls)",
+        CurrentValue = settings.gkSweeper,
+        Flag = "Soccer_GKSweeper",
+        Callback = function(value)
+            settings.gkSweeper = value
         end,
     })
 
