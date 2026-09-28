@@ -1,8 +1,10 @@
 -- ============================================================
 --   RAVEN HUB  |  Frisbee Frenzy
 --   UniverseId: 10230942274  |  PlaceId: 106986181033085
---   Player ESP + Combat State ESP | 100% Drawing API (zero instances)
---   v1.0.0 — read-only visuals, no hooks, no remotes
+--   Player ESP + Combat State ESP + Auto-Block | 100% Drawing API (zero instances)
+--   v1.1.0 — read-only visuals, no hooks, no remotes
+--   Auto-Block: triggers the game's own "Blocking" status effect via
+--   character state functions when an enemy M1 is detected nearby.
 -- ============================================================
 
 return function(Window, scriptInfo)
@@ -19,7 +21,7 @@ return function(Window, scriptInfo)
         and type(environment.__RAVEN_FRISBEE_FRENZY.Destroy) == "function" then
         pcall(environment.__RAVEN_FRISBEE_FRENZY.Destroy)
     end
-    environment.RAVEN_FRISBEE_FRENZY_VER = "1.0.0"
+    environment.RAVEN_FRISBEE_FRENZY_VER = "1.1.0"
 
     local running = true
     local connections = {}
@@ -33,6 +35,9 @@ return function(Window, scriptInfo)
         combatEsp = true,
         distanceEsp = true,
         maxDistance = 2000,
+        autoBlock = false,
+        blockRange = 15,
+        reactWindow = 0.5,
     }
 
     local hasDrawing = type(Drawing) == "table" and type(Drawing.new) == "function"
@@ -204,6 +209,105 @@ return function(Window, scriptInfo)
         end
     end
 
+    -- [[ Auto-Block ]]
+    -- The game tracks blocking as a "Blocking" status effect on the character
+    -- (IsCharacterBlocking = HasStatusEffect(ch, "Blocking")). We trigger and
+    -- release it through the game's own character-state functions — the same
+    -- path the game uses internally. No remotes, no hooks.
+    local blockHolder = nil
+    local function getBlockHolder()
+        if blockHolder then return blockHolder end
+        for _, v in ipairs(getgc(true)) do
+            if type(v) == "table" then
+                pcall(function()
+                    if rawget(v, "IsCharacterBlocking") ~= nil then
+                        blockHolder = v
+                    end
+                end)
+                if blockHolder then break end
+            end
+        end
+        return blockHolder
+    end
+
+    local function getMyChar()
+        return localPlayer.Character
+    end
+
+    local function isBlocking()
+        local h = getBlockHolder()
+        local ch = getMyChar()
+        if not h or not ch then return false end
+        local ok, res = pcall(h.IsCharacterBlocking, ch)
+        return ok and res == true
+    end
+
+    local function startBlock()
+        local h = getBlockHolder()
+        local ch = getMyChar()
+        if not h or not ch or isBlocking() then return end
+        pcall(h.AddStatusEffect, ch, "Blocking")
+    end
+
+    local function stopBlock()
+        local h = getBlockHolder()
+        local ch = getMyChar()
+        if not h or not ch or not isBlocking() then return end
+        local ok, effs = pcall(h.GetStatusEffects, ch)
+        if not ok or type(effs) ~= "table" then return end
+        local copy = {}
+        for _, e in ipairs(effs) do table.insert(copy, e) end
+        for _, e in ipairs(copy) do
+            local isB = false
+            pcall(function() isB = (type(e) == "table" and e.Name == "Blocking") end)
+            if isB then pcall(h.RemoveStatusEffect, ch, e) end
+        end
+    end
+
+    local function safeAttr(inst, name)
+        local ok, v = pcall(inst.GetAttribute, inst, name)
+        return ok and v or nil
+    end
+
+    -- Threat detection: an enemy is swinging if their M1Count just increased
+    -- or their LastM1Time (Unix epoch, matches DateTime.now()) is within
+    -- the reaction window. NOTE: LastM1Time is NOT on tick() epoch
+    -- (differs by ~7h); must use DateTime/os.time epoch.
+    local lastM1Count = {}
+    local function updateAutoBlock()
+        if not running or not settings.autoBlock then return end
+        local ch = getMyChar()
+        local myRoot = ch and ch:FindFirstChild("HumanoidRootPart")
+        if not myRoot then stopBlock() return end
+        local myPos = myRoot.Position
+        local now = DateTime.now().UnixTimestampMillis / 1000
+        local threat = false
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= localPlayer and p.Character then
+                local ech = p.Character
+                local m1c = safeAttr(ech, "M1Count")
+                local lm1t = safeAttr(ech, "LastM1Time")
+                local prev = lastM1Count[p]
+                local freshSwing = false
+                if type(m1c) == "number" and type(prev) == "number" and m1c > prev then
+                    freshSwing = true
+                end
+                if type(lm1t) == "number" and (now - lm1t) < settings.reactWindow then
+                    freshSwing = true
+                end
+                if type(m1c) == "number" then lastM1Count[p] = m1c end
+                if freshSwing then
+                    local eroot = ech:FindFirstChild("HumanoidRootPart")
+                    if eroot and (eroot.Position - myPos).Magnitude <= settings.blockRange then
+                        threat = true
+                        break
+                    end
+                end
+            end
+        end
+        if threat then startBlock() else stopBlock() end
+    end
+
     -- [[ UI ]]
     local VisualsTab = Window:CreateTab("Visuals", 4483362458)
     VisualsTab:CreateSection("Player ESP")
@@ -258,15 +362,67 @@ return function(Window, scriptInfo)
 
     -- [[ Connections ]]
     table.insert(connections, RunService.RenderStepped:Connect(updateEsp))
-    table.insert(connections, Players.PlayerRemoving:Connect(function(p) destroyEntry(p) end))
+    table.insert(connections, Players.PlayerRemoving:Connect(function(p)
+        destroyEntry(p)
+        lastM1Count[p] = nil
+    end))
+
+    -- Auto-block ticker (10 Hz is plenty for M1 reactions)
+    task.spawn(function()
+        while running do
+            local ok, err = pcall(updateAutoBlock)
+            task.wait(0.1)
+        end
+    end)
+
+    local CombatTab = Window:CreateTab("Combat", 4483362458)
+    CombatTab:CreateSection("Defense")
+
+    CombatTab:CreateToggle({
+        Name = "Auto-Block",
+        CurrentValue = false,
+        Flag = "FF_AutoBlock",
+        Callback = function(v)
+            settings.autoBlock = v
+            if not v then stopBlock() end
+        end,
+    })
+
+    CombatTab:CreateSlider({
+        Name = "Block Range",
+        Range = {5, 30},
+        Increment = 1,
+        Suffix = " studs",
+        CurrentValue = 15,
+        Flag = "FF_BlockRange",
+        Callback = function(v) settings.blockRange = v end,
+    })
+
+    CombatTab:CreateSlider({
+        Name = "Reaction Window",
+        Range = {0.2, 1.0},
+        Increment = 0.05,
+        Suffix = "s",
+        CurrentValue = 0.5,
+        Flag = "FF_ReactWindow",
+        Callback = function(v) settings.reactWindow = v end,
+    })
 
     local api = {}
     function api.Destroy()
         running = false
+        pcall(stopBlock)
         for _, c in ipairs(connections) do pcall(function() c:Disconnect() end) end
         for p, _ in pairs(espCache) do destroyEntry(p) end
         environment.__RAVEN_FRISBEE_FRENZY = nil
     end
+    function api.SetAutoBlock(v)
+        settings.autoBlock = v and true or false
+        if not settings.autoBlock then stopBlock() end
+    end
+    function api.IsBlocking() return isBlocking() end
+    function api.StartBlock() startBlock() end
+    function api.StopBlock() stopBlock() end
     environment.__RAVEN_FRISBEE_FRENZY = api
 
     return api
