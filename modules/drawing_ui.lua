@@ -873,7 +873,7 @@ local MAC_THEME = {
 
     -- 5. Section Container Cards (Raised Neumorphic Surface - Zero Borders)
     sectionTitle   = Color3.fromRGB(169, 245, 255),    -- Minimal cyan section header
-    cardBg         = NEU_MATTE,                        -- Section Cards Share Exact Base Color!
+    cardBg         = Color3.fromRGB(22, 25, 32),         -- Luxe: lifted card surface for contrast
     cardBorder     = Color3.fromRGB(23, 26, 32),       -- Minimal edge
     cardShadow     = Color3.fromRGB(0, 0, 0),          -- No shadow (flat)
     rowDivider     = Color3.fromRGB(23, 26, 32),       -- Minimal row separator
@@ -1083,6 +1083,15 @@ function DrawingUI:CreateWindow(config)
         self.drawings.subtitle.Color = self.theme.subtitle
         self.drawings.subtitle.Text = self.subtitle
         self.drawings.subtitle.Visible = false
+    end
+
+    -- Luxe: gold LUXE badge (BAC-safe: created once, not in render loop)
+    self.drawings.luxeBadge = createBoldText(10, true)
+    if self.drawings.luxeBadge then
+        self.drawings.luxeBadge.Size = 11
+        self.drawings.luxeBadge.Color = self.theme.gold
+        self.drawings.luxeBadge.Text = "LUXE"
+        self.drawings.luxeBadge.Visible = false
     end
 
     -- Keybind Badge on Top-Right (Layer 10)
@@ -3252,6 +3261,12 @@ function DrawingUI:Render()
     if self.drawings.subtitle then
         self.drawings.subtitle.Position = Vector2.new(p.X + 175, p.Y + 15)
         self.drawings.subtitle.Visible = true
+    end
+
+    -- Luxe: gold badge next to subtitle
+    if self.drawings.luxeBadge then
+        self.drawings.luxeBadge.Position = Vector2.new(p.X + 320, p.Y + 15)
+        self.drawings.luxeBadge.Visible = true
     end
 
     -- 6. Top-Right Key Badge (Rounded Pill, Clean 13px Padding)
