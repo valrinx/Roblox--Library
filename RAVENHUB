@@ -414,6 +414,14 @@ local SCRIPTS = {
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/wanted.lua",
     },
     {
+        name        = "WarZPVP",
+        description = "Player ESP (Box/Name/Distance/HP/Weapon/Skeleton) | Mouse-Driven Aimbot (FOV, custom keybind, target lock) | 100% Drawing API",
+        placeIds    = {135187059974536},
+        gameIds     = {10763998990},
+        version     = "v1.3.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/warz_pvp.lua",
+    },
+    {
         name        = "Dueling Grounds",
         description = "Marker-Driven Auto Parry | 81 Attack Animations | Jump Attack Prediction | Auto Counter (Riposte) | Combat Assist",
         placeIds    = {94217045453265},
@@ -731,14 +739,6 @@ local SCRIPTS = {
         gameIds     = {3615728730},
         version     = "v1.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/desolate_valley.lua",
-    },
-    {
-        name        = "Steal An Egg",
-        description = "Auto Steal | Auto Hatch | Auto Place | Egg/Player/Chaser ESP | Anti-Kick",
-        placeIds    = {107778070777162},
-        gameIds     = {10563114921},
-        version     = "v1.0.0",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/steal_an_egg.lua",
     },
     {
         name        = "Pull An Egg",
@@ -1214,7 +1214,12 @@ local function loadScriptModule(scriptInfo)
             raw = safeHttpGet(fetchUrl)
             assert(type(raw) == "string" and #raw > 10,
                 "HttpGet empty URL: " .. scriptInfo.moduleUrl)
-            if type(writefile) == "function" and modFile then
+            -- Never cache a fetched body that fails the version check:
+            -- a "404: Not Found" page would otherwise clobber the good
+            -- local copy and break every later load.
+            if type(writefile) == "function" and modFile
+                and (not scriptInfo.version
+                    or string.find(raw, scriptInfo.version, 1, true)) then
                 pcall(writefile, modFile, raw)
             end
         end
