@@ -1,8 +1,7 @@
 -- ============================================================
---   RAVEN HUB  |  MacLib macOS Edition (100% Drawing API Engine)
---   Authentic Apple macOS Aesthetic | 1:1 MacLib Visual Fidelity
---   High-Contrast Bold Typography | macOS Section Container Cards
---   Apple Capsule Switches | 100% BAC / Frog Anti-Cheat Compliant
+--   RAVEN HUB  |  Minimal Dark Edition (100% Drawing API Engine)
+--   Lumen Edge Minimal Dark Theme | Flat Surfaces | Cyan Accent #A9F5FF
+--   100% BAC / Frog Anti-Cheat Compliant
 -- ============================================================
 
 local DrawingUI = {}
@@ -832,24 +831,24 @@ end
 --   PURE NEUMORPHIC (SOFT UI) PALETTE (100% Surface Fidelity)
 --   Uniform Matte Surface • Dual Soft Shadows • Zero Hard Borders
 -- ============================================================
-local NEU_MATTE = Color3.fromRGB(24, 27, 36) -- Exact uniform matte surface color (#181B24)
+local NEU_MATTE = Color3.fromRGB(13, 15, 19) -- Minimal dark base (#0D0F13)
 
 local MAC_THEME = {
     -- 1. Uniform Continuous Matte Surfaces (Controls share exact background color)
     bg             = NEU_MATTE,                        -- Main Chassis Base Surface
     bgSidebar      = NEU_MATTE,                        -- Sidebar shares exact base matte color
     bgHeader       = NEU_MATTE,                        -- Header shares exact base matte color
-    border         = Color3.fromRGB(36, 42, 56),       -- Subtle Non-Hard Edge
-    divider        = Color3.fromRGB(12, 14, 18),       -- Deep Carved Seam Shadow
-    dividerLight   = Color3.fromRGB(36, 42, 56),       -- Subtle Bevel Seam Reflection
+    border         = Color3.fromRGB(23, 26, 32),       -- Minimal subtle edge
+    divider        = Color3.fromRGB(8, 9, 12),         -- Deep seam
+    dividerLight   = Color3.fromRGB(23, 26, 32),       -- Subtle bevel
 
     -- 2. Dual Soft Lighting Modeling (Light Top-Left, Dark Bottom-Right)
-    neuHighlight   = Color3.fromRGB(48, 56, 76),       -- Top-Left Specular Light (Soft Diffuse Rim)
-    neuShadow      = Color3.fromRGB(10, 12, 16),       -- Bottom-Right Deep Ambient Shadow
+    neuHighlight   = Color3.fromRGB(23, 26, 32),       -- Flat minimal (no specular)
+    neuShadow      = Color3.fromRGB(8, 9, 12),         -- Flat minimal shadow
     neuRaisedBg    = NEU_MATTE,                        -- Raised Controls Share Exact Base Matte!
-    neuRaisedHover = Color3.fromRGB(28, 32, 44),       -- Soft Tactile Hover Glow
-    neuInsetBg     = Color3.fromRGB(18, 20, 27),       -- Debossed Sunken Cavity (Tracks & Wells)
-    neuDropShadow  = Color3.fromRGB(6, 7, 10),
+    neuRaisedHover = Color3.fromRGB(23, 26, 32),       -- Minimal hover
+    neuInsetBg     = Color3.fromRGB(8, 9, 12),         -- Minimal inset
+    neuDropShadow  = Color3.fromRGB(0, 0, 0),
 
     -- 3. macOS Window Traffic Lights (Soft Neumorphic Sockets)
     trafficRed     = Color3.fromRGB(255, 95, 87),
@@ -859,37 +858,37 @@ local MAC_THEME = {
 
     -- 4. Typography (WCAG AAA High-Contrast, Razor-Sharp 13px)
     title          = Color3.fromRGB(255, 255, 255),    -- Pure White Window Header
-    subtitle       = Color3.fromRGB(168, 180, 204),    -- High-Contrast Slate Grey Subtitle
+    subtitle       = Color3.fromRGB(124, 132, 144),    -- Minimal dim
     outline        = Color3.fromRGB(8, 9, 13),
-    tabInactive    = Color3.fromRGB(168, 180, 204),    -- High-Legibility Inactive Tab
+    tabInactive    = Color3.fromRGB(124, 132, 144),    -- Minimal dim tab
     tabActive      = Color3.fromRGB(255, 255, 255),    -- Pure White Active Tab
     tabActiveBg    = NEU_MATTE,                        -- Active Tab Pill Shares Exact Base Matte!
-    tabActiveBar   = Color3.fromRGB(56, 139, 253),     -- One Saturated Accent Cue (Electric Blue)
+    tabActiveBar   = Color3.fromRGB(169, 245, 255),    -- Minimal cyan accent (#A9F5FF)
 
     -- 5. Section Container Cards (Raised Neumorphic Surface - Zero Borders)
-    sectionTitle   = Color3.fromRGB(88, 166, 255),     -- Saturated Vivid Apple Blue Section Header
+    sectionTitle   = Color3.fromRGB(169, 245, 255),    -- Minimal cyan section header
     cardBg         = NEU_MATTE,                        -- Section Cards Share Exact Base Color!
-    cardBorder     = Color3.fromRGB(32, 36, 48),       -- Soft Ambient Edge
-    cardShadow     = Color3.fromRGB(10, 12, 16),       -- Bottom-Right Soft Shadow
-    rowDivider     = Color3.fromRGB(30, 34, 46),       -- Subtle Inner Row Separator
-    rowHover       = Color3.fromRGB(28, 32, 44),       -- Smooth Row Hover Highlight
+    cardBorder     = Color3.fromRGB(23, 26, 32),       -- Minimal edge
+    cardShadow     = Color3.fromRGB(0, 0, 0),          -- No shadow (flat)
+    rowDivider     = Color3.fromRGB(23, 26, 32),       -- Minimal row separator
+    rowHover       = Color3.fromRGB(23, 26, 32),       -- Minimal hover
 
     -- 6. Controls & Badges (Raised / Inset Matte - Zero Borders)
-    text           = Color3.fromRGB(248, 250, 255),    -- Crisp Apple High-Contrast White
-    textMuted      = Color3.fromRGB(168, 176, 196),    -- Secondary Values & Descriptions
+    text           = Color3.fromRGB(237, 239, 242),    -- Minimal soft white
+    textMuted      = Color3.fromRGB(124, 132, 144),    -- Minimal dim
     controlBg      = NEU_MATTE,                        -- Buttons & Badges Share Exact Base Color!
-    controlBorder  = Color3.fromRGB(32, 36, 48),       -- Soft Inset Rim
-    controlShadow  = Color3.fromRGB(10, 12, 16),       -- Ambient Shadow
+    controlBorder  = Color3.fromRGB(23, 26, 32),       -- Minimal rim
+    controlShadow  = Color3.fromRGB(0, 0, 0),          -- No shadow
 
     -- 7. Switches & Sliders (Inset Wells + Raised Matte Thumb)
     toggleOn       = Color3.fromRGB(52, 199, 89),      -- Saturated Apple Green Accent (#34C759)
-    toggleOff      = Color3.fromRGB(18, 20, 27),       -- Sunken Inset Cavity Track
-    toggleBorder   = Color3.fromRGB(32, 36, 48),       -- Soft Inset Rim
+    toggleOff      = Color3.fromRGB(42, 46, 54),       -- Minimal track
+    toggleBorder   = Color3.fromRGB(23, 26, 32),       -- Minimal rim
     knob           = Color3.fromRGB(250, 252, 255),    -- Pure White Solid Knob
     knobShadow     = Color3.fromRGB(8, 9, 12),         -- Drop Shadow for Knob
-    sliderTrack    = Color3.fromRGB(18, 20, 27),       -- Inset Groove Track
-    sliderFill     = Color3.fromRGB(56, 139, 253),     -- Saturated Electric Blue Fill
-    accent         = Color3.fromRGB(56, 139, 253),     -- Saturated Electric Blue Accent
+    sliderTrack    = Color3.fromRGB(42, 46, 54),       -- Minimal track
+    sliderFill     = Color3.fromRGB(169, 245, 255),    -- Minimal cyan fill
+    accent         = Color3.fromRGB(169, 245, 255),    -- Minimal cyan accent
 }
 
 -- ============================================================
