@@ -1,6 +1,6 @@
 -- ============================================================
 --   RAVEN HUB  |  Luxe Minimal Dark Edition (100% Drawing API Engine)
---   Lumen Edge Luxe Theme | Cyan #A9F5FF + Gold Accents | Animations
+--   Lumen Edge Luxe | Cyan #A9F5FF + Gold | BAC-Safe Animations
 --   100% BAC / Frog Anti-Cheat Compliant
 -- ============================================================
 
@@ -37,18 +37,9 @@ local function pointInCircle(pt, center, radius)
     return (dx * dx + dy * dy) <= (radius * radius)
 end
 
--- Luxe Animation System
-local function lerp(a, b, t)
-    return a + (b - a) * t
-end
-
-local function lerpColor(c1, c2, t)
-    return Color3.new(
-        lerp(c1.R, c2.R, t),
-        lerp(c1.G, c2.G, t),
-        lerp(c1.B, c2.B, t)
-    )
-end
+-- Luxe Animation (BAC-safe: pure math, no new Drawing objects)
+local function lerp(a, b, t) return a + (b - a) * t end
+local function easeOutCubic(t) return 1 - (1 - t)^3 end
 
 local function sanitizeText(str)
     if type(str) ~= "string" then return tostring(str or "") end
@@ -876,8 +867,9 @@ local MAC_THEME = {
     tabInactive    = Color3.fromRGB(124, 132, 144),    -- Minimal dim tab
     tabActive      = Color3.fromRGB(255, 255, 255),    -- Pure White Active Tab
     tabActiveBg    = NEU_MATTE,                        -- Active Tab Pill Shares Exact Base Matte!
-    tabActiveBar   = Color3.fromRGB(169, 245, 255),    -- Minimal cyan accent (#A9F5FF)
+    tabActiveBar   = Color3.fromRGB(169, 245, 255),    -- Luxe cyan accent (#A9F5FF)
     gold           = Color3.fromRGB(232, 200, 122),    -- Luxe gold accent
+    cyanGlow       = Color3.fromRGB(169, 245, 255),    -- Glow color
 
     -- 5. Section Container Cards (Raised Neumorphic Surface - Zero Borders)
     sectionTitle   = Color3.fromRGB(169, 245, 255),    -- Minimal cyan section header
@@ -960,9 +952,7 @@ function DrawingUI:CreateWindow(config)
     self.visible = true
     self.running = true
     self.theme = MAC_THEME
-    -- Luxe animation state
-    self._openAnim = 0  -- 0=closed, 1=open (for fade-in)
-    self._animSpeed = 8  -- animation speed multiplier
+    self._luxeAnim = 0  -- 0..1 open animation (BAC-safe: just a number)
     self.tabs = {}
     self.activeTabIndex = 1
     self.headerHeight = 44
@@ -1121,14 +1111,6 @@ function DrawingUI:CreateWindow(config)
         self.activeTabBar.Thickness = 1
         self.activeTabBar.Visible = false
         pcall(function() self.activeTabBar.ZIndex = 4 end)
-    -- Luxe: glow behind active tab bar
-    self.activeTabGlow = safeDrawing("Square")
-    if self.activeTabGlow then
-        self.activeTabGlow.Filled = true
-        self.activeTabGlow.Color = self.theme.tabActiveBar
-        self.activeTabGlow.Transparency = 0.7
-        self.activeTabGlow.Visible = false
-        pcall(function() self.activeTabGlow.ZIndex = 3 end)
     end
 
     -- User Info Profile Card (Bottom of Sidebar)
@@ -3134,9 +3116,7 @@ end
 
 function DrawingUI:Toggle()
     self.visible = not self.visible
-    if self.visible then
-        self._openAnim = 0  -- Luxe: restart open animation
-    end
+    if self.visible then self._luxeAnim = 0 end
     if not self.visible then
         self.openDropdown = nil
         if self.dropdownPopupCard then self.dropdownPopupCard:Update(Vector2.zero, Vector2.zero, 0, Color3.new(), nil, false) end
@@ -3155,7 +3135,6 @@ function DrawingUI:Toggle()
         end
         if self.activeTabPill then self.activeTabPill:Update(Vector2.zero, Vector2.zero, 0, Color3.new(), nil, false) end
         setObjVisible(self.activeTabBar, false)
-        if self.activeTabGlow then setObjVisible(self.activeTabGlow, false) end
         if self.userCardPill then self.userCardPill:Update(Vector2.zero, Vector2.zero, 0, Color3.new(), nil, false) end
         if self.rowHoverCard then self.rowHoverCard:Update(Vector2.zero, Vector2.zero, 0, Color3.new(), nil, false) end
         if self.scrollThumbPill then self.scrollThumbPill:Update(Vector2.zero, Vector2.zero, 0, Color3.new(), nil, false) end
@@ -3184,18 +3163,15 @@ end
 function DrawingUI:Render()
     if not self.visible then return end
 
-    -- Luxe: animate open (fade-in)
-    local dt = 1/60  -- assume 60fps, RenderStepped is frame-bound
-    if self._openAnim < 1 then
-        self._openAnim = math.min(1, self._openAnim + dt * self._animSpeed)
+    -- Luxe: open animation (BAC-safe: modifies existing objects only)
+    if self._luxeAnim < 1 then
+        self._luxeAnim = math.min(1, self._luxeAnim + (1/60) * 6)
     end
-    local animT = self._openAnim
-    -- Ease-out cubic for smooth open
-    animT = 1 - (1 - animT) * (1 - animT) * (1 - animT)
+    local animE = easeOutCubic(self._luxeAnim)
 
     local p = self.pos
-    -- Luxe: slide up slightly on open
-    p = Vector2.new(p.X, p.Y + (1 - animT) * 20)
+    -- Subtle slide-up on open (20px -> 0)
+    p = Vector2.new(p.X, p.Y + (1 - animE) * 18)
     local sz = self.size
     local sideW = self.sidebarWidth
     local headH = self.headerHeight
@@ -3359,15 +3335,10 @@ function DrawingUI:Render()
                 self.activeTabPill:Update(Vector2.new(tabX, btnY), Vector2.new(tabBtnW, tabBtnH), 10, self.theme.tabActiveBg, Color3.fromRGB(44, 52, 70), true, "raised")
             end
             if self.activeTabBar then
-                self.activeTabBar.Position = Vector2.new(tabX + 2, btnY + 8)
-                self.activeTabBar.Size = Vector2.new(3, tabBtnH - 16)
+                -- Luxe: wider, more prominent active indicator
+                self.activeTabBar.Position = Vector2.new(tabX + 2, btnY + 6)
+                self.activeTabBar.Size = Vector2.new(4, tabBtnH - 12)
                 self.activeTabBar.Visible = true
-            end
-            -- Luxe: glow effect
-            if self.activeTabGlow then
-                self.activeTabGlow.Position = Vector2.new(tabX - 2, btnY + 4)
-                self.activeTabGlow.Size = Vector2.new(11, tabBtnH - 8)
-                self.activeTabGlow.Visible = true
             end
         end
 
