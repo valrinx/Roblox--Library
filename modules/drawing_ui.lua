@@ -1,6 +1,6 @@
 -- ============================================================
---   RAVEN HUB  |  Minimal Dark Edition (100% Drawing API Engine)
---   Lumen Edge Minimal Dark Theme | Flat Surfaces | Cyan Accent #A9F5FF
+--   RAVEN HUB  |  Luxe Minimal Dark Edition (100% Drawing API Engine)
+--   Lumen Edge Luxe Theme | Cyan #A9F5FF + Gold Accents | Animations
 --   100% BAC / Frog Anti-Cheat Compliant
 -- ============================================================
 
@@ -35,6 +35,19 @@ local function pointInCircle(pt, center, radius)
     local dx = pt.X - center.X
     local dy = pt.Y - center.Y
     return (dx * dx + dy * dy) <= (radius * radius)
+end
+
+-- Luxe Animation System
+local function lerp(a, b, t)
+    return a + (b - a) * t
+end
+
+local function lerpColor(c1, c2, t)
+    return Color3.new(
+        lerp(c1.R, c2.R, t),
+        lerp(c1.G, c2.G, t),
+        lerp(c1.B, c2.B, t)
+    )
 end
 
 local function sanitizeText(str)
@@ -864,6 +877,7 @@ local MAC_THEME = {
     tabActive      = Color3.fromRGB(255, 255, 255),    -- Pure White Active Tab
     tabActiveBg    = NEU_MATTE,                        -- Active Tab Pill Shares Exact Base Matte!
     tabActiveBar   = Color3.fromRGB(169, 245, 255),    -- Minimal cyan accent (#A9F5FF)
+    gold           = Color3.fromRGB(232, 200, 122),    -- Luxe gold accent
 
     -- 5. Section Container Cards (Raised Neumorphic Surface - Zero Borders)
     sectionTitle   = Color3.fromRGB(169, 245, 255),    -- Minimal cyan section header
@@ -946,6 +960,9 @@ function DrawingUI:CreateWindow(config)
     self.visible = true
     self.running = true
     self.theme = MAC_THEME
+    -- Luxe animation state
+    self._openAnim = 0  -- 0=closed, 1=open (for fade-in)
+    self._animSpeed = 8  -- animation speed multiplier
     self.tabs = {}
     self.activeTabIndex = 1
     self.headerHeight = 44
@@ -3109,6 +3126,9 @@ end
 
 function DrawingUI:Toggle()
     self.visible = not self.visible
+    if self.visible then
+        self._openAnim = 0  -- Luxe: restart open animation
+    end
     if not self.visible then
         self.openDropdown = nil
         if self.dropdownPopupCard then self.dropdownPopupCard:Update(Vector2.zero, Vector2.zero, 0, Color3.new(), nil, false) end
@@ -3155,7 +3175,18 @@ end
 function DrawingUI:Render()
     if not self.visible then return end
 
+    -- Luxe: animate open (fade-in)
+    local dt = 1/60  -- assume 60fps, RenderStepped is frame-bound
+    if self._openAnim < 1 then
+        self._openAnim = math.min(1, self._openAnim + dt * self._animSpeed)
+    end
+    local animT = self._openAnim
+    -- Ease-out cubic for smooth open
+    animT = 1 - (1 - animT) * (1 - animT) * (1 - animT)
+
     local p = self.pos
+    -- Luxe: slide up slightly on open
+    p = Vector2.new(p.X, p.Y + (1 - animT) * 20)
     local sz = self.size
     local sideW = self.sidebarWidth
     local headH = self.headerHeight
