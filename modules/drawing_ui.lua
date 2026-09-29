@@ -1121,6 +1121,14 @@ function DrawingUI:CreateWindow(config)
         self.activeTabBar.Thickness = 1
         self.activeTabBar.Visible = false
         pcall(function() self.activeTabBar.ZIndex = 4 end)
+    -- Luxe: glow behind active tab bar
+    self.activeTabGlow = safeDrawing("Square")
+    if self.activeTabGlow then
+        self.activeTabGlow.Filled = true
+        self.activeTabGlow.Color = self.theme.tabActiveBar
+        self.activeTabGlow.Transparency = 0.7
+        self.activeTabGlow.Visible = false
+        pcall(function() self.activeTabGlow.ZIndex = 3 end)
     end
 
     -- User Info Profile Card (Bottom of Sidebar)
@@ -3147,6 +3155,7 @@ function DrawingUI:Toggle()
         end
         if self.activeTabPill then self.activeTabPill:Update(Vector2.zero, Vector2.zero, 0, Color3.new(), nil, false) end
         setObjVisible(self.activeTabBar, false)
+        if self.activeTabGlow then setObjVisible(self.activeTabGlow, false) end
         if self.userCardPill then self.userCardPill:Update(Vector2.zero, Vector2.zero, 0, Color3.new(), nil, false) end
         if self.rowHoverCard then self.rowHoverCard:Update(Vector2.zero, Vector2.zero, 0, Color3.new(), nil, false) end
         if self.scrollThumbPill then self.scrollThumbPill:Update(Vector2.zero, Vector2.zero, 0, Color3.new(), nil, false) end
@@ -3353,6 +3362,12 @@ function DrawingUI:Render()
                 self.activeTabBar.Position = Vector2.new(tabX + 2, btnY + 8)
                 self.activeTabBar.Size = Vector2.new(3, tabBtnH - 16)
                 self.activeTabBar.Visible = true
+            end
+            -- Luxe: glow effect
+            if self.activeTabGlow then
+                self.activeTabGlow.Position = Vector2.new(tabX - 2, btnY + 4)
+                self.activeTabGlow.Size = Vector2.new(11, tabBtnH - 8)
+                self.activeTabGlow.Visible = true
             end
         end
 
