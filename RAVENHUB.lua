@@ -415,10 +415,10 @@ local SCRIPTS = {
     },
     {
         name        = "WarZPVP",
-        description = "Player ESP (Box/Name/Distance/HP/Weapon/Skeleton) | Mouse-Driven Aimbot (FOV, custom keybind, target lock) | 100% Drawing API",
+        description = "Player ESP (Box/Name/Distance/HP/Weapon/Skeleton) | Loot ESP (name/distance/category) | Boss ESP (box/HP/spawn alert) | Mouse-Driven Aimbot (FOV, custom keybind, target lock) | 100% Drawing API",
         placeIds    = {135187059974536},
         gameIds     = {10763998990},
-        version     = "v1.3.0",
+        version     = "v1.4.0",
         moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/warz_pvp.lua",
     },
     {
@@ -470,7 +470,7 @@ local SCRIPTS = {
     },
     {
         name        = "Steal Fish Eggs",
-        description = "Auto Steal Eggs | Subterranean Flight (ดำดิน) | Best Egg Buff & Size | Ultra Speed | ESP",
+        description = "Auto Steal Eggs | Subterranean Flight (Ã Â¸â€Ã Â¸Â³Ã Â¸â€Ã Â¸Â´Ã Â¸â„¢) | Best Egg Buff & Size | Ultra Speed | ESP",
         placeIds    = {99183404085821},
         gameIds     = {10718240577},
         version     = "v1.9.0",
@@ -781,7 +781,7 @@ local SCRIPTS = {
     },
     {
         name        = "Greedy Growers",
-        description = "High-Multiplier Hunter (1.1x–500x) | Peak Tracker | Auto Farm Loop | Ping Comp",
+        description = "High-Multiplier Hunter (1.1xÃ¢â‚¬â€œ500x) | Peak Tracker | Auto Farm Loop | Ping Comp",
         placeIds    = {74102906764176},
         gameIds     = {10440833423},
         version     = "v4.2.0",

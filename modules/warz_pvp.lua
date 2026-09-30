@@ -1,8 +1,8 @@
 -- ============================================================
 --   RAVEN HUB  |  WarZPVP
 --   UniverseId: 10763998990  |  PlaceId: 135187059974536
---   Player ESP (Box/Name/Distance/HP/Weapon) + Aimbot (mouse-driven)
---   v1.3.0 — Self ESP toggle; custom aim-key button binds MB1/MB2/MB3 + keys
+--   Player ESP (Box/Name/Distance/HP/Weapon) + Loot ESP + Boss ESP + Aimbot (mouse-driven)
+--   v1.4.0 — loot ESP (WarzLoot), boss ESP + spawn alert (WarzBoss), skeleton render fix
 --   Read-only visuals + mouse-driven aim.
 --   WarZ notes: FFA (no Teams), skip dead via WarzDead attribute,
 --   character = R15 (Head/HumanoidRootPart), WarzHitboxes folder present.
@@ -30,7 +30,7 @@ return function(Window, ctx)
             environment.__RAVEN_WINDOW.Destroy()
         end
     end)
-    environment.RAVEN_WARZPVP_VER = "1.0.0"
+    environment.RAVEN_WARZPVP_VER = "1.4.0"
 
     local running = true
     local connections = {}
@@ -47,6 +47,11 @@ return function(Window, ctx)
         skeletonEsp = true,
         selfEsp = false,
         maxDistance = 2000,
+        lootEsp = true,
+        lootMaxDistance = 1500,
+        lootCategory = "All",
+        bossEsp = true,
+        bossAlert = true,
         aimbot = false,
         aimMaxDist = 500,
         aimFov = 150,
@@ -64,40 +69,18 @@ return function(Window, ctx)
     end
 
     local function removeUiSections()
+        -- Visuals/Combat are owned by this module. Use DrawingUI's native
+        -- Clear() so the old Drawing objects are actually removed.
+        local tabs = {}
         for _, sec in ipairs(uiSections) do
-            pcall(function()
-                local tab = sec.tab
-                if tab and type(tab.sections) == "table" then
-                    for i, s in ipairs(tab.sections) do
-                        if s == sec then
-                            table.remove(tab.sections, i)
-                            break
-                        end
-                    end
-                    if tab._currentSection == sec then
-                        tab._currentSection = nil
-                    end
-                end
-                -- Hide every Drawing (userdata) owned by the section; skip
-                -- tab/window back-references so the rest of the UI survives.
-                local seen = {}
-                local function hideDeep(t)
-                    if type(t) ~= "table" or seen[t] then return end
-                    seen[t] = true
-                    for k, v in pairs(t) do
-                        if k ~= "tab" and k ~= "window" then
-                            if type(v) == "userdata" then
-                                pcall(function() v.Visible = false end)
-                            elseif type(v) == "table" then
-                                hideDeep(v)
-                            end
-                        end
-                    end
-                end
-                hideDeep(sec)
-            end)
+            if sec and sec.tab then tabs[sec.tab] = true end
         end
-        uiSections = {}
+        for tab in pairs(tabs) do
+            if type(tab.Clear) == "function" then
+                pcall(function() tab:Clear() end)
+            end
+        end
+        table.clear(uiSections)
     end
 
     local hasDrawing = type(Drawing) == "table" and type(Drawing.new) == "function"
@@ -121,31 +104,36 @@ return function(Window, ctx)
     -- FFA game: no teams, single ESP color.
     local ESP_COLOR = Color3.fromRGB(255, 200, 60)
 
-    -- Skeleton bones anchored at R15 RigAttachments (exact joint pivots, so
-    -- the lines sit on the model's real joints instead of floating between
-    -- part centers). Verified live on WarZPVP characters: 0 missing.
-    -- Falls back to part centers if a game ever strips attachments.
+    -- Pose-following R15 skeleton. Each segment follows two different points
+    -- along the same animated body part (or a short joint branch), avoiding
+    -- both zero-length Motor6D attachment pairs and stiff part-center chains.
     local SKELETON_BONES = {
-        { "Head", "NeckRigAttachment", "UpperTorso", "NeckRigAttachment" },
-        { "UpperTorso", "WaistRigAttachment", "LowerTorso", "WaistRigAttachment" },
-        { "UpperTorso", "LeftShoulderRigAttachment", "LeftUpperArm", "LeftShoulderRigAttachment" },
-        { "LeftUpperArm", "LeftElbowRigAttachment", "LeftLowerArm", "LeftElbowRigAttachment" },
-        { "LeftLowerArm", "LeftWristRigAttachment", "LeftHand", "LeftWristRigAttachment" },
-        { "UpperTorso", "RightShoulderRigAttachment", "RightUpperArm", "RightShoulderRigAttachment" },
-        { "RightUpperArm", "RightElbowRigAttachment", "RightLowerArm", "RightElbowRigAttachment" },
-        { "RightLowerArm", "RightWristRigAttachment", "RightHand", "RightWristRigAttachment" },
-        { "LowerTorso", "LeftHipRigAttachment", "LeftUpperLeg", "LeftHipRigAttachment" },
-        { "LeftUpperLeg", "LeftKneeRigAttachment", "LeftLowerLeg", "LeftKneeRigAttachment" },
-        { "LeftLowerLeg", "LeftAnkleRigAttachment", "LeftFoot", "LeftAnkleRigAttachment" },
-        { "LowerTorso", "RightHipRigAttachment", "RightUpperLeg", "RightHipRigAttachment" },
-        { "RightUpperLeg", "RightKneeRigAttachment", "RightLowerLeg", "RightKneeRigAttachment" },
-        { "RightLowerLeg", "RightAnkleRigAttachment", "RightFoot", "RightAnkleRigAttachment" },
+        { "Head", nil, "Head", "NeckRigAttachment" },
+        { "UpperTorso", "NeckRigAttachment", "UpperTorso", "WaistRigAttachment" },
+        { "UpperTorso", "NeckRigAttachment", "UpperTorso", "LeftShoulderRigAttachment" },
+        { "LeftUpperArm", "LeftShoulderRigAttachment", "LeftUpperArm", "LeftElbowRigAttachment" },
+        { "LeftLowerArm", "LeftElbowRigAttachment", "LeftLowerArm", "LeftWristRigAttachment" },
+        { "LeftHand", "LeftWristRigAttachment", "LeftHand", nil },
+        { "UpperTorso", "NeckRigAttachment", "UpperTorso", "RightShoulderRigAttachment" },
+        { "RightUpperArm", "RightShoulderRigAttachment", "RightUpperArm", "RightElbowRigAttachment" },
+        { "RightLowerArm", "RightElbowRigAttachment", "RightLowerArm", "RightWristRigAttachment" },
+        { "RightHand", "RightWristRigAttachment", "RightHand", nil },
+        { "LowerTorso", "WaistRigAttachment", "LowerTorso", "LeftHipRigAttachment" },
+        { "LeftUpperLeg", "LeftHipRigAttachment", "LeftUpperLeg", "LeftKneeRigAttachment" },
+        { "LeftLowerLeg", "LeftKneeRigAttachment", "LeftLowerLeg", "LeftAnkleRigAttachment" },
+        { "LeftFoot", "LeftAnkleRigAttachment", "LeftFoot", nil },
+        { "LowerTorso", "WaistRigAttachment", "LowerTorso", "RightHipRigAttachment" },
+        { "RightUpperLeg", "RightHipRigAttachment", "RightUpperLeg", "RightKneeRigAttachment" },
+        { "RightLowerLeg", "RightKneeRigAttachment", "RightLowerLeg", "RightAnkleRigAttachment" },
+        { "RightFoot", "RightAnkleRigAttachment", "RightFoot", nil },
     }
 
-    local function boneWorldPos(part, att)
-        if att ~= nil then
-            local ok, wp = pcall(function() return att.WorldPosition end)
-            if ok and typeof(wp) == "Vector3" then return wp end
+    local function skeletonPoint(part, attachmentName)
+        if attachmentName then
+            local attachment = part:FindFirstChild(attachmentName)
+            if attachment and attachment:IsA("Attachment") then
+                return attachment.WorldPosition
+            end
         end
         return part.Position
     end
@@ -183,49 +171,66 @@ return function(Window, ctx)
             e.hpFill.Visible = false
         end
         e.bones = {}
+        e.boneParts = {}
+        e.boneCharacter = nil
+        e.boneRetryAt = 0
+        e.boneReady = false
+        espCache[p] = e
+        return e
+    end
+
+    local function ensureSkeletonDrawings(e)
+        if e.bones[1] then return end
         for i = 1, #SKELETON_BONES do
             local ln = safeDrawing("Line")
             if ln then
-                ln.Thickness = 1
+                ln.Thickness = 2
+                ln.Transparency = 1
                 ln.Color = ESP_COLOR
                 ln.Visible = false
                 e.bones[i] = ln
             end
         end
-        espCache[p] = e
-        return e
+    end
+
+    local function resolveSkeletonParts(e, ch)
+        local now = os.clock()
+        if e.boneCharacter == ch and e.boneReady then return end
+        if e.boneCharacter == ch and now < e.boneRetryAt then return end
+        e.boneCharacter = ch
+        e.boneRetryAt = now + 0.5
+        e.boneReady = true
+        for i, b in ipairs(SKELETON_BONES) do
+            local pa = ch:FindFirstChild(b[1])
+            local pb = ch:FindFirstChild(b[3])
+            if pa and pb then
+                e.boneParts[i] = { pa, b[2], pb, b[4] }
+            else
+                e.boneParts[i] = false
+                e.boneReady = false
+            end
+        end
     end
 
     local function hideEntry(e)
-        for _, d in pairs(e) do
-            if type(d) == "table" then
-                for _, l in pairs(d) do
-                    if typeof(l) ~= "Instance" then
-                        pcall(function() l.Visible = false end)
-                    end
-                end
-            elseif d ~= nil and typeof(d) ~= "Instance" then
-                pcall(function() d.Visible = false end)
-            end
+        for _, d in pairs({ e.box, e.name, e.hpBack, e.hpFill }) do
+            if d then pcall(function() d.Visible = false end) end
+        end
+        for _, line in pairs(e.bones or {}) do
+            if line then pcall(function() line.Visible = false end) end
         end
     end
 
     local function destroyEntry(p)
         local e = espCache[p]
-        if e then
-            for _, d in pairs(e) do
-                if type(d) == "table" then
-                    for _, l in pairs(d) do
-                        if typeof(l) ~= "Instance" then
-                            pcall(function() l:Remove() end)
-                        end
-                    end
-                elseif d ~= nil and typeof(d) ~= "Instance" then
-                    pcall(function() d:Remove() end)
-                end
-            end
-            espCache[p] = nil
+        if not e then return end
+        for _, d in pairs({ e.box, e.name, e.hpBack, e.hpFill }) do
+            if d then pcall(function() d:Remove() end) end
         end
+        for _, line in pairs(e.bones or {}) do
+            if line then pcall(function() line:Remove() end) end
+        end
+        espCache[p] = nil
     end
 
     local function isAlive(ch)
@@ -293,26 +298,23 @@ return function(Window, ctx)
                                 if e.hpBack then e.hpBack.Visible = false end
                                 if e.hpFill then e.hpFill.Visible = false end
                             end
-                            -- Skeleton: resolve bone parts once per character,
-                            -- then project each bone to screen every frame.
-                            if e.ch ~= ch then
-                                e.ch = ch
-                                e.boneParts = {}
-                                for i, b in ipairs(SKELETON_BONES) do
-                                    local pa = ch:FindFirstChild(b[1])
-                                    local pb = ch:FindFirstChild(b[3])
-                                    local aa = pa and pa:FindFirstChild(b[2]) or nil
-                                    local ab = pb and pb:FindFirstChild(b[4]) or nil
-                                    e.boneParts[i] = (pa and pb) and { pa, pb, aa, ab } or false
-                                end
-                            end
                             if settings.skeletonEsp then
-                                for i, bp in ipairs(e.boneParts) do
+                                -- Create skeleton drawings only for visible players.
+                                -- If a character was only partially replicated when first seen,
+                                -- retry missing body parts every 0.5s instead of caching failure forever.
+                                ensureSkeletonDrawings(e)
+                                resolveSkeletonParts(e, ch)
+                                for i = 1, #SKELETON_BONES do
+                                    local bp = e.boneParts[i]
                                     local ln = e.bones[i]
                                     if ln then
-                                        if bp then
-                                            local va, ona = camera:WorldToViewportPoint(boneWorldPos(bp[1], bp[3]))
-                                            local vb, onb = camera:WorldToViewportPoint(boneWorldPos(bp[2], bp[4]))
+                                        if bp and bp[1].Parent and bp[3].Parent then
+                                            local va, ona = camera:WorldToViewportPoint(
+                                                skeletonPoint(bp[1], bp[2])
+                                            )
+                                            local vb, onb = camera:WorldToViewportPoint(
+                                                skeletonPoint(bp[3], bp[4])
+                                            )
                                             if ona and onb and va.Z > 0 and vb.Z > 0 then
                                                 ln.From = Vector2.new(va.X, va.Y)
                                                 ln.To = Vector2.new(vb.X, vb.Y)
@@ -321,12 +323,13 @@ return function(Window, ctx)
                                                 ln.Visible = false
                                             end
                                         else
+                                            e.boneReady = false
                                             ln.Visible = false
                                         end
                                     end
                                 end
                             else
-                                for _, ln in ipairs(e.bones) do
+                                for _, ln in pairs(e.bones) do
                                     if ln then ln.Visible = false end
                                 end
                             end
@@ -345,6 +348,261 @@ return function(Window, ctx)
         end
     end
 
+    -- [[ Loot ESP: read-only labels for drops under Workspace.WarzLoot ]]
+    -- Loot models look like "Loot_ARMOR_Rebel_Heavy" / "Loot_HEADHELMET"
+    -- with PrimaryPart = "LootMarker". No remotes, no hooks — Drawing only.
+    local lootCache = {} -- [model] = { text = drawing }
+    local lootCategories = { "All" }
+    local lootCategoryDropdown = nil
+
+    local function parseLootName(modelName)
+        local rest = modelName
+        if rest:sub(1, 5) == "Loot_" then
+            rest = rest:sub(6)
+        end
+        local parts = {}
+        for tok in rest:gmatch("[^_]+") do
+            table.insert(parts, tok)
+        end
+        local category = parts[1] or rest
+        local itemName = category
+        if #parts > 1 then
+            itemName = table.concat(parts, " ", 2)
+        end
+        return category, itemName
+    end
+
+    local function lootAnchor(model)
+        -- PrimaryPart -> "LootMarker" child -> first BasePart fallback.
+        local pp = model.PrimaryPart
+        if pp then return pp end
+        local marker = model:FindFirstChild("LootMarker")
+        if marker then return marker end
+        for _, d in ipairs(model:GetChildren()) do
+            if d:IsA("BasePart") then return d end
+        end
+        return nil
+    end
+
+    local function lootAnchorPos(anchor)
+        if anchor == nil then return nil end
+        if anchor:IsA("BasePart") then return anchor.Position end
+        return anchor.WorldPosition
+    end
+
+    local function lootCategoryAllowed(category)
+        return settings.lootCategory == "All" or settings.lootCategory == category
+    end
+
+    local function noteLootCategory(category)
+        for _, c in ipairs(lootCategories) do
+            if c == category then return end
+        end
+        table.insert(lootCategories, category)
+        if lootCategoryDropdown and type(lootCategoryDropdown.SetOptions) == "function" then
+            pcall(function() lootCategoryDropdown:SetOptions(lootCategories) end)
+        end
+    end
+
+    local function updateLootEsp()
+        if not settings.lootEsp then
+            for _, e in pairs(lootCache) do
+                if e.text then pcall(function() e.text.Visible = false end) end
+            end
+            return
+        end
+        local folder = Workspace:FindFirstChild("WarzLoot")
+        local seen = {}
+        if folder then
+            for _, model in ipairs(folder:GetChildren()) do
+                if model:IsA("Model") then
+                    local anchor = lootAnchor(model)
+                    local apos = lootAnchorPos(anchor)
+                    if apos then
+                        local dist = (apos - camera.CFrame.Position).Magnitude
+                        if dist <= settings.lootMaxDistance then
+                            local category, itemName = parseLootName(model.Name)
+                            noteLootCategory(category)
+                            seen[model] = true
+                            local e = lootCache[model]
+                            if not e then
+                                local t = safeDrawing("Text")
+                                if t then
+                                    t.Size = 13
+                                    t.Center = true
+                                    t.Outline = true
+                                    t.Color = Color3.fromRGB(255, 255, 255)
+                                end
+                                e = { text = t }
+                                lootCache[model] = e
+                            end
+                            if e.text then
+                                if lootCategoryAllowed(category) then
+                                    local v, on = camera:WorldToViewportPoint(apos)
+                                    if on and v.Z > 0 then
+                                        e.text.Visible = true
+                                        e.text.Position = Vector2.new(v.X, v.Y)
+                                        e.text.Text = string.format("%s [%s] %dm",
+                                            itemName, category, math.floor(dist + 0.5))
+                                    else
+                                        e.text.Visible = false
+                                    end
+                                else
+                                    e.text.Visible = false
+                                end
+                            end
+                        else
+                            local e = lootCache[model]
+                            if e and e.text then pcall(function() e.text.Visible = false end) end
+                        end
+                    end
+                end
+            end
+        end
+        -- Picked-up / recycled / reparented loot: remove its drawing.
+        for model, e in pairs(lootCache) do
+            if not seen[model] then
+                if e.text then pcall(function() e.text:Remove() end) end
+                lootCache[model] = nil
+            end
+        end
+    end
+
+    -- [[ Boss ESP: read-only box + name/distance + HP bar, spawn alert ]]
+    -- Boss lives under Workspace.WarzBoss (observed: "SuperZombie", 5000 HP).
+    local bossDraw = nil
+    local bossAlertText = nil
+    local bossWasPresent = false
+    local bossAlertUntil = 0
+
+    local function getBossModel()
+        local folder = Workspace:FindFirstChild("WarzBoss")
+        if not folder then return nil end
+        local named = folder:FindFirstChild("SuperZombie")
+        if named and named:IsA("Model") then return named end
+        for _, c in ipairs(folder:GetChildren()) do
+            if c:IsA("Model") and c:FindFirstChildOfClass("Humanoid") then
+                return c
+            end
+        end
+        return nil
+    end
+
+    local function ensureBossDraw()
+        if bossDraw then return bossDraw end
+        local box = safeDrawing("Square")
+        if box then
+            box.Thickness = 2
+            box.Filled = false
+            box.Color = Color3.fromRGB(255, 60, 60)
+        end
+        local name = safeDrawing("Text")
+        if name then
+            name.Size = 14
+            name.Center = true
+            name.Outline = true
+            name.Color = Color3.fromRGB(255, 120, 120)
+        end
+        local hpBg = safeDrawing("Square")
+        if hpBg then
+            hpBg.Filled = true
+            hpBg.Color = Color3.fromRGB(20, 20, 20)
+        end
+        local hpFill = safeDrawing("Square")
+        if hpFill then
+            hpFill.Filled = true
+            hpFill.Color = Color3.fromRGB(60, 220, 90)
+        end
+        bossDraw = { box = box, name = name, hpBg = hpBg, hpFill = hpFill }
+        return bossDraw
+    end
+
+    local function hideBossEsp()
+        if bossDraw then
+            for _, d in pairs(bossDraw) do
+                if d then pcall(function() d.Visible = false end) end
+            end
+        end
+    end
+
+    local function updateBossEsp()
+        if bossAlertText then
+            local showAlert = settings.bossAlert and os.clock() < bossAlertUntil
+            pcall(function() bossAlertText.Visible = showAlert end)
+        end
+        local model = settings.bossEsp and getBossModel() or nil
+        if not model or not isAlive(model) then
+            hideBossEsp()
+            bossWasPresent = false
+            return
+        end
+        if not bossWasPresent then
+            bossWasPresent = true
+            if settings.bossAlert then
+                if not bossAlertText then
+                    local t = safeDrawing("Text")
+                    if t then
+                        t.Size = 22
+                        t.Center = true
+                        t.Outline = true
+                        t.Color = Color3.fromRGB(255, 80, 80)
+                        local vs = camera.ViewportSize
+                        t.Position = Vector2.new(vs.X / 2, vs.Y * 0.25)
+                    end
+                    bossAlertText = t
+                end
+                if bossAlertText then
+                    bossAlertText.Text = "!! BOSS SPAWNED !!"
+                    bossAlertUntil = os.clock() + 5
+                    pcall(function() bossAlertText.Visible = true end)
+                end
+            end
+        end
+        local d = ensureBossDraw()
+        local hrp = model:FindFirstChild("HumanoidRootPart")
+        local hum = model:FindFirstChildOfClass("Humanoid")
+        if not hrp or not hum or not hum.MaxHealth or hum.MaxHealth <= 0 then
+            hideBossEsp()
+            return
+        end
+        local dist = (hrp.Position - camera.CFrame.Position).Magnitude
+        local top, topOn = camera:WorldToViewportPoint(hrp.Position + Vector3.new(0, 4, 0))
+        local bot, botOn = camera:WorldToViewportPoint(hrp.Position - Vector3.new(0, 4, 0))
+        if not (topOn and botOn and top.Z > 0 and bot.Z > 0) then
+            hideBossEsp()
+            return
+        end
+        local h = math.abs(top.Y - bot.Y)
+        if h < 4 then
+            hideBossEsp()
+            return
+        end
+        local w = h * 0.7
+        local x0, y0 = top.X - w / 2, top.Y
+        if d.box then
+            d.box.Visible = true
+            d.box.Size = Vector2.new(w, h)
+            d.box.Position = Vector2.new(x0, y0)
+        end
+        if d.name then
+            d.name.Visible = true
+            d.name.Position = Vector2.new(top.X, y0 - 18)
+            d.name.Text = string.format("%s %dm", model.Name, math.floor(dist + 0.5))
+        end
+        local frac = math.clamp(hum.Health / hum.MaxHealth, 0, 1)
+        if d.hpBg then
+            d.hpBg.Visible = true
+            d.hpBg.Position = Vector2.new(x0 - 6, y0)
+            d.hpBg.Size = Vector2.new(4, h)
+        end
+        if d.hpFill then
+            d.hpFill.Visible = true
+            local fhh = h * frac
+            d.hpFill.Position = Vector2.new(x0 - 6, y0 + h - fhh)
+            d.hpFill.Size = Vector2.new(4, math.max(fhh, 1))
+        end
+    end
+
     -- [[ Aimbot: mouse-driven (no hitbox edits, no hooks, no remotes) ]]
     -- Drives the real mouse via mousemoverel() so the game's own camera
     -- turns toward the target. Target = head closest to crosshair within FOV.
@@ -353,6 +611,7 @@ return function(Window, ctx)
     -- this the "nearest head" scan flickers between close targets and the
     -- crosshair whips back and forth at high response.
     local aimLockPlayer = nil
+    local aimHeld = false
     local capturingAimKey = false -- true while the custom aim-key button listens
 
     local function scanAimTarget()
@@ -491,8 +750,10 @@ return function(Window, ctx)
         end
         -- While a keybind is listening for its new key, drop the menu
         -- input block so mouse buttons can be captured for rebinding.
-        local listening = false
-        pcall(function() listening = Window.activeKeybindListener ~= nil end)
+        local listening = capturingAimKey
+        if not listening then
+            pcall(function() listening = Window.activeKeybindListener ~= nil end)
+        end
         setInputBlock(open and mouseOverMenu() and not listening)
     end
 
@@ -514,34 +775,15 @@ return function(Window, ctx)
         return nil
     end
 
-    -- Aimbot keybind: MouseButton1/2/3 or any KeyCode, by name.
-    local function isAimKeyHeld()
-        local kn = settings.aimKeyName
-        if kn == "MouseButton1" or kn == "MouseButton2" or kn == "MouseButton3" then
-            local ok, held = pcall(function()
-                return UserInputService:IsMouseButtonPressed(Enum.UserInputType[kn])
-            end)
-            return ok and held or false
-        end
-        -- Keyboard key: never fire while typing in chat / a textbox.
-        local focused = nil
-        pcall(function() focused = UserInputService:GetFocusedTextBox() end)
-        if focused ~= nil then return false end
-        local kc = nil
-        pcall(function() kc = Enum.KeyCode[kn] end)
-        if kc then
-            local ok, held = pcall(function() return UserInputService:IsKeyDown(kc) end)
-            return ok and held or false
-        end
-        return false
+    local function inputMatchesAimKey(input)
+        return resolveInputName(input) == settings.aimKeyName
     end
 
     local function updateAimbot(dt)
-        if not settings.aimbot then aimLockPlayer = nil return end
-        if capturingAimKey then return end
-        if menuOpen then return end -- don't fight the user while configuring
-        local aiming = isAimKeyHeld()
-        if not aiming or not hasMouseMove then aimLockPlayer = nil return end
+        if not settings.aimbot then aimHeld, aimLockPlayer = false, nil return end
+        if capturingAimKey then aimHeld, aimLockPlayer = false, nil return end
+        if menuOpen and mouseOverMenu() then aimLockPlayer = nil return end
+        if not aimHeld or not hasMouseMove then aimLockPlayer = nil return end
         local target = getAimTarget()
         if target then
             local v, on = camera:WorldToViewportPoint(target.Position)
@@ -623,13 +865,54 @@ return function(Window, ctx)
         Callback = function(v) settings.maxDistance = v end,
     })
 
+    trackSection(VisualsTab, "Loot ESP")
+    VisualsTab:CreateToggle({
+        Name = "Loot ESP",
+        CurrentValue = true,
+        Flag = "WZP_LootEsp",
+        Callback = function(v) settings.lootEsp = v end,
+    })
+    VisualsTab:CreateSlider({
+        Name = "Loot Max Distance",
+        Range = { 100, 3000 },
+        Increment = 50,
+        Suffix = " studs",
+        CurrentValue = 1500,
+        Flag = "WZP_LootMaxDistance",
+        Callback = function(v) settings.lootMaxDistance = v end,
+    })
+    lootCategoryDropdown = VisualsTab:CreateDropdown({
+        Name = "Loot Category",
+        Options = lootCategories,
+        CurrentOption = "All",
+        Flag = "WZP_LootCategory",
+        Callback = function(v) settings.lootCategory = v end,
+    })
+
+    trackSection(VisualsTab, "Boss ESP")
+    VisualsTab:CreateToggle({
+        Name = "Boss ESP",
+        CurrentValue = true,
+        Flag = "WZP_BossEsp",
+        Callback = function(v) settings.bossEsp = v end,
+    })
+    VisualsTab:CreateToggle({
+        Name = "Boss Spawn Alert",
+        CurrentValue = true,
+        Flag = "WZP_BossAlert",
+        Callback = function(v) settings.bossAlert = v end,
+    })
+
     local CombatTab = Window:CreateTab("Combat", 4483362458)
     trackSection(CombatTab, "Aimbot")
     CombatTab:CreateToggle({
         Name = "Aimbot Enabled",
         CurrentValue = false,
         Flag = "WZP_Aimbot",
-        Callback = function(v) settings.aimbot = v end,
+        Callback = function(v)
+            settings.aimbot = v
+            if not v then aimHeld, aimLockPlayer = false, nil end
+        end,
     })
     -- Custom aim-key button. The library keybind control cannot capture
     -- MouseButton1 (its rebinding handler has no MB1 branch), so we capture
@@ -650,7 +933,7 @@ return function(Window, ctx)
             self.key = newKey
         end
         capturingAimKey = false
-        pcall(function() Window.activeKeybindListener = nil end)
+        aimHeld = false
         refreshAimKeyLabel()
     end
     aimKeyBtn = CombatTab:CreateButton({
@@ -659,9 +942,9 @@ return function(Window, ctx)
             if capturingAimKey then return end
             capturingAimKey = true
             captureArmedAt = os.clock()
-            -- Drop the menu input block while listening (same signal the
-            -- library keybind uses), so mouse buttons reach our capture.
-            pcall(function() Window.activeKeybindListener = aimKeyProxy end)
+            -- Release menu input sinking immediately; the next input is the bind.
+            setInputBlock(false)
+            -- updateMenuState keeps the block disabled while capture is armed.
             refreshAimKeyLabel()
         end,
     })
@@ -670,13 +953,39 @@ return function(Window, ctx)
             Window.itemsByFlag["WZP_AimKey"] = aimKeyProxy
         end
     end)
-    table.insert(connections, UserInputService.InputBegan:Connect(function(input, gpe)
+
+    -- Hold-state activation is event driven so mouse and keyboard binds use
+    -- the same path. Mouse input is accepted even when Roblox marks it
+    -- gameProcessed; keyboard input is ignored while typing in a textbox.
+    table.insert(connections, UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if capturingAimKey or not settings.aimbot then return end
+        if not inputMatchesAimKey(input) then return end
+        if input.UserInputType == Enum.UserInputType.Keyboard then
+            if gameProcessed then return end
+            local focused = nil
+            pcall(function() focused = UserInputService:GetFocusedTextBox() end)
+            if focused ~= nil then return end
+        end
+        aimHeld = true
+    end))
+    table.insert(connections, UserInputService.InputEnded:Connect(function(input)
+        if inputMatchesAimKey(input) then
+            aimHeld = false
+            aimLockPlayer = nil
+        end
+    end))
+
+    table.insert(connections, UserInputService.InputBegan:Connect(function(input)
         if not capturingAimKey then return end
-        if gpe then return end
         -- Ignore the click that opened capture (button fires on press).
-        if os.clock() - captureArmedAt < 0.25 then return end
+        if os.clock() - captureArmedAt < 0.18 then return end
+        if input.KeyCode == Enum.KeyCode.Escape then
+            capturingAimKey = false
+            refreshAimKeyLabel()
+            return
+        end
         local name = resolveInputName(input)
-        aimKeyProxy:Set(name or aimKeyProxy.key)
+        if name then aimKeyProxy:Set(name) end
     end))
     CombatTab:CreateSlider({
         Name = "Aim Max Distance",
@@ -721,6 +1030,8 @@ return function(Window, ctx)
     table.insert(connections, RunService.RenderStepped:Connect(function(dt)
         pcall(updateMenuState)
         pcall(updatePlayerEsp)
+        pcall(updateLootEsp)
+        pcall(updateBossEsp)
         pcall(updateFovCircle)
         pcall(updateAimbot, dt)
     end))
@@ -729,19 +1040,79 @@ return function(Window, ctx)
         destroyEntry(p)
     end))
 
+    local moduleHandle
     local function destroy()
+        if not running then return end
         running = false
+        settings.aimbot = false
+        aimHeld, aimLockPlayer, capturingAimKey = false, nil, false
         pcall(function() setInputBlock(false) end)
         for _, c in ipairs(connections) do
             pcall(function() c:Disconnect() end)
         end
+        table.clear(connections)
         pcall(removeUiSections)
-        if fovCircle ~= nil then pcall(function() fovCircle:Remove() end) end
-        for p in pairs(espCache) do destroyEntry(p) end
-        espCache = {}
+        if fovCircle ~= nil then
+            pcall(function() fovCircle:Remove() end)
+            fovCircle = nil
+        end
+        local players = {}
+        for p in pairs(espCache) do table.insert(players, p) end
+        for _, p in ipairs(players) do destroyEntry(p) end
+        table.clear(espCache)
+        for model, e in pairs(lootCache) do
+            if e.text then pcall(function() e.text:Remove() end) end
+            lootCache[model] = nil
+        end
+        if bossDraw then
+            for _, d in pairs(bossDraw) do
+                if d then pcall(function() d:Remove() end) end
+            end
+            bossDraw = nil
+        end
+        if bossAlertText then
+            pcall(function() bossAlertText:Remove() end)
+            bossAlertText = nil
+        end
+        bossWasPresent = false
+        if environment.__RAVEN_WARZPVP == moduleHandle then
+            environment.__RAVEN_WARZPVP = nil
+        end
     end
 
-    environment.__RAVEN_WARZPVP = { Destroy = destroy }
+    local function getStatus()
+        local lines, visible, ready, entries = 0, 0, 0, 0
+        for _, e in pairs(espCache) do
+            entries += 1
+            if e.boneReady then ready += 1 end
+            for _, line in pairs(e.bones or {}) do
+                lines += 1
+                local ok, shown = pcall(function() return line.Visible end)
+                if ok and shown then visible += 1 end
+            end
+        end
+        return {
+            version = environment.RAVEN_WARZPVP_VER,
+            running = running,
+            aimbot = settings.aimbot,
+            aimKey = settings.aimKeyName,
+            aimHeld = aimHeld,
+            target = aimLockPlayer and aimLockPlayer.Name or nil,
+            skeleton = {entries = entries, lines = lines, visible = visible, ready = ready},
+            loot = (function()
+                local n = 0
+                for _ in pairs(lootCache) do n = n + 1 end
+                return n
+            end)(),
+            boss = bossWasPresent,
+        }
+    end
+
+    moduleHandle = { Destroy = destroy, GetStatus = getStatus }
+    environment.__RAVEN_WARZPVP = moduleHandle
+    if type(ctx) == "table" and type(ctx.registerCleanup) == "function" then
+        ctx.registerCleanup(destroy)
+    end
 
     -- Test hook (only when loaded with ctx.__test); does not affect hub usage
     if type(ctx) == "table" and ctx.__test == true then
@@ -760,6 +1131,21 @@ return function(Window, ctx)
             hasMouseMove = function() return hasMouseMove end,
             hasDrawing = function() return hasDrawing end,
             resolveInputName = resolveInputName,
+            aimKeyName = function() return settings.aimKeyName end,
+            setAimKey = function(name) aimKeyProxy:Set(name) end,
+            skeletonStats = function()
+                local entries, lines, visible, ready = 0, 0, 0, 0
+                for _, e in pairs(espCache) do
+                    entries += 1
+                    if e.boneReady then ready += 1 end
+                    for _, line in pairs(e.bones or {}) do
+                        lines += 1
+                        local ok, isVisible = pcall(function() return line.Visible end)
+                        if ok and isVisible then visible += 1 end
+                    end
+                end
+                return {entries = entries, lines = lines, visible = visible, ready = ready}
+            end,
             espNames = function()
                 local names = {}
                 for plr in pairs(espCache) do
@@ -779,6 +1165,18 @@ return function(Window, ctx)
             end,
             menuOpen = function() return menuOpen end,
             blockBound = function() return inputBlockBound end,
+            parseLootName = parseLootName,
+            lootCategoryAllowed = lootCategoryAllowed,
+            updateLootEsp = updateLootEsp,
+            updateBossEsp = updateBossEsp,
+            getBossModel = getBossModel,
+            setLootCategory = function(c) settings.lootCategory = c end,
+            lootCount = function()
+                local n = 0
+                for _ in pairs(lootCache) do n = n + 1 end
+                return n
+            end,
+            bossPresent = function() return bossWasPresent end,
         }
     end
 
