@@ -41,6 +41,16 @@ files in subdirectories may add or override rules for their scope.
 - After a local module change, update the local teleport payload when applicable
   so the same tested build survives the next teleport.
 - Do not commit or push unless the user explicitly asks.
+- **CRITICAL / MANDATORY: กฎเหล็กการรันเทสบน Local Client ก่อน Commit & Push (Mandatory Pre-Push Local Testing)**:
+  - **ห้าม push โค้ดโดยไม่รันเทสบน Client เด็ดขาด**: แม้ผู้ใช้จะสั่ง "รันเทส + push" หรือ "push ได้เลย" หากมี client Roblox เชื่อมต่ออยู่ใน Raven MCP (`list_clients`) **ต้องรันโค้ดทดสอบจริงบน Local Client ผ่าน `execute_luau` ก่อนเสมอ** ห้ามข้ามขั้นตอนไป git commit/push โดยเด็ดขาด
+  - **ขั้นตอนทดสอบภาคบังคับ (Mandatory Pre-Push Flow)**:
+    1. **Contract Tests**: รันสคริปต์ตรวจความถูกต้องแบบ static (`tests/*.ps1`) ให้ผ่านทุกชุด
+    2. **Active Client Check**: ตรวจสอบ client ผ่าน `list_clients`, `get_game_info` ยืนยัน Username, PlaceId, GameId
+    3. **Local Dev Load**: สั่งรันสคริปต์/โมดูลผ่าน Local Dev Server (`http://localhost:8999/...` หรือ URL ของโมดูล) บน client จริง
+    4. **In-Game Verification**: ตรวจสอบค่าสถานะตัวละคร, ตารางอาวุธ/สกิล, หรือฟีเจอร์ที่แก้ไขว่าทำงานถูกต้องจริง (เช่น Recoil = 0, Auto Heal พร้อมยิง, ไม่เกิด error ใน console ด้วย `get_console`)
+    5. **Visual & UI Check**: ถ่ายภาพหน้าจอ (`screenshot_window`) ตรวจสอบความถูกต้องว่าไม่มี ghost menu, ไม่มี UI ซ้อน
+    6. **สรุปรายงานผล**: รายงาน Client, PlaceId, Module Version, ผลการทดสอบเชิงประจักษ์ให้ผู้ใช้ทราบ
+    7. **Commit & Push**: ทำการ `git commit` และ `git push` เฉพาะเมื่อผ่านการทดสอบบน Client ครบถ้วนแล้วเท่านั้น
 - When the user asks to "รายงาน client", call `list_clients`, `get_game_info`, and
   `get_player_state`, then summarize the connected and active client clearly.
 - **CRITICAL / MANDATORY: ป้องกันการทำเมนูซ้ำซ้อนและ Ghost UI Overlays (UI Duplication Prevention)**:
