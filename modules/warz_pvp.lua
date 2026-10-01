@@ -32,7 +32,7 @@ return function(Window, ctx)
             environment.__RAVEN_WINDOW.Destroy()
         end
     end)
-    environment.RAVEN_WARZPVP_VER = "1.4.3"
+    environment.RAVEN_WARZPVP_VER = "1.4.5"
 
     local running = true
     local connections = {}
@@ -64,6 +64,7 @@ return function(Window, ctx)
         healSlot = 3,
         healCooldown = 0,
         noRecoil = false,
+        instantPickup = false,
     }
 
     -- Track every section we create so destroy() can remove them from the
@@ -112,10 +113,9 @@ return function(Window, ctx)
     local ESP_COLOR = Color3.fromRGB(255, 200, 60)
 
     -- WarZ renders the visible, animated body in
-    -- Workspace.HeroVisualsLocal.Drift_<PlayerName>.LiveAim (Head/Body/Arms/Legs).
-    -- player.Character only holds invisible (Transparency=1) T-pose parts used
-    -- for server hit detection. Skeleton and aim MUST use LiveAim, never
-    -- Character parts, or they draw/lock a stiff T-pose that ignores animation.
+    -- Workspace.HeroVisualsLocal.Drift_<PlayerName>.LiveAim.
+    -- LiveAim contains the real animated Bip01 Bone hierarchy under RootPart.
+    -- Use those bones directly: WarzHitboxes uses the same Bip01 names.
     local function getLiveAim(player)
         if not player then return nil end
         local hv = Workspace:FindFirstChild("HeroVisualsLocal")
@@ -125,51 +125,50 @@ return function(Window, ctx)
         return drift:FindFirstChild("LiveAim")
     end
 
-    -- LiveAim parts have no attachments; compute joints from the visible part
-    -- CFrames every frame so the skeleton follows the animation.
-    local LIVEAIM_BONE_COUNT = 9
-    local function liveAimJoints(live)
-        if not live then return nil end
-        local head = live:FindFirstChild("Head")
-        local body = live:FindFirstChild("Body")
-        local arms = live:FindFirstChild("Arms")
-        local legs = live:FindFirstChild("Legs")
-        if not (head and body and arms and legs) then return nil end
-        if not (head:IsA("BasePart") and body:IsA("BasePart")
-            and arms:IsA("BasePart") and legs:IsA("BasePart")) then return nil end
-        if head.Transparency >= 1 or body.Transparency >= 1 then return nil end
+    local LIVEAIM_BONES = {
+        { "Bip01_Head", "Bip01_Neck" },
+        { "Bip01_Neck", "Bip01_Spine2" },
+        { "Bip01_Spine2", "Bip01_Spine1" },
+        { "Bip01_Spine1", "Bip01_Spine" },
+        { "Bip01_Spine", "Bip01_Pelvis" },
 
-        local headPos = head.Position
-        local bodyUp = body.CFrame.UpVector
-        local neck = body.Position + bodyUp * (body.Size.Y / 2)
-        local waist = body.Position - bodyUp * (body.Size.Y / 2)
-        local headBase = headPos - head.CFrame.UpVector * (head.Size.Y / 2)
+        { "Bip01_Neck", "Bip01_L_Clavicle" },
+        { "Bip01_L_Clavicle", "Bip01_L_UpperArm" },
+        { "Bip01_L_UpperArm", "Bip01_L_Forearm" },
+        { "Bip01_L_Forearm", "Bip01_L_Hand" },
 
-        -- Arms is a single wide rigid mesh; its ends are NOT hands.
-        -- Draw short shoulder stubs at body sides instead of a T-pose bar.
-        local armRight = arms.CFrame.RightVector
-        local shoulderY = neck - bodyUp * 0.35
-        local shoulderOut = body.Size.X / 2 + 0.15
-        local shoulderL = shoulderY - armRight * shoulderOut
-        local shoulderR = shoulderY + armRight * shoulderOut
-        local armL = shoulderL - armRight * 0.55 - bodyUp * 0.35
-        local armR = shoulderR + armRight * 0.55 - bodyUp * 0.35
+        { "Bip01_Neck", "Bip01_R_Clavicle" },
+        { "Bip01_R_Clavicle", "Bip01_R_UpperArm" },
+        { "Bip01_R_UpperArm", "Bip01_R_Forearm" },
+        { "Bip01_R_Forearm", "Bip01_R_Hand" },
 
-        local legUp = legs.CFrame.UpVector
-        local hips = legs.Position + legUp * (legs.Size.Y / 2)
-        local feet = legs.Position - legUp * (legs.Size.Y / 2)
+        { "Bip01_Pelvis", "Bip01_L_Thigh" },
+        { "Bip01_L_Thigh", "Bip01_L_Calf" },
+        { "Bip01_L_Calf", "Bip01_L_Foot" },
 
-        return {
-            { headPos, headBase },   -- head
-            { headBase, neck },      -- neck
-            { neck, waist },         -- spine
-            { neck, shoulderL },     -- left shoulder
-            { neck, shoulderR },     -- right shoulder
-            { shoulderL, armL },     -- left arm stub
-            { shoulderR, armR },     -- right arm stub
-            { waist, hips },         -- waist to hips
-            { hips, feet },          -- legs
-        }
+        { "Bip01_Pelvis", "Bip01_R_Thigh" },
+        { "Bip01_R_Thigh", "Bip01_R_Calf" },
+        { "Bip01_R_Calf", "Bip01_R_Foot" },
+    }
+    local LIVEAIM_BONE_COUNT = #LIVEAIM_BONES
+
+    local function findLiveBone(live, name)
+        local root = live and live:FindFirstChild("RootPart")
+        if not root then return nil end
+        local bone = root:FindFirstChild(name, true)
+        return bone and bone:IsA("Bone") and bone or nil
+    end
+
+    local function boneWorldPosition(bone)
+        if not bone or not bone.Parent then return nil end
+        local ok, pos = pcall(function()
+            return bone.TransformedWorldCFrame.Position
+        end)
+        if ok and typeof(pos) == "Vector3" then return pos end
+        ok, pos = pcall(function()
+            return bone.WorldPosition
+        end)
+        return (ok and typeof(pos) == "Vector3") and pos or nil
     end
 
     local function bodyPart(model, name)
@@ -181,78 +180,115 @@ return function(Window, ctx)
         return nil
     end
 
-    local function getAimPart(character)
-        -- Aim at BODY (not head): bigger target, less affected by crouch/run
-        -- pose since we cannot read the native animation. Head moves a lot
-        -- when crouching, body stays more stable.
-        local target
+    local function getVisualHead(character)
+        local player = Players:GetPlayerFromCharacter(character)
+        local live = getLiveAim(player)
+        local head = live and live:FindFirstChild("Head")
+        if head and head:IsA("BasePart") and head.Transparency < 1 then
+            return head, live
+        end
+        return bodyPart(character, "Head"), live
+    end
+
+    -- WarzHitboxes builds its Chest capsule from Bip01_Spine2 -> Bip01_Neck.
+    -- Aim at the middle of that exact animated segment instead of guessing
+    -- from the merged Body mesh. This stays inside the game's real hit volume.
+    local function getAimPoint(character)
         local player = Players:GetPlayerFromCharacter(character)
         local live = getLiveAim(player)
         if live then
-            local lb = live:FindFirstChild("Body")
-            if lb and lb:IsA("BasePart") and lb.Transparency < 1 then
-                target = lb
+            local spine2 = findLiveBone(live, "Bip01_Spine2")
+            local neck = findLiveBone(live, "Bip01_Neck")
+            local a, b = boneWorldPosition(spine2), boneWorldPosition(neck)
+            if a and b then
+                return a:Lerp(b, 0.5), "Chest"
+            end
+
+            local headBone = findLiveBone(live, "Bip01_Head")
+            local headPos = boneWorldPosition(headBone)
+            if headPos then
+                return headPos, "Head"
+            end
+
+            local body = live:FindFirstChild("Body")
+            if body and body:IsA("BasePart") and body.Transparency < 1 then
+                return body.Position, "Body"
             end
         end
-        if not target then
-            -- Fallback: Character UpperTorso or Torso
-            target = bodyPart(character, "UpperTorso") or bodyPart(character, "Torso") or bodyPart(character, "Body")
-        end
-        if not target then
-            -- Last resort: Head
-            target = bodyPart(character, "Head")
-        end
-        local root = bodyPart(character, "HumanoidRootPart")
-        if not target or not root then return nil end
-        -- Reject detached/desynced parts
-        if (target.Position - root.Position).Magnitude
-            > math.max(8, target.Size.Magnitude * 3) then return nil end
-        return target
+
+        local torso = bodyPart(character, "UpperTorso")
+            or bodyPart(character, "Torso")
+            or bodyPart(character, "Head")
+        return torso and torso.Position or nil, torso and torso.Name or nil
     end
 
-    local BODY_PARTS = { "Head", "UpperTorso", "LowerTorso", "Torso", "LeftUpperArm", "RightUpperArm", "LeftUpperLeg", "RightUpperLeg", "LeftFoot", "RightFoot" }
+    local BODY_PARTS = {
+        "Head", "UpperTorso", "LowerTorso", "Torso",
+        "LeftUpperArm", "LeftLowerArm", "LeftHand",
+        "RightUpperArm", "RightLowerArm", "RightHand",
+        "LeftUpperLeg", "LeftLowerLeg", "LeftFoot",
+        "RightUpperLeg", "RightLowerLeg", "RightFoot",
+    }
 
     local function characterScreenBounds(model)
         local root = bodyPart(model, "HumanoidRootPart") or bodyPart(model, "Torso")
-        local head = getAimPart(model)
-        if not root or not head then return nil end
+        if not root then return nil end
         local rootView, rootOn = camera:WorldToViewportPoint(root.Position)
         if not rootOn or rootView.Z <= 0 then return nil end
 
         local minX, minY = math.huge, math.huge
         local maxX, maxY = -math.huge, -math.huge
+        local points = 0
         local function add(position)
             local v = camera:WorldToViewportPoint(position)
             if v.Z <= 0 then return end
+            points += 1
             minX, minY = math.min(minX, v.X), math.min(minY, v.Y)
             maxX, maxY = math.max(maxX, v.X), math.max(maxY, v.Y)
         end
-        for _, name in ipairs(BODY_PARTS) do
-            local part = bodyPart(model, name)
-            if part then add(part.Position) end
-        end
-        -- Include the skull, shoulders and soles rather than guessing height.
-        add(head.Position + head.CFrame.UpVector * head.Size.Y * 0.5)
-        add(head.Position - head.CFrame.UpVector * head.Size.Y * 0.5)
-        local torso = bodyPart(model, "UpperTorso") or bodyPart(model, "Torso")
-        if torso then
-            local side = torso.CFrame.RightVector * torso.Size.X * 0.5
-            add(torso.Position - side)
-            add(torso.Position + side)
-        end
-        for _, footName in ipairs({ "LeftFoot", "RightFoot", "Left Leg", "Right Leg" }) do
-            local foot = bodyPart(model, footName)
-            if foot then
-                add(foot.Position - foot.CFrame.UpVector * foot.Size.Y * 0.5)
+        local function addPartBounds(part)
+            if not part or not part:IsA("BasePart") then return end
+            local cf, half = part.CFrame, part.Size * 0.5
+            for sx = -1, 1, 2 do
+                for sy = -1, 1, 2 do
+                    for sz = -1, 1, 2 do
+                        add(cf:PointToWorldSpace(Vector3.new(
+                            half.X * sx, half.Y * sy, half.Z * sz
+                        )))
+                    end
+                end
             end
         end
+
+        -- Match the rendered WarZ body, not the invisible Character T-pose.
+        local _, live = getVisualHead(model)
+        if live then
+            for _, name in ipairs({ "Head", "Body", "Arms", "Legs" }) do
+                local part = live:FindFirstChild(name)
+                if part and part:IsA("BasePart") and part.Transparency < 1 then
+                    addPartBounds(part)
+                end
+            end
+        end
+
+        -- Fallback while LiveAim has not replicated yet.
+        if points == 0 then
+            for _, name in ipairs(BODY_PARTS) do
+                addPartBounds(bodyPart(model, name))
+            end
+        end
+
+        if points == 0 then return nil end
         local w, h = maxX - minX, maxY - minY
         local vs = camera.ViewportSize
         if w < 2 or h < 4 or w > vs.X * 2 or h > vs.Y * 2
             or maxX < 0 or minX > vs.X or maxY < 0 or minY > vs.Y then
             return nil
         end
-        return { x = minX, y = minY, w = w, h = h, centerX = (minX + maxX) * 0.5 }
+        return {
+            x = minX, y = minY, w = w, h = h,
+            centerX = (minX + maxX) * 0.5,
+        }
     end
 
     -- [[ Player ESP entries (Drawing API, zero instances) ]]
@@ -312,12 +348,27 @@ return function(Window, ctx)
 
     local function resolveSkeletonParts(e, ch, player)
         local now = os.clock()
-        if e.boneCharacter == ch and e.boneReady then return end
-        if e.boneCharacter == ch and now < e.boneRetryAt then return end
+        local live = getLiveAim(player)
+        if e.boneCharacter == ch and e.liveAim == live and e.boneReady then return end
+        if e.boneCharacter == ch and e.liveAim == live and now < e.boneRetryAt then return end
+
         e.boneCharacter = ch
+        e.liveAim = live
         e.boneRetryAt = now + 0.5
-        e.liveAim = getLiveAim(player)
-        e.boneReady = e.liveAim ~= nil
+        table.clear(e.boneParts)
+        e.boneReady = live ~= nil
+        if not live then return end
+
+        for i, segment in ipairs(LIVEAIM_BONES) do
+            local a = findLiveBone(live, segment[1])
+            local b = findLiveBone(live, segment[2])
+            if a and b then
+                e.boneParts[i] = { a, b }
+            else
+                e.boneParts[i] = false
+                e.boneReady = false
+            end
+        end
     end
 
     local function hideEntry(e)
@@ -411,23 +462,28 @@ return function(Window, ctx)
                                 -- never draw the invisible Character T-pose.
                                 ensureSkeletonDrawings(e)
                                 resolveSkeletonParts(e, ch, p)
-                                local joints = liveAimJoints(e.liveAim)
                                 for i = 1, LIVEAIM_BONE_COUNT do
                                     local ln = e.bones[i]
+                                    local pair = e.boneParts[i]
                                     if ln then
-                                        local j = joints and joints[i]
-                                        if j and e.liveAim.Parent then
-                                            local va, ona = camera:WorldToViewportPoint(j[1])
-                                            local vb, onb = camera:WorldToViewportPoint(j[2])
-                                            if ona and onb and va.Z > 0 and vb.Z > 0 then
-                                                ln.From = Vector2.new(va.X, va.Y)
-                                                ln.To = Vector2.new(vb.X, vb.Y)
-                                                ln.Visible = true
+                                        if pair and e.liveAim and e.liveAim.Parent then
+                                            local a = boneWorldPosition(pair[1])
+                                            local b = boneWorldPosition(pair[2])
+                                            if a and b then
+                                                local va, ona = camera:WorldToViewportPoint(a)
+                                                local vb, onb = camera:WorldToViewportPoint(b)
+                                                if ona and onb and va.Z > 0 and vb.Z > 0 then
+                                                    ln.From = Vector2.new(va.X, va.Y)
+                                                    ln.To = Vector2.new(vb.X, vb.Y)
+                                                    ln.Visible = true
+                                                else
+                                                    ln.Visible = false
+                                                end
                                             else
+                                                e.boneReady = false
                                                 ln.Visible = false
                                             end
                                         else
-                                            e.boneReady = false
                                             ln.Visible = false
                                         end
                                     end
@@ -1034,10 +1090,18 @@ return function(Window, ctx)
     local captureArmedAt = 0
     local aimKeyBtn
     local function refreshAimKeyLabel()
-        if aimKeyBtn and aimKeyBtn.label then
-            aimKeyBtn.label.Text = capturingAimKey
-                and "Aim Key: [...]"
-                or ("Aim Key: [" .. settings.aimKeyName .. "]")
+        local text = capturingAimKey
+            and "Aim Key: [...]"
+            or ("Aim Key: [" .. settings.aimKeyName .. "]")
+        if aimKeyBtn then
+            if aimKeyBtn.label then
+                pcall(function() aimKeyBtn.label.Text = text end)
+            end
+            if type(aimKeyBtn.SetName) == "function" then
+                pcall(function() aimKeyBtn:SetName(text) end)
+            elseif type(aimKeyBtn.Set) == "function" then
+                pcall(function() aimKeyBtn:Set({ Name = text }) end)
+            end
         end
     end
     local aimKeyProxy = { type = "keybind", key = settings.aimKeyName }
@@ -1218,6 +1282,15 @@ return function(Window, ctx)
             pcall(applyNoRecoil)
         end,
     })
+    CombatTab:CreateToggle({
+        Name = "Instant Pickup",
+        CurrentValue = false,
+        Flag = "WZP_InstantPickup",
+        Callback = function(v)
+            settings.instantPickup = v
+            pcall(applyInstantPickup)
+        end,
+    })
     pcall(function()
         if type(CombatTab.CreateLabel) == "function" then
             CombatTab:CreateLabel("Hold the aim key to aim at nearest head in FOV")
@@ -1239,10 +1312,7 @@ return function(Window, ctx)
         lootTime += elapsed
         bossTime += elapsed
         pcall(updateMenuState)
-        if espTime >= 1 / 30 then
-            espTime = 0
-            pcall(updatePlayerEsp)
-        end
+        pcall(updatePlayerEsp)
         if lootTime >= 1 / 8 then
             lootTime = 0
             pcall(updateLootEsp)
@@ -1257,6 +1327,36 @@ return function(Window, ctx)
         -- Keep recoil updated if active
         if settings.noRecoil then
             pcall(applyNoRecoil)
+        end
+
+        -- Instant Pickup (Tier 2): patch LootHold.Step to commit instantly
+        local _origLootHoldStep = nil
+        local function applyInstantPickup()
+            local lhMod
+            for _, c in ipairs(localPlayer.PlayerScripts.Client:GetDescendants()) do
+                if c.Name == "LootHold" and c:IsA("ModuleScript") then
+                    local ok, mod = pcall(require, c)
+                    if ok and mod then lhMod = mod break end
+                end
+            end
+            if not lhMod then return end
+            if settings.instantPickup then
+                if not _origLootHoldStep then
+                    _origLootHoldStep = lhMod.Step
+                    lhMod.Step = function(self, uid, target, holding, t)
+                        if self.uid and not self.committed and holding then
+                            self.started = t - 2
+                            self.nextUse = t - 1
+                        end
+                        return _origLootHoldStep(self, uid, target, holding, t)
+                    end
+                end
+            else
+                if _origLootHoldStep then
+                    lhMod.Step = _origLootHoldStep
+                    _origLootHoldStep = nil
+                end
+            end
         end
 
         -- Auto Heal (Tier 1): via CombatInput.RequestUseMed() (correct signature)
