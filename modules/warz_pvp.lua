@@ -63,6 +63,8 @@ return function(Window, ctx)
         healThreshold = 50,
         healSlot = 3,
         healCooldown = 0,
+        noRecoil = false,
+        noSpread = false,
     }
 
     -- Track every section we create so destroy() can remove them from the
@@ -1143,6 +1145,25 @@ return function(Window, ctx)
         Flag = "WZP_HealSlot",
         Callback = function(v) settings.healSlot = math.floor(v) end,
     })
+    trackSection(CombatTab, "No Recoil / No Spread")
+    CombatTab:CreateToggle({
+        Name = "No Recoil",
+        CurrentValue = false,
+        Flag = "WZP_NoRecoil",
+        Callback = function(v)
+            settings.noRecoil = v
+            pcall(applyNoRecoilSpread)
+        end,
+    })
+    CombatTab:CreateToggle({
+        Name = "No Spread",
+        CurrentValue = false,
+        Flag = "WZP_NoSpread",
+        Callback = function(v)
+            settings.noSpread = v
+            pcall(applyNoRecoilSpread)
+        end,
+    })
     pcall(function()
         if type(CombatTab.CreateLabel) == "function" then
             CombatTab:CreateLabel("Hold the aim key to aim at nearest head in FOV")
@@ -1178,18 +1199,57 @@ return function(Window, ctx)
         end
         pcall(updateFovCircle)
         pcall(updateAimbot, dt)
-        -- Auto Heal (Tier 1): fire UseItem when HP low
+        -- No Recoil / No Spread (Tier 2): modify weapon catalog tables directly
+        -- When Recoil/Spread <= 0, WarzCamera.ApplyRecoil and WarzSpread.ApplySpread
+        -- return early (no effect). No hooks needed.
+        local function applyNoRecoilSpread()
+            local ok, cs = pcall(require, localPlayer.PlayerScripts.Client.input.CombatSettings)
+            if not ok or not cs then return end
+            local catalog
+            if type(cs.GetCatalog) == "function" then
+                local ok2, cat = pcall(cs.GetCatalog)
+                if ok2 then catalog = cat end
+            end
+            if not (catalog and catalog.Weapons) then return end
+            for _, weapon in pairs(catalog.Weapons) do
+                if type(weapon) == "table" then
+                    if weapon._origRecoil == nil then
+                        weapon._origRecoil = weapon.Recoil
+                        weapon._origSpread = weapon.Spread
+                        weapon._origViewRecoil = weapon.ViewRecoil
+                    end
+                    if settings.noRecoil then
+                        weapon.Recoil = 0
+                        weapon.ViewRecoil = 0
+                    else
+                        weapon.Recoil = weapon._origRecoil
+                        weapon.ViewRecoil = weapon._origViewRecoil
+                    end
+                    if settings.noSpread then
+                        weapon.Spread = 0
+                    else
+                        weapon.Spread = weapon._origSpread
+                    end
+                end
+            end
+        end
+        _G.__WZP_ApplyNoRecoilSpread = applyNoRecoilSpread
+
+        -- Auto Heal (Tier 1): via CombatInput.RequestUseMed() (correct signature)
         if settings.autoHeal then
             pcall(function()
                 local char = localPlayer.Character
                 local hum = char and char:FindFirstChildOfClass("Humanoid")
                 if hum and hum.Health > 0 and hum.Health < settings.healThreshold then
                     local now = os.clock()
-                    if now - settings.healCooldown >= 2.0 then
-                        settings.healCooldown = now
-                        local useItem = ReplicatedStorage.Remotes:FindFirstChild("UseItem")
-                        if useItem then
-                            useItem:FireServer(settings.healSlot)
+                    if now - settings.healCooldown >= 1.0 then
+                        local cd = tonumber(localPlayer:GetAttribute("WarzMedCdLeft")) or 0
+                        if cd <= 0.05 then
+                            local ok, ci = pcall(require, localPlayer.PlayerScripts.Client.input.CombatInput)
+                            if ok and ci and type(ci.RequestUseMed) == "function" then
+                                pcall(ci.RequestUseMed)
+                                settings.healCooldown = now
+                            end
                         end
                     end
                 end
