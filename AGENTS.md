@@ -27,6 +27,12 @@ files in subdirectories may add or override rules for their scope.
       - BAC มีกับดัก Metamethod บน `game`: `pcall(function() return game:Kick("Sigma") end)` และ `pcall(function() return game:LoadAnimation() end)` ซึ่งใน Roblox ปกติต้อง Error (`success == false`) หากมีการ hook `__namecall` หรือ `game` จน pcall สำเร็จ จะถูกเตะทันที
       - **ห้าม** ใช้ `hookfunction(game.HttpGet, ...)` หรือ hook metamethod ใดๆ บน `game` โดยเด็ดขาด
     - **UI & ESP Strategy**: หลีกเลี่ยงการสร้าง `ScreenGui` ดิบๆ ลงใน `CoreGui` หรือ `PlayerGui` ให้ใช้ **Drawing API** ของ Executor เป็นหลักสำหรับฟังก์ชัน Visuals/ESP เพื่อเลี่ยงการตรวจจับ Object Injection
+- **Tiered risk framework สำหรับ Hook / Remote (2026-10-01)** — แทนกฎแบน blanket เดิม อนุญาตทุก tier ตามสถานการณ์:
+  - **Tier 0 — ปลอดภัย:** read-only + ขยับเมาส์จริงเท่านั้น (ESP, notifier, aimbot แบบ `mousemoverel`)
+  - **Tier 1 — เสี่ยงต่ำ-กลาง:** ยิง Remote แบบเดียวกับที่ client ยิงเองเป๊ะๆ (args/timing เหมือนกัน) — ต้องผ่าน checklist ข้างบนก่อนเสมอ (decompile, honeypot, rate-limit)
+  - **Tier 2 — เสี่ยงกลาง:** แก้ค่า memory ฝั่ง client อย่างเดียว ไม่ hook (เช่น ค่า recoil ในตารางปืน) — ห้ามแตะขนาด hitbox เด็ดขาด (BAC trap สแกนทุก 5 วิ)
+  - **Tier 3 — เสี่ยงสูง:** hook (`__namecall` ฯลฯ) เช่น silent aim — ทำได้เฉพาะหลังยืนยันว่าเกมเป้าหมายไม่มี hook detection แบบ BAC Alpha-3B
+  - **กติกาประกอบทุก tier:** ส่องสถาปัตยกรรมก่อนลงมือทุกครั้ง, ตัดสินใจรายฟีเจอร์, ทำทีละฟีเจอร์, เทสบนไอดีรองก่อนถ้ามี
 - If multiple clients are connected, explicitly select or confirm the intended
   active client before executing code.
 - When the user asks to run or test a script, run the modified version locally on
@@ -49,6 +55,16 @@ files in subdirectories may add or override rules for their scope.
     - URL รูปแบบ `https://raw.githubusercontent.com/.../refs/heads/main/...` มีการแคชบน Fastly Edge นาน 5-10 นาที แม้จะ push โค้ดใหม่แล้วก็ตาม
     - แนะนำให้ใช้ URL สั้นรูปแบบ `https://raw.githubusercontent.com/valrinx/Roblox--Library/main/RAVENHUB` (ใช้ `/main/` แทน `/refs/heads/main/`) หรือเติม Cache-busting query string เช่น `?v=" .. tostring(os.time())` เสมอ
     - หลัง push ทุกครั้ง ให้ตรวจสอบผ่าน `game:HttpGet` หรือเทียบ hash ให้มั่นใจว่าฝั่ง CDN อัปเดตจริงก่อนส่งมอบงานให้ผู้ใช้
+
+## Roblox live-client performance safety (MANDATORY)
+
+- **Protect active gameplay first.** Treat the connected Roblox client as latency-sensitive whenever the user is playing or may be in a live match. Never run a whole-game scan, bulk script indexing, or a loop of deep `analyze_script` / `disassemble_script` calls during gameplay.
+- **Offline-first.** Inspect repository files, existing captures, cached indexes, previous results, and narrow module/config excerpts before requesting more information from the live client. Keep anti-cheat and remote-safety inspection evidence-driven; do not turn that requirement into a bulk live scan.
+- **One lightweight live request at a time.** Prefer targeted, read-only checks of one instance, state, packet, or script. Do not parallelize/fan out client requests or run long polling, repeated OCR, broad enumeration, deep recursive inspection, or heavy loops through `execute_luau`. Keep each interactive call brief (normally 5–10 seconds or less) and allow the client time to recover between calls.
+- **Require explicit approval for expensive analysis.** Before broad indexing, multiple script decompilations/disassemblies, large captures, or other high-load work, tell the user what will run and ask them to confirm they are not actively playing. Prefer an idle/test client or offline analysis; never silently perform such work on an active gameplay client.
+- **Immediate stop condition.** At the first report or sign of FPS loss, input delay, stutter, freeze, disconnect, or tool timeout, stop issuing all client-side requests. Do not automatically retry a timed-out or heavy command. Inform the user what ran and what is known; wait for explicit permission before resuming.
+- **Clean up temporary instrumentation.** Disconnect listeners, stop monitors, restore temporary hooks/configuration, and avoid leaving diagnostic tasks running. Never create a background scan or repeated cast just to validate a hypothesis.
+- **Report verification limits accurately.** A source audit, registry count, or successful local compile is not proof that all skills hit targets or that server-authoritative timing changed. Distinguish static coverage from per-skill live verification, and avoid exhaustive in-match tests.
 
 ## Evidence-driven troubleshooting
 

@@ -32,7 +32,7 @@ return function(Window, ctx)
             environment.__RAVEN_WINDOW.Destroy()
         end
     end)
-    environment.RAVEN_WARZPVP_VER = "1.4.1"
+    environment.RAVEN_WARZPVP_VER = "1.4.3"
 
     local running = true
     local connections = {}
@@ -64,7 +64,6 @@ return function(Window, ctx)
         healSlot = 3,
         healCooldown = 0,
         noRecoil = false,
-        noSpread = false,
     }
 
     -- Track every section we create so destroy() can remove them from the
@@ -173,6 +172,15 @@ return function(Window, ctx)
         }
     end
 
+    local function bodyPart(model, name)
+        if not model then return nil end
+        local part = model:FindFirstChild(name)
+        if part and part:IsA("BasePart") then
+            return part
+        end
+        return nil
+    end
+
     local function getAimPart(character)
         -- Aim at BODY (not head): bigger target, less affected by crouch/run
         -- pose since we cannot read the native animation. Head moves a lot
@@ -201,6 +209,9 @@ return function(Window, ctx)
             > math.max(8, target.Size.Magnitude * 3) then return nil end
         return target
     end
+
+    local BODY_PARTS = { "Head", "UpperTorso", "LowerTorso", "Torso", "LeftUpperArm", "RightUpperArm", "LeftUpperLeg", "RightUpperLeg", "LeftFoot", "RightFoot" }
+
     local function characterScreenBounds(model)
         local root = bodyPart(model, "HumanoidRootPart") or bodyPart(model, "Torso")
         local head = getAimPart(model)
@@ -1145,23 +1156,66 @@ return function(Window, ctx)
         Flag = "WZP_HealSlot",
         Callback = function(v) settings.healSlot = math.floor(v) end,
     })
-    trackSection(CombatTab, "No Recoil / No Spread")
+    -- No Recoil (Tier 2): modify weapon catalog tables directly
+    -- When Recoil <= 0, WarzCamera.ApplyRecoil returns early (no effect). No hooks needed.
+    local function applyNoRecoil()
+        local ok, cs = pcall(require, localPlayer.PlayerScripts.Client.input.CombatSettings)
+        if not ok or not cs then return end
+        local catalog
+        if type(cs.GetCatalog) == "function" then
+            local ok2, cat = pcall(cs.GetCatalog)
+            if ok2 then catalog = cat end
+        end
+        if catalog and catalog.Weapons then
+            for _, weapon in pairs(catalog.Weapons) do
+                if type(weapon) == "table" then
+                    if weapon._origRecoil == nil then
+                        weapon._origRecoil = weapon.Recoil or 9
+                        weapon._origViewRecoil = weapon.ViewRecoil or 0.38
+                    end
+                    if settings.noRecoil then
+                        weapon.Recoil = 0
+                        weapon.ViewRecoil = 0
+                    else
+                        weapon.Recoil = weapon._origRecoil
+                        weapon.ViewRecoil = weapon._origViewRecoil
+                    end
+                    -- Ensure Spread stays at its original legit value for server-authoritative hits
+                    if weapon._origSpread ~= nil then
+                        weapon.Spread = weapon._origSpread
+                    end
+                end
+            end
+        end
+        local okCfg, Config = pcall(require, ReplicatedStorage.Shared.Config)
+        if okCfg and Config and type(Config.Shop) == "table" then
+            for _, item in pairs(Config.Shop) do
+                if type(item) == "table" then
+                    if item.Recoil ~= nil and item._origRecoil == nil then
+                        item._origRecoil = item.Recoil
+                    end
+                    if settings.noRecoil and item.Recoil ~= nil then
+                        item.Recoil = 0
+                    elseif not settings.noRecoil and item._origRecoil ~= nil then
+                        item.Recoil = item._origRecoil
+                    end
+                    if item._origSpread ~= nil then
+                        item.Spread = item._origSpread
+                    end
+                end
+            end
+        end
+    end
+    _G.__WZP_ApplyNoRecoil = applyNoRecoil
+
+    trackSection(CombatTab, "No Recoil")
     CombatTab:CreateToggle({
         Name = "No Recoil",
         CurrentValue = false,
         Flag = "WZP_NoRecoil",
         Callback = function(v)
             settings.noRecoil = v
-            pcall(applyNoRecoilSpread)
-        end,
-    })
-    CombatTab:CreateToggle({
-        Name = "No Spread",
-        CurrentValue = false,
-        Flag = "WZP_NoSpread",
-        Callback = function(v)
-            settings.noSpread = v
-            pcall(applyNoRecoilSpread)
+            pcall(applyNoRecoil)
         end,
     })
     pcall(function()
@@ -1199,41 +1253,11 @@ return function(Window, ctx)
         end
         pcall(updateFovCircle)
         pcall(updateAimbot, dt)
-        -- No Recoil / No Spread (Tier 2): modify weapon catalog tables directly
-        -- When Recoil/Spread <= 0, WarzCamera.ApplyRecoil and WarzSpread.ApplySpread
-        -- return early (no effect). No hooks needed.
-        local function applyNoRecoilSpread()
-            local ok, cs = pcall(require, localPlayer.PlayerScripts.Client.input.CombatSettings)
-            if not ok or not cs then return end
-            local catalog
-            if type(cs.GetCatalog) == "function" then
-                local ok2, cat = pcall(cs.GetCatalog)
-                if ok2 then catalog = cat end
-            end
-            if not (catalog and catalog.Weapons) then return end
-            for _, weapon in pairs(catalog.Weapons) do
-                if type(weapon) == "table" then
-                    if weapon._origRecoil == nil then
-                        weapon._origRecoil = weapon.Recoil
-                        weapon._origSpread = weapon.Spread
-                        weapon._origViewRecoil = weapon.ViewRecoil
-                    end
-                    if settings.noRecoil then
-                        weapon.Recoil = 0
-                        weapon.ViewRecoil = 0
-                    else
-                        weapon.Recoil = weapon._origRecoil
-                        weapon.ViewRecoil = weapon._origViewRecoil
-                    end
-                    if settings.noSpread then
-                        weapon.Spread = 0
-                    else
-                        weapon.Spread = weapon._origSpread
-                    end
-                end
-            end
+
+        -- Keep recoil updated if active
+        if settings.noRecoil then
+            pcall(applyNoRecoil)
         end
-        _G.__WZP_ApplyNoRecoilSpread = applyNoRecoilSpread
 
         -- Auto Heal (Tier 1): via CombatInput.RequestUseMed() (correct signature)
         if settings.autoHeal then
@@ -1242,7 +1266,7 @@ return function(Window, ctx)
                 local hum = char and char:FindFirstChildOfClass("Humanoid")
                 if hum and hum.Health > 0 and hum.Health < settings.healThreshold then
                     local now = os.clock()
-                    if now - settings.healCooldown >= 1.0 then
+                    if now - settings.healCooldown >= 0.5 then
                         local cd = tonumber(localPlayer:GetAttribute("WarzMedCdLeft")) or 0
                         if cd <= 0.05 then
                             local ok, ci = pcall(require, localPlayer.PlayerScripts.Client.input.CombatInput)
@@ -1296,6 +1320,21 @@ return function(Window, ctx)
             bossAlertText = nil
         end
         bossWasPresent = false
+        pcall(function()
+            local ok, cs = pcall(require, localPlayer.PlayerScripts.Client.input.CombatSettings)
+            if ok and cs and type(cs.GetCatalog) == "function" then
+                local cat = cs.GetCatalog()
+                if cat and cat.Weapons then
+                    for _, w in pairs(cat.Weapons) do
+                        if type(w) == "table" and w._origRecoil ~= nil then
+                            w.Recoil = w._origRecoil
+                            w.Spread = w._origSpread
+                            w.ViewRecoil = w._origViewRecoil
+                        end
+                    end
+                end
+            end
+        end)
         if environment.__RAVEN_WARZPVP == moduleHandle then
             environment.__RAVEN_WARZPVP = nil
         end

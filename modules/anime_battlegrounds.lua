@@ -149,8 +149,12 @@ return function(Window, scriptInfo)
         RangeAware = true, RangeMargin = 0.95, RangeInfo = nil,
         ActiveAbilityId = nil, ProfileUntil = 0, Registry = nil,
         Target = nil, VisualTarget = nil, LastScan = 0, ScanInterval = 0.2,
+        LastAcquire = -1, ReacquireInterval = 0.2,
+        AbilityCatalog = {}, PacketOwners = {}, MappedPackets = 0,
+        RegisteredAbilities = 0, LastRoute = nil,
         Original = {}, Wrappers = {}, Packets = nil, Aim = nil,
-        Stats = {acquired = 0, redirected = 0, passed = 0, outOfRange = 0},
+        Stats = {acquired = 0, redirected = 0, passed = 0, outOfRange = 0,
+            byRoute = {}},
     }
     local function aimTargetValid(target)
         if not target or not target.model or not target.model.Parent then return nil end
@@ -289,6 +293,7 @@ return function(Window, scriptInfo)
         if not skillAim.Enabled then return nil end
         local target = chooseSkillTarget()
         skillAim.Target = target
+        skillAim.LastAcquire = os.clock()
         skillAim.LockUntil = target and os.clock() + 5 or 0
         if target then skillAim.Stats.acquired += 1 end
         return target
@@ -304,11 +309,47 @@ return function(Window, scriptInfo)
             skillAim.Stats.outOfRange += 1
             skillAim.Target, point = nil, nil
         end
-        if not point and reacquire then
+        if not point and reacquire
+            and os.clock() - skillAim.LastAcquire >= skillAim.ReacquireInterval then
             acquireSkillTarget()
             point = aimPoint(skillAim.Target)
         end
         return point
+    end
+    local function buildSkillAimCatalog(registry, packets)
+        table.clear(skillAim.AbilityCatalog)
+        table.clear(skillAim.PacketOwners)
+        skillAim.RegisteredAbilities, skillAim.MappedPackets = 0, 0
+        local ok, names = pcall(registry.GetMovesetNames)
+        if not ok or type(names) ~= "table" then return end
+        local abilities = {}
+        for _, name in ipairs(names) do
+            local found, moveset = pcall(registry.GetMoveset, name)
+            if found and type(moveset) == "table" then
+                for _, ability in ipairs(moveset.Abilities or {}) do
+                    local config = ability.Config
+                    if config and config.Kind ~= "Attack" and config.Kind ~= "Melee" then
+                        skillAim.AbilityCatalog[ability.Id] = ability
+                        table.insert(abilities, ability)
+                        skillAim.RegisteredAbilities += 1
+                    end
+                end
+            end
+        end
+        -- Resolve the longest registered ability prefix first; never guess a hit payload.
+        table.sort(abilities, function(a, b) return #a.Key > #b.Key end)
+        for packetName, packet in pairs(packets) do
+            if type(packetName) == "string" and type(packet) == "table"
+                and type(packet.send) == "function" then
+                for _, ability in ipairs(abilities) do
+                    if packetName:sub(1, #ability.Key) == ability.Key then
+                        skillAim.PacketOwners[packetName] = ability.Id
+                        skillAim.MappedPackets += 1
+                        break
+                    end
+                end
+            end
+        end
     end
     local function restoreSkillAim()
         if skillAim.Aim then
@@ -329,6 +370,67 @@ return function(Window, scriptInfo)
         skillAim.ActiveAbilityId, skillAim.RangeInfo, skillAim.ProfileUntil = nil, nil, 0
         skillAim.Enabled = false
     end
+    -- Only explicit aim-bearing fields are candidates. Never rewrite Origin,
+    -- Victims, hit confirmation, movement coordinates or cooldown packets.
+    local aimPositionPacketModes = {
+        RoadRollerAim = "ground", WhipSmashAim = "point",
+    }
+    local function aimOutgoingPacket(name)
+        return name == "AbilityCast" or name == "AbilityCharge"
+            or name == "AbilityFire" or name:match("Cast$") or name:match("Fire$")
+            or name:match("Fired$") or name:match("Shoot$") or name:match("Shot$")
+            or name:match("Aim$") or name:match("Release$") or name:match("Dash$")
+    end
+    local function redirectSkillPayload(name, payload)
+        local look = typeof(payload.Look) == "Vector3"
+        local direction = typeof(payload.Direction) == "Vector3"
+        local aimDirection = typeof(payload.AimDirection) == "Vector3"
+        local targetPosition = typeof(payload.TargetPosition) == "Vector3"
+        local aimPosition = typeof(payload.AimPosition) == "Vector3"
+        local aimPointField = typeof(payload.AimPoint) == "Vector3"
+        local positionMode = aimPositionPacketModes[name]
+        local packetPosition = positionMode and typeof(payload.Position) == "Vector3"
+        if not (look or direction or aimDirection or targetPosition
+            or aimPosition or aimPointField or packetPosition) then return nil end
+        local point, own = currentSkillPoint(true), getLocalRoot()
+        if not point or not own then
+            skillAim.Stats.passed += 1
+            return nil
+        end
+        local origin = typeof(payload.Origin) == "Vector3" and payload.Origin or own.Position
+        local delta = point - origin
+        local flat = Vector3.new(delta.X, 0, delta.Z)
+        if delta.Magnitude < 0.01 then return nil end
+        local copy, route = table.clone(payload), nil
+        if look and flat.Magnitude > 0.01 then
+            -- Preserve vertical aiming only for packets that already use it.
+            copy.Look = math.abs(payload.Look.Y) > 0.05 and delta.Unit or flat.Unit
+            route = "Look"
+        end
+        if direction then
+            copy.Direction = delta.Unit * payload.Direction.Magnitude
+            route = "Direction"
+        end
+        if aimDirection then
+            copy.AimDirection = delta.Unit * payload.AimDirection.Magnitude
+            route = "AimDirection"
+        end
+        if targetPosition then copy.TargetPosition, route = point, "TargetPosition" end
+        if aimPosition then copy.AimPosition, route = point, "AimPosition" end
+        if aimPointField then copy.AimPoint, route = point, "AimPoint" end
+        if packetPosition then
+            -- Road Roller ring uses a ground-plane target; preserve its original Y.
+            copy.Position = positionMode == "ground"
+                and Vector3.new(point.X, payload.Position.Y, point.Z) or point
+            route = name .. ".Position"
+        end
+        if not route then return nil end
+        skillAim.Stats.redirected += 1
+        skillAim.Stats.byRoute[route] = (skillAim.Stats.byRoute[route] or 0) + 1
+        skillAim.LastRoute = route
+        skillAim.LockUntil = os.clock() + 2.5
+        return copy
+    end
     local function installSkillAim()
         if not skillAim.Enabled then return end
         local ok, shared = pcall(function() return ReplicatedStorage:WaitForChild("Shared", 3) end)
@@ -343,16 +445,21 @@ return function(Window, scriptInfo)
         local okRegistry, registry = pcall(function()
             return require(shared.Abilities.Registry)
         end)
-        if okRegistry and type(registry) == "table" then skillAim.Registry = registry end
+        if okRegistry and type(registry) == "table" then
+            skillAim.Registry = registry
+            buildSkillAimCatalog(registry, packets)
+        end
         skillAim.Aim, skillAim.Packets = aim, packets
         skillAim.Original.Point, skillAim.Original.Direction = aim.Point, aim.Direction
         skillAim.Wrappers.Point = function(...)
-            local point = currentSkillPoint(false)
+            local active = skillAim.ActiveAbilityId ~= nil and os.clock() <= skillAim.ProfileUntil
+            local point = currentSkillPoint(active)
             if point then return point end
             return skillAim.Original.Point(...)
         end
         skillAim.Wrappers.Direction = function(...)
-            local point, cam = currentSkillPoint(false), Workspace.CurrentCamera
+            local active = skillAim.ActiveAbilityId ~= nil and os.clock() <= skillAim.ProfileUntil
+            local point, cam = currentSkillPoint(active), Workspace.CurrentCamera
             if point and cam then
                 local direction = point - cam.CFrame.Position
                 if direction.Magnitude > 0.01 then return direction.Unit end
@@ -361,43 +468,41 @@ return function(Window, scriptInfo)
         end
         aim.Point, aim.Direction = skillAim.Wrappers.Point, skillAim.Wrappers.Direction
         for name, packet in pairs(packets) do
-            local outgoing = type(name) == "string" and (name == "AbilityCast" or name == "AbilityCharge"
-                or name == "AbilityFire" or name:match("Cast$") or name:match("Fire$")
-                or name:match("Fired$") or name:match("Shoot$") or name:match("Shot$")
-                or name:match("Aim$") or name:match("Release$"))
+            local isAbilityPacket = name == "AbilityCast" or name == "AbilityCharge"
+                or name == "AbilityFire"
+            local outgoing = type(name) == "string" and aimOutgoingPacket(name)
+                and (isAbilityPacket or skillAim.PacketOwners[name] ~= nil)
             if outgoing and type(packet) == "table" and type(packet.send) == "function" then
                 local original = packet.send
                 skillAim.Original[name] = original
                 local wrapper = function(payload, ...)
                     if skillAim.Enabled and type(payload) == "table" then
-                        if name == "AbilityCast" and payload.AbilityId ~= nil then
-                            setSkillRange(payload.AbilityId, nil)
-                            acquireSkillTarget()
-                        elseif name == "AbilityCharge" and payload.AbilityId ~= nil then
-                            if payload.AbilityId ~= skillAim.ActiveAbilityId then
-                                setSkillRange(payload.AbilityId, nil)
-                            end
-                            if not aimTargetValid(skillAim.Target) then acquireSkillTarget() end
-                            if skillAim.Target then skillAim.LockUntil = os.clock() + 5 end
-                        elseif name:match("Cast$") and name ~= "AbilityCast" then
-                            setSkillRange(payload.AbilityId, name)
-                            acquireSkillTarget()
+                        local abilityId = payload.AbilityId or skillAim.PacketOwners[name]
+                        if name == "AbilityFire" and abilityId == nil then
+                            abilityId = skillAim.ActiveAbilityId
                         end
-                        if typeof(payload.Look) == "Vector3" then
-                            local point, own = currentSkillPoint(true), getLocalRoot()
-                            if point and own then
-                                local delta = point - own.Position
-                                local flat = Vector3.new(delta.X, 0, delta.Z)
-                                if flat.Magnitude > 0.01 then
-                                    local copy = table.clone(payload)
-                                    -- Preserve vertical aiming only for packets that already use it.
-                                    copy.Look = math.abs(payload.Look.Y) > 0.05 and delta.Unit or flat.Unit
-                                    skillAim.Stats.redirected += 1
-                                    skillAim.LockUntil = os.clock() + 2.5
-                                    return original(copy, ...)
-                                end
+                        local ability = skillAim.AbilityCatalog[abilityId]
+                        local currentMoveset = localPlayer:GetAttribute("Moveset")
+                        if ability and (not ability.Moveset or ability.Moveset == currentMoveset) then
+                            local fresh = abilityId ~= skillAim.ActiveAbilityId
+                                or os.clock() > skillAim.ProfileUntil
+                            if name == "AbilityCast" or fresh then
+                                setSkillRange(abilityId, name)
+                                acquireSkillTarget()
+                            elseif not aimTargetValid(skillAim.Target)
+                                and os.clock() - skillAim.LastAcquire >= skillAim.ReacquireInterval then
+                                acquireSkillTarget()
                             end
-                            skillAim.Stats.passed += 1
+                            if name == "AbilityCharge" and skillAim.Target then
+                                skillAim.LockUntil = os.clock() + 5
+                            end
+                            local copy = redirectSkillPayload(name, payload)
+                            if copy then return original(copy, ...) end
+                        elseif name == "AbilityCast" then
+                            -- Basic M1 and unregistered abilities must not inherit a stale lock.
+                            skillAim.Target, skillAim.ActiveAbilityId = nil, nil
+                            skillAim.LockUntil, skillAim.ProfileUntil = 0, 0
+                            skillAim.RangeInfo = nil
                         end
                     end
                     return original(payload, ...)
@@ -1646,6 +1751,18 @@ return function(Window, scriptInfo)
                 lastSpeed = fastCast.LastSpeed,
                 serverCooldownChanged = false, serverTimedRoadRollerUnchanged = true}
         end,
+        GetSkillAimCoverage = function()
+            local routes = {}
+            for packetName, abilityId in pairs(skillAim.PacketOwners) do
+                routes[packetName] = abilityId
+            end
+            return {registeredAbilities = skillAim.RegisteredAbilities,
+                mappedPackets = skillAim.MappedPackets, packetOwners = routes,
+                methods = {"Aim.Point", "Aim.Direction", "Look", "Direction",
+                    "AimDirection", "TargetPosition", "AimPosition", "AimPoint",
+                    "RoadRollerAim.Position", "WhipSmashAim.Position"},
+                allServerHitsVerified = false}
+        end,
         GetSkillAimStatus = function()
             local profile = skillAim.RangeInfo or {classification = "unknown"}
             return {enabled = skillAim.Enabled, installed = skillAim.Aim ~= nil,
@@ -1657,7 +1774,11 @@ return function(Window, scriptInfo)
                 rangeClass = profile.classification, rangeKey = profile.key,
                 rangeMax = activeSkillRange(), acquired = skillAim.Stats.acquired,
                 redirected = skillAim.Stats.redirected, passed = skillAim.Stats.passed,
-                outOfRange = skillAim.Stats.outOfRange}
+                outOfRange = skillAim.Stats.outOfRange,
+                registeredAbilities = skillAim.RegisteredAbilities,
+                mappedPackets = skillAim.MappedPackets,
+                lastRoute = skillAim.LastRoute,
+                redirectedByRoute = table.clone(skillAim.Stats.byRoute)}
         end,
         GetSkillRangeProfile = function(abilityId)
             local registry = skillAim.Registry

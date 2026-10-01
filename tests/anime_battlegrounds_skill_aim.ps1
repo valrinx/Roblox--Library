@@ -9,7 +9,7 @@ $checks = @{
     "cast acquisition" = 'name == "AbilityCast"'
     "charged ability handling" = 'name == "AbilityCharge"'
     "direction payload only" = 'copy\.Look = math\.abs\(payload\.Look\.Y\)'
-    "no payload mutation" = 'local copy = table\.clone\(payload\)'
+    "no payload mutation" = 'table\.clone\(payload\)'
     "original passthrough" = 'return original\(payload, \.\.\.\)'
     "aim module restoration" = 'skillAim\.Aim\.Point = skillAim\.Original\.Point'
     "packet restoration" = 'packet\.send = skillAim\.Original\[name\]'

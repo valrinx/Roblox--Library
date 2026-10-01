@@ -318,6 +318,14 @@ local camera    = game.Workspace.CurrentCamera
 
 local SCRIPTS = {
     {
+        name        = "Dream Car Collection",
+        description = "Turbo Auto Clean | Instant Phase Burst | Rarity Priority | Auto Washer Upgrades | Car Shine Intel",
+        placeIds    = {76841016201110},
+        gameIds     = {10667357873},
+        version     = "v1.0.0",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/dream_car_collection.lua?v=dcc-1.0.0",
+    },
+    {
         name        = "Lumber INC.",
         description = "Smart Auto Chop | Value Wood Filter | Auto Sawmill Deliver | Tree & Log ESP | Infinite Nitro | Vehicle Mod",
         placeIds    = {3344967357},
@@ -415,11 +423,11 @@ local SCRIPTS = {
     },
     {
         name        = "WarZPVP",
-        description = "Player ESP (Box/Name/Distance/HP/Weapon/Skeleton) | Loot ESP (name/distance/category) | Boss ESP (box/HP/spawn alert) | Mouse-Driven Aimbot (FOV, custom keybind, target lock) | 100% Drawing API",
+        description = "Player ESP (Box/Name/Distance/HP/Weapon/Skeleton) | Loot ESP | Boss ESP | Mouse-Driven Aimbot | Auto Heal | No Recoil",
         placeIds    = {135187059974536},
         gameIds     = {10763998990},
-        version     = "v1.4.0",
-        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/refs/heads/main/modules/warz_pvp.lua",
+        version     = "v1.4.3",
+        moduleUrl   = "https://raw.githubusercontent.com/valrinx/Roblox--Library/main/modules/warz_pvp.lua?v=wzp-1.4.3",
     },
     {
         name        = "Dueling Grounds",
